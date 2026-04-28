@@ -62,7 +62,7 @@ These are not obvious from any single file and are easy to break:
 ## What's intentionally out of v1
 
 If asked to add these, push back unless the user is explicit:
-- Change failure rate / MTTR (no reliable incident source yet — schema reserves room for rollback-proxy detection)
+- Change failure rate / failed deployment recovery time (DORA's current term, formerly MTTR) — no reliable incident source yet; schema reserves room for rollback-proxy detection
 - Backfill workers (forward-only ingestion only)
 - Aggregation API or metric endpoints (collector ingests; reads are SQL or future siblings)
 - Helm chart (Kustomize is enough for v1)

@@ -73,9 +73,11 @@ the data captured in v1.
 
 ### Intentionally deferred
 
-- **Change failure rate / MTTR.** No reliable incident source today. Schema
-  reserves room for an ArgoCD rollback proxy (revision N+1 < revision N within
-  X hours) and a manual `POST /events/incident` endpoint as follow-ups.
+- **Change failure rate / failed deployment recovery time** (DORA's
+  current term, replacing MTTR). No reliable incident source today.
+  Schema reserves room for an ArgoCD rollback proxy (revision N+1 <
+  revision N within X hours) and a manual `POST /events/incident`
+  endpoint as follow-ups.
 - **Pre-aggregated metric tables.** Compute on read; only materialize when
   query volume justifies it.
 
