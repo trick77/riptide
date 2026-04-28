@@ -24,7 +24,7 @@ VALID_CATALOG: dict[str, Any] = {
             "team": "checkout",
             "bitbucket_repos": ["acme/payments-api"],
             "argocd_apps": ["payments-api-prod"],
-            "jenkins_jobs": ["payments-api-deploy"],
+            "pipelines": ["payments-api-deploy"],
         }
     ],
     "teams": [
@@ -84,7 +84,7 @@ async def session_factory(
     engine = create_async_engine(db_url, future=True)
     factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with engine.begin() as conn:
-        for table in ("bitbucket_events", "jenkins_events", "argocd_events"):
+        for table in ("bitbucket_events", "pipeline_events", "argocd_events"):
             await conn.exec_driver_sql(f"TRUNCATE TABLE {table} RESTART IDENTITY")
     try:
         yield factory

@@ -1,7 +1,8 @@
-"""Strict Jenkins payload contract — Jenkins jobs MUST send these fields.
+"""Source-agnostic pipeline event schema.
 
-If a field is missing, we 422 — that's a wiring bug to surface, not data to
-silently drop.
+Used by Jenkins, Tekton, and any other CI emitting build/deploy events. The
+`source` field tags which CI produced the event so downstream queries can
+slice by tooling.
 """
 
 from datetime import UTC, datetime
@@ -15,11 +16,23 @@ def _to_utc(value: datetime | None) -> datetime | None:
     return value.astimezone(UTC) if value.tzinfo else value.replace(tzinfo=UTC)
 
 
-class JenkinsWebhook(BaseModel):
+class PipelineWebhook(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    job_name: str = Field(..., min_length=1)
-    build_number: int = Field(..., ge=0)
+    source: str = Field(
+        ...,
+        min_length=1,
+        description="ci system tag, e.g. 'jenkins', 'tekton'",
+        examples=["jenkins", "tekton"],
+    )
+    pipeline_name: str = Field(
+        ..., min_length=1, description="Jenkins job name / Tekton pipeline name"
+    )
+    run_id: str = Field(
+        ...,
+        min_length=1,
+        description="ci-system run id (Jenkins build number, Tekton PipelineRun name)",
+    )
     phase: str = Field(..., min_length=1, description="STARTED / COMPLETED / FINALIZED")
     status: str | None = Field(default=None, description="SUCCESS / FAILURE / etc.")
     commit_sha: str = Field(..., min_length=7, description="git commit SHA being built")
@@ -27,7 +40,7 @@ class JenkinsWebhook(BaseModel):
     finished_at: datetime | None = None
     service_id: str | None = Field(
         default=None,
-        description="Optional explicit service id; if absent, resolve via job_name.",
+        description="Optional explicit service id; if absent, resolve via pipeline_name.",
     )
 
     @field_validator("started_at", "finished_at")

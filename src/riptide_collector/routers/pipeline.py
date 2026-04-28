@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from riptide_collector.catalog import CatalogStore
 from riptide_collector.logging_config import get_logger
-from riptide_collector.models import JenkinsEvent
-from riptide_collector.schemas.jenkins import JenkinsWebhook
+from riptide_collector.models import PipelineEvent
+from riptide_collector.schemas.pipeline import PipelineWebhook
 
 logger = get_logger(__name__)
 
@@ -21,34 +21,42 @@ def make_router(
     router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
     @router.post(
-        "/jenkins",
+        "/pipeline",
         status_code=status.HTTP_202_ACCEPTED,
         dependencies=[Depends(auth_dep)],
-        summary="Jenkins webhook sink",
+        summary="CI pipeline webhook sink (Jenkins, Tekton, …)",
     )
-    async def jenkins_webhook(  # pyright: ignore[reportUnusedFunction]
-        event: JenkinsWebhook,
+    async def pipeline_webhook(  # pyright: ignore[reportUnusedFunction]
+        event: PipelineWebhook,
     ) -> dict[str, str]:
         raw = event.model_dump(mode="json")
         catalog.maybe_reload()
 
         resolution = (
-            catalog.resolve_jenkins(event.service_id)
+            catalog.resolve_pipeline(event.service_id)
             if event.service_id
-            else catalog.resolve_jenkins(event.job_name)
+            else catalog.resolve_pipeline(event.pipeline_name)
         )
         if resolution is None:
-            logger.warning("jenkins_unknown_job", job=event.job_name)
+            logger.warning(
+                "pipeline_unknown_name",
+                source=event.source,
+                pipeline=event.pipeline_name,
+            )
 
-        delivery_id = f"{event.job_name}#{event.build_number}#{event.phase}"
+        # source is part of the dedup key so distinct CI systems with the same
+        # pipeline name (e.g. a Jenkins job and a Tekton pipeline both called
+        # 'deploy') don't collide.
+        delivery_id = f"{event.source}#{event.pipeline_name}#{event.run_id}#{event.phase}"
 
         async with session_factory() as session:
             stmt = (
-                pg_insert(JenkinsEvent)
+                pg_insert(PipelineEvent)
                 .values(
                     delivery_id=delivery_id,
-                    job_name=event.job_name,
-                    build_number=event.build_number,
+                    source=event.source,
+                    pipeline_name=event.pipeline_name,
+                    run_id=event.run_id,
                     phase=event.phase,
                     status=event.status,
                     commit_sha=event.commit_sha,
@@ -65,10 +73,11 @@ def make_router(
             await session.commit()
 
         logger.info(
-            "jenkins_event_received",
+            "pipeline_event_received",
             delivery_id=delivery_id,
-            job=event.job_name,
-            build=event.build_number,
+            source=event.source,
+            pipeline=event.pipeline_name,
+            run=event.run_id,
             phase=event.phase,
             status=event.status,
             service=resolution.service_id if resolution else None,

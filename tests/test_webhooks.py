@@ -7,7 +7,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from riptide_collector.models import ArgoCDEvent, BitbucketEvent, JenkinsEvent
+from riptide_collector.models import ArgoCDEvent, BitbucketEvent, PipelineEvent
 
 FIXTURES = Path(__file__).parent / "fixtures"
 AUTH = {"Authorization": "Bearer test-token"}
@@ -128,11 +128,11 @@ class TestBitbucketWebhook:
         return transport.app.state.session_factory  # type: ignore[no-any-return]
 
 
-class TestJenkinsWebhook:
-    async def test_valid_payload_inserted(self, client: AsyncClient) -> None:
-        payload = _load("jenkins_completed.json")
+class TestPipelineWebhook:
+    async def test_jenkins_payload_inserted(self, client: AsyncClient) -> None:
+        payload = _load("pipeline_jenkins_completed.json")
         response = await client.post(
-            "/webhooks/jenkins",
+            "/webhooks/pipeline",
             json=payload,
             headers=AUTH,
         )
@@ -140,16 +140,47 @@ class TestJenkinsWebhook:
 
         factory = TestBitbucketWebhook._fresh_session_factory(client)
         async with factory() as session:
-            row = (await session.execute(select(JenkinsEvent))).scalar_one()
+            row = (await session.execute(select(PipelineEvent))).scalar_one()
             assert row.service == "payments-api"
             assert row.team == "checkout"
+            assert row.source == "jenkins"
             assert row.status == "SUCCESS"
             assert row.duration_seconds == 210
 
+    async def test_tekton_payload_inserted(self, client: AsyncClient) -> None:
+        payload = _load("pipeline_tekton_completed.json")
+        response = await client.post(
+            "/webhooks/pipeline",
+            json=payload,
+            headers=AUTH,
+        )
+        assert response.status_code == 202
+
+        factory = TestBitbucketWebhook._fresh_session_factory(client)
+        async with factory() as session:
+            row = (await session.execute(select(PipelineEvent))).scalar_one()
+            assert row.source == "tekton"
+            assert row.run_id == "payments-api-deploy-7gx2k"
+            assert row.service == "payments-api"
+
+    async def test_jenkins_and_tekton_same_name_dedup_separately(self, client: AsyncClient) -> None:
+        # Same pipeline_name + run_id but different sources must both insert.
+        jenkins = _load("pipeline_jenkins_completed.json")
+        tekton = _load("pipeline_tekton_completed.json")
+        tekton["run_id"] = jenkins["run_id"]  # force collision attempt
+        r1 = await client.post("/webhooks/pipeline", json=jenkins, headers=AUTH)
+        r2 = await client.post("/webhooks/pipeline", json=tekton, headers=AUTH)
+        assert r1.status_code == r2.status_code == 202
+
+        factory = TestBitbucketWebhook._fresh_session_factory(client)
+        async with factory() as session:
+            rows = (await session.execute(select(PipelineEvent))).all()
+            assert len(rows) == 2
+
     async def test_missing_required_field_returns_422(self, client: AsyncClient) -> None:
-        payload = _load("jenkins_completed.json")
+        payload = _load("pipeline_jenkins_completed.json")
         del payload["commit_sha"]
-        response = await client.post("/webhooks/jenkins", json=payload, headers=AUTH)
+        response = await client.post("/webhooks/pipeline", json=payload, headers=AUTH)
         assert response.status_code == 422
 
 
@@ -180,7 +211,7 @@ class TestArgoCDWebhook:
 @pytest.mark.parametrize(
     "endpoint,payload",
     [
-        ("/webhooks/jenkins", {"job_name": "x"}),
+        ("/webhooks/pipeline", {"pipeline_name": "x"}),
         ("/webhooks/argocd", {"app_name": "x"}),
     ],
 )

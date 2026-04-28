@@ -85,12 +85,13 @@ async def test_argocd_phase_transitions_create_distinct_rows(
         assert len(rows) == 2
 
 
-async def test_jenkins_naive_timestamps_normalised_to_utc(
+async def test_pipeline_naive_timestamps_normalised_to_utc(
     client: AsyncClient,
 ) -> None:
     payload = {
-        "job_name": "payments-api-deploy",
-        "build_number": 999,
+        "source": "jenkins",
+        "pipeline_name": "payments-api-deploy",
+        "run_id": "999",
         "phase": "COMPLETED",
         "status": "SUCCESS",
         "commit_sha": "abc1234567890abc1234567890abc1234567890a",
@@ -98,14 +99,14 @@ async def test_jenkins_naive_timestamps_normalised_to_utc(
         "started_at": "2026-04-28T10:00:00",
         "finished_at": "2026-04-28T10:01:00",
     }
-    response = await client.post("/webhooks/jenkins", json=payload, headers=AUTH)
+    response = await client.post("/webhooks/pipeline", json=payload, headers=AUTH)
     assert response.status_code == 202
 
-    from riptide_collector.models import JenkinsEvent
+    from riptide_collector.models import PipelineEvent
 
     factory = TestBitbucketWebhook._fresh_session_factory(client)
     async with factory() as session:
-        row = (await session.execute(select(JenkinsEvent))).scalar_one()
+        row = (await session.execute(select(PipelineEvent))).scalar_one()
         assert row.started_at is not None
         assert row.started_at.tzinfo is not None
         assert row.duration_seconds == 60

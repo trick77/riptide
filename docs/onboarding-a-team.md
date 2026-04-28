@@ -23,7 +23,7 @@ Open a PR editing [`config/service-catalog.json`](../config/service-catalog.json
     "team": "checkout",
     "bitbucket_repos": ["acme/payments-api"],
     "argocd_apps": ["payments-api-prod"],
-    "jenkins_jobs": ["payments-api-deploy"]
+    "pipelines": ["payments-api-deploy"]
   }
   ```
 
@@ -41,10 +41,12 @@ oc -n riptide rollout restart deployment/riptide-collector
 
 ## 3. Wire the webhooks
 
-For each repo / job / Application:
+For each repo / pipeline / Application:
 
 - **Bitbucket**: follow [setup-bitbucket-webhook.md](setup-bitbucket-webhook.md)
-- **Jenkins**: follow [setup-jenkins-notification.md](setup-jenkins-notification.md)
+- **Jenkins** *or* **Tekton** (your CI choice):
+  - Jenkins → [setup-jenkins-notification.md](setup-jenkins-notification.md)
+  - Tekton / OpenShift Pipelines → [setup-tekton-pipeline.md](setup-tekton-pipeline.md)
 - **ArgoCD**: follow [setup-argocd-notification.md](setup-argocd-notification.md)
 
 ## 4. Smoke test

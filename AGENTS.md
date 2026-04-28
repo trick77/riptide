@@ -1,10 +1,10 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to coding agents (Claude Code, Cursor, etc.) when working in this repository.
 
 ## What this is
 
-`riptide-collector` is the first component of a planned **riptide** suite of DevOps delivery-metrics tools. It is an append-only ingestion service that captures raw webhook events from Bitbucket, Jenkins, and ArgoCD into Postgres for later metric computation by other suite components or ad-hoc SQL.
+`riptide-collector` is the first component of a planned **riptide** suite of DevOps delivery-metrics tools. It is an append-only ingestion service that captures raw webhook events from Bitbucket, CI pipelines (Jenkins, Tekton, …), and ArgoCD into Postgres for later metric computation by other suite components or ad-hoc SQL.
 
 Future suite components (e.g. `riptide-api`, `riptide-dashboard`) will be added as siblings — leave architectural room for them.
 
@@ -35,8 +35,9 @@ These are not obvious from any single file and are easy to break:
 - **Catalog is config, not data.** `config/service-catalog.json` is the source of truth for service↔team↔repo mapping and bot detection. There is no admin UI or DB-backed catalog. Edits go through PRs to that file. The running pod hot-reloads via mtime in `CatalogStore.maybe_reload()`. Do not propose moving the catalog into Postgres.
 - **`automation` is org-wide.** Bot definitions live at the catalog root, not per service — Renovate/Dependabot run across all repos.
 - **Metrics are computed on read, not at ingest.** Don't add aggregation tables or scheduled rollup jobs in v1. Schema additions should preserve raw events; new metrics are SQL queries against existing rows or future materialized views.
-- **Commit SHA is the universal join key.** All three sources record `commit_sha`/`revision`. Lead-time joins between `bitbucket_events`, `jenkins_events`, `argocd_events` happen on this column.
-- **`change_type` lives on Bitbucket events only.** Don't denormalise it onto Jenkins/Argo rows; join via `commit_sha` at read time.
+- **Commit SHA is the universal join key.** All three sources record `commit_sha`/`revision`. Lead-time joins between `bitbucket_events`, `pipeline_events`, `argocd_events` happen on this column.
+- **`change_type` lives on Bitbucket events only.** Don't denormalise it onto pipeline / Argo rows; join via `commit_sha` at read time.
+- **CI events are source-tagged, not source-routed.** All pipeline events from any CI (Jenkins, Tekton, …) land in the single `pipeline_events` table via `POST /webhooks/pipeline`, distinguished by the `source` column. Do not add per-CI tables or endpoints. The dedup key is `source#pipeline_name#run_id#phase`.
 - **`modified_at` has a Postgres trigger** (`riptide_set_modified_at`), not just SQLAlchemy `onupdate`. Raw-SQL updates also bump it. Keep the trigger when changing migrations.
 - **Database is external.** `riptide-collector` does NOT manage Postgres. The cluster Postgres is provisioned separately; the URL ships via `riptide-collector-secrets`. Do not add a Postgres Deployment to `openshift/`.
 - **Pyright strict for `src/`, standard for `tests/` and `migrations/`.** New code under `src/` must satisfy strict mode — typed dicts, no `Any` leaks, narrow `Optional`s with `isinstance` or helper coercions like `_as_dict()` in `routers/bitbucket.py`.
@@ -45,7 +46,7 @@ These are not obvious from any single file and are easy to break:
 
 - Single Python package, `riptide_collector` (flat top-level, not a namespace package). When future suite components arrive they get their own top-level package, e.g. `riptide_dashboard`.
 - Webhook routers are factories (`make_router(catalog, session_factory, auth_dep)`) that return an `APIRouter`. They're wired up in `src/riptide_collector/main.py::create_app`. Use the same pattern for any new router.
-- Pydantic schemas: **strict** for Jenkins and ArgoCD (we own the contract — invalid payloads must 422); **permissive raw-dict parsing** for Bitbucket (its payload shapes vary; we best-effort extract).
+- Pydantic schemas: **strict** for `/webhooks/pipeline` and `/webhooks/argocd` (we own the contract — invalid payloads must 422); **permissive raw-dict parsing** for Bitbucket (its payload shapes vary; we best-effort extract).
 - Use `_as_dict()` / `_as_list()` helpers in `routers/bitbucket.py` to coerce arbitrary JSON shapes — pyright strict won't accept chained `.get()` on `Optional[dict]`.
 - Tests use real Postgres via testcontainers, never SQLite. The `client` fixture in `tests/conftest.py` depends on `session_factory` which truncates tables per test.
 - `.pre-commit-config.yaml` runs ruff + pyright + uv-lock-check; expect CI to enforce the same.

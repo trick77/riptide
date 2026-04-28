@@ -1,17 +1,19 @@
 # Setup: Jenkins notification
 
 Have a Jenkins pipeline POST a small JSON payload to riptide-collector at the
-end of each build.
+end of each build. The endpoint is shared with Tekton and any other CI
+(`POST /webhooks/pipeline`) — distinguish your CI via the `source` field.
 
 ## Pipeline contract
 
-riptide-collector accepts the following JSON; **all required fields are mandatory** —
-without them the metrics break.
+riptide-collector accepts the following JSON. **All required fields are
+mandatory** — without them the metrics break.
 
 ```json
 {
-  "job_name": "<env.JOB_NAME>",
-  "build_number": <env.BUILD_NUMBER>,
+  "source": "jenkins",
+  "pipeline_name": "<env.JOB_NAME>",
+  "run_id": "<env.BUILD_NUMBER>",
   "phase": "COMPLETED",
   "status": "<SUCCESS|FAILURE|UNSTABLE|...>",
   "commit_sha": "<env.GIT_COMMIT>",
@@ -21,21 +23,20 @@ without them the metrics break.
 }
 ```
 
-If `service_id` is omitted, riptide tries to resolve via `job_name` against the
-service catalog.
+If `service_id` is omitted, riptide tries to resolve via `pipeline_name` against the service catalog's `pipelines` array.
 
 ## Jenkinsfile snippet
 
-Add to your pipeline. Requires the **HTTP Request** plugin and a `Secret text`
-credential named `RIPTIDE_TOKEN` containing the shared bearer token.
+Requires the **HTTP Request** plugin and a `Secret text` credential named `RIPTIDE_TOKEN`.
 
 ```groovy
 def riptideNotify(String phase) {
     def started = currentBuild.startTimeInMillis
     def finished = System.currentTimeMillis()
     def body = [
-        job_name: env.JOB_NAME,
-        build_number: env.BUILD_NUMBER as int,
+        source: 'jenkins',
+        pipeline_name: env.JOB_NAME,
+        run_id: env.BUILD_NUMBER,
         phase: phase,
         status: currentBuild.currentResult ?: 'IN_PROGRESS',
         commit_sha: env.GIT_COMMIT,
@@ -47,7 +48,7 @@ def riptideNotify(String phase) {
     withCredentials([string(credentialsId: 'RIPTIDE_TOKEN', variable: 'TOKEN')]) {
         httpRequest(
             httpMode: 'POST',
-            url: 'https://riptide-collector.example.com/webhooks/jenkins',
+            url: 'https://riptide-collector.example.com/webhooks/pipeline',
             customHeaders: [[name: 'Authorization', value: "Bearer ${TOKEN}"]],
             contentType: 'APPLICATION_JSON',
             requestBody: groovy.json.JsonOutput.toJson(body),
@@ -62,9 +63,7 @@ pipeline {
         stage('Build') { steps { echo 'build' } }
     }
     post {
-        always {
-            script { riptideNotify('COMPLETED') }
-        }
+        always { script { riptideNotify('COMPLETED') } }
     }
 }
 ```
@@ -72,14 +71,10 @@ pipeline {
 ## Verify
 
 ```sql
--- replace <job> with your job name
-SELECT delivery_id, phase, status, duration_seconds, service, team
-FROM jenkins_events
-WHERE job_name = '<job>'
+SELECT delivery_id, source, pipeline_name, run_id, phase, status,
+       duration_seconds, service, team
+FROM pipeline_events
+WHERE source = 'jenkins' AND pipeline_name = '<job>'
 ORDER BY created_at DESC
 LIMIT 5;
 ```
-
-You should see the latest build with `status = SUCCESS|FAILURE`,
-`duration_seconds` populated, and `service`/`team` resolved if the job is in
-the catalog.

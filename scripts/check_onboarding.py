@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from riptide_collector.models import ArgoCDEvent, BitbucketEvent, JenkinsEvent
+from riptide_collector.models import ArgoCDEvent, BitbucketEvent, PipelineEvent
 from riptide_collector.settings import load_settings
 
 
@@ -26,7 +26,7 @@ async def main(service_id: str) -> int:
 
     sources = {
         "bitbucket_events": BitbucketEvent,
-        "jenkins_events": JenkinsEvent,
+        "pipeline_events": PipelineEvent,
         "argocd_events": ArgoCDEvent,
     }
 

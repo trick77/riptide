@@ -14,7 +14,7 @@ down_revision: str | None = "0001"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-EVENT_TABLES = ("bitbucket_events", "jenkins_events", "argocd_events")
+EVENT_TABLES = ("bitbucket_events", "pipeline_events", "argocd_events")
 
 
 def upgrade() -> None:

@@ -13,7 +13,7 @@ VALID: dict[str, Any] = {
             "team": "team-x",
             "bitbucket_repos": ["org/a"],
             "argocd_apps": ["a-prod"],
-            "jenkins_jobs": ["a-deploy"],
+            "pipelines": ["a-deploy"],
         }
     ],
     "teams": [{"name": "team-x", "group_email": "x@example.com"}],
@@ -76,7 +76,7 @@ class TestLoadCatalog:
                 "team": "team-x",
                 "bitbucket_repos": ["org/a"],
                 "argocd_apps": [],
-                "jenkins_jobs": [],
+                "pipelines": [],
             }
         )
         path = _write(tmp_path / "c.json", bad)
@@ -90,7 +90,7 @@ class TestCatalogStoreReload:
         store = CatalogStore(path)
         assert store.resolve_bitbucket("org/a") is not None
         assert store.resolve_bitbucket("ghost/repo") is None
-        assert store.resolve_jenkins("a-deploy") is not None
+        assert store.resolve_pipeline("a-deploy") is not None
         assert store.resolve_argocd("a-prod") is not None
 
     def test_team_lookup(self, tmp_path: Path) -> None:

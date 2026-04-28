@@ -1,4 +1,4 @@
-"""initial schema: bitbucket_events, jenkins_events, argocd_events
+"""initial schema: bitbucket_events, pipeline_events, argocd_events
 
 Revision ID: 0001
 Revises:
@@ -30,7 +30,7 @@ $$ LANGUAGE plpgsql;
 
 DROP_TRIGGER_FN_SQL = "DROP FUNCTION IF EXISTS riptide_set_modified_at();"
 
-EVENT_TABLES = ("bitbucket_events", "jenkins_events", "argocd_events")
+EVENT_TABLES = ("bitbucket_events", "pipeline_events", "argocd_events")
 
 
 def upgrade() -> None:
@@ -87,11 +87,22 @@ def upgrade() -> None:
     )
 
     op.create_table(
-        "jenkins_events",
+        "pipeline_events",
         sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
         sa.Column("delivery_id", sa.String, nullable=False),
-        sa.Column("job_name", sa.String, nullable=False),
-        sa.Column("build_number", sa.Integer, nullable=False),
+        sa.Column(
+            "source",
+            sa.String,
+            nullable=False,
+            comment="ci system that produced the event: jenkins / tekton / etc.",
+        ),
+        sa.Column("pipeline_name", sa.String, nullable=False),
+        sa.Column(
+            "run_id",
+            sa.String,
+            nullable=False,
+            comment="ci-system run identifier (Jenkins build number, Tekton PipelineRun name)",
+        ),
         sa.Column("phase", sa.String, nullable=False),
         sa.Column("status", sa.String, nullable=True),
         sa.Column("commit_sha", sa.String, nullable=True),
@@ -119,10 +130,11 @@ def upgrade() -> None:
         sa.Column("service", sa.String, nullable=True),
         sa.Column("team", sa.String, nullable=True),
         sa.Column("payload", JSONB, nullable=False),
-        sa.UniqueConstraint("delivery_id", name="uq_jenkins_events_delivery_id"),
+        sa.UniqueConstraint("delivery_id", name="uq_pipeline_events_delivery_id"),
     )
-    op.create_index("ix_jenkins_events_job_name", "jenkins_events", ["job_name"])
-    op.create_index("ix_jenkins_events_commit_sha", "jenkins_events", ["commit_sha"])
+    op.create_index("ix_pipeline_events_source", "pipeline_events", ["source"])
+    op.create_index("ix_pipeline_events_pipeline_name", "pipeline_events", ["pipeline_name"])
+    op.create_index("ix_pipeline_events_commit_sha", "pipeline_events", ["commit_sha"])
 
     op.create_table(
         "argocd_events",
@@ -175,6 +187,6 @@ def downgrade() -> None:
     for table in EVENT_TABLES:
         op.execute(f"DROP TRIGGER IF EXISTS trg_{table}_modified_at ON {table};")
     op.drop_table("argocd_events")
-    op.drop_table("jenkins_events")
+    op.drop_table("pipeline_events")
     op.drop_table("bitbucket_events")
     op.execute(DROP_TRIGGER_FN_SQL)

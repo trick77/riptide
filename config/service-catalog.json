@@ -6,7 +6,7 @@
       "team": "checkout",
       "bitbucket_repos": ["acme/payments-api"],
       "argocd_apps": ["payments-api-prod"],
-      "jenkins_jobs": ["payments-api-deploy"]
+      "pipelines": ["payments-api-deploy"]
     },
     {
       "id": "checkout-web",
@@ -14,7 +14,7 @@
       "team": "checkout",
       "bitbucket_repos": ["acme/checkout-web"],
       "argocd_apps": ["checkout-web-prod"],
-      "jenkins_jobs": ["checkout-web-deploy"]
+      "pipelines": ["checkout-web-deploy"]
     }
   ],
   "teams": [

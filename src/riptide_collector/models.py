@@ -70,19 +70,21 @@ class BitbucketEvent(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
 
-class JenkinsEvent(Base):
-    __tablename__ = "jenkins_events"
+class PipelineEvent(Base):
+    __tablename__ = "pipeline_events"
     __table_args__ = (
-        UniqueConstraint("delivery_id", name="uq_jenkins_events_delivery_id"),
-        Index("ix_jenkins_events_job_name", "job_name"),
-        Index("ix_jenkins_events_commit_sha", "commit_sha"),
-        Index("ix_jenkins_events_service_created_at", "service", "created_at"),
+        UniqueConstraint("delivery_id", name="uq_pipeline_events_delivery_id"),
+        Index("ix_pipeline_events_source", "source"),
+        Index("ix_pipeline_events_pipeline_name", "pipeline_name"),
+        Index("ix_pipeline_events_commit_sha", "commit_sha"),
+        Index("ix_pipeline_events_service_created_at", "service", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     delivery_id: Mapped[str] = mapped_column(String, nullable=False)
-    job_name: Mapped[str] = mapped_column(String, nullable=False)
-    build_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    pipeline_name: Mapped[str] = mapped_column(String, nullable=False)
+    run_id: Mapped[str] = mapped_column(String, nullable=False)
     phase: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str | None] = mapped_column(String, nullable=True)
     commit_sha: Mapped[str | None] = mapped_column(String, nullable=True)
