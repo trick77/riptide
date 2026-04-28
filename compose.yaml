@@ -1,0 +1,46 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: riptide
+      POSTGRES_PASSWORD: riptide
+      POSTGRES_DB: riptide
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U riptide -d riptide"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Containerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      RIPTIDE_DB_URL: postgresql+asyncpg://riptide:riptide@db:5432/riptide
+      RIPTIDE_WEBHOOK_TOKEN: dev-token
+      RIPTIDE_CATALOG_PATH: /etc/riptide-collector/service-catalog.json
+    volumes:
+      - ./config/service-catalog.json:/etc/riptide-collector/service-catalog.json:ro
+    command: ["alembic", "upgrade", "head"]
+
+  app:
+    build:
+      context: .
+      dockerfile: Containerfile
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      RIPTIDE_DB_URL: postgresql+asyncpg://riptide:riptide@db:5432/riptide
+      RIPTIDE_WEBHOOK_TOKEN: dev-token
+      RIPTIDE_CATALOG_PATH: /etc/riptide-collector/service-catalog.json
+      RIPTIDE_LOG_LEVEL: INFO
+    volumes:
+      - ./config/service-catalog.json:/etc/riptide-collector/service-catalog.json:ro
+    ports:
+      - "8000:8000"

@@ -1,0 +1,45 @@
+{
+  "services": [
+    {
+      "id": "payments-api",
+      "display_name": "Payments API",
+      "team": "checkout",
+      "bitbucket_repos": ["acme/payments-api"],
+      "argocd_apps": ["payments-api-prod"],
+      "pipelines": ["payments-api-deploy"]
+    },
+    {
+      "id": "checkout-web",
+      "display_name": "Checkout Web",
+      "team": "checkout",
+      "bitbucket_repos": ["acme/checkout-web"],
+      "argocd_apps": ["checkout-web-prod"],
+      "pipelines": ["checkout-web-deploy"]
+    }
+  ],
+  "teams": [
+    {
+      "name": "checkout",
+      "group_email": "team-checkout@example.com",
+      "slack": "#team-checkout"
+    }
+  ],
+  "automation": {
+    "renovate": {
+      "authors": ["renovate-bot", "renovate[bot]"],
+      "branch_prefixes": ["renovate/"]
+    },
+    "dependabot": {
+      "authors": ["dependabot[bot]"],
+      "branch_prefixes": ["dependabot/"]
+    },
+    "snyk": {
+      "authors": ["snyk-bot"],
+      "branch_prefixes": ["snyk-"]
+    },
+    "mend": {
+      "authors": ["mend-bot", "mend[bot]"],
+      "branch_prefixes": ["whitesource-"]
+    }
+  }
+}

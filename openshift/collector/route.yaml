@@ -1,0 +1,18 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: riptide-collector
+  annotations:
+    haproxy.router.openshift.io/timeout: 30s
+spec:
+  # Override per-environment via overlay; this default is just a placeholder.
+  host: riptide-collector.apps.example.com
+  to:
+    kind: Service
+    name: riptide-collector
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
