@@ -48,18 +48,22 @@ VALID_CATALOG: dict[str, Any] = {
 
 
 @pytest.fixture(scope="session")
-def postgres_container() -> Iterator[PostgresContainer]:
+def db_url() -> Iterator[str]:
+    """Provide a Postgres URL.
+
+    If RIPTIDE_TEST_DB_URL is set (e.g. CI service container), use it directly.
+    Otherwise spin up a throwaway Postgres via testcontainers (local dev).
+    """
+    explicit = os.environ.get("RIPTIDE_TEST_DB_URL")
+    if explicit:
+        yield explicit
+        return
     container = PostgresContainer("postgres:17-alpine", driver="asyncpg")
     container.start()
     try:
-        yield container
+        yield container.get_connection_url()
     finally:
         container.stop()
-
-
-@pytest.fixture(scope="session")
-def db_url(postgres_container: PostgresContainer) -> str:
-    return postgres_container.get_connection_url()
 
 
 @pytest_asyncio.fixture(scope="session")
