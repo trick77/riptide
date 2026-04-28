@@ -71,6 +71,30 @@ the data captured in v1.
 | **Per-ticket flow** | `WHERE 'ABC-1234' = ANY(jira_keys)` returns every event for a ticket across Bitbucket / pipeline / Argo (joined via commit_sha). |
 | **Human vs automated split** | `WHERE NOT is_automated` (Renovate / Dependabot / Snyk / Mend / generic-bot detection runs at write time and tags `automation_source`). Default dashboards exclude bots; bot velocity is a separate CI-health view. |
 
+### FinOps signals (derivable, currency excluded)
+
+riptide is a delivery-metrics collector, not a billing system — it captures
+**duration and attribution** but does not assign currency. Multiply the unit
+metrics below by your own $/runner-second to convert.
+
+| Signal | How it's computed |
+|---|---|
+| **CI compute time per service / team** | `SUM(pipeline_events.duration_seconds) GROUP BY service, team`. The unit metric for CI cost attribution. |
+| **Wasted CI** | `SUM(duration_seconds) WHERE status IN ('FAILURE','Failed')` — failed builds × time. Quantifies the cost of flakes / broken tests. |
+| **Bot-driven pipeline churn** | `pipeline_events` joined to `bitbucket_events` via `commit_sha` filtered on `is_automated = true`. Renovate / Dependabot can drive 40–70% of pipeline runs in many orgs; useful input for batching policies. |
+| **Deploy compute** | `SUM(argocd_events.duration_seconds) GROUP BY service, team`. |
+| **Cost-by-change-type** | Group pipeline / argocd compute by `bitbucket_events.change_type` (joined via `commit_sha`): hotfix vs. feature spend, week over week. |
+
+What riptide does **not** provide today, and the natural seam for it:
+
+- **Currency.** Add a `unit_cost` config (per-runner $/sec) in
+  `config/service-catalog.json`, or pull real per-namespace cost from
+  **OpenCost / Kubecost** if it already runs in the cluster, and join to the
+  catalog by `service`. Either is a follow-up component, not a v1 collector
+  concern.
+- **Cloud bill imports** (AWS CUR / GCP billing export) — out of scope for an
+  enterprise self-hosted, on-prem-first product.
+
 ### Intentionally deferred
 
 - **Change failure rate / failed deployment recovery time** (DORA's
