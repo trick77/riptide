@@ -1,8 +1,8 @@
 """ArgoCD notification payload — populated from the bundled NotificationTemplate."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ArgoCDWebhook(BaseModel):
@@ -14,3 +14,10 @@ class ArgoCDWebhook(BaseModel):
     operation_phase: str | None = Field(default=None, description="Succeeded / Failed / Running")
     started_at: datetime | None = None
     finished_at: datetime | None = None
+
+    @field_validator("started_at", "finished_at")
+    @classmethod
+    def _normalise_tz(cls, v: datetime | None) -> datetime | None:
+        if v is None:
+            return None
+        return v.astimezone(UTC) if v.tzinfo else v.replace(tzinfo=UTC)

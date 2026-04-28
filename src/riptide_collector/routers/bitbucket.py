@@ -36,12 +36,18 @@ def _safe_int(value: Any) -> int | None:
 
 
 def _parse_dt(value: Any) -> datetime | None:
+    """Parse an ISO-8601 string and normalise to UTC.
+
+    Naive datetimes are assumed to be UTC; aware datetimes are converted.
+    Returns None for unparseable input.
+    """
     if not isinstance(value, str):
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+    return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _synth_delivery_id(event_key: str | None, body: dict[str, Any]) -> str:

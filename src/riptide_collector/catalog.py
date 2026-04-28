@@ -206,18 +206,18 @@ class CatalogStore:
 
     def maybe_reload(self) -> bool:
         """Re-read the file if mtime changed. Returns True iff reloaded."""
-        try:
-            mtime = self._path.stat().st_mtime
-        except OSError as exc:
-            logger.error(
-                "catalog_stat_failed",
-                path=str(self._path),
-                error=str(exc),
-            )
-            self._reload_failures += 1
-            return False
-
         with self._lock:
+            try:
+                mtime = self._path.stat().st_mtime
+            except OSError as exc:
+                logger.error(
+                    "catalog_stat_failed",
+                    path=str(self._path),
+                    error=str(exc),
+                )
+                self._reload_failures += 1
+                return False
+
             if mtime == self._mtime:
                 return False
             try:

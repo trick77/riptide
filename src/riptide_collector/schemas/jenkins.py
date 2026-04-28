@@ -4,9 +4,15 @@ If a field is missing, we 422 — that's a wiring bug to surface, not data to
 silently drop.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+def _to_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value.astimezone(UTC) if value.tzinfo else value.replace(tzinfo=UTC)
 
 
 class JenkinsWebhook(BaseModel):
@@ -23,3 +29,8 @@ class JenkinsWebhook(BaseModel):
         default=None,
         description="Optional explicit service id; if absent, resolve via job_name.",
     )
+
+    @field_validator("started_at", "finished_at")
+    @classmethod
+    def _normalise_tz(cls, v: datetime | None) -> datetime | None:
+        return _to_utc(v)

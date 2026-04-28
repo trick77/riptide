@@ -36,10 +36,13 @@ def make_router(
         if resolution is None:
             logger.warning("argocd_unknown_app", app=event.app_name)
 
-        finished_repr = event.finished_at.isoformat() if event.finished_at else "incomplete"
+        # Stable dedup key: started_at is fixed for a sync attempt; phase varies
+        # across the lifecycle (Running → Succeeded/Failed) and SHOULD produce
+        # distinct rows. finished_at is excluded — it can drift between retries
+        # of the same phase and would cause duplicates.
+        started_repr = event.started_at.isoformat() if event.started_at else "unknown"
         delivery_id = (
-            f"{event.app_name}#{event.revision}#"
-            f"{event.operation_phase or 'unknown'}#{finished_repr}"
+            f"{event.app_name}#{event.revision}#{started_repr}#{event.operation_phase or 'unknown'}"
         )
 
         async with session_factory() as session:

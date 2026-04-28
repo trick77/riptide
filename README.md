@@ -1,6 +1,15 @@
-![riptide](logo-text.png)
+<p align="left">
+  <img src="logo-text.png" alt="riptide">
+</p>
 
 Ingestion service for the **riptide** DevOps delivery-metrics suite.
+
+riptide is **built for the enterprise** — for organisations running self-hosted
+toolchains behind a corporate firewall: Bitbucket Data Center, on-prem Jenkins,
+OpenShift, and ArgoCD. It is **not** a SaaS, has no third-party data egress,
+runs entirely inside your cluster, and is designed for the realities of
+regulated environments (mandatory team / cost-centre attribution, auditable
+config-as-code, no admin UIs that bypass change control).
 
 Collects raw events from:
 - **Bitbucket** (PR + push webhooks)
@@ -9,7 +18,7 @@ Collects raw events from:
 
 …and stores them, append-only, in Postgres for later metric computation.
 
-See `docs/` for setup and onboarding guides; see `/Users/jan/.claude/plans/valiant-knitting-biscuit.md` for the full design.
+See `docs/` for setup and onboarding guides.
 
 ## Quickstart (local)
 

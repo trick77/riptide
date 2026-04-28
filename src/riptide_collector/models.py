@@ -32,6 +32,7 @@ class BitbucketEvent(Base):
             "jira_keys",
             postgresql_using="gin",
         ),
+        Index("ix_bitbucket_events_service_created_at", "service", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -75,6 +76,7 @@ class JenkinsEvent(Base):
         UniqueConstraint("delivery_id", name="uq_jenkins_events_delivery_id"),
         Index("ix_jenkins_events_job_name", "job_name"),
         Index("ix_jenkins_events_commit_sha", "commit_sha"),
+        Index("ix_jenkins_events_service_created_at", "service", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -112,6 +114,7 @@ class ArgoCDEvent(Base):
         UniqueConstraint("delivery_id", name="uq_argocd_events_delivery_id"),
         Index("ix_argocd_events_app_name", "app_name"),
         Index("ix_argocd_events_revision", "revision"),
+        Index("ix_argocd_events_service_created_at", "service", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
