@@ -1,0 +1,9 @@
+{
+  "job_name": "payments-api-deploy",
+  "build_number": 1234,
+  "phase": "COMPLETED",
+  "status": "SUCCESS",
+  "commit_sha": "abc1234567890abc1234567890abc1234567890a",
+  "started_at": "2026-04-28T10:05:00Z",
+  "finished_at": "2026-04-28T10:08:30Z"
+}
