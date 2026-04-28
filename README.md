@@ -1,4 +1,4 @@
-# riptide-collector
+![riptide](logo-text.png)
 
 Ingestion service for the **riptide** DevOps delivery-metrics suite.
 
