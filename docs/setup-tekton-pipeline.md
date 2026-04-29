@@ -80,22 +80,22 @@ spec:
           2*) echo "riptide-notify: OK (http=${HTTP_CODE})" ;;
           000)
               # Connect/timeout/DNS — we never reached riptide-collector.
-              echo "##############################################################"
-              echo "## WARNING: RIPTIDE-COLLECTOR UNREACHABLE                   ##"
-              echo "## url=$(params.riptide-url)"
-              echo "## reason=connect/timeout/DNS (curl exit non-zero, http=000)##"
-              echo "## pipeline result is UNAFFECTED — this is best-effort      ##"
-              echo "##############################################################"
+              echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+              echo "!! WARNING: RIPTIDE-COLLECTOR UNREACHABLE                   !!"
+              echo "!! url=$(params.riptide-url)"
+              echo "!! reason=connect/timeout/DNS (curl exit non-zero, http=000)!!"
+              echo "!! pipeline result is UNAFFECTED — this is best-effort      !!"
+              echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
               ;;
           *)
               # Reached the server but it returned an error status.
-              echo "##############################################################"
-              echo "## WARNING: RIPTIDE-COLLECTOR REJECTED THE EVENT            ##"
-              echo "## http=${HTTP_CODE}  url=$(params.riptide-url)"
-              echo "## body (first 500 bytes):"
+              echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+              echo "!! WARNING: RIPTIDE-COLLECTOR REJECTED THE EVENT            !!"
+              echo "!! http=${HTTP_CODE}  url=$(params.riptide-url)"
+              echo "!! body (first 500 bytes):"
               head -c 500 /tmp/riptide.out 2>/dev/null || true; echo
-              echo "## pipeline result is UNAFFECTED — this is best-effort      ##"
-              echo "##############################################################"
+              echo "!! pipeline result is UNAFFECTED — this is best-effort      !!"
+              echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
               ;;
         esac
         exit 0
