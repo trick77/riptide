@@ -30,6 +30,9 @@ If `service_id` is omitted, riptide tries to resolve via `pipeline_name` against
 Requires the **HTTP Request** plugin and a `Secret text` credential named `RIPTIDE_TOKEN`.
 
 ```groovy
+// Notification is best-effort: a slow or unavailable riptide-collector must
+// NEVER fail the build. We bound the call with `timeout`, swallow exceptions,
+// and accept any HTTP status (we just log it).
 def riptideNotify(String phase) {
     def started = currentBuild.startTimeInMillis
     def finished = System.currentTimeMillis()
@@ -45,15 +48,30 @@ def riptideNotify(String phase) {
             ? new Date(finished).format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
             : null,
     ]
-    withCredentials([string(credentialsId: 'RIPTIDE_TOKEN', variable: 'TOKEN')]) {
-        httpRequest(
-            httpMode: 'POST',
-            url: 'https://riptide-collector.example.com/webhooks/pipeline',
-            customHeaders: [[name: 'Authorization', value: "Bearer ${TOKEN}"]],
-            contentType: 'APPLICATION_JSON',
-            requestBody: groovy.json.JsonOutput.toJson(body),
-            validResponseCodes: '200:299',
-        )
+    try {
+        // Hard wall-clock ceiling so a hung connection can't drag the build.
+        timeout(time: 15, unit: 'SECONDS') {
+            withCredentials([string(credentialsId: 'RIPTIDE_TOKEN', variable: 'TOKEN')]) {
+                def resp = httpRequest(
+                    httpMode: 'POST',
+                    url: 'https://riptide-collector.example.com/webhooks/pipeline',
+                    customHeaders: [[name: 'Authorization', value: "Bearer ${TOKEN}"]],
+                    contentType: 'APPLICATION_JSON',
+                    requestBody: groovy.json.JsonOutput.toJson(body),
+                    timeout: 10,                   // HTTP Request plugin: per-request seconds
+                    quiet: true,                   // keep build log clean
+                    validResponseCodes: '100:599', // accept any status; we just log it
+                    consoleLogResponseBody: false,
+                )
+                echo "riptide-notify: http=${resp.status}"
+            }
+        }
+    } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
+        // timeout() aborted us. Do NOT rethrow — that would propagate the abort
+        // and mark the build aborted/failed.
+        echo "riptide-notify: timed out, ignoring (build result unaffected)"
+    } catch (Throwable t) {
+        echo "riptide-notify: error ${t.class.simpleName}: ${t.message} (ignored)"
     }
 }
 
@@ -63,7 +81,15 @@ pipeline {
         stage('Build') { steps { echo 'build' } }
     }
     post {
-        always { script { riptideNotify('COMPLETED') } }
+        // Snapshot the build result before notify and restore it afterwards as
+        // belt-and-suspenders: notify must never demote a SUCCESS build.
+        always {
+            script {
+                def preResult = currentBuild.result
+                riptideNotify('COMPLETED')
+                if (currentBuild.result != preResult) { currentBuild.result = preResult }
+            }
+        }
     }
 }
 ```

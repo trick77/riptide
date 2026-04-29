@@ -48,8 +48,12 @@ spec:
               key: token
       script: |
         #!/bin/sh
-        set -eu
-        microdnf install -y --nodocs jq curl >/dev/null
+        # Notification is best-effort: a slow or unavailable riptide-collector
+        # must NEVER fail the PipelineRun. We deliberately do not `set -e` and
+        # exit 0 at the end regardless of the curl outcome.
+        set -u
+        microdnf install -y --nodocs jq curl >/dev/null 2>&1 || {
+          echo "riptide-notify: could not install curl/jq, skipping"; exit 0; }
         # Tekton's $(tasks.status) is one of: Succeeded, Failed, Completed, None
         STATUS="$(params.aggregate-status)"
         BODY=$(jq -n \
@@ -63,10 +67,22 @@ spec:
           --arg fa "$(params.finished-at)" \
           '{source:$src, pipeline_name:$pn, run_id:$rid, phase:$phase,
             status:$st, commit_sha:$sha, started_at:$sa, finished_at:$fa}')
-        curl -fsS -X POST "$(params.riptide-url)" \
+        # --connect-timeout caps TCP/TLS handshake; --max-time caps the full
+        # request. One quick retry handles transient blips. Any non-2xx is
+        # logged and ignored — the PipelineRun result is unaffected.
+        HTTP_CODE=$(curl -sS -o /tmp/riptide.out -w '%{http_code}' \
+          --connect-timeout 3 --max-time 10 --retry 1 --retry-delay 1 \
+          -X POST "$(params.riptide-url)" \
           -H "Authorization: Bearer ${RIPTIDE_TOKEN}" \
           -H "Content-Type: application/json" \
-          --data "$BODY"
+          --data "$BODY") || HTTP_CODE="000"
+        echo "riptide-notify: http=${HTTP_CODE}"
+        case "$HTTP_CODE" in
+          2*) ;;
+          *)  echo "riptide-notify: non-2xx, ignoring (pipeline result unaffected)"
+              head -c 500 /tmp/riptide.out 2>/dev/null || true; echo ;;
+        esac
+        exit 0
 ```
 
 ## 2) Wire it into your Pipeline
@@ -93,6 +109,10 @@ spec:
   finally:
     - name: notify-riptide
       taskRef: { name: riptide-notify }
+      # Hard ceiling so a hung pod can never delay the PipelineRun.
+      # curl budget is ~14s (connect 3s + max 10s + 1 retry); 30s adds
+      # headroom for pod startup without making humans wait.
+      timeout: "30s"
       params:
         - name: pipeline-name
           value: $(context.pipeline.name)
