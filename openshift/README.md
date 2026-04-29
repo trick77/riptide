@@ -7,18 +7,17 @@ Per-component folders sit alongside one another; v1 only ships `collector/`.
 
 ```
 openshift/
-├── kustomization.yaml          # suite-level entry; compose components
-├── shared/
-│   ├── secret.env.example      # template for riptide-collector-secrets
-│   └── team-keys.json.example  # template for riptide-collector-team-keys
+├── kustomization.yaml          # suite-level entry; composes components
+├── secret.env.example          # template for riptide-collector-secrets
 └── collector/
     ├── kustomization.yaml
     ├── deployment.yaml
     ├── service.yaml
     ├── route.yaml
-    ├── configmap-app.yaml             # non-secret env (log level, catalog path, team-keys path)
-    ├── service-catalog.json           # canonical catalog (teams + automation)
-    └── job-migrate.yaml               # alembic upgrade head, runs PreSync
+    ├── configmap-app.yaml      # non-secret env (log level, catalog path, team-keys path)
+    ├── service-catalog.json    # in-repo sample catalog (teams + automation)
+    ├── team-keys.json          # in-repo dev sample (sha256 hashes); prod replaces via Secret
+    └── job-migrate.yaml        # alembic upgrade head, runs PreSync
 ```
 
 ## Database
@@ -34,7 +33,7 @@ webhook bearer keys.
 ### 1. `riptide-collector-secrets` (DB URL)
 
 ```bash
-cp openshift/shared/secret.env.example /tmp/secret.env
+cp openshift/secret.env.example /tmp/secret.env
 # edit /tmp/secret.env — set the real RIPTIDE_DB_URL
 oc create secret generic riptide-collector-secrets \
     --namespace=$NS \
@@ -57,11 +56,12 @@ echo "Give to team checkout: $RAW"
 printf %s "$RAW" | sha256sum | awk '{print $1}'   # → put under "checkout"
 ```
 
-Build the file:
+Build a real team-keys file (start from the in-repo sample if helpful, but
+**replace every value** with a fresh hash — the committed sample contains
+deterministic dev tokens that must never reach production):
 
 ```bash
-cp openshift/shared/team-keys.json.example /tmp/team-keys.json
-# edit /tmp/team-keys.json — replace each value with the sha256 hex
+$EDITOR /tmp/team-keys.json   # JSON: { "<team>": "<64-char sha256 hex>", ... }
 oc create secret generic riptide-collector-team-keys \
     --namespace=$NS \
     --from-file=team-keys.json=/tmp/team-keys.json \
@@ -72,16 +72,27 @@ shred -u /tmp/team-keys.json
 Every team listed in `service-catalog.json` must have a corresponding entry
 in `team-keys.json` — the pod fails to start otherwise.
 
-### 3. Image
+### 3. Namespace
 
-Push the image to your registry, then set the `images:` newName/newTag in
-your overlay (or in `openshift/collector/kustomization.yaml` if you're not
-using overlays).
+Riptide does not create the namespace itself (it's an env-specific
+decision). Either provision it via your normal flow:
+
+```bash
+oc create namespace $NS
+```
+
+…or have your overlay's `kustomization.yaml` set `namespace: $NS` so every
+resource lands in it.
+
+### 4. Image
+
+Push the image to your registry, then set the `images:` `newName`/`newTag`
+in your overlay (the base no longer pins a registry — see PR #8).
 
 ## Deploy
 
 ```bash
-oc apply -k openshift/<your-overlay>/
+oc apply -k openshift/overlays/<your-overlay>/
 ```
 
 This applies (in order, via Kustomize):
@@ -103,8 +114,8 @@ short-lived and gets a smaller budget than the long-running app.
 
 ## Editing the catalog
 
-`config/service-catalog.json` (symlink → `openshift/collector/service-catalog.json`)
-is the source of truth. Editing the ConfigMap in the cluster directly is
+`openshift/collector/service-catalog.json` is the in-repo sample and the
+single source of truth. Editing the ConfigMap in the cluster directly is
 wrong — it gets overwritten on the next `oc apply -k`. To onboard a team,
 see `docs/onboarding-a-team.md`.
 

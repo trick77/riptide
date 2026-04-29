@@ -25,8 +25,8 @@ services:
       RIPTIDE_CATALOG_PATH: /etc/riptide-collector/service-catalog.json
       RIPTIDE_TEAM_KEYS_PATH: /etc/riptide-collector/team-keys.json
     volumes:
-      - ./config/service-catalog.json:/etc/riptide-collector/service-catalog.json:ro
-      - ./config/team-keys.dev.json:/etc/riptide-collector/team-keys.json:ro
+      - ./openshift/collector/service-catalog.json:/etc/riptide-collector/service-catalog.json:ro
+      - ./openshift/collector/team-keys.json:/etc/riptide-collector/team-keys.json:ro
     command: ["alembic", "upgrade", "head"]
 
   app:
@@ -42,10 +42,12 @@ services:
       RIPTIDE_TEAM_KEYS_PATH: /etc/riptide-collector/team-keys.json
       RIPTIDE_LOG_LEVEL: INFO
     volumes:
-      - ./config/service-catalog.json:/etc/riptide-collector/service-catalog.json:ro
+      - ./openshift/collector/service-catalog.json:/etc/riptide-collector/service-catalog.json:ro
       # Dev raw bearers (use as `Authorization: Bearer <raw>` against the
       # running app): checkout → "dev-checkout", platform → "dev-platform".
-      # These match the sha256 hashes committed in config/team-keys.dev.json.
-      - ./config/team-keys.dev.json:/etc/riptide-collector/team-keys.json:ro
+      # These match the sha256 hashes committed in
+      # openshift/collector/team-keys.json (sample for local dev; production
+      # mounts a different file from a k8s Secret).
+      - ./openshift/collector/team-keys.json:/etc/riptide-collector/team-keys.json:ro
     ports:
       - "8000:8000"
