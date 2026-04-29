@@ -125,6 +125,30 @@ class TestBitbucketWebhook:
             assert row.service == "srv0417"
             assert row.team == "checkout"
 
+    async def test_uppercase_service_id_normalised_to_lowercase(
+        self,
+        client: AsyncClient,
+        session_factory: async_sessionmaker[AsyncSession],
+    ) -> None:
+        del session_factory
+        payload = _load("bitbucket_pr_merged.json")
+        payload["repository"]["full_name"] = "ACME/Payments-API"
+        response = await client.post(
+            "/webhooks/bitbucket",
+            json=payload,
+            headers={
+                **AUTH,
+                "X-Request-UUID": "uuid-upper",
+                "X-Riptide-Service-Id": "SRV0417",
+            },
+        )
+        assert response.status_code == 202
+
+        async with self._fresh_session_factory(client)() as session:
+            row = (await session.execute(select(BitbucketEvent))).scalar_one()
+            assert row.service == "srv0417"
+            assert row.repo_full_name == "acme/payments-api"
+
     async def test_unknown_repo_still_recorded_with_caller_team(
         self,
         client: AsyncClient,
@@ -203,6 +227,19 @@ class TestPipelineWebhook:
             row = (await session.execute(select(PipelineEvent))).scalar_one()
             assert row.service == "srv0417"
 
+    async def test_uppercase_inputs_normalised_to_lowercase(self, client: AsyncClient) -> None:
+        payload = _load("pipeline_jenkins_completed.json")
+        payload["service_id"] = "SRV0417"
+        payload["commit_sha"] = payload["commit_sha"].upper()
+        response = await client.post("/webhooks/pipeline", json=payload, headers=AUTH)
+        assert response.status_code == 202
+
+        factory = TestBitbucketWebhook._fresh_session_factory(client)
+        async with factory() as session:
+            row = (await session.execute(select(PipelineEvent))).scalar_one()
+            assert row.service == "srv0417"
+            assert row.commit_sha == row.commit_sha.lower()
+
     async def test_jenkins_and_tekton_same_name_dedup_separately(self, client: AsyncClient) -> None:
         # Same pipeline_name + run_id but different sources must both insert.
         jenkins = _load("pipeline_jenkins_completed.json")
@@ -252,6 +289,20 @@ class TestArgoCDWebhook:
         async with factory() as session:
             row = (await session.execute(select(ArgoCDEvent))).scalar_one()
             assert row.service == "srv0417"
+
+    async def test_uppercase_inputs_normalised_to_lowercase(self, client: AsyncClient) -> None:
+        payload = _load("argocd_synced.json")
+        payload["service_id"] = "SRV0417"
+        # commit SHAs sometimes arrive uppercase from non-git tools
+        payload["revision"] = payload["revision"].upper()
+        response = await client.post("/webhooks/argocd", json=payload, headers=AUTH)
+        assert response.status_code == 202
+
+        factory = TestBitbucketWebhook._fresh_session_factory(client)
+        async with factory() as session:
+            row = (await session.execute(select(ArgoCDEvent))).scalar_one()
+            assert row.service == "srv0417"
+            assert row.revision == row.revision.lower()
 
     async def test_missing_revision_returns_422(self, client: AsyncClient) -> None:
         payload = _load("argocd_synced.json")

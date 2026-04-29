@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from riptide_collector.catalog import CatalogStore
 from riptide_collector.logging_config import get_logger
 from riptide_collector.models import PipelineEvent
+from riptide_collector.parsers import lower
 from riptide_collector.schemas.pipeline import PipelineWebhook
 
 logger = get_logger(__name__)
@@ -38,7 +39,9 @@ def make_router(
         delivery_id = f"{event.source}#{event.pipeline_name}#{event.run_id}#{event.phase}"
 
         # Service identity is observed: explicit hint wins, else the pipeline name.
-        service = event.service_id or event.pipeline_name
+        # Always lowercased so the column joins cleanly across sources.
+        service = lower(event.service_id) or lower(event.pipeline_name)
+        commit_sha = lower(event.commit_sha)
 
         async with session_factory() as session:
             stmt = (
@@ -50,7 +53,7 @@ def make_router(
                     run_id=event.run_id,
                     phase=event.phase,
                     status=event.status,
-                    commit_sha=event.commit_sha,
+                    commit_sha=commit_sha,
                     started_at=event.started_at,
                     finished_at=event.finished_at,
                     occurred_at=event.finished_at or event.started_at or datetime.now(UTC),

@@ -54,3 +54,12 @@ def looks_bot_shaped(author: str | None) -> bool:
     if not author:
         return False
     return bool(BOT_SHAPED_RE.match(author))
+
+
+def lower(value: str | None) -> str | None:
+    """Lowercase a string or pass through None / empty.
+
+    Used at ingest time to normalise identifiers stored in join columns
+    (service, commit_sha, revision, repo_full_name, branch_name).
+    """
+    return value.lower() if isinstance(value, str) and value else value

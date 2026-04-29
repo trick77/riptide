@@ -11,6 +11,7 @@ from riptide_collector.models import BitbucketEvent
 from riptide_collector.parsers import (
     extract_jira_keys,
     is_revert_commit,
+    lower,
     parse_change_type,
 )
 
@@ -144,6 +145,13 @@ def make_router(
                     author = value
                     break
 
+        # Lowercase identifiers used for joins / aggregations. Raw values are
+        # preserved on the original `payload` JSONB.
+        repo_full_name = lower(repo_full_name)
+        branch_name = lower(branch_name)
+        commit_sha = lower(commit_sha)
+        service = lower(x_riptide_service_id) or repo_full_name
+
         change_type = parse_change_type(branch_name)
         jira_keys = extract_jira_keys(title, description, branch_name, *commit_messages)
         automation_source = catalog.detect_automation_source(author, branch_name)
@@ -171,7 +179,7 @@ def make_router(
                     files_changed=files_changed,
                     is_revert=is_revert,
                     occurred_at=occurred_at,
-                    service=x_riptide_service_id or repo_full_name,
+                    service=service,
                     team=caller_team,
                     payload=body,
                 )
