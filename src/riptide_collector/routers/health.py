@@ -1,6 +1,6 @@
 from typing import Any
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -12,6 +12,7 @@ def make_router(
     catalog: CatalogStore,
     session_factory: async_sessionmaker[AsyncSession],
     team_keys: TeamKeysStore,
+    auth_dep: Any,
 ) -> APIRouter:
     router = APIRouter(tags=["health"])
 
@@ -40,5 +41,14 @@ def make_router(
             "catalog_reload_failures": catalog.reload_failures,
             "team_keys_reload_failures": team_keys.reload_failures,
         }
+
+    @router.get(
+        "/auth/ping",
+        summary="Authenticated reachability check for senders",
+    )
+    async def auth_ping(  # pyright: ignore[reportUnusedFunction]
+        caller_team: str = Depends(auth_dep),
+    ) -> dict[str, str]:
+        return {"status": "ok", "team": caller_team}
 
     return router

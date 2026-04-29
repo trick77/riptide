@@ -8,7 +8,7 @@ from riptide_collector.auth import make_team_bearer_dependency
 from riptide_collector.catalog import CatalogStore
 from riptide_collector.db import make_engine, make_session_factory
 from riptide_collector.logging_config import configure_logging, get_logger
-from riptide_collector.routers import argocd, bitbucket, health, pipeline
+from riptide_collector.routers import argocd, bitbucket, health, noergler, pipeline
 from riptide_collector.settings import Settings, load_settings
 from riptide_collector.team_keys import TeamKeysStore
 
@@ -71,10 +71,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
 
-    app.include_router(health.make_router(catalog, session_factory, team_keys))
+    app.include_router(health.make_router(catalog, session_factory, team_keys, auth_dep))
     app.include_router(bitbucket.make_router(catalog, session_factory, auth_dep))
     app.include_router(pipeline.make_router(session_factory, auth_dep))
     app.include_router(argocd.make_router(session_factory, auth_dep))
+    app.include_router(noergler.make_router(session_factory, auth_dep))
 
     app.state.catalog = catalog
     app.state.team_keys = team_keys

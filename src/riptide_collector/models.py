@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
@@ -8,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     Index,
     Integer,
+    Numeric,
     String,
     UniqueConstraint,
     func,
@@ -95,6 +97,48 @@ class PipelineEvent(Base):
         Computed("EXTRACT(EPOCH FROM finished_at - started_at)::int", persisted=True),
         nullable=True,
     )
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    modified_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    service: Mapped[str | None] = mapped_column(String, nullable=True)
+    team: Mapped[str | None] = mapped_column(String, nullable=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+
+class NoerglerEvent(Base):
+    __tablename__ = "noergler_events"
+    __table_args__ = (
+        UniqueConstraint("delivery_id", name="uq_noergler_events_delivery_id"),
+        Index("ix_noergler_events_event_type", "event_type"),
+        Index("ix_noergler_events_pr_key", "pr_key"),
+        Index("ix_noergler_events_commit_sha", "commit_sha"),
+        Index("ix_noergler_events_model", "model"),
+        Index("ix_noergler_events_service_created_at", "service", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    delivery_id: Mapped[str] = mapped_column(String, nullable=False)
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    pr_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    repo: Mapped[str | None] = mapped_column(String, nullable=True)
+    commit_sha: Mapped[str | None] = mapped_column(String, nullable=True)
+    run_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    model: Mapped[str | None] = mapped_column(String, nullable=True)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    elapsed_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    findings_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
+    finding_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    verdict: Mapped[str | None] = mapped_column(String, nullable=True)
+    actor: Mapped[str | None] = mapped_column(String, nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
