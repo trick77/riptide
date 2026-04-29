@@ -87,22 +87,24 @@ class TeamKeysStore:
     def lookup(self, raw_token: str | None) -> str | None:
         """Return the team name for a raw bearer token, or None if no match.
 
-        Constant-time comparison via `hmac.compare_digest` against the stored
-        hash for each team. The reverse-index lookup is fast-path; the
-        sequential compare is the actual constant-time check (timing leaks
-        only the team count, which is public information anyway).
+        Always runs `hmac.compare_digest` against every stored hash and
+        defers the return until the loop completes — this prevents a timing
+        side-channel from leaking *which* team matched (or how far down the
+        dict iteration order it sits). Total work is constant in the
+        team count (which is public anyway). Bearer length is not leaked
+        because we hash the candidate first.
         """
         if not raw_token:
             return None
         candidate = _hash(raw_token)
+        match: str | None = None
         with self._lock:
-            # Fast O(1) lookup AND a constant-time compare. Without the
-            # compare, a timing side-channel on dict membership could leak
-            # which team's key was guessed correctly.
             for stored_hash, team in self._by_hash.items():
+                # Bitwise OR via short-circuit-free assignment: every iteration
+                # runs compare_digest regardless of prior matches.
                 if hmac.compare_digest(candidate, stored_hash):
-                    return team
-            return None
+                    match = team
+        return match
 
     def maybe_reload(self) -> bool:
         """Re-read the file if mtime changed. Returns True iff reloaded."""

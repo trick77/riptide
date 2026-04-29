@@ -6,7 +6,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from conftest import CHECKOUT_TOKEN, PLATFORM_TOKEN
+from _keys import CHECKOUT_TOKEN, PLATFORM_TOKEN
 from riptide_collector.models import PipelineEvent
 
 # Minimal pipeline payload that satisfies the schema.

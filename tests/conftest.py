@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from collections.abc import AsyncIterator, Iterator
@@ -13,18 +12,10 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
 
+from _keys import TEAM_KEYS
 from riptide_collector.main import create_app
 from riptide_collector.models import Base
 from riptide_collector.settings import Settings
-
-# Test bearer tokens (raw); their sha256 hashes go in TEAM_KEYS.
-CHECKOUT_TOKEN = "test-checkout-token-please-do-not-use-in-prod"
-PLATFORM_TOKEN = "test-platform-token-please-do-not-use-in-prod"
-
-
-def _h(raw: str) -> str:
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
 
 VALID_CATALOG: dict[str, Any] = {
     "teams": [
@@ -41,11 +32,6 @@ VALID_CATALOG: dict[str, Any] = {
             "branch_prefixes": ["dependabot/"],
         },
     },
-}
-
-TEAM_KEYS: dict[str, str] = {
-    "checkout": _h(CHECKOUT_TOKEN),
-    "platform": _h(PLATFORM_TOKEN),
 }
 
 

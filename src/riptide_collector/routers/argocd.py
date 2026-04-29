@@ -5,7 +5,6 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from riptide_collector.catalog import CatalogStore
 from riptide_collector.logging_config import get_logger
 from riptide_collector.models import ArgoCDEvent
 from riptide_collector.parsers import lower
@@ -15,11 +14,9 @@ logger = get_logger(__name__)
 
 
 def make_router(
-    catalog: CatalogStore,
     session_factory: async_sessionmaker[AsyncSession],
     auth_dep: Any,
 ) -> APIRouter:
-    del catalog  # not needed; team comes from caller, not the catalog
     router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
     @router.post(

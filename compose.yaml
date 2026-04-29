@@ -43,10 +43,9 @@ services:
       RIPTIDE_LOG_LEVEL: INFO
     volumes:
       - ./config/service-catalog.json:/etc/riptide-collector/service-catalog.json:ro
+      # Dev raw bearers (use as `Authorization: Bearer <raw>` against the
+      # running app): checkout → "dev-checkout", platform → "dev-platform".
+      # These match the sha256 hashes committed in config/team-keys.dev.json.
       - ./config/team-keys.dev.json:/etc/riptide-collector/team-keys.json:ro
     ports:
       - "8000:8000"
-# Dev raw bearers (use as `Authorization: Bearer <raw>`):
-#   checkout team → dev-checkout
-#   platform team → dev-platform
-# These are matched by their sha256 hashes in config/team-keys.dev.json.

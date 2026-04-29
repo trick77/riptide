@@ -7,7 +7,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from conftest import CHECKOUT_TOKEN
+from _keys import CHECKOUT_TOKEN
 from riptide_collector.models import ArgoCDEvent, BitbucketEvent, PipelineEvent
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -238,6 +238,7 @@ class TestPipelineWebhook:
         async with factory() as session:
             row = (await session.execute(select(PipelineEvent))).scalar_one()
             assert row.service == "srv0417"
+            assert row.commit_sha is not None
             assert row.commit_sha == row.commit_sha.lower()
 
     async def test_jenkins_and_tekton_same_name_dedup_separately(self, client: AsyncClient) -> None:
