@@ -13,11 +13,6 @@ configMapGenerator:
     files:
       - service-catalog.json
 
-images:
-  - name: riptide-collector
-    newName: image-registry.openshift-image-registry.svc:5000/riptide/riptide-collector
-    newTag: latest
-
 labels:
   - pairs:
       app.kubernetes.io/name: riptide-collector
