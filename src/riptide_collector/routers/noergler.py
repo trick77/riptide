@@ -65,7 +65,6 @@ def _values_completed(
     # idempotency key. Prefix with event_type so a future event re-using a
     # run_id can't collide.
     delivery_id = f"completed#{event.run_id}"
-    service = lower(event.service_id) or lower(event.repo)
     return {
         "delivery_id": delivery_id,
         "event_type": "completed",
@@ -80,7 +79,6 @@ def _values_completed(
         "findings_count": event.findings_count,
         "cost_usd": event.cost_usd,
         "occurred_at": event.finished_at,
-        "service": service,
         "team": caller_team,
         "payload": raw,
     }
@@ -93,7 +91,6 @@ def _values_feedback(
     # same user flipping disagree → acknowledged (or vice versa) to produce
     # distinct rows for honest auditability.
     delivery_id = f"feedback#{event.finding_id}#{event.verdict}"
-    service = lower(event.service_id) or lower(event.repo)
     return {
         "delivery_id": delivery_id,
         "event_type": "feedback",
@@ -107,7 +104,6 @@ def _values_feedback(
         # and refs.
         "actor": lower(event.actor),
         "occurred_at": event.occurred_at,
-        "service": service,
         "team": caller_team,
         "payload": raw,
     }

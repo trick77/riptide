@@ -77,7 +77,6 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.func.now(),
         ),
-        sa.Column("service", sa.String, nullable=True),
         sa.Column("team", sa.String, nullable=True),
         sa.Column("payload", JSONB, nullable=False),
         sa.UniqueConstraint("delivery_id", name="uq_bitbucket_events_delivery_id"),
@@ -90,11 +89,6 @@ def upgrade() -> None:
         "bitbucket_events",
         ["jira_keys"],
         postgresql_using="gin",
-    )
-    op.create_index(
-        "ix_bitbucket_events_service_created_at",
-        "bitbucket_events",
-        ["service", "created_at"],
     )
 
     op.create_table(
@@ -138,7 +132,6 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.func.now(),
         ),
-        sa.Column("service", sa.String, nullable=True),
         sa.Column("team", sa.String, nullable=True),
         sa.Column("payload", JSONB, nullable=False),
         sa.UniqueConstraint("delivery_id", name="uq_pipeline_events_delivery_id"),
@@ -146,11 +139,6 @@ def upgrade() -> None:
     op.create_index("ix_pipeline_events_source", "pipeline_events", ["source"])
     op.create_index("ix_pipeline_events_pipeline_name", "pipeline_events", ["pipeline_name"])
     op.create_index("ix_pipeline_events_commit_sha", "pipeline_events", ["commit_sha"])
-    op.create_index(
-        "ix_pipeline_events_service_created_at",
-        "pipeline_events",
-        ["service", "created_at"],
-    )
 
     op.create_table(
         "argocd_events",
@@ -181,18 +169,12 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.func.now(),
         ),
-        sa.Column("service", sa.String, nullable=True),
         sa.Column("team", sa.String, nullable=True),
         sa.Column("payload", JSONB, nullable=False),
         sa.UniqueConstraint("delivery_id", name="uq_argocd_events_delivery_id"),
     )
     op.create_index("ix_argocd_events_app_name", "argocd_events", ["app_name"])
     op.create_index("ix_argocd_events_revision", "argocd_events", ["revision"])
-    op.create_index(
-        "ix_argocd_events_service_created_at",
-        "argocd_events",
-        ["service", "created_at"],
-    )
 
     op.create_table(
         "noergler_events",
@@ -232,7 +214,6 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.func.now(),
         ),
-        sa.Column("service", sa.String, nullable=True),
         sa.Column("team", sa.String, nullable=True),
         sa.Column("payload", JSONB, nullable=False),
         sa.UniqueConstraint("delivery_id", name="uq_noergler_events_delivery_id"),
@@ -241,11 +222,6 @@ def upgrade() -> None:
     op.create_index("ix_noergler_events_pr_key", "noergler_events", ["pr_key"])
     op.create_index("ix_noergler_events_commit_sha", "noergler_events", ["commit_sha"])
     op.create_index("ix_noergler_events_model", "noergler_events", ["model"])
-    op.create_index(
-        "ix_noergler_events_service_created_at",
-        "noergler_events",
-        ["service", "created_at"],
-    )
 
     for table in EVENT_TABLES:
         op.execute(

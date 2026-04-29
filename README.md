@@ -52,11 +52,11 @@ the data captured in v1.
 
 | Metric | How it's computed |
 |---|---|
-| **Deployment frequency** | `COUNT(*)` of `argocd_events` per `service` / `team` / time window where `operation_phase = 'Succeeded'`. |
+| **Deployment frequency** | `COUNT(*)` of `argocd_events` per `app_name` / `team` / time window where `operation_phase = 'Succeeded'`. |
 | **Lead time for changes** | For each merged PR, `MIN(bitbucket_events.occurred_at)` for the PR (first commit) → `argocd_events.occurred_at` of the prod deploy that carries the same `commit_sha`. Joined via the SHA. Stratify by `bitbucket_events.change_type` (feature / hotfix / bugfix / …) to see hotfix lead time vs. feature lead time separately. |
 | **PR cycle time** | `pullrequest:fulfilled.occurred_at − pullrequest:created.occurred_at` per PR id. |
 | **Time to first review** *(DX Core 4 "code review pickup time")* | First reviewer event timestamp − PR-created timestamp on `bitbucket_events`. |
-| **Build success rate** | `pipeline_events` with `phase = 'COMPLETED'` grouped by `status`. Slice by `source` to compare Jenkins vs Tekton, by `service`/`team` for ownership. |
+| **Build success rate** | `pipeline_events` with `phase = 'COMPLETED'` grouped by `status`. Slice by `source` to compare Jenkins vs Tekton, by `pipeline_name` / `team` for ownership. |
 | **Build duration** | `pipeline_events.duration_seconds` (a Postgres `GENERATED ALWAYS AS (finished_at − started_at)` column). |
 | **Deploy success rate** | `argocd_events` with `operation_phase IN ('Succeeded', 'Failed')` aggregated. |
 | **Deploy duration** | `argocd_events.duration_seconds` (generated column). |
@@ -85,19 +85,19 @@ events arrive pre-priced in USD.
 | Signal | How it's computed |
 |---|---|
 | **LLM review spend per model / team** *(noergler)* | `SUM(noergler_events.cost_usd), SUM(prompt_tokens + completion_tokens) GROUP BY model, team` over `event_type = 'completed'`. Pre-priced — no multiplier needed. |
-| **CI compute time per service / team** | `SUM(pipeline_events.duration_seconds) GROUP BY service, team`. The unit metric for CI cost attribution. |
+| **CI compute time per pipeline / team** | `SUM(pipeline_events.duration_seconds) GROUP BY pipeline_name, team`. The unit metric for CI cost attribution. |
 | **Wasted CI** | `SUM(duration_seconds) WHERE status IN ('FAILURE','Failed')` — failed builds × time. Quantifies the cost of flakes / broken tests. |
 | **Bot-driven pipeline churn** | `pipeline_events` joined to `bitbucket_events` via `commit_sha` filtered on `is_automated = true`. Renovate / Dependabot can drive 40–70% of pipeline runs in many orgs; useful input for batching policies. |
-| **Deploy compute** | `SUM(argocd_events.duration_seconds) GROUP BY service, team`. |
+| **Deploy compute** | `SUM(argocd_events.duration_seconds) GROUP BY app_name, team`. |
 | **Cost-by-change-type** | Group pipeline / argocd compute by `bitbucket_events.change_type` (joined via `commit_sha`): hotfix vs. feature spend, week over week. |
 
 What riptide does **not** provide today, and the natural seam for it:
 
 - **Currency.** Add a `unit_cost` config (per-runner $/sec) in
   `openshift/collector/service-catalog.json`, or pull real per-namespace cost from
-  **OpenCost / Kubecost** if it already runs in the cluster, and join to the
-  catalog by `service`. Either is a follow-up component, not a v1 collector
-  concern.
+  **OpenCost / Kubecost** if it already runs in the cluster, and join on the
+  per-source identifier (`pipeline_name`, `app_name`). Either is a follow-up
+  component, not a v1 collector concern.
 - **Cloud bill imports** (AWS CUR / GCP billing export) — out of scope for an
   enterprise self-hosted, on-prem-first product.
 

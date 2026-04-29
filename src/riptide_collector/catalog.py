@@ -1,8 +1,9 @@
 """Team catalog loader, validator, hot-reloader.
 
 The catalog file declares teams (name + contact) and org-wide automation
-rules (bot detection). Service identity is observed at request time from
-the webhook payload; it is not curated here.
+rules (bot detection). Cross-source aggregation is done at read time on
+`commit_sha` plus per-source identifiers (`repo_full_name`, `pipeline_name`,
+`app_name`, `repo`); the catalog does not curate service identity.
 
 The file is loaded at startup and re-read on mtime change.
 """

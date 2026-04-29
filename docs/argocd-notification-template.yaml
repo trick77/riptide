@@ -16,9 +16,6 @@ data:
             "operation_phase": "{{.app.status.operationState.phase}}",
             "started_at": "{{.app.status.operationState.startedAt}}",
             "finished_at": "{{.app.status.operationState.finishedAt}}"
-            {{- with index .app.metadata.labels "riptide.service-id" }},
-            "service_id": "{{ . }}"
-            {{- end }}
           }
 
   trigger.on-deployed: |

@@ -58,7 +58,7 @@ class TestBitbucketWebhook:
         async with self._fresh_session_factory(client)() as session:
             row = (await session.execute(select(BitbucketEvent))).scalar_one()
             assert row.team == "checkout"
-            assert row.service == "acme/payments-api"
+            assert row.repo_full_name == "acme/payments-api"
             assert row.change_type == "feature"
             assert "ABC-123" in row.jira_keys
             assert "PROJ-9" in row.jira_keys
@@ -102,30 +102,7 @@ class TestBitbucketWebhook:
             count = (await session.execute(select(BitbucketEvent))).all()
             assert len(count) == 1
 
-    async def test_x_riptide_service_id_header_wins(
-        self,
-        client: AsyncClient,
-        session_factory: async_sessionmaker[AsyncSession],
-    ) -> None:
-        del session_factory
-        payload = _load("bitbucket_pr_merged.json")
-        response = await client.post(
-            "/webhooks/bitbucket",
-            json=payload,
-            headers={
-                **AUTH,
-                "X-Request-UUID": "uuid-srvid",
-                "X-Riptide-Service-Id": "srv0417",
-            },
-        )
-        assert response.status_code == 202
-
-        async with self._fresh_session_factory(client)() as session:
-            row = (await session.execute(select(BitbucketEvent))).scalar_one()
-            assert row.service == "srv0417"
-            assert row.team == "checkout"
-
-    async def test_uppercase_service_id_normalised_to_lowercase(
+    async def test_uppercase_repo_normalised_to_lowercase(
         self,
         client: AsyncClient,
         session_factory: async_sessionmaker[AsyncSession],
@@ -136,17 +113,12 @@ class TestBitbucketWebhook:
         response = await client.post(
             "/webhooks/bitbucket",
             json=payload,
-            headers={
-                **AUTH,
-                "X-Request-UUID": "uuid-upper",
-                "X-Riptide-Service-Id": "SRV0417",
-            },
+            headers={**AUTH, "X-Request-UUID": "uuid-upper"},
         )
         assert response.status_code == 202
 
         async with self._fresh_session_factory(client)() as session:
             row = (await session.execute(select(BitbucketEvent))).scalar_one()
-            assert row.service == "srv0417"
             assert row.repo_full_name == "acme/payments-api"
 
     async def test_unknown_repo_still_recorded_with_caller_team(
@@ -166,8 +138,7 @@ class TestBitbucketWebhook:
 
         async with self._fresh_session_factory(client)() as session:
             row = (await session.execute(select(BitbucketEvent))).scalar_one()
-            # Service is just whatever the caller said; team is the caller.
-            assert row.service == "ghost/repo"
+            assert row.repo_full_name == "ghost/repo"
             assert row.team == "checkout"
 
     @staticmethod
@@ -191,7 +162,7 @@ class TestPipelineWebhook:
         async with factory() as session:
             row = (await session.execute(select(PipelineEvent))).scalar_one()
             assert row.team == "checkout"
-            assert row.service == "payments-api-deploy"
+            assert row.pipeline_name == "payments-api-deploy"
             assert row.source == "jenkins"
             assert row.status == "SUCCESS"
             assert row.duration_seconds == 210
@@ -210,26 +181,10 @@ class TestPipelineWebhook:
             row = (await session.execute(select(PipelineEvent))).scalar_one()
             assert row.source == "tekton"
             assert row.run_id == "payments-api-deploy-7gx2k"
-            assert row.service == "payments-api-deploy"
+            assert row.pipeline_name == "payments-api-deploy"
 
-    async def test_explicit_service_id_wins(self, client: AsyncClient) -> None:
+    async def test_uppercase_commit_sha_normalised_to_lowercase(self, client: AsyncClient) -> None:
         payload = _load("pipeline_jenkins_completed.json")
-        payload["service_id"] = "srv0417"
-        response = await client.post(
-            "/webhooks/pipeline",
-            json=payload,
-            headers=AUTH,
-        )
-        assert response.status_code == 202
-
-        factory = TestBitbucketWebhook._fresh_session_factory(client)
-        async with factory() as session:
-            row = (await session.execute(select(PipelineEvent))).scalar_one()
-            assert row.service == "srv0417"
-
-    async def test_uppercase_inputs_normalised_to_lowercase(self, client: AsyncClient) -> None:
-        payload = _load("pipeline_jenkins_completed.json")
-        payload["service_id"] = "SRV0417"
         payload["commit_sha"] = payload["commit_sha"].upper()
         response = await client.post("/webhooks/pipeline", json=payload, headers=AUTH)
         assert response.status_code == 202
@@ -237,7 +192,6 @@ class TestPipelineWebhook:
         factory = TestBitbucketWebhook._fresh_session_factory(client)
         async with factory() as session:
             row = (await session.execute(select(PipelineEvent))).scalar_one()
-            assert row.service == "srv0417"
             assert row.commit_sha is not None
             assert row.commit_sha == row.commit_sha.lower()
 
@@ -276,24 +230,12 @@ class TestArgoCDWebhook:
         async with factory() as session:
             row = (await session.execute(select(ArgoCDEvent))).scalar_one()
             assert row.team == "checkout"
-            assert row.service == "payments-api-prod"
+            assert row.app_name == "payments-api-prod"
             assert row.operation_phase == "Succeeded"
             assert row.duration_seconds == 45
 
-    async def test_explicit_service_id_wins(self, client: AsyncClient) -> None:
+    async def test_uppercase_revision_normalised_to_lowercase(self, client: AsyncClient) -> None:
         payload = _load("argocd_synced.json")
-        payload["service_id"] = "srv0417"
-        response = await client.post("/webhooks/argocd", json=payload, headers=AUTH)
-        assert response.status_code == 202
-
-        factory = TestBitbucketWebhook._fresh_session_factory(client)
-        async with factory() as session:
-            row = (await session.execute(select(ArgoCDEvent))).scalar_one()
-            assert row.service == "srv0417"
-
-    async def test_uppercase_inputs_normalised_to_lowercase(self, client: AsyncClient) -> None:
-        payload = _load("argocd_synced.json")
-        payload["service_id"] = "SRV0417"
         # commit SHAs sometimes arrive uppercase from non-git tools
         payload["revision"] = payload["revision"].upper()
         response = await client.post("/webhooks/argocd", json=payload, headers=AUTH)
@@ -302,7 +244,6 @@ class TestArgoCDWebhook:
         factory = TestBitbucketWebhook._fresh_session_factory(client)
         async with factory() as session:
             row = (await session.execute(select(ArgoCDEvent))).scalar_one()
-            assert row.service == "srv0417"
             assert row.revision == row.revision.lower()
 
     async def test_missing_revision_returns_422(self, client: AsyncClient) -> None:

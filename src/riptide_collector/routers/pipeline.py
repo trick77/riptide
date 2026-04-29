@@ -35,9 +35,6 @@ def make_router(
         # 'deploy') don't collide.
         delivery_id = f"{event.source}#{event.pipeline_name}#{event.run_id}#{event.phase}"
 
-        # Service identity is observed: explicit hint wins, else the pipeline name.
-        # Always lowercased so the column joins cleanly across sources.
-        service = lower(event.service_id) or lower(event.pipeline_name)
         commit_sha = lower(event.commit_sha)
 
         async with session_factory() as session:
@@ -54,7 +51,6 @@ def make_router(
                     started_at=event.started_at,
                     finished_at=event.finished_at,
                     occurred_at=event.finished_at or event.started_at or datetime.now(UTC),
-                    service=service,
                     team=caller_team,
                     payload=raw,
                 )
@@ -71,7 +67,6 @@ def make_router(
             run=event.run_id,
             phase=event.phase,
             status=event.status,
-            service=service,
             team=caller_team,
         )
         return {"status": "accepted"}

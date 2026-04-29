@@ -1,9 +1,9 @@
 # Onboarding a team to riptide
 
 End-to-end checklist for adding a team so their delivery events show up in
-the metrics. There is **no per-service onboarding** — the catalog declares
-teams; service identity is observed automatically from the webhook payloads
-(repo full name, ArgoCD app name, pipeline name).
+the metrics. The catalog declares teams; per-source aggregations key on the
+upstream identifiers (`repo_full_name`, `pipeline_name`, `app_name`, `repo`)
+already present on each event, and cross-source joins use `commit_sha`.
 
 ## 1. Add the team to the catalog
 

@@ -18,16 +18,13 @@ mandatory** — without them the metrics break.
   "status": "<SUCCESS|FAILURE|UNSTABLE|...>",
   "commit_sha": "<env.GIT_COMMIT>",
   "started_at": "<ISO 8601 UTC>",
-  "finished_at": "<ISO 8601 UTC>",
-  "service_id": "<optional explicit service id from catalog>"
+  "finished_at": "<ISO 8601 UTC>"
 }
 ```
 
-`service_id` is **optional** — set it to a stable opaque service identifier
-from your CMDB / service registry (e.g. `"srv0417"`) so the same service
-rolls up across Jenkins, Tekton, ArgoCD, and Bitbucket. If absent, riptide
-records `service = pipeline_name` as-is. The `team` column is populated
-from the bearer token, not the payload.
+The `team` column is populated from the bearer token, not the payload.
+Cross-source joins (to Bitbucket / ArgoCD / Noergler) use `commit_sha`;
+per-pipeline aggregations use `pipeline_name`.
 
 ## Per-team token
 
@@ -129,7 +126,7 @@ pipeline {
 
 ```sql
 SELECT delivery_id, source, pipeline_name, run_id, phase, status,
-       duration_seconds, service, team
+       duration_seconds, team
 FROM pipeline_events
 WHERE source = 'jenkins' AND pipeline_name = '<job>'
 ORDER BY created_at DESC

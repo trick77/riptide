@@ -81,7 +81,6 @@ class TestCompletedEvent:
             row = (await session.execute(select(NoerglerEvent))).scalar_one()
             assert row.event_type == "completed"
             assert row.team == "checkout"
-            assert row.service == "acme/payments-api"
             assert row.repo == "acme/payments-api"
             # pr_key lowercased for stable cross-source joins.
             assert row.pr_key == "proj/payments-api#42"
@@ -128,17 +127,6 @@ class TestCompletedEvent:
             row = (await session.execute(select(NoerglerEvent))).scalar_one()
             assert row.occurred_at.tzinfo is not None
             assert row.occurred_at.utcoffset().total_seconds() == 0  # type: ignore[union-attr]
-
-    async def test_service_id_override_wins(self, client: AsyncClient) -> None:
-        payload = _load("noergler_completed.json")
-        payload["service_id"] = "srv0417"
-        r = await client.post("/webhooks/noergler", json=payload, headers=AUTH)
-        assert r.status_code == 202
-
-        async with _fresh_session_factory(client)() as session:
-            row = (await session.execute(select(NoerglerEvent))).scalar_one()
-            assert row.service == "srv0417"
-            assert row.repo == "acme/payments-api"
 
     async def test_negative_tokens_rejected(self, client: AsyncClient) -> None:
         payload = _load("noergler_completed.json")
