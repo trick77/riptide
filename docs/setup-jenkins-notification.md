@@ -52,9 +52,10 @@ def riptideNotify(String phase) {
         // Hard wall-clock ceiling so a hung connection can't drag the build.
         timeout(time: 15, unit: 'SECONDS') {
             withCredentials([string(credentialsId: 'RIPTIDE_TOKEN', variable: 'TOKEN')]) {
+                def url = 'https://riptide-collector.example.com/webhooks/pipeline'
                 def resp = httpRequest(
                     httpMode: 'POST',
-                    url: 'https://riptide-collector.example.com/webhooks/pipeline',
+                    url: url,
                     customHeaders: [[name: 'Authorization', value: "Bearer ${TOKEN}"]],
                     contentType: 'APPLICATION_JSON',
                     requestBody: groovy.json.JsonOutput.toJson(body),
@@ -63,15 +64,33 @@ def riptideNotify(String phase) {
                     validResponseCodes: '100:599', // accept any status; we just log it
                     consoleLogResponseBody: false,
                 )
-                echo "riptide-notify: http=${resp.status}"
+                if (resp.status >= 200 && resp.status < 300) {
+                    echo "riptide-notify: OK (http=${resp.status})"
+                } else {
+                    // Reached the server but it returned an error status.
+                    echo '##############################################################'
+                    echo '## WARNING: RIPTIDE-COLLECTOR REJECTED THE EVENT            ##'
+                    echo "## http=${resp.status}  url=${url}"
+                    echo '## build result is UNAFFECTED — this is best-effort         ##'
+                    echo '##############################################################'
+                }
             }
         }
     } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
-        // timeout() aborted us. Do NOT rethrow — that would propagate the abort
-        // and mark the build aborted/failed.
-        echo "riptide-notify: timed out, ignoring (build result unaffected)"
+        // timeout() aborted us — riptide-collector did not respond in time.
+        // Do NOT rethrow: that would propagate the abort and fail the build.
+        echo '##############################################################'
+        echo '## WARNING: RIPTIDE-COLLECTOR UNREACHABLE                   ##'
+        echo '## reason=wall-clock timeout (no response in 15s)           ##'
+        echo '## build result is UNAFFECTED — this is best-effort         ##'
+        echo '##############################################################'
     } catch (Throwable t) {
-        echo "riptide-notify: error ${t.class.simpleName}: ${t.message} (ignored)"
+        // Connection refused, DNS failure, TLS error, plugin error, etc.
+        echo '##############################################################'
+        echo '## WARNING: RIPTIDE-COLLECTOR UNREACHABLE                   ##'
+        echo "## reason=${t.class.simpleName}: ${t.message}"
+        echo '## build result is UNAFFECTED — this is best-effort         ##'
+        echo '##############################################################'
     }
 }
 
