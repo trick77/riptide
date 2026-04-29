@@ -1,0 +1,14 @@
+{
+  "event_type": "completed",
+  "pr_key": "PROJ/payments-api#42",
+  "repo": "acme/payments-api",
+  "commit_sha": "abc1234567890abc1234567890abc1234567890a",
+  "run_id": "run-2026-04-29-00001",
+  "model": "gpt-4o-2024-08-06",
+  "prompt_tokens": 12345,
+  "completion_tokens": 678,
+  "elapsed_ms": 8200,
+  "findings_count": 3,
+  "cost_usd": "0.124500",
+  "finished_at": "2026-04-29T18:01:00Z"
+}

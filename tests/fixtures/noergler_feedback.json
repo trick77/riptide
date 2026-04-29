@@ -1,0 +1,9 @@
+{
+  "event_type": "feedback",
+  "pr_key": "PROJ/payments-api#42",
+  "finding_id": "finding-2026-04-29-0001",
+  "verdict": "disagreed",
+  "actor": "alice@example.com",
+  "repo": "acme/payments-api",
+  "occurred_at": "2026-04-29T18:05:00Z"
+}
