@@ -31,6 +31,9 @@ Raw events from:
 - **CI pipelines** — Jenkins and Tekton supported via the same source-agnostic
   `/webhooks/pipeline` endpoint; any CI that can POST JSON works
 - **ArgoCD** (sync notifications)
+- **Noergler** *(optional)* — AI code-review agent forwarding LLM
+  finops (model, tokens, `cost_usd`) and reviewer-precision (disagree
+  feedback) via `/webhooks/noergler`. Sender-side config is opt-in.
 
 …stored append-only in Postgres for later metric computation by other suite
 components or ad-hoc SQL.
@@ -70,15 +73,18 @@ the data captured in v1.
 | **Untracked-work rate** | `COUNT(*) WHERE jira_keys = '{}'` over merged PRs — process-compliance signal. |
 | **Per-ticket flow** | `WHERE 'ABC-1234' = ANY(jira_keys)` returns every event for a ticket across Bitbucket / pipeline / Argo (joined via commit_sha). |
 | **Human vs automated split** | `WHERE NOT is_automated` (Renovate / Dependabot / Snyk / Mend / generic-bot detection runs at write time and tags `automation_source`). Default dashboards exclude bots; bot velocity is a separate CI-health view. |
+| **AI reviewer precision** *(noergler)* | `1 - count(noergler_events WHERE event_type='feedback' AND verdict='disagreed') / count(noergler_events WHERE event_type='completed')` per repo × week. Higher = the AI review is more useful. |
 
-### FinOps signals (derivable, currency excluded)
+### FinOps signals
 
-riptide is a delivery-metrics collector, not a billing system — it captures
-**duration and attribution** but does not assign currency. Multiply the unit
-metrics below by your own $/runner-second to convert.
+For CI / deploy compute, riptide captures **duration and attribution** but
+does not assign currency — multiply by your own $/runner-second to convert.
+LLM review cost is the exception: when the noergler source is wired up,
+events arrive pre-priced in USD.
 
 | Signal | How it's computed |
 |---|---|
+| **LLM review spend per model / team** *(noergler)* | `SUM(noergler_events.cost_usd), SUM(prompt_tokens + completion_tokens) GROUP BY model, team` over `event_type = 'completed'`. Pre-priced — no multiplier needed. |
 | **CI compute time per service / team** | `SUM(pipeline_events.duration_seconds) GROUP BY service, team`. The unit metric for CI cost attribution. |
 | **Wasted CI** | `SUM(duration_seconds) WHERE status IN ('FAILURE','Failed')` — failed builds × time. Quantifies the cost of flakes / broken tests. |
 | **Bot-driven pipeline churn** | `pipeline_events` joined to `bitbucket_events` via `commit_sha` filtered on `is_automated = true`. Renovate / Dependabot can drive 40–70% of pipeline runs in many orgs; useful input for batching policies. |
@@ -137,5 +143,6 @@ See [`docs/`](docs/) for setup and onboarding guides:
 - [Setup: Jenkins notification](docs/setup-jenkins-notification.md)
 - [Setup: Tekton / OpenShift Pipelines](docs/setup-tekton-pipeline.md)
 - [Setup: ArgoCD notification](docs/setup-argocd-notification.md)
+- [Setup: Noergler notification](docs/setup-noergler-notification.md)
 - [Onboarding a team](docs/onboarding-a-team.md)
 - [OpenShift manifests](openshift/README.md)
