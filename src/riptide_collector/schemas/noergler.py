@@ -28,13 +28,6 @@ class _Common(BaseModel):
     # in `payload` JSONB and skew metrics.
     model_config = ConfigDict(extra="forbid")
 
-    service_id: str | None = Field(
-        default=None,
-        min_length=1,
-        description="Optional opaque service identifier (e.g. CMDB id 'srv0417'). "
-        "If absent, falls back to `repo`.",
-    )
-
 
 class NoerglerCompleted(_Common):
     event_type: Literal["completed"]

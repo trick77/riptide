@@ -34,7 +34,6 @@ class BitbucketEvent(Base):
             "jira_keys",
             postgresql_using="gin",
         ),
-        Index("ix_bitbucket_events_service_created_at", "service", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -67,7 +66,6 @@ class BitbucketEvent(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
-    service: Mapped[str | None] = mapped_column(String, nullable=True)
     team: Mapped[str | None] = mapped_column(String, nullable=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
@@ -79,7 +77,6 @@ class PipelineEvent(Base):
         Index("ix_pipeline_events_source", "source"),
         Index("ix_pipeline_events_pipeline_name", "pipeline_name"),
         Index("ix_pipeline_events_commit_sha", "commit_sha"),
-        Index("ix_pipeline_events_service_created_at", "service", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -107,7 +104,6 @@ class PipelineEvent(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
-    service: Mapped[str | None] = mapped_column(String, nullable=True)
     team: Mapped[str | None] = mapped_column(String, nullable=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
@@ -120,7 +116,6 @@ class NoerglerEvent(Base):
         Index("ix_noergler_events_pr_key", "pr_key"),
         Index("ix_noergler_events_commit_sha", "commit_sha"),
         Index("ix_noergler_events_model", "model"),
-        Index("ix_noergler_events_service_created_at", "service", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -149,7 +144,6 @@ class NoerglerEvent(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
-    service: Mapped[str | None] = mapped_column(String, nullable=True)
     team: Mapped[str | None] = mapped_column(String, nullable=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
@@ -160,7 +154,6 @@ class ArgoCDEvent(Base):
         UniqueConstraint("delivery_id", name="uq_argocd_events_delivery_id"),
         Index("ix_argocd_events_app_name", "app_name"),
         Index("ix_argocd_events_revision", "revision"),
-        Index("ix_argocd_events_service_created_at", "service", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -186,6 +179,5 @@ class ArgoCDEvent(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
-    service: Mapped[str | None] = mapped_column(String, nullable=True)
     team: Mapped[str | None] = mapped_column(String, nullable=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)

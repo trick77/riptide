@@ -77,7 +77,6 @@ def make_router(
         x_event_key: str | None = Header(default=None),
         x_request_uuid: str | None = Header(default=None),
         x_hook_uuid: str | None = Header(default=None),
-        x_riptide_service_id: str | None = Header(default=None),
     ) -> dict[str, str]:
         body = await request.json()
         if not isinstance(body, dict):
@@ -150,7 +149,6 @@ def make_router(
         repo_full_name = lower(repo_full_name)
         branch_name = lower(branch_name)
         commit_sha = lower(commit_sha)
-        service = lower(x_riptide_service_id) or repo_full_name
 
         change_type = parse_change_type(branch_name)
         jira_keys = extract_jira_keys(title, description, branch_name, *commit_messages)
@@ -179,7 +177,6 @@ def make_router(
                     files_changed=files_changed,
                     is_revert=is_revert,
                     occurred_at=occurred_at,
-                    service=service,
                     team=caller_team,
                     payload=body,
                 )

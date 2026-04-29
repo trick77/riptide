@@ -57,18 +57,13 @@ noergler verifies reachability and bearer validity at startup via
   "elapsed_ms": 8200,
   "findings_count": 3,
   "cost_usd": "0.124500",
-  "finished_at": "2026-04-29T18:01:00Z",
-  "service_id": "srv0417"
+  "finished_at": "2026-04-29T18:01:00Z"
 }
 ```
 
 `run_id` alone is the idempotency key — noergler may safely retry. The
 `commit_sha` enables joins to `bitbucket_events`, `pipeline_events`, and
 `argocd_events` for cost-vs-deployment analysis.
-
-`service_id` is **optional** — set it to a stable opaque service identifier
-from your CMDB / service registry. If absent, riptide records
-`service = repo` as-is.
 
 ### `feedback`
 

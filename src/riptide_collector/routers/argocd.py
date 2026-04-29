@@ -30,9 +30,6 @@ def make_router(
     ) -> dict[str, str]:
         raw = event.model_dump(mode="json")
 
-        # Service identity: explicit hint wins, else the app name. Both lowercased
-        # so the join column is stable across sources.
-        service = lower(event.service_id) or lower(event.app_name)
         revision = lower(event.revision)
 
         # Stable dedup key: started_at is fixed for a sync attempt; phase varies
@@ -56,7 +53,6 @@ def make_router(
                     started_at=event.started_at,
                     finished_at=event.finished_at,
                     occurred_at=event.finished_at or event.started_at or datetime.now(UTC),
-                    service=service,
                     team=caller_team,
                     payload=raw,
                 )

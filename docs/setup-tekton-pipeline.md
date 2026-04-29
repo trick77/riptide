@@ -161,7 +161,7 @@ The token identifies the team to riptide; do not share across teams.
 
 ```sql
 SELECT delivery_id, source, pipeline_name, run_id, status, duration_seconds,
-       service, team
+       team
 FROM pipeline_events
 WHERE source = 'tekton' AND pipeline_name = '<your pipeline>'
 ORDER BY created_at DESC
