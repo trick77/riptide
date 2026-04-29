@@ -30,6 +30,9 @@ If `service_id` is omitted, riptide tries to resolve via `pipeline_name` against
 Requires the **HTTP Request** plugin and a `Secret text` credential named `RIPTIDE_TOKEN`.
 
 ```groovy
+// Notification is best-effort: a slow or unavailable riptide-collector must
+// NEVER fail the build. We bound the call with `timeout`, swallow exceptions,
+// and accept any HTTP status (we just log it).
 def riptideNotify(String phase) {
     def started = currentBuild.startTimeInMillis
     def finished = System.currentTimeMillis()
@@ -45,15 +48,49 @@ def riptideNotify(String phase) {
             ? new Date(finished).format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
             : null,
     ]
-    withCredentials([string(credentialsId: 'RIPTIDE_TOKEN', variable: 'TOKEN')]) {
-        httpRequest(
-            httpMode: 'POST',
-            url: 'https://riptide-collector.example.com/webhooks/pipeline',
-            customHeaders: [[name: 'Authorization', value: "Bearer ${TOKEN}"]],
-            contentType: 'APPLICATION_JSON',
-            requestBody: groovy.json.JsonOutput.toJson(body),
-            validResponseCodes: '200:299',
-        )
+    try {
+        // Hard wall-clock ceiling so a hung connection can't drag the build.
+        timeout(time: 15, unit: 'SECONDS') {
+            withCredentials([string(credentialsId: 'RIPTIDE_TOKEN', variable: 'TOKEN')]) {
+                def url = 'https://riptide-collector.example.com/webhooks/pipeline'
+                def resp = httpRequest(
+                    httpMode: 'POST',
+                    url: url,
+                    customHeaders: [[name: 'Authorization', value: "Bearer ${TOKEN}"]],
+                    contentType: 'APPLICATION_JSON',
+                    requestBody: groovy.json.JsonOutput.toJson(body),
+                    timeout: 10,                   // HTTP Request plugin: per-request seconds
+                    quiet: true,                   // keep build log clean
+                    validResponseCodes: '100:599', // accept any status; we just log it
+                    consoleLogResponseBody: false,
+                )
+                if (resp.status >= 200 && resp.status < 300) {
+                    echo "riptide-notify: OK (http=${resp.status})"
+                } else {
+                    // Reached the server but it returned an error status.
+                    echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+                    echo '!! WARNING: RIPTIDE-COLLECTOR REJECTED THE EVENT            !!'
+                    echo "!! http=${resp.status}  url=${url}"
+                    echo '!! build result is UNAFFECTED — this is best-effort         !!'
+                    echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+                }
+            }
+        }
+    } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
+        // timeout() aborted us — riptide-collector did not respond in time.
+        // Do NOT rethrow: that would propagate the abort and fail the build.
+        echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+        echo '!! WARNING: RIPTIDE-COLLECTOR UNREACHABLE                   !!'
+        echo '!! reason=wall-clock timeout (no response in 15s)           !!'
+        echo '!! build result is UNAFFECTED — this is best-effort         !!'
+        echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+    } catch (Throwable t) {
+        // Connection refused, DNS failure, TLS error, plugin error, etc.
+        echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+        echo '!! WARNING: RIPTIDE-COLLECTOR UNREACHABLE                   !!'
+        echo "!! reason=${t.class.simpleName}: ${t.message}"
+        echo '!! build result is UNAFFECTED — this is best-effort         !!'
+        echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
     }
 }
 
@@ -63,7 +100,15 @@ pipeline {
         stage('Build') { steps { echo 'build' } }
     }
     post {
-        always { script { riptideNotify('COMPLETED') } }
+        // Snapshot the build result before notify and restore it afterwards as
+        // belt-and-suspenders: notify must never demote a SUCCESS build.
+        always {
+            script {
+                def preResult = currentBuild.result
+                riptideNotify('COMPLETED')
+                if (currentBuild.result != preResult) { currentBuild.result = preResult }
+            }
+        }
     }
 }
 ```
