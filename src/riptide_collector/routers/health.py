@@ -2,14 +2,14 @@ from typing import Any
 
 from fastapi import APIRouter, status
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from riptide_collector.catalog import CatalogStore
 
 
 def make_router(
     catalog: CatalogStore,
-    session_factory: async_sessionmaker[Any],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> APIRouter:
     router = APIRouter(tags=["health"])
 
