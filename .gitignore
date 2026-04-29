@@ -22,6 +22,9 @@ node_modules/
 # Local secrets — never commit
 openshift/**/secret.env
 !openshift/**/secret.env.example
+
+# Local OpenShift overlays — never commit
+openshift/overlays/
 .env
 .env.*
 !.env.example
