@@ -1,4 +1,4 @@
-"""initial schema: bitbucket_events, pipeline_events, argocd_events
+"""initial schema: bitbucket_events, pipeline_events, argocd_events, noergler_events
 
 Revision ID: 0001
 Revises:
@@ -30,11 +30,17 @@ $$ LANGUAGE plpgsql;
 
 DROP_TRIGGER_FN_SQL = "DROP FUNCTION IF EXISTS riptide_set_modified_at();"
 
-EVENT_TABLES = ("bitbucket_events", "pipeline_events", "argocd_events")
+EVENT_TABLES = (
+    "bitbucket_events",
+    "pipeline_events",
+    "argocd_events",
+    "noergler_events",
+)
 
 
 def upgrade() -> None:
     op.execute(TRIGGER_FN_SQL)
+
     op.create_table(
         "bitbucket_events",
         sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
@@ -84,6 +90,11 @@ def upgrade() -> None:
         "bitbucket_events",
         ["jira_keys"],
         postgresql_using="gin",
+    )
+    op.create_index(
+        "ix_bitbucket_events_service_created_at",
+        "bitbucket_events",
+        ["service", "created_at"],
     )
 
     op.create_table(
@@ -135,6 +146,11 @@ def upgrade() -> None:
     op.create_index("ix_pipeline_events_source", "pipeline_events", ["source"])
     op.create_index("ix_pipeline_events_pipeline_name", "pipeline_events", ["pipeline_name"])
     op.create_index("ix_pipeline_events_commit_sha", "pipeline_events", ["commit_sha"])
+    op.create_index(
+        "ix_pipeline_events_service_created_at",
+        "pipeline_events",
+        ["service", "created_at"],
+    )
 
     op.create_table(
         "argocd_events",
@@ -172,6 +188,64 @@ def upgrade() -> None:
     )
     op.create_index("ix_argocd_events_app_name", "argocd_events", ["app_name"])
     op.create_index("ix_argocd_events_revision", "argocd_events", ["revision"])
+    op.create_index(
+        "ix_argocd_events_service_created_at",
+        "argocd_events",
+        ["service", "created_at"],
+    )
+
+    op.create_table(
+        "noergler_events",
+        sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+        sa.Column("delivery_id", sa.String, nullable=False),
+        sa.Column(
+            "event_type",
+            sa.String,
+            nullable=False,
+            comment="completed | feedback",
+        ),
+        sa.Column("pr_key", sa.String, nullable=True),
+        sa.Column("repo", sa.String, nullable=True),
+        sa.Column("commit_sha", sa.String, nullable=True),
+        # completed-only:
+        sa.Column("run_id", sa.String, nullable=True),
+        sa.Column("model", sa.String, nullable=True),
+        sa.Column("prompt_tokens", sa.Integer, nullable=True),
+        sa.Column("completion_tokens", sa.Integer, nullable=True),
+        sa.Column("elapsed_ms", sa.Integer, nullable=True),
+        sa.Column("findings_count", sa.Integer, nullable=True),
+        sa.Column("cost_usd", sa.Numeric(12, 6), nullable=True),
+        # feedback-only:
+        sa.Column("finding_id", sa.String, nullable=True),
+        sa.Column("verdict", sa.String, nullable=True),
+        sa.Column("actor", sa.String, nullable=True),
+        sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
+        sa.Column(
+            "modified_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
+        sa.Column("service", sa.String, nullable=True),
+        sa.Column("team", sa.String, nullable=True),
+        sa.Column("payload", JSONB, nullable=False),
+        sa.UniqueConstraint("delivery_id", name="uq_noergler_events_delivery_id"),
+    )
+    op.create_index("ix_noergler_events_event_type", "noergler_events", ["event_type"])
+    op.create_index("ix_noergler_events_pr_key", "noergler_events", ["pr_key"])
+    op.create_index("ix_noergler_events_commit_sha", "noergler_events", ["commit_sha"])
+    op.create_index("ix_noergler_events_model", "noergler_events", ["model"])
+    op.create_index(
+        "ix_noergler_events_service_created_at",
+        "noergler_events",
+        ["service", "created_at"],
+    )
 
     for table in EVENT_TABLES:
         op.execute(
@@ -186,6 +260,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     for table in EVENT_TABLES:
         op.execute(f"DROP TRIGGER IF EXISTS trg_{table}_modified_at ON {table};")
+    op.drop_table("noergler_events")
     op.drop_table("argocd_events")
     op.drop_table("pipeline_events")
     op.drop_table("bitbucket_events")
