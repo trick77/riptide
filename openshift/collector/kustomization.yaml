@@ -11,7 +11,7 @@ resources:
 configMapGenerator:
   - name: riptide-collector-service-catalog
     files:
-      - service-catalog.json=../../config/service-catalog.json
+      - service-catalog.json
 
 images:
   - name: riptide-collector
