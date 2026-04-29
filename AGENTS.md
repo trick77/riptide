@@ -2,12 +2,6 @@
 
 This file provides guidance to coding agents (Claude Code, Cursor, etc.) when working in this repository.
 
-## What this is
-
-`riptide-collector` is the first component of a planned **riptide** suite of DevOps delivery-metrics tools. It is an append-only ingestion service that captures raw webhook events from Bitbucket, CI pipelines (Jenkins, Tekton, …), and ArgoCD into Postgres for later metric computation by other suite components or ad-hoc SQL.
-
-Future suite components (e.g. `riptide-api`, `riptide-dashboard`) will be added as siblings — leave architectural room for them.
-
 ## Commands
 
 ```bash
@@ -24,27 +18,25 @@ RIPTIDE_DB_URL=... uv run alembic downgrade base      # tear down
 podman-compose up                    # local dev: Postgres + migrations + app on :8000
 ```
 
-The DB-backed tests need a running Docker daemon. If `docker ps` fails, ask the user to start OrbStack.
+If `docker ps` fails, ask the user to start OrbStack.
 
 ## Architecture invariants
 
-These are not obvious from any single file and are easy to break:
-
-- **Append-only ingestion.** Every webhook handler does `INSERT … ON CONFLICT (delivery_id) DO NOTHING`. Never `UPDATE` or `DELETE` event rows. Webhook retries must be idempotent. The `delivery_id` is the dedup key for each source — see each router for how it's synthesised when no UUID header is present.
-- **Raw payload always stored.** `payload JSONB` keeps the full request body even if we extracted fields into typed columns. Don't drop fields you don't currently use.
-- **Catalog is config, not data.** `config/service-catalog.json` is the source of truth for service↔team↔repo mapping and bot detection. There is no admin UI or DB-backed catalog. Edits go through PRs to that file. The running pod hot-reloads via mtime in `CatalogStore.maybe_reload()`. Do not propose moving the catalog into Postgres.
-- **`automation` is org-wide.** Bot definitions live at the catalog root, not per service — Renovate/Dependabot run across all repos.
+- **Append-only ingestion.** Every webhook handler does `INSERT … ON CONFLICT (delivery_id) DO NOTHING`. Never `UPDATE` or `DELETE` event rows. Webhook retries must be idempotent. `delivery_id` is the dedup key for each source.
+- **Raw payload always stored.** `payload JSONB` keeps the full request body even if fields are extracted into typed columns. Don't drop fields you don't currently use.
+- **Catalog is config, not data.** `config/service-catalog.json` is the source of truth for service↔team↔repo mapping and bot detection. Edits go through PRs to that file. The running pod hot-reloads via mtime in `CatalogStore.maybe_reload()`. Do not propose moving the catalog into Postgres.
+- **`automation` is org-wide.** Bot definitions live at the catalog root, not per service.
 - **Metrics are computed on read, not at ingest.** Don't add aggregation tables or scheduled rollup jobs in v1. Schema additions should preserve raw events; new metrics are SQL queries against existing rows or future materialized views.
 - **Commit SHA is the universal join key.** All three sources record `commit_sha`/`revision`. Lead-time joins between `bitbucket_events`, `pipeline_events`, `argocd_events` happen on this column.
 - **`change_type` lives on Bitbucket events only.** Don't denormalise it onto pipeline / Argo rows; join via `commit_sha` at read time.
 - **CI events are source-tagged, not source-routed.** All pipeline events from any CI (Jenkins, Tekton, …) land in the single `pipeline_events` table via `POST /webhooks/pipeline`, distinguished by the `source` column. Do not add per-CI tables or endpoints. The dedup key is `source#pipeline_name#run_id#phase`.
 - **`modified_at` has a Postgres trigger** (`riptide_set_modified_at`), not just SQLAlchemy `onupdate`. Raw-SQL updates also bump it. Keep the trigger when changing migrations.
-- **Database is external.** `riptide-collector` does NOT manage Postgres. The cluster Postgres is provisioned separately; the URL ships via `riptide-collector-secrets`. Do not add a Postgres Deployment to `openshift/`.
-- **Pyright strict for `src/`, standard for `tests/` and `migrations/`.** New code under `src/` must satisfy strict mode — typed dicts, no `Any` leaks, narrow `Optional`s with `isinstance` or helper coercions like `_as_dict()` in `routers/bitbucket.py`.
+- **Database is external.** `riptide-collector` does NOT manage Postgres. Do not add a Postgres Deployment to `openshift/`.
+- **Pyright strict for `src/`, standard for `tests/` and `migrations/`.** New code under `src/` must satisfy strict mode — no `Any` leaks; narrow `Optional`s with `isinstance` or helpers like `_as_dict()` in `routers/bitbucket.py`.
 
 ## Repo conventions
 
-- Single Python package, `riptide_collector` (flat top-level, not a namespace package). When future suite components arrive they get their own top-level package, e.g. `riptide_dashboard`.
+- Single Python package, `riptide_collector` (flat top-level, not a namespace package). Future suite components (e.g. `riptide-api`, `riptide-dashboard`) get their own top-level package, e.g. `riptide_dashboard` — leave architectural room for them.
 - Webhook routers are factories (`make_router(catalog, session_factory, auth_dep)`) that return an `APIRouter`. They're wired up in `src/riptide_collector/main.py::create_app`. Use the same pattern for any new router.
 - Pydantic schemas: **strict** for `/webhooks/pipeline` and `/webhooks/argocd` (we own the contract — invalid payloads must 422); **permissive raw-dict parsing** for Bitbucket (its payload shapes vary; we best-effort extract).
 - Use `_as_dict()` / `_as_list()` helpers in `routers/bitbucket.py` to coerce arbitrary JSON shapes — pyright strict won't accept chained `.get()` on `Optional[dict]`.

@@ -3,7 +3,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from riptide_collector.catalog import CatalogStore
 from riptide_collector.logging_config import get_logger
@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 
 def make_router(
     catalog: CatalogStore,
-    session_factory: async_sessionmaker[Any],
+    session_factory: async_sessionmaker[AsyncSession],
     auth_dep: Any,
 ) -> APIRouter:
     router = APIRouter(prefix="/webhooks", tags=["webhooks"])
