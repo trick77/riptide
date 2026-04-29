@@ -1,4 +1,3 @@
-from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, status
@@ -70,7 +69,7 @@ def _values_completed(
     return {
         "delivery_id": delivery_id,
         "event_type": "completed",
-        "pr_key": event.pr_key,
+        "pr_key": lower(event.pr_key),
         "repo": lower(event.repo),
         "commit_sha": lower(event.commit_sha),
         "run_id": event.run_id,
@@ -98,12 +97,12 @@ def _values_feedback(
     return {
         "delivery_id": delivery_id,
         "event_type": "feedback",
-        "pr_key": event.pr_key,
+        "pr_key": lower(event.pr_key),
         "repo": lower(event.repo),
         "finding_id": event.finding_id,
         "verdict": event.verdict,
         "actor": event.actor,
-        "occurred_at": event.occurred_at or datetime.now(UTC),
+        "occurred_at": event.occurred_at,
         "service": service,
         "team": caller_team,
         "payload": raw,

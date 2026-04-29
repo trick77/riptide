@@ -46,6 +46,11 @@ class TestAuthPing:
         r = await client.get("/auth/ping", headers={"Authorization": "Bearer not-a-real-key"})
         assert r.status_code == 401
 
+    async def test_non_bearer_scheme_returns_401(self, client: AsyncClient) -> None:
+        # Must reject Basic / token / raw — only "Bearer <token>" is valid.
+        r = await client.get("/auth/ping", headers={"Authorization": f"Basic {CHECKOUT_TOKEN}"})
+        assert r.status_code == 401
+
 
 class TestAuthRejection:
     async def test_missing_bearer(self, client: AsyncClient) -> None:
@@ -78,6 +83,8 @@ class TestCompletedEvent:
             assert row.team == "checkout"
             assert row.service == "acme/payments-api"
             assert row.repo == "acme/payments-api"
+            # pr_key lowercased for stable cross-source joins.
+            assert row.pr_key == "proj/payments-api#42"
             assert row.run_id == "run-2026-04-29-00001"
             assert row.model == "gpt-4o-2024-08-06"
             assert row.prompt_tokens == 12345
@@ -87,15 +94,40 @@ class TestCompletedEvent:
             assert float(row.cost_usd) == 0.1245
             assert row.commit_sha == "abc1234567890abc1234567890abc1234567890a"
 
-    async def test_idempotent_on_run_id(self, client: AsyncClient) -> None:
+    async def test_idempotent_preserves_original_row(self, client: AsyncClient) -> None:
+        # Catches a regression to ON CONFLICT DO UPDATE: the second insert
+        # must be a no-op, not replace the original row's id / created_at.
         payload = _load("noergler_completed.json")
         r1 = await client.post("/webhooks/noergler", json=payload, headers=AUTH)
-        r2 = await client.post("/webhooks/noergler", json=payload, headers=AUTH)
-        assert r1.status_code == r2.status_code == 202
+        assert r1.status_code == 202
 
         async with _fresh_session_factory(client)() as session:
-            rows = (await session.execute(select(NoerglerEvent))).all()
+            first = (await session.execute(select(NoerglerEvent))).scalar_one()
+            first_id = first.id
+            first_created = first.created_at
+
+        r2 = await client.post("/webhooks/noergler", json=payload, headers=AUTH)
+        assert r2.status_code == 202
+
+        async with _fresh_session_factory(client)() as session:
+            rows = (await session.execute(select(NoerglerEvent))).scalars().all()
             assert len(rows) == 1
+            assert rows[0].id == first_id
+            assert rows[0].created_at == first_created
+
+    async def test_naive_finished_at_is_normalised_to_utc(self, client: AsyncClient) -> None:
+        # If the sender omits the trailing Z / offset, we must still record
+        # the timestamp as UTC rather than reject the payload or treat it
+        # as local time.
+        payload = _load("noergler_completed.json")
+        payload["finished_at"] = "2026-04-29T18:01:00"  # no offset, no Z
+        r = await client.post("/webhooks/noergler", json=payload, headers=AUTH)
+        assert r.status_code == 202
+
+        async with _fresh_session_factory(client)() as session:
+            row = (await session.execute(select(NoerglerEvent))).scalar_one()
+            assert row.occurred_at.tzinfo is not None
+            assert row.occurred_at.utcoffset().total_seconds() == 0  # type: ignore[union-attr]
 
     async def test_service_id_override_wins(self, client: AsyncClient) -> None:
         payload = _load("noergler_completed.json")
@@ -168,5 +200,12 @@ class TestFeedbackEvent:
 class TestDiscriminator:
     async def test_unknown_event_type_rejected(self, client: AsyncClient) -> None:
         payload = {**_load("noergler_completed.json"), "event_type": "exploded"}
+        r = await client.post("/webhooks/noergler", json=payload, headers=AUTH)
+        assert r.status_code == 422
+
+    async def test_unknown_field_rejected(self, client: AsyncClient) -> None:
+        # extra="forbid": a sender typo (e.g. cost_used instead of cost_usd)
+        # must 422 instead of silently landing in `payload` JSONB.
+        payload = {**_load("noergler_completed.json"), "definitely_not_a_field": "x"}
         r = await client.post("/webhooks/noergler", json=payload, headers=AUTH)
         assert r.status_code == 422

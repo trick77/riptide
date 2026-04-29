@@ -3,6 +3,16 @@
 Revision ID: 0003
 Revises: 0002
 Create Date: 2026-04-29
+
+Cross-source join model:
+- `completed` rows carry `commit_sha` and join the other event tables on
+  the universal `commit_sha` join key (AGENTS.md "Commit SHA is the
+  universal join key").
+- `feedback` rows do NOT carry `commit_sha` — the verdict is on a
+  finding, not a build. Reviewer-precision can only be aggregated by
+  team / repo / week, not joined to deployments.
+- `pr_key` is lowercased for stable joins against future Bitbucket-derived
+  rollups.
 """
 
 from collections.abc import Sequence

@@ -18,14 +18,15 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-def _to_utc(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
+def _to_utc(value: datetime) -> datetime:
     return value.astimezone(UTC) if value.tzinfo else value.replace(tzinfo=UTC)
 
 
 class _Common(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    # Strict — we own this contract (same posture as pipeline / argocd).
+    # Unknown fields surface as 422 so a sender typo doesn't silently land
+    # in `payload` JSONB and skew metrics.
+    model_config = ConfigDict(extra="forbid")
 
     service_id: str | None = Field(
         default=None,
@@ -52,9 +53,7 @@ class NoerglerCompleted(_Common):
     @field_validator("finished_at")
     @classmethod
     def _normalise_tz(cls, v: datetime) -> datetime:
-        normalised = _to_utc(v)
-        assert normalised is not None
-        return normalised
+        return _to_utc(v)
 
 
 class NoerglerFeedback(_Common):
@@ -69,9 +68,7 @@ class NoerglerFeedback(_Common):
     @field_validator("occurred_at")
     @classmethod
     def _normalise_tz(cls, v: datetime) -> datetime:
-        normalised = _to_utc(v)
-        assert normalised is not None
-        return normalised
+        return _to_utc(v)
 
 
 NoerglerWebhook = Annotated[
