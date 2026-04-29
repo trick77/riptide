@@ -144,28 +144,18 @@ spec:
           value: $(context.pipelineRun.completionTime)
 ```
 
-## 3) Provide the bearer token Secret
+## 3) Provide the team's bearer token Secret
+
+Each team has its own bearer (the platform team hands it out — see
+`docs/onboarding-a-team.md`). Create a Secret per team in their pipeline
+namespace:
 
 ```bash
 oc -n <pipeline-namespace> create secret generic riptide-token \
-  --from-literal=token='<TOKEN>'
+  --from-literal=token='<RAW_TOKEN_FOR_THIS_TEAM>'
 ```
 
-## Catalog mapping
-
-In `config/service-catalog.json`, list your Tekton pipeline names in the
-`pipelines` array — same field Jenkins uses:
-
-```json
-{
-  "id": "payments-api",
-  "team": "checkout",
-  "pipelines": ["payments-api-deploy"]
-}
-```
-
-A service can mix Jenkins jobs and Tekton pipelines in the same array — riptide
-resolves by name regardless of source.
+The token identifies the team to riptide; do not share across teams.
 
 ## Verify
 

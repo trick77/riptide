@@ -1,43 +1,58 @@
 # Setup: ArgoCD notification
 
-Have ArgoCD push sync events for prod Applications to riptide-collector via
-the **argocd-notifications** controller.
+Have ArgoCD push sync events to riptide-collector via the
+**argocd-notifications** controller. Each team uses **its own bearer
+token**: configure one `NotificationService` per team and route teams to
+the right one via `AppProject` defaults so you don't annotate every app.
 
 ## Prerequisites
 
-- The argocd-notifications controller is installed (it ships with most
-  recent ArgoCD distributions; if not, see
+- The argocd-notifications controller is installed (ships with most recent
+  ArgoCD distributions; if not, see
   [the upstream docs](https://argocd-notifications.readthedocs.io/)).
 - Access to edit `argocd-notifications-cm` and `argocd-notifications-secret`.
-- The shared bearer token from `riptide-collector-secrets`.
+- Each team's raw bearer token (the platform team hands these out — see
+  `docs/onboarding-a-team.md`).
 
-## 1) Add the webhook service
+## 1) Per-team webhook services
 
-Edit `argocd-notifications-cm` (in the `argocd` namespace):
+Edit `argocd-notifications-cm` (in the `argocd` namespace). One
+`service.webhook.<team>` block per team:
 
 ```yaml
 data:
-  service.webhook.riptide: |
+  service.webhook.riptide-checkout: |
     url: https://riptide-collector.example.com/webhooks/argocd
     headers:
       - name: Authorization
-        value: "Bearer $riptide-token"
+        value: "Bearer $riptide-token-checkout"
+      - name: Content-Type
+        value: application/json
+
+  service.webhook.riptide-platform: |
+    url: https://riptide-collector.example.com/webhooks/argocd
+    headers:
+      - name: Authorization
+        value: "Bearer $riptide-token-platform"
       - name: Content-Type
         value: application/json
 ```
 
-Then add the token to `argocd-notifications-secret`:
+Then add the tokens to `argocd-notifications-secret`:
 
 ```bash
-oc -n argocd patch secret argocd-notifications-secret \
-   -p '{"stringData": {"riptide-token": "<TOKEN>"}}'
+oc -n argocd patch secret argocd-notifications-secret -p '{
+  "stringData": {
+    "riptide-token-checkout": "<RAW_CHECKOUT_TOKEN>",
+    "riptide-token-platform": "<RAW_PLATFORM_TOKEN>"
+  }
+}'
 ```
 
 ## 2) Install the template + triggers
 
-The bundled template is at [`docs/argocd-notification-template.yaml`](argocd-notification-template.yaml).
-
-Append it to `argocd-notifications-cm`:
+The bundled template is at
+[`docs/argocd-notification-template.yaml`](argocd-notification-template.yaml).
 
 ```bash
 oc -n argocd apply -f docs/argocd-notification-template.yaml
@@ -45,30 +60,64 @@ oc -n argocd apply -f docs/argocd-notification-template.yaml
 
 This adds:
 - `template.app-deployed-riptide`
-- `trigger.on-deployed`, `trigger.on-sync-succeeded`, `trigger.on-sync-failed` (riptide-flavored)
+- `trigger.on-deployed`, `trigger.on-sync-succeeded`, `trigger.on-sync-failed`
+  (riptide-flavored)
 
-## 3) Subscribe per Application
+## 3) Route teams to their service via AppProject defaults
 
-Add this annotation to each `Application` you want tracked:
+Each team should have its own `AppProject`. Set a default subscription on
+the project so every Application under it inherits the right team's
+service — no per-app annotations:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: checkout
+  namespace: argocd
+spec:
+  # ... destinations, sourceRepos, etc.
+  description: Checkout team apps
+  # default subscription:
+  # (see https://argocd-notifications.readthedocs.io/en/stable/subscriptions/)
+metadata:
+  annotations:
+    notifications.argoproj.io/subscribe.on-deployed.riptide-checkout: ""
+    notifications.argoproj.io/subscribe.on-sync-succeeded.riptide-checkout: ""
+    notifications.argoproj.io/subscribe.on-sync-failed.riptide-checkout: ""
+```
+
+Apps under the `checkout` AppProject will fire the riptide webhook with the
+**checkout** team's bearer.
+
+If a team needs a per-app override (rare), set the same annotation directly
+on the `Application` and it overrides the project default.
+
+## 4) (Optional) tag each Application with its service id
+
+If you want events stamped with a stable opaque service id from your
+CMDB / service registry (e.g. `srv0417`), label the Application:
 
 ```yaml
 metadata:
-  annotations:
-    notifications.argoproj.io/subscribe.on-deployed.riptide: ""
-    notifications.argoproj.io/subscribe.on-sync-succeeded.riptide: ""
-    notifications.argoproj.io/subscribe.on-sync-failed.riptide: ""
+  labels:
+    riptide.service-id: srv0417
 ```
+
+The bundled NotificationTemplate forwards this as `service_id` in the
+webhook body when the label is present. If the label is missing, riptide
+records `service = app_name` as-is.
 
 ## Verify
 
 Trigger a sync, then:
 
 ```sql
-SELECT delivery_id, app_name, revision, operation_phase, duration_seconds, service, team
+SELECT delivery_id, app_name, revision, operation_phase, team, service
 FROM argocd_events
 ORDER BY created_at DESC
 LIMIT 5;
 ```
 
-You should see one row per relevant trigger, with `revision` matching the
-deployed commit SHA.
+`team` should equal the team whose bearer was used. `service` is the
+ArgoCD `app_name`.

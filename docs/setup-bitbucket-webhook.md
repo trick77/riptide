@@ -6,7 +6,9 @@ Wire a Bitbucket repository to send PR + push events to riptide-collector.
 
 - Repo admin access to the Bitbucket repository.
 - The riptide-collector URL for your environment (ask the platform team).
-- The shared bearer token (ask the platform team — stored in the cluster Secret `riptide-collector-secrets`).
+- **Your team's** bearer token. Each team has its own; the platform team
+  hands it out when onboarding (see `docs/onboarding-a-team.md`). The token
+  identifies your team to the collector — do not share it with another team.
 
 ## Steps
 
@@ -19,7 +21,10 @@ Wire a Bitbucket repository to send PR + push events to riptide-collector.
    - Repository: **Push**
    - Pull request: **Created**, **Updated**, **Approved**, **Merged**, **Declined**, **Comment created**
 7. **Custom headers**:
-   - `Authorization: Bearer <token>` (the shared bearer token)
+   - `Authorization: Bearer <your-team-token>`
+   - *Optional:* `X-Riptide-Service-Id: <opaque service id from your CMDB, e.g. srv0417>`
+     — sets the `service` column on every event from this repo. If absent,
+     riptide falls back to `service = repository.full_name`.
 8. **Save**.
 
 ## Verify
@@ -29,8 +34,9 @@ Wire a Bitbucket repository to send PR + push events to riptide-collector.
    ```bash
    oc logs -n riptide deployment/riptide-collector --tail=50 | grep bitbucket_event_received
    ```
-3. You should see a line with the `delivery_id`, `event_type`, and `repo` matching what you triggered.
-4. If `service` is `null`, the repo is not yet in the catalog — see `onboarding-a-team.md`.
+3. You should see a line with the `delivery_id`, `event_type`, `repo`, and
+   `team` matching what you triggered. `team` is whichever team the bearer
+   token identifies.
 
 ## Troubleshooting
 

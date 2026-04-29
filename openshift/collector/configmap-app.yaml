@@ -5,4 +5,5 @@ metadata:
 data:
   RIPTIDE_LOG_LEVEL: "INFO"
   RIPTIDE_CATALOG_PATH: "/etc/riptide-collector/service-catalog.json"
+  RIPTIDE_TEAM_KEYS_PATH: "/etc/riptide-collector-team-keys/team-keys.json"
   RIPTIDE_CATALOG_RELOAD_SECONDS: "30"

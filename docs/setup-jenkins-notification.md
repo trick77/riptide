@@ -23,11 +23,23 @@ mandatory** — without them the metrics break.
 }
 ```
 
-If `service_id` is omitted, riptide tries to resolve via `pipeline_name` against the service catalog's `pipelines` array.
+`service_id` is **optional** — set it to a stable opaque service identifier
+from your CMDB / service registry (e.g. `"srv0417"`) so the same service
+rolls up across Jenkins, Tekton, ArgoCD, and Bitbucket. If absent, riptide
+records `service = pipeline_name` as-is. The `team` column is populated
+from the bearer token, not the payload.
+
+## Per-team token
+
+Each team has its own bearer (the platform team hands it out — see
+`docs/onboarding-a-team.md`). For shared Jenkins instances, scope each
+folder's `RIPTIDE_TOKEN` credential to that folder so jobs see only their
+team's token. The token identifies the team; do not share across teams.
 
 ## Jenkinsfile snippet
 
-Requires the **HTTP Request** plugin and a `Secret text` credential named `RIPTIDE_TOKEN`.
+Requires the **HTTP Request** plugin and a `Secret text` credential named
+`RIPTIDE_TOKEN` containing **your team's** raw bearer token.
 
 ```groovy
 // Notification is best-effort: a slow or unavailable riptide-collector must

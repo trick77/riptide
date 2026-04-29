@@ -16,13 +16,13 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://riptide:riptide@localhost:5432/riptide",
         description="SQLAlchemy async DB URL.",
     )
-    webhook_token: str = Field(
-        default="dev-token",
-        description="Shared bearer token expected on Authorization header.",
-    )
     catalog_path: Path = Field(
         default=Path("config/service-catalog.json"),
         description="Path to service-catalog.json.",
+    )
+    team_keys_path: Path = Field(
+        default=Path("config/team-keys.json"),
+        description="Path to team-keys.json (sha256 hashes of per-team bearer tokens).",
     )
     log_level: str = Field(default="INFO")
     catalog_reload_seconds: float = Field(

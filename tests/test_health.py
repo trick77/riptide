@@ -12,5 +12,5 @@ class TestHealth:
         assert response.status_code == 200
         body = response.json()
         assert body["status"] == "ok"
-        assert body["services"] >= 1
         assert body["teams"] >= 1
+        assert body["team_keys"] >= 1

@@ -40,7 +40,9 @@ class PipelineWebhook(BaseModel):
     finished_at: datetime | None = None
     service_id: str | None = Field(
         default=None,
-        description="Optional explicit service id; if absent, resolve via pipeline_name.",
+        min_length=1,
+        description="Optional opaque service identifier (e.g. CMDB id 'srv0417'). "
+        "If absent, falls back to `pipeline_name`.",
     )
 
     @field_validator("started_at", "finished_at")

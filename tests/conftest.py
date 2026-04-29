@@ -12,27 +12,15 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
 
+from _keys import TEAM_KEYS
 from riptide_collector.main import create_app
 from riptide_collector.models import Base
 from riptide_collector.settings import Settings
 
 VALID_CATALOG: dict[str, Any] = {
-    "services": [
-        {
-            "id": "payments-api",
-            "display_name": "Payments API",
-            "team": "checkout",
-            "bitbucket_repos": ["acme/payments-api"],
-            "argocd_apps": ["payments-api-prod"],
-            "pipelines": ["payments-api-deploy"],
-        }
-    ],
     "teams": [
-        {
-            "name": "checkout",
-            "group_email": "team-checkout@example.com",
-            "slack": "#team-checkout",
-        }
+        {"name": "checkout", "group_email": "team-checkout@example.com"},
+        {"name": "platform", "group_email": "team-platform@example.com"},
     ],
     "automation": {
         "renovate": {
@@ -100,10 +88,17 @@ def catalog_file(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def settings(catalog_file: Path, db_url: str) -> Settings:
+def team_keys_file(tmp_path: Path) -> Path:
+    path = tmp_path / "team-keys.json"
+    path.write_text(json.dumps(TEAM_KEYS), encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def settings(catalog_file: Path, team_keys_file: Path, db_url: str) -> Settings:
     os.environ["RIPTIDE_DB_URL"] = db_url
-    os.environ["RIPTIDE_WEBHOOK_TOKEN"] = "test-token"
     os.environ["RIPTIDE_CATALOG_PATH"] = str(catalog_file)
+    os.environ["RIPTIDE_TEAM_KEYS_PATH"] = str(team_keys_file)
     return Settings()
 
 
