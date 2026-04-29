@@ -99,9 +99,13 @@ def _values_feedback(
         "event_type": "feedback",
         "pr_key": lower(event.pr_key),
         "repo": lower(event.repo),
+        "commit_sha": lower(event.commit_sha),
         "finding_id": event.finding_id,
         "verdict": event.verdict,
-        "actor": event.actor,
+        # Lowercase the actor so future joins to a directory / Slack handle
+        # mapping are case-stable. Same rule the project applies to repos
+        # and refs.
+        "actor": lower(event.actor),
         "occurred_at": event.occurred_at,
         "service": service,
         "team": caller_team,

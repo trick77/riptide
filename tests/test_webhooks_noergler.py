@@ -163,11 +163,26 @@ class TestFeedbackEvent:
             assert row.event_type == "feedback"
             assert row.team == "checkout"
             assert row.verdict == "disagreed"
+            # actor lowercased (the fixture sends mixed case)
             assert row.actor == "alice@example.com"
             assert row.finding_id == "finding-2026-04-29-0001"
+            # commit_sha lowercased; allows joining feedback to deployments
+            assert row.commit_sha == "abc1234567890abc1234567890abc1234567890a"
             # finops columns are unset for feedback
             assert row.model is None
             assert row.cost_usd is None
+
+    async def test_commit_sha_optional_on_feedback(self, client: AsyncClient) -> None:
+        # Feedback without a commit_sha is accepted — reviewer-precision can
+        # still be aggregated by team/repo/week.
+        payload = _load("noergler_feedback.json")
+        del payload["commit_sha"]
+        r = await client.post("/webhooks/noergler", json=payload, headers=AUTH)
+        assert r.status_code == 202
+
+        async with _fresh_session_factory(client)() as session:
+            row = (await session.execute(select(NoerglerEvent))).scalar_one()
+            assert row.commit_sha is None
 
     async def test_idempotent_per_verdict(self, client: AsyncClient) -> None:
         payload = _load("noergler_feedback.json")

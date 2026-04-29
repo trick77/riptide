@@ -59,10 +59,28 @@ class NoerglerCompleted(_Common):
 class NoerglerFeedback(_Common):
     event_type: Literal["feedback"]
     pr_key: str = Field(..., min_length=1)
-    finding_id: str = Field(..., min_length=1)
+    finding_id: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Stable opaque identifier for the finding the verdict applies to. "
+            "Noergler must emit the same finding_id verbatim across retries and "
+            "verdict flips — riptide does not normalise (`Finding-X` and "
+            "`finding-x` are treated as distinct findings)."
+        ),
+    )
     verdict: Literal["disagreed", "acknowledged"]
     actor: str = Field(..., min_length=1, description="user who reacted to the finding")
     repo: str | None = Field(default=None, min_length=1)
+    commit_sha: str | None = Field(
+        default=None,
+        min_length=7,
+        description=(
+            "Optional commit SHA the finding was raised on. Lets readers join "
+            "feedback rows to deployments / pipelines for 'did the user disagree "
+            "with a finding on code that later regressed' analysis."
+        ),
+    )
     occurred_at: datetime
 
     @field_validator("occurred_at")
