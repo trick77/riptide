@@ -15,4 +15,3 @@ spec:
     targetPort: http
   tls:
     termination: edge
-    insecureEdgeTerminationPolicy: Redirect
