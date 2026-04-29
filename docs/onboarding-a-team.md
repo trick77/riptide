@@ -7,7 +7,7 @@ teams; service identity is observed automatically from the webhook payloads
 
 ## 1. Add the team to the catalog
 
-Open a PR editing [`config/service-catalog.json`](../config/service-catalog.json):
+Open a PR editing [`openshift/collector/service-catalog.json`](../openshift/collector/service-catalog.json):
 
 ```json
 {

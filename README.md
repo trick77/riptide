@@ -88,7 +88,7 @@ metrics below by your own $/runner-second to convert.
 What riptide does **not** provide today, and the natural seam for it:
 
 - **Currency.** Add a `unit_cost` config (per-runner $/sec) in
-  `config/service-catalog.json`, or pull real per-namespace cost from
+  `openshift/collector/service-catalog.json`, or pull real per-namespace cost from
   **OpenCost / Kubecost** if it already runs in the cluster, and join to the
   catalog by `service`. Either is a follow-up component, not a v1 collector
   concern.
@@ -124,7 +124,7 @@ Open http://localhost:8000/docs for Swagger UI.
 the database lifecycle.** Connection URL (with credentials) is supplied at
 runtime via the `RIPTIDE_DB_URL` env var, which on OpenShift is sourced from
 the `riptide-collector-secrets` Secret created from
-`openshift/shared/secret.env.example`.
+`openshift/secret.env.example`.
 
 The local `compose.yaml` runs a throwaway Postgres for development only —
 production deployments connect to the cluster's existing Postgres.

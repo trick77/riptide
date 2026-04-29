@@ -17,12 +17,16 @@ class Settings(BaseSettings):
         description="SQLAlchemy async DB URL.",
     )
     catalog_path: Path = Field(
-        default=Path("config/service-catalog.json"),
-        description="Path to service-catalog.json.",
+        default=Path("openshift/collector/service-catalog.json"),
+        description="Path to service-catalog.json. The default points at the "
+        "in-repo sample for `uv run` from the repo root; production overrides "
+        "via RIPTIDE_CATALOG_PATH to a Secret-/ConfigMap-mounted location.",
     )
     team_keys_path: Path = Field(
-        default=Path("config/team-keys.json"),
-        description="Path to team-keys.json (sha256 hashes of per-team bearer tokens).",
+        default=Path("openshift/collector/team-keys.json"),
+        description="Path to team-keys.json (sha256 hashes of per-team bearer "
+        "tokens). Default points at the in-repo dev sample; production "
+        "overrides via RIPTIDE_TEAM_KEYS_PATH to a Secret mount.",
     )
     log_level: str = Field(default="INFO")
     catalog_reload_seconds: float = Field(
