@@ -53,7 +53,7 @@ def make_router(
                     started_at=event.started_at,
                     finished_at=event.finished_at,
                     occurred_at=event.finished_at or event.started_at or datetime.now(UTC),
-                    service=event.app_name,
+                    service=event.service_id or event.app_name,
                     team=caller_team,
                     payload=raw,
                 )

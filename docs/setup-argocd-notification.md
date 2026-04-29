@@ -93,6 +93,21 @@ Apps under the `checkout` AppProject will fire the riptide webhook with the
 If a team needs a per-app override (rare), set the same annotation directly
 on the `Application` and it overrides the project default.
 
+## 4) (Optional) tag each Application with its service id
+
+If you want events stamped with a stable opaque service id from your
+CMDB / service registry (e.g. `srv0417`), label the Application:
+
+```yaml
+metadata:
+  labels:
+    riptide.service-id: srv0417
+```
+
+The bundled NotificationTemplate forwards this as `service_id` in the
+webhook body when the label is present. If the label is missing, riptide
+records `service = app_name` as-is.
+
 ## Verify
 
 Trigger a sync, then:

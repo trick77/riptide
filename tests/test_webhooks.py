@@ -102,6 +102,29 @@ class TestBitbucketWebhook:
             count = (await session.execute(select(BitbucketEvent))).all()
             assert len(count) == 1
 
+    async def test_x_riptide_service_id_header_wins(
+        self,
+        client: AsyncClient,
+        session_factory: async_sessionmaker[AsyncSession],
+    ) -> None:
+        del session_factory
+        payload = _load("bitbucket_pr_merged.json")
+        response = await client.post(
+            "/webhooks/bitbucket",
+            json=payload,
+            headers={
+                **AUTH,
+                "X-Request-UUID": "uuid-srvid",
+                "X-Riptide-Service-Id": "srv0417",
+            },
+        )
+        assert response.status_code == 202
+
+        async with self._fresh_session_factory(client)() as session:
+            row = (await session.execute(select(BitbucketEvent))).scalar_one()
+            assert row.service == "srv0417"
+            assert row.team == "checkout"
+
     async def test_unknown_repo_still_recorded_with_caller_team(
         self,
         client: AsyncClient,
@@ -167,7 +190,7 @@ class TestPipelineWebhook:
 
     async def test_explicit_service_id_wins(self, client: AsyncClient) -> None:
         payload = _load("pipeline_jenkins_completed.json")
-        payload["service_id"] = "payments-api"
+        payload["service_id"] = "srv0417"
         response = await client.post(
             "/webhooks/pipeline",
             json=payload,
@@ -178,7 +201,7 @@ class TestPipelineWebhook:
         factory = TestBitbucketWebhook._fresh_session_factory(client)
         async with factory() as session:
             row = (await session.execute(select(PipelineEvent))).scalar_one()
-            assert row.service == "payments-api"
+            assert row.service == "srv0417"
 
     async def test_jenkins_and_tekton_same_name_dedup_separately(self, client: AsyncClient) -> None:
         # Same pipeline_name + run_id but different sources must both insert.
@@ -218,6 +241,17 @@ class TestArgoCDWebhook:
             assert row.service == "payments-api-prod"
             assert row.operation_phase == "Succeeded"
             assert row.duration_seconds == 45
+
+    async def test_explicit_service_id_wins(self, client: AsyncClient) -> None:
+        payload = _load("argocd_synced.json")
+        payload["service_id"] = "srv0417"
+        response = await client.post("/webhooks/argocd", json=payload, headers=AUTH)
+        assert response.status_code == 202
+
+        factory = TestBitbucketWebhook._fresh_session_factory(client)
+        async with factory() as session:
+            row = (await session.execute(select(ArgoCDEvent))).scalar_one()
+            assert row.service == "srv0417"
 
     async def test_missing_revision_returns_422(self, client: AsyncClient) -> None:
         payload = _load("argocd_synced.json")

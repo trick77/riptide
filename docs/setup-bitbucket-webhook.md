@@ -22,6 +22,9 @@ Wire a Bitbucket repository to send PR + push events to riptide-collector.
    - Pull request: **Created**, **Updated**, **Approved**, **Merged**, **Declined**, **Comment created**
 7. **Custom headers**:
    - `Authorization: Bearer <your-team-token>`
+   - *Optional:* `X-Riptide-Service-Id: <opaque service id from your CMDB, e.g. srv0417>`
+     — sets the `service` column on every event from this repo. If absent,
+     riptide falls back to `service = repository.full_name`.
 8. **Save**.
 
 ## Verify

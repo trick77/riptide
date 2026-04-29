@@ -23,8 +23,11 @@ mandatory** — without them the metrics break.
 }
 ```
 
-If `service_id` is omitted, riptide records `service = pipeline_name` as-is.
-The `team` column is populated from the bearer token, not the payload.
+`service_id` is **optional** — set it to a stable opaque service identifier
+from your CMDB / service registry (e.g. `"srv0417"`) so the same service
+rolls up across Jenkins, Tekton, ArgoCD, and Bitbucket. If absent, riptide
+records `service = pipeline_name` as-is. The `team` column is populated
+from the bearer token, not the payload.
 
 ## Per-team token
 

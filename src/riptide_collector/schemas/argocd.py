@@ -9,6 +9,12 @@ class ArgoCDWebhook(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     app_name: str = Field(..., min_length=1)
+    service_id: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Optional opaque service identifier (e.g. CMDB id 'srv0417'). "
+        "If absent, falls back to `app_name`.",
+    )
     revision: str = Field(..., min_length=7, description="commit SHA being deployed")
     sync_status: str | None = None
     operation_phase: str | None = Field(default=None, description="Succeeded / Failed / Running")

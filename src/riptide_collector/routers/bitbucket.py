@@ -76,6 +76,7 @@ def make_router(
         x_event_key: str | None = Header(default=None),
         x_request_uuid: str | None = Header(default=None),
         x_hook_uuid: str | None = Header(default=None),
+        x_riptide_service_id: str | None = Header(default=None),
     ) -> dict[str, str]:
         body = await request.json()
         if not isinstance(body, dict):
@@ -170,7 +171,7 @@ def make_router(
                     files_changed=files_changed,
                     is_revert=is_revert,
                     occurred_at=occurred_at,
-                    service=repo_full_name,
+                    service=x_riptide_service_id or repo_full_name,
                     team=caller_team,
                     payload=body,
                 )
