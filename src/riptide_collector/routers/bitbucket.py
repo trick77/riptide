@@ -68,11 +68,11 @@ def make_router(
     @router.post(
         "/bitbucket",
         status_code=status.HTTP_202_ACCEPTED,
-        dependencies=[Depends(auth_dep)],
         summary="Bitbucket webhook sink",
     )
     async def bitbucket_webhook(  # pyright: ignore[reportUnusedFunction]
         request: Request,
+        caller_team: str = Depends(auth_dep),
         x_event_key: str | None = Header(default=None),
         x_request_uuid: str | None = Header(default=None),
         x_hook_uuid: str | None = Header(default=None),
@@ -147,10 +147,6 @@ def make_router(
         jira_keys = extract_jira_keys(title, description, branch_name, *commit_messages)
         automation_source = catalog.detect_automation_source(author, branch_name)
 
-        resolution = catalog.resolve_bitbucket(repo_full_name)
-        if resolution is None and repo_full_name:
-            logger.warning("bitbucket_unknown_repo", repo=repo_full_name)
-
         occurred_at = (
             _parse_dt(body.get("date")) or _parse_dt(body.get("created_on")) or datetime.now(UTC)
         )
@@ -174,8 +170,8 @@ def make_router(
                     files_changed=files_changed,
                     is_revert=is_revert,
                     occurred_at=occurred_at,
-                    service=resolution.service_id if resolution else None,
-                    team=resolution.team_name if resolution else None,
+                    service=repo_full_name,
+                    team=caller_team,
                     payload=body,
                 )
                 .on_conflict_do_nothing(index_elements=["delivery_id"])
@@ -188,7 +184,7 @@ def make_router(
             delivery_id=delivery_id,
             event_type=event_type,
             repo=repo_full_name,
-            service=resolution.service_id if resolution else None,
+            team=caller_team,
         )
         return {"status": "accepted"}
 

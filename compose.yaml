@@ -22,10 +22,11 @@ services:
         condition: service_healthy
     environment:
       RIPTIDE_DB_URL: postgresql+asyncpg://riptide:riptide@db:5432/riptide
-      RIPTIDE_WEBHOOK_TOKEN: dev-token
       RIPTIDE_CATALOG_PATH: /etc/riptide-collector/service-catalog.json
+      RIPTIDE_TEAM_KEYS_PATH: /etc/riptide-collector/team-keys.json
     volumes:
       - ./config/service-catalog.json:/etc/riptide-collector/service-catalog.json:ro
+      - ./config/team-keys.dev.json:/etc/riptide-collector/team-keys.json:ro
     command: ["alembic", "upgrade", "head"]
 
   app:
@@ -37,10 +38,15 @@ services:
         condition: service_completed_successfully
     environment:
       RIPTIDE_DB_URL: postgresql+asyncpg://riptide:riptide@db:5432/riptide
-      RIPTIDE_WEBHOOK_TOKEN: dev-token
       RIPTIDE_CATALOG_PATH: /etc/riptide-collector/service-catalog.json
+      RIPTIDE_TEAM_KEYS_PATH: /etc/riptide-collector/team-keys.json
       RIPTIDE_LOG_LEVEL: INFO
     volumes:
       - ./config/service-catalog.json:/etc/riptide-collector/service-catalog.json:ro
+      - ./config/team-keys.dev.json:/etc/riptide-collector/team-keys.json:ro
     ports:
       - "8000:8000"
+# Dev raw bearers (use as `Authorization: Bearer <raw>`):
+#   checkout team → dev-checkout
+#   platform team → dev-platform
+# These are matched by their sha256 hashes in config/team-keys.dev.json.

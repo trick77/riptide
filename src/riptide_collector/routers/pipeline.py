@@ -18,36 +18,27 @@ def make_router(
     session_factory: async_sessionmaker[AsyncSession],
     auth_dep: Any,
 ) -> APIRouter:
+    del catalog  # not needed; team comes from caller, not the catalog
     router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
     @router.post(
         "/pipeline",
         status_code=status.HTTP_202_ACCEPTED,
-        dependencies=[Depends(auth_dep)],
         summary="CI pipeline webhook sink (Jenkins, Tekton, …)",
     )
     async def pipeline_webhook(  # pyright: ignore[reportUnusedFunction]
         event: PipelineWebhook,
+        caller_team: str = Depends(auth_dep),
     ) -> dict[str, str]:
         raw = event.model_dump(mode="json")
-        catalog.maybe_reload()
-
-        resolution = (
-            catalog.resolve_pipeline(event.service_id)
-            if event.service_id
-            else catalog.resolve_pipeline(event.pipeline_name)
-        )
-        if resolution is None:
-            logger.warning(
-                "pipeline_unknown_name",
-                source=event.source,
-                pipeline=event.pipeline_name,
-            )
 
         # source is part of the dedup key so distinct CI systems with the same
         # pipeline name (e.g. a Jenkins job and a Tekton pipeline both called
         # 'deploy') don't collide.
         delivery_id = f"{event.source}#{event.pipeline_name}#{event.run_id}#{event.phase}"
+
+        # Service identity is observed: explicit hint wins, else the pipeline name.
+        service = event.service_id or event.pipeline_name
 
         async with session_factory() as session:
             stmt = (
@@ -63,8 +54,8 @@ def make_router(
                     started_at=event.started_at,
                     finished_at=event.finished_at,
                     occurred_at=event.finished_at or event.started_at or datetime.now(UTC),
-                    service=resolution.service_id if resolution else None,
-                    team=resolution.team_name if resolution else None,
+                    service=service,
+                    team=caller_team,
                     payload=raw,
                 )
                 .on_conflict_do_nothing(index_elements=["delivery_id"])
@@ -80,7 +71,8 @@ def make_router(
             run=event.run_id,
             phase=event.phase,
             status=event.status,
-            service=resolution.service_id if resolution else None,
+            service=service,
+            team=caller_team,
         )
         return {"status": "accepted"}
 

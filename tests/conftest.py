@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from collections.abc import AsyncIterator, Iterator
@@ -16,23 +17,19 @@ from riptide_collector.main import create_app
 from riptide_collector.models import Base
 from riptide_collector.settings import Settings
 
+# Test bearer tokens (raw); their sha256 hashes go in TEAM_KEYS.
+CHECKOUT_TOKEN = "test-checkout-token-please-do-not-use-in-prod"
+PLATFORM_TOKEN = "test-platform-token-please-do-not-use-in-prod"
+
+
+def _h(raw: str) -> str:
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 VALID_CATALOG: dict[str, Any] = {
-    "services": [
-        {
-            "id": "payments-api",
-            "display_name": "Payments API",
-            "team": "checkout",
-            "bitbucket_repos": ["acme/payments-api"],
-            "argocd_apps": ["payments-api-prod"],
-            "pipelines": ["payments-api-deploy"],
-        }
-    ],
     "teams": [
-        {
-            "name": "checkout",
-            "group_email": "team-checkout@example.com",
-            "slack": "#team-checkout",
-        }
+        {"name": "checkout", "group_email": "team-checkout@example.com"},
+        {"name": "platform", "group_email": "team-platform@example.com"},
     ],
     "automation": {
         "renovate": {
@@ -44,6 +41,11 @@ VALID_CATALOG: dict[str, Any] = {
             "branch_prefixes": ["dependabot/"],
         },
     },
+}
+
+TEAM_KEYS: dict[str, str] = {
+    "checkout": _h(CHECKOUT_TOKEN),
+    "platform": _h(PLATFORM_TOKEN),
 }
 
 
@@ -100,10 +102,17 @@ def catalog_file(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def settings(catalog_file: Path, db_url: str) -> Settings:
+def team_keys_file(tmp_path: Path) -> Path:
+    path = tmp_path / "team-keys.json"
+    path.write_text(json.dumps(TEAM_KEYS), encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def settings(catalog_file: Path, team_keys_file: Path, db_url: str) -> Settings:
     os.environ["RIPTIDE_DB_URL"] = db_url
-    os.environ["RIPTIDE_WEBHOOK_TOKEN"] = "test-token"
     os.environ["RIPTIDE_CATALOG_PATH"] = str(catalog_file)
+    os.environ["RIPTIDE_TEAM_KEYS_PATH"] = str(team_keys_file)
     return Settings()
 
 

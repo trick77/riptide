@@ -5,11 +5,13 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from riptide_collector.catalog import CatalogStore
+from riptide_collector.team_keys import TeamKeysStore
 
 
 def make_router(
     catalog: CatalogStore,
     session_factory: async_sessionmaker[AsyncSession],
+    team_keys: TeamKeysStore,
 ) -> APIRouter:
     router = APIRouter(tags=["health"])
 
@@ -33,9 +35,10 @@ def make_router(
         catalog_view = catalog.get()
         return {
             "status": "ok",
-            "services": len(catalog_view.services),
             "teams": len(catalog_view.teams_by_name),
+            "team_keys": len(team_keys.team_names()),
             "catalog_reload_failures": catalog.reload_failures,
+            "team_keys_reload_failures": team_keys.reload_failures,
         }
 
     return router

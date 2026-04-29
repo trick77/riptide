@@ -24,8 +24,9 @@ If `docker ps` fails, ask the user to start OrbStack.
 
 - **Append-only ingestion.** Every webhook handler does `INSERT … ON CONFLICT (delivery_id) DO NOTHING`. Never `UPDATE` or `DELETE` event rows. Webhook retries must be idempotent. `delivery_id` is the dedup key for each source.
 - **Raw payload always stored.** `payload JSONB` keeps the full request body even if fields are extracted into typed columns. Don't drop fields you don't currently use.
-- **Catalog is config, not data.** `config/service-catalog.json` is the source of truth for service↔team↔repo mapping and bot detection. Edits go through PRs to that file. The running pod hot-reloads via mtime in `CatalogStore.maybe_reload()`. Do not propose moving the catalog into Postgres.
-- **`automation` is org-wide.** Bot definitions live at the catalog root, not per service.
+- **Catalog is config, not data.** `config/service-catalog.json` declares teams (name + `group_email`) and org-wide automation rules. Service identity is **observed** at request time from the webhook payload (repo full name, app name, pipeline name) — not curated. Edits go through PRs to the catalog file. The running pod hot-reloads via mtime in `CatalogStore.maybe_reload()`. Do not propose moving the catalog into Postgres.
+- **Per-team bearer keys live in a separate, gitignored file** mounted from the `riptide-collector-team-keys` Secret. Stored as sha256 hashes; `TeamKeysStore` hot-reloads it the same way. The bearer **is** the team identity — every webhook is tagged with `team = caller_team`.
+- **`automation` is org-wide.** Bot definitions live at the catalog root, not per team.
 - **Metrics are computed on read, not at ingest.** Don't add aggregation tables or scheduled rollup jobs in v1. Schema additions should preserve raw events; new metrics are SQL queries against existing rows or future materialized views.
 - **Commit SHA is the universal join key.** All three sources record `commit_sha`/`revision`. Lead-time joins between `bitbucket_events`, `pipeline_events`, `argocd_events` happen on this column.
 - **`change_type` lives on Bitbucket events only.** Don't denormalise it onto pipeline / Argo rows; join via `commit_sha` at read time.

@@ -1,7 +1,10 @@
-"""Service-catalog loader, validator, hot-reloader, and resolver.
+"""Team catalog loader, validator, hot-reloader.
 
-The catalog file is the source of truth for service / team mapping and bot
-detection. It is loaded at startup and re-read on mtime change.
+The catalog file declares teams (name + contact) and org-wide automation
+rules (bot detection). Service identity is observed at request time from
+the webhook payload; it is not curated here.
+
+The file is loaded at startup and re-read on mtime change.
 """
 
 from __future__ import annotations
@@ -27,17 +30,6 @@ class CatalogError(ValueError):
 class Team:
     name: str
     group_email: str
-    slack: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class Service:
-    id: str
-    display_name: str
-    team: str
-    bitbucket_repos: tuple[str, ...]
-    argocd_apps: tuple[str, ...]
-    pipelines: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,19 +40,9 @@ class AutomationSource:
 
 
 @dataclass(frozen=True, slots=True)
-class Resolution:
-    service_id: str
-    team_name: str
-
-
-@dataclass(frozen=True, slots=True)
 class Catalog:
-    services: tuple[Service, ...]
     teams_by_name: dict[str, Team]
     automation: tuple[AutomationSource, ...]
-    bitbucket_index: dict[str, Resolution]
-    pipeline_index: dict[str, Resolution]
-    argocd_index: dict[str, Resolution]
 
 
 def _validate_email(addr: str) -> bool:
@@ -71,13 +53,10 @@ def _validate_email(addr: str) -> bool:
 
 def _build_catalog(data: dict[str, Any]) -> Catalog:
     raw_teams = data.get("teams") or []
-    raw_services = data.get("services") or []
     raw_automation = data.get("automation") or {}
 
     if not isinstance(raw_teams, list):
         raise CatalogError("`teams` must be a list")
-    if not isinstance(raw_services, list):
-        raise CatalogError("`services` must be a list")
     if not isinstance(raw_automation, dict):
         raise CatalogError("`automation` must be an object")
 
@@ -91,65 +70,7 @@ def _build_catalog(data: dict[str, Any]) -> Catalog:
             raise CatalogError(f"duplicate team name: {name!r}")
         if not email or not isinstance(email, str) or not _validate_email(email):
             raise CatalogError(f"team {name!r} has invalid `group_email`: {email!r}")
-        slack = raw.get("slack") if isinstance(raw.get("slack"), str) else None
-        teams[name] = Team(name=name, group_email=email, slack=slack)
-
-    services: list[Service] = []
-    seen_ids: set[str] = set()
-    bitbucket_index: dict[str, Resolution] = {}
-    pipeline_index: dict[str, Resolution] = {}
-    argocd_index: dict[str, Resolution] = {}
-
-    for raw in raw_services:
-        sid = raw.get("id")
-        if not sid or not isinstance(sid, str):
-            raise CatalogError("service is missing `id`")
-        if sid in seen_ids:
-            raise CatalogError(f"duplicate service id: {sid!r}")
-        seen_ids.add(sid)
-
-        display_name = raw.get("display_name") or sid
-        team_name = raw.get("team")
-        if not team_name or team_name not in teams:
-            raise CatalogError(f"service {sid!r} references unknown team {team_name!r}")
-
-        bb = tuple(raw.get("bitbucket_repos") or [])
-        pl = tuple(raw.get("pipelines") or [])
-        ac = tuple(raw.get("argocd_apps") or [])
-
-        resolution = Resolution(service_id=sid, team_name=team_name)
-        for repo in bb:
-            if repo in bitbucket_index:
-                raise CatalogError(
-                    f"bitbucket_repo {repo!r} claimed by both "
-                    f"{bitbucket_index[repo].service_id!r} and {sid!r}"
-                )
-            bitbucket_index[repo] = resolution
-        for name in pl:
-            if name in pipeline_index:
-                raise CatalogError(
-                    f"pipeline {name!r} claimed by both "
-                    f"{pipeline_index[name].service_id!r} and {sid!r}"
-                )
-            pipeline_index[name] = resolution
-        for app in ac:
-            if app in argocd_index:
-                raise CatalogError(
-                    f"argocd_app {app!r} claimed by both "
-                    f"{argocd_index[app].service_id!r} and {sid!r}"
-                )
-            argocd_index[app] = resolution
-
-        services.append(
-            Service(
-                id=sid,
-                display_name=display_name,
-                team=team_name,
-                bitbucket_repos=bb,
-                argocd_apps=ac,
-                pipelines=pl,
-            )
-        )
+        teams[name] = Team(name=name, group_email=email)
 
     automations: list[AutomationSource] = []
     for src_name, cfg in raw_automation.items():
@@ -162,12 +83,8 @@ def _build_catalog(data: dict[str, Any]) -> Catalog:
         )
 
     return Catalog(
-        services=tuple(services),
         teams_by_name=teams,
         automation=tuple(automations),
-        bitbucket_index=bitbucket_index,
-        pipeline_index=pipeline_index,
-        argocd_index=argocd_index,
     )
 
 
@@ -234,27 +151,9 @@ class CatalogStore:
             self._mtime = mtime
             logger.info(
                 "catalog_reloaded",
-                services=len(new_catalog.services),
                 teams=len(new_catalog.teams_by_name),
             )
             return True
-
-    # --- resolvers -------------------------------------------------------
-
-    def resolve_bitbucket(self, repo_full_name: str | None) -> Resolution | None:
-        if not repo_full_name:
-            return None
-        return self._catalog.bitbucket_index.get(repo_full_name)
-
-    def resolve_pipeline(self, name: str | None) -> Resolution | None:
-        if not name:
-            return None
-        return self._catalog.pipeline_index.get(name)
-
-    def resolve_argocd(self, app_name: str | None) -> Resolution | None:
-        if not app_name:
-            return None
-        return self._catalog.argocd_index.get(app_name)
 
     def team(self, name: str | None) -> Team | None:
         if not name:

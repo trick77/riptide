@@ -18,23 +18,19 @@ def make_router(
     session_factory: async_sessionmaker[AsyncSession],
     auth_dep: Any,
 ) -> APIRouter:
+    del catalog  # not needed; team comes from caller, not the catalog
     router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
     @router.post(
         "/argocd",
         status_code=status.HTTP_202_ACCEPTED,
-        dependencies=[Depends(auth_dep)],
         summary="ArgoCD webhook sink",
     )
     async def argocd_webhook(  # pyright: ignore[reportUnusedFunction]
         event: ArgoCDWebhook,
+        caller_team: str = Depends(auth_dep),
     ) -> dict[str, str]:
         raw = event.model_dump(mode="json")
-        catalog.maybe_reload()
-
-        resolution = catalog.resolve_argocd(event.app_name)
-        if resolution is None:
-            logger.warning("argocd_unknown_app", app=event.app_name)
 
         # Stable dedup key: started_at is fixed for a sync attempt; phase varies
         # across the lifecycle (Running → Succeeded/Failed) and SHOULD produce
@@ -57,8 +53,8 @@ def make_router(
                     started_at=event.started_at,
                     finished_at=event.finished_at,
                     occurred_at=event.finished_at or event.started_at or datetime.now(UTC),
-                    service=resolution.service_id if resolution else None,
-                    team=resolution.team_name if resolution else None,
+                    service=event.app_name,
+                    team=caller_team,
                     payload=raw,
                 )
                 .on_conflict_do_nothing(index_elements=["delivery_id"])
@@ -72,7 +68,7 @@ def make_router(
             app=event.app_name,
             revision=event.revision,
             phase=event.operation_phase,
-            service=resolution.service_id if resolution else None,
+            team=caller_team,
         )
         return {"status": "accepted"}
 
