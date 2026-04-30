@@ -233,6 +233,35 @@ class TestArgoCDWebhook:
             assert row.app_name == "payments-api-prod"
             assert row.operation_phase == "Succeeded"
             assert row.duration_seconds == 45
+            assert row.destination_namespace == "payments-prod"
+            assert row.environment == "prod"
+
+    async def test_missing_destination_namespace_yields_null_environment(
+        self, client: AsyncClient
+    ) -> None:
+        payload = _load("argocd_synced.json")
+        del payload["destination_namespace"]
+        response = await client.post("/webhooks/argocd", json=payload, headers=AUTH)
+        assert response.status_code == 202
+
+        factory = TestBitbucketWebhook._fresh_session_factory(client)
+        async with factory() as session:
+            row = (await session.execute(select(ArgoCDEvent))).scalar_one()
+            assert row.destination_namespace is None
+            assert row.environment is None
+
+    async def test_environment_extracted_from_namespace_suffix(
+        self, client: AsyncClient
+    ) -> None:
+        payload = _load("argocd_synced.json")
+        payload["destination_namespace"] = "checkout-intg"
+        response = await client.post("/webhooks/argocd", json=payload, headers=AUTH)
+        assert response.status_code == 202
+
+        factory = TestBitbucketWebhook._fresh_session_factory(client)
+        async with factory() as session:
+            row = (await session.execute(select(ArgoCDEvent))).scalar_one()
+            assert row.environment == "intg"
 
     async def test_uppercase_revision_normalised_to_lowercase(self, client: AsyncClient) -> None:
         payload = _load("argocd_synced.json")

@@ -1,4 +1,7 @@
 {
+  "environments": {
+    "production_stage": "prod"
+  },
   "teams": [
     {
       "name": "checkout",

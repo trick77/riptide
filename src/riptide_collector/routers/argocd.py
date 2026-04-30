@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from riptide_collector.logging_config import get_logger
 from riptide_collector.models import ArgoCDEvent
-from riptide_collector.parsers import lower
+from riptide_collector.parsers import lower, parse_environment
 from riptide_collector.schemas.argocd import ArgoCDWebhook
 
 logger = get_logger(__name__)
@@ -31,6 +31,7 @@ def make_router(
         raw = event.model_dump(mode="json")
 
         revision = lower(event.revision)
+        environment = parse_environment(event.destination_namespace)
 
         # Stable dedup key: started_at is fixed for a sync attempt; phase varies
         # across the lifecycle (Running → Succeeded/Failed) and SHOULD produce
@@ -54,6 +55,8 @@ def make_router(
                     finished_at=event.finished_at,
                     occurred_at=event.finished_at or event.started_at or datetime.now(UTC),
                     team=caller_team,
+                    destination_namespace=event.destination_namespace,
+                    environment=environment,
                     payload=raw,
                 )
                 .on_conflict_do_nothing(index_elements=["delivery_id"])
@@ -68,6 +71,7 @@ def make_router(
             revision=revision,
             phase=event.operation_phase,
             team=caller_team,
+            environment=environment,
         )
         return {"status": "accepted"}
 

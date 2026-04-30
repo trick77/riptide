@@ -15,7 +15,8 @@ data:
             "sync_status": "{{.app.status.sync.status}}",
             "operation_phase": "{{.app.status.operationState.phase}}",
             "started_at": "{{.app.status.operationState.startedAt}}",
-            "finished_at": "{{.app.status.operationState.finishedAt}}"
+            "finished_at": "{{.app.status.operationState.finishedAt}}",
+            "destination_namespace": "{{.app.spec.destination.namespace}}"
           }
 
   trigger.on-deployed: |

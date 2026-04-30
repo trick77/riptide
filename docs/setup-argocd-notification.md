@@ -63,6 +63,11 @@ This adds:
 - `trigger.on-deployed`, `trigger.on-sync-succeeded`, `trigger.on-sync-failed`
   (riptide-flavored)
 
+If you are upgrading from an earlier riptide release, **re-apply this
+ConfigMap** so the template body includes the new `destination_namespace`
+field — riptide derives the `environment` column (and the prod-vs-non-prod
+metric filters) from the namespace suffix.
+
 ## 3) Route teams to their service via AppProject defaults
 
 Each team should have its own `AppProject`. Set a default subscription on
@@ -98,12 +103,16 @@ on the `Application` and it overrides the project default.
 Trigger a sync, then:
 
 ```sql
-SELECT delivery_id, app_name, revision, operation_phase, team
+SELECT delivery_id, app_name, revision, operation_phase, team,
+       destination_namespace, environment
 FROM argocd_events
 ORDER BY created_at DESC
 LIMIT 5;
 ```
 
-`team` should equal the team whose bearer was used. Aggregations group by
-`app_name`; cross-source joins (Pipeline, Bitbucket, Noergler) use
-`revision = commit_sha`.
+`team` should equal the team whose bearer was used. `environment` is the
+lowercased suffix of `destination_namespace` (after the last `-`); which
+suffix counts as "production" is configured in
+`openshift/collector/service-catalog.json` (`environments.production_stage`,
+default `prod`). Aggregations group by `app_name`; cross-source joins
+(Pipeline, Bitbucket, Noergler) use `revision = commit_sha`.
