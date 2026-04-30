@@ -250,9 +250,7 @@ class TestArgoCDWebhook:
             assert row.destination_namespace is None
             assert row.environment is None
 
-    async def test_environment_extracted_from_namespace_suffix(
-        self, client: AsyncClient
-    ) -> None:
+    async def test_environment_extracted_from_namespace_suffix(self, client: AsyncClient) -> None:
         payload = _load("argocd_synced.json")
         payload["destination_namespace"] = "checkout-intg"
         response = await client.post("/webhooks/argocd", json=payload, headers=AUTH)
