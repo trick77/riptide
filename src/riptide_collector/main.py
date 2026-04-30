@@ -54,6 +54,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             version=__version__,
             teams=len(catalog.get().teams_by_name),
             keys=len(team_keys.team_names()),
+            production_stage=catalog.get().environments.production_stage,
         )
         try:
             yield

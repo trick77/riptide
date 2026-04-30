@@ -108,7 +108,7 @@ class TestParseEnvironment:
 
     @pytest.mark.parametrize(
         "namespace",
-        ["", "  ", "noseparator", "trailing-", None],
+        ["", "  ", "noseparator", "trailing-", "-leading", None],
     )
     def test_returns_none_for_unparseable(self, namespace: str | None) -> None:
         assert parse_environment(namespace) is None

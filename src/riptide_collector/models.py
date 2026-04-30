@@ -162,6 +162,8 @@ class ArgoCDEvent(Base):
     app_name: Mapped[str] = mapped_column(String, nullable=False)
     revision: Mapped[str] = mapped_column(String, nullable=False)
     sync_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    # destination_namespace is stored case-preserved (raw from Argo CD);
+    # environment is the lowercased suffix used for prod-vs-non-prod filtering.
     destination_namespace: Mapped[str | None] = mapped_column(String, nullable=True)
     environment: Mapped[str | None] = mapped_column(String, nullable=True)
     operation_phase: Mapped[str | None] = mapped_column(String, nullable=True)

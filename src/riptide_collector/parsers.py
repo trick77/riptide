@@ -79,5 +79,7 @@ def parse_environment(namespace: str | None) -> str | None:
     namespace = namespace.strip()
     if "-" not in namespace:
         return None
-    suffix = namespace.rsplit("-", 1)[1].lower()
-    return suffix or None
+    prefix, suffix = namespace.rsplit("-", 1)
+    if not prefix or not suffix:
+        return None
+    return suffix.lower()

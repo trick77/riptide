@@ -52,8 +52,9 @@ the data captured in v1.
 > namespace (after the last `-`) — e.g. `payments-prod` → `prod`,
 > `checkout-intg` → `intg`. Which suffix counts as "production" is configured
 > in `openshift/collector/service-catalog.json` (`environments.production_stage`,
-> default `prod`). Rows ingested before this column existed have
-> `environment = NULL`.
+> default `prod`). The literal `'prod'` in the example queries below is a
+> placeholder — substitute whatever your `production_stage` is set to. Rows
+> ingested before this column existed have `environment = NULL`.
 
 ### From the DORA / DX / SPACE families
 
