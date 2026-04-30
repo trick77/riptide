@@ -23,6 +23,10 @@ Edit `argocd-notifications-cm` (in the `argocd` namespace). One
 data:
   service.webhook.riptide-checkout: |
     url: https://riptide-collector.example.com/webhooks/argocd
+    timeout: 5s
+    retryWaitMin: 1s
+    retryWaitMax: 5s
+    retryMax: 3
     headers:
       - name: Authorization
         value: "Bearer $riptide-token-checkout"
@@ -31,12 +35,23 @@ data:
 
   service.webhook.riptide-platform: |
     url: https://riptide-collector.example.com/webhooks/argocd
+    timeout: 5s
+    retryWaitMin: 1s
+    retryWaitMax: 5s
+    retryMax: 3
     headers:
       - name: Authorization
         value: "Bearer $riptide-token-platform"
       - name: Content-Type
         value: application/json
 ```
+
+> **Why the explicit timeout / retry caps.** The notifications controller
+> runs in its own pod (separate from `argocd-application-controller`), so a
+> down or slow riptide-collector cannot block syncs or reconciliation —
+> only notification dispatch is affected. The caps above bound the worst
+> case per event to roughly 5s + (1s + 5s) + (5s + 5s) + 5s ≈ 25s instead
+> of inheriting the library's generous defaults. Tune to taste.
 
 Then add the tokens to `argocd-notifications-secret`:
 
@@ -62,6 +77,11 @@ This adds:
 - `template.app-deployed-riptide`
 - `trigger.on-deployed`, `trigger.on-sync-succeeded`, `trigger.on-sync-failed`
   (riptide-flavored)
+
+If you are upgrading from an earlier riptide release, **re-apply this
+ConfigMap** so the template body includes the new `destination_namespace`
+field — riptide derives the `environment` column (and the prod-vs-non-prod
+metric filters) from the namespace suffix.
 
 ## 3) Route teams to their service via AppProject defaults
 
@@ -98,12 +118,16 @@ on the `Application` and it overrides the project default.
 Trigger a sync, then:
 
 ```sql
-SELECT delivery_id, app_name, revision, operation_phase, team
+SELECT delivery_id, app_name, revision, operation_phase, team,
+       destination_namespace, environment
 FROM argocd_events
 ORDER BY created_at DESC
 LIMIT 5;
 ```
 
-`team` should equal the team whose bearer was used. Aggregations group by
-`app_name`; cross-source joins (Pipeline, Bitbucket, Noergler) use
-`revision = commit_sha`.
+`team` should equal the team whose bearer was used. `environment` is the
+lowercased suffix of `destination_namespace` (after the last `-`); which
+suffix counts as "production" is configured in
+`openshift/collector/service-catalog.json` (`environments.production_stage`,
+default `prod`). Aggregations group by `app_name`; cross-source joins
+(Pipeline, Bitbucket, Noergler) use `revision = commit_sha`.

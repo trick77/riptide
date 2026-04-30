@@ -1,8 +1,11 @@
+import pytest
+
 from riptide_collector.parsers import (
     extract_jira_keys,
     is_revert_commit,
     looks_bot_shaped,
     parse_change_type,
+    parse_environment,
 )
 
 
@@ -84,3 +87,28 @@ class TestLooksBotShaped:
 
     def test_none(self) -> None:
         assert looks_bot_shaped(None) is False
+
+
+class TestParseEnvironment:
+    @pytest.mark.parametrize(
+        "namespace,expected",
+        [
+            ("payments-prod", "prod"),
+            ("checkout-intg", "intg"),
+            ("billing-syst", "syst"),
+            ("orders-dev", "dev"),
+            ("noergler-entw", "entw"),
+            ("payments-qa", "qa"),
+            ("Payments-PROD", "prod"),
+            ("multi-part-name-prod", "prod"),
+        ],
+    )
+    def test_returns_lowercased_suffix(self, namespace: str, expected: str) -> None:
+        assert parse_environment(namespace) == expected
+
+    @pytest.mark.parametrize(
+        "namespace",
+        ["", "  ", "noseparator", "trailing-", "-leading", None],
+    )
+    def test_returns_none_for_unparseable(self, namespace: str | None) -> None:
+        assert parse_environment(namespace) is None

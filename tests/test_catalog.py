@@ -4,7 +4,12 @@ from typing import Any
 
 import pytest
 
-from riptide_collector.catalog import CatalogError, CatalogStore, load_catalog_from_path
+from riptide_collector.catalog import (
+    DEFAULT_PRODUCTION_STAGE,
+    CatalogError,
+    CatalogStore,
+    load_catalog_from_path,
+)
 
 VALID: dict[str, Any] = {
     "teams": [{"name": "team-x", "group_email": "x@example.com"}],
@@ -121,3 +126,31 @@ class TestAutomationDetection:
         path = _write(tmp_path / "c.json", VALID)
         store = CatalogStore(path)
         assert store.detect_automation_source("alice", "feature/x") is None
+
+
+class TestEnvironments:
+    def test_defaults_when_block_absent(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "c.json", VALID)
+        catalog = load_catalog_from_path(path)
+        assert catalog.environments.production_stage == DEFAULT_PRODUCTION_STAGE
+
+    def test_reads_configured_production_stage(self, tmp_path: Path) -> None:
+        data = json.loads(json.dumps(VALID))
+        data["environments"] = {"production_stage": "PROD"}
+        path = _write(tmp_path / "c.json", data)
+        catalog = load_catalog_from_path(path)
+        assert catalog.environments.production_stage == "prod"
+
+    def test_rejects_non_object(self, tmp_path: Path) -> None:
+        data = json.loads(json.dumps(VALID))
+        data["environments"] = "prod"
+        path = _write(tmp_path / "c.json", data)
+        with pytest.raises(CatalogError, match="environments"):
+            load_catalog_from_path(path)
+
+    def test_rejects_empty_production_stage(self, tmp_path: Path) -> None:
+        data = json.loads(json.dumps(VALID))
+        data["environments"] = {"production_stage": "  "}
+        path = _write(tmp_path / "c.json", data)
+        with pytest.raises(CatalogError, match="production_stage"):
+            load_catalog_from_path(path)

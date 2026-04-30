@@ -63,3 +63,23 @@ def lower(value: str | None) -> str | None:
     (service, commit_sha, revision, repo_full_name, branch_name).
     """
     return value.lower() if isinstance(value, str) and value else value
+
+
+def parse_environment(namespace: str | None) -> str | None:
+    """Extract the lowercased stage suffix from an Argo CD destination namespace.
+
+    Convention: `<thing>-<stage>` (e.g. `payments-prod`, `checkout-intg`).
+    Returns the suffix after the last `-`, or None if the namespace is
+    empty / has no `-` / has an empty suffix. Unknown suffixes are
+    preserved verbatim — the catalog's `production_stage` decides which
+    one means production at query time.
+    """
+    if not isinstance(namespace, str):
+        return None
+    namespace = namespace.strip()
+    if "-" not in namespace:
+        return None
+    prefix, suffix = namespace.rsplit("-", 1)
+    if not prefix or not suffix:
+        return None
+    return suffix.lower()

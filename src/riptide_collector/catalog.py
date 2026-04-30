@@ -41,9 +41,18 @@ class AutomationSource:
 
 
 @dataclass(frozen=True, slots=True)
+class EnvironmentConfig:
+    production_stage: str
+
+
+DEFAULT_PRODUCTION_STAGE = "prod"
+
+
+@dataclass(frozen=True, slots=True)
 class Catalog:
     teams_by_name: dict[str, Team]
     automation: tuple[AutomationSource, ...]
+    environments: EnvironmentConfig
 
 
 def _validate_email(addr: str) -> bool:
@@ -52,9 +61,21 @@ def _validate_email(addr: str) -> bool:
     return "@" in parsed and "." in parsed.split("@", 1)[1]
 
 
+def _build_environments(raw: Any) -> EnvironmentConfig:
+    if raw is None:
+        return EnvironmentConfig(production_stage=DEFAULT_PRODUCTION_STAGE)
+    if not isinstance(raw, dict):
+        raise CatalogError("`environments` must be an object")
+    stage = raw.get("production_stage", DEFAULT_PRODUCTION_STAGE)
+    if not isinstance(stage, str) or not stage.strip():
+        raise CatalogError("`environments.production_stage` must be a non-empty string")
+    return EnvironmentConfig(production_stage=stage.strip().lower())
+
+
 def _build_catalog(data: dict[str, Any]) -> Catalog:
     raw_teams = data.get("teams") or []
     raw_automation = data.get("automation") or {}
+    raw_environments = data.get("environments")
 
     if not isinstance(raw_teams, list):
         raise CatalogError("`teams` must be a list")
@@ -86,6 +107,7 @@ def _build_catalog(data: dict[str, Any]) -> Catalog:
     return Catalog(
         teams_by_name=teams,
         automation=tuple(automations),
+        environments=_build_environments(raw_environments),
     )
 
 

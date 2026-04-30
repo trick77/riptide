@@ -154,6 +154,7 @@ class ArgoCDEvent(Base):
         UniqueConstraint("delivery_id", name="uq_argocd_events_delivery_id"),
         Index("ix_argocd_events_app_name", "app_name"),
         Index("ix_argocd_events_revision", "revision"),
+        Index("ix_argocd_events_environment", "environment"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -161,6 +162,10 @@ class ArgoCDEvent(Base):
     app_name: Mapped[str] = mapped_column(String, nullable=False)
     revision: Mapped[str] = mapped_column(String, nullable=False)
     sync_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    # destination_namespace is stored case-preserved (raw from Argo CD);
+    # environment is the lowercased suffix used for prod-vs-non-prod filtering.
+    destination_namespace: Mapped[str | None] = mapped_column(String, nullable=True)
+    environment: Mapped[str | None] = mapped_column(String, nullable=True)
     operation_phase: Mapped[str | None] = mapped_column(String, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

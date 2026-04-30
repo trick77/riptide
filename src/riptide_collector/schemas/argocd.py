@@ -14,6 +14,10 @@ class ArgoCDWebhook(BaseModel):
     operation_phase: str | None = Field(default=None, description="Succeeded / Failed / Running")
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    destination_namespace: str | None = Field(
+        default=None,
+        description="kubernetes namespace the app deployed into; suffix drives `environment`",
+    )
 
     @field_validator("started_at", "finished_at")
     @classmethod

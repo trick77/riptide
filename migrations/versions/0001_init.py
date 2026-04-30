@@ -147,6 +147,18 @@ def upgrade() -> None:
         sa.Column("app_name", sa.String, nullable=False),
         sa.Column("revision", sa.String, nullable=False),
         sa.Column("sync_status", sa.String, nullable=True),
+        sa.Column(
+            "destination_namespace",
+            sa.String,
+            nullable=True,
+            comment="kubernetes namespace the app deployed into; raw value from Argo CD",
+        ),
+        sa.Column(
+            "environment",
+            sa.String,
+            nullable=True,
+            comment="lowercased suffix of destination_namespace after the last '-'; matches catalog.environments.production_stage for prod metrics",
+        ),
         sa.Column("operation_phase", sa.String, nullable=True),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
@@ -175,6 +187,7 @@ def upgrade() -> None:
     )
     op.create_index("ix_argocd_events_app_name", "argocd_events", ["app_name"])
     op.create_index("ix_argocd_events_revision", "argocd_events", ["revision"])
+    op.create_index("ix_argocd_events_environment", "argocd_events", ["environment"])
 
     op.create_table(
         "noergler_events",
