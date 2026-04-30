@@ -23,6 +23,10 @@ Edit `argocd-notifications-cm` (in the `argocd` namespace). One
 data:
   service.webhook.riptide-checkout: |
     url: https://riptide-collector.example.com/webhooks/argocd
+    timeout: 5s
+    retryWaitMin: 1s
+    retryWaitMax: 5s
+    retryMax: 3
     headers:
       - name: Authorization
         value: "Bearer $riptide-token-checkout"
@@ -31,12 +35,23 @@ data:
 
   service.webhook.riptide-platform: |
     url: https://riptide-collector.example.com/webhooks/argocd
+    timeout: 5s
+    retryWaitMin: 1s
+    retryWaitMax: 5s
+    retryMax: 3
     headers:
       - name: Authorization
         value: "Bearer $riptide-token-platform"
       - name: Content-Type
         value: application/json
 ```
+
+> **Why the explicit timeout / retry caps.** The notifications controller
+> runs in its own pod (separate from `argocd-application-controller`), so a
+> down or slow riptide-collector cannot block syncs or reconciliation —
+> only notification dispatch is affected. The caps above bound the worst
+> case per event to roughly 5s + (1s + 5s) + (5s + 5s) + 5s ≈ 25s instead
+> of inheriting the library's generous defaults. Tune to taste.
 
 Then add the tokens to `argocd-notifications-secret`:
 
