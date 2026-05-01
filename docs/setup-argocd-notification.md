@@ -112,6 +112,38 @@ Apps under the `checkout` AppProject will fire the riptide webhook with the
 If a team needs a per-app override (rare), set the same annotation directly
 on the `Application` and it overrides the project default.
 
+### Alternative: global subscriptions in the ConfigMap
+
+If you cannot rely on `AppProject` inheritance (e.g. Applications live
+outside per-team projects), declare subscriptions globally in
+`argocd-notifications-cm` with a selector. One block per team, since each
+team has its own bearer / `NotificationService`:
+
+```yaml
+data:
+  subscriptions: |
+    - recipients:
+        - riptide-checkout
+      triggers:
+        - on-deployed
+        - on-sync-succeeded
+        - on-sync-failed
+      selector: app.kubernetes.io/part-of=checkout
+    - recipients:
+        - riptide-platform
+      triggers:
+        - on-deployed
+        - on-sync-succeeded
+        - on-sync-failed
+      selector: app.kubernetes.io/part-of=platform
+```
+
+The `selector` matches labels on the `Application` resource — pick a label
+your Applications consistently carry (e.g. `argocd.argoproj.io/instance`,
+`app.kubernetes.io/part-of`, or a custom team label). AppProject defaults
+are simpler when team ↔ AppProject is 1:1; the global form is the escape
+hatch for everything else.
+
 ## Verify
 
 Trigger a sync, then:
