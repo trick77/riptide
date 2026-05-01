@@ -60,7 +60,7 @@ def _hash(raw: str) -> str:
 class TeamKeysStore:
     """Thread-safe team-keys holder with mtime-based hot reload.
 
-    Mirrors `CatalogStore`. Single instance per process.
+    Mirrors `RiptideConfigStore`. Single instance per process.
     """
 
     def __init__(self, path: Path):

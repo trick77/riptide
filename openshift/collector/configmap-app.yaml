@@ -4,6 +4,6 @@ metadata:
   name: riptide-collector-app
 data:
   RIPTIDE_LOG_LEVEL: "INFO"
-  RIPTIDE_CATALOG_PATH: "/etc/riptide-collector/riptide-catalog.json"
+  RIPTIDE_CONFIG_PATH: "/etc/riptide-collector/riptide.json"
   RIPTIDE_TEAM_KEYS_PATH: "/etc/riptide-collector-team-keys/team-keys.json"
-  RIPTIDE_CATALOG_RELOAD_SECONDS: "30"
+  RIPTIDE_CONFIG_RELOAD_SECONDS: "30"

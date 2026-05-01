@@ -1,13 +1,13 @@
 # Onboarding a team to riptide
 
 End-to-end checklist for adding a team so their delivery events show up in
-the metrics. The catalog declares teams; per-source aggregations key on the
+the metrics. The config declares teams; per-source aggregations key on the
 upstream identifiers (`repo_full_name`, `pipeline_name`, `app_name`, `repo`)
 already present on each event, and cross-source joins use `commit_sha`.
 
-## 1. Add the team to the catalog
+## 1. Add the team to the config
 
-Open a PR editing [`openshift/collector/riptide-catalog.json`](../openshift/collector/riptide-catalog.json):
+Open a PR editing [`openshift/collector/riptide.json`](../openshift/collector/riptide.json):
 
 ```json
 {
@@ -51,7 +51,7 @@ shred -u /tmp/team-keys.json
 oc -n $NS rollout restart deployment/riptide-collector
 ```
 
-Every team in the catalog must have an entry in `team-keys.json`, or the
+Every team in the config must have an entry in `team-keys.json`, or the
 pod fails to start. The hot-reloader picks up edits automatically; the
 restart above is just to surface validation errors immediately.
 

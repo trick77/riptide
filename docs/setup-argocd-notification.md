@@ -159,6 +159,6 @@ LIMIT 5;
 `team` should equal the team whose bearer was used. `environment` is the
 lowercased suffix of `destination_namespace` (after the last `-`); which
 suffix counts as "production" is configured in
-`openshift/collector/riptide-catalog.json` (`environments.production_stage`,
+`openshift/collector/riptide.json` (`environments.production_stage`,
 default `prod`). Aggregations group by `app_name`; cross-source joins
 (Pipeline, Bitbucket, Noergler) use `revision = commit_sha`.

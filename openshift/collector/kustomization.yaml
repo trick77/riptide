@@ -8,9 +8,9 @@ resources:
   - configmap-app.yaml
 
 configMapGenerator:
-  - name: riptide-collector-catalog
+  - name: riptide-collector-config
     files:
-      - riptide-catalog.json
+      - riptide.json
 
 labels:
   - pairs:
