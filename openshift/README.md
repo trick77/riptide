@@ -16,9 +16,11 @@ openshift/
     ├── route.yaml
     ├── configmap-app.yaml      # non-secret env (log level, catalog path, team-keys path)
     ├── service-catalog.json    # in-repo sample catalog (teams + automation)
-    ├── team-keys.json          # in-repo dev sample (sha256 hashes); prod replaces via Secret
-    └── job-migrate.yaml        # alembic upgrade head, runs PreSync
+    └── team-keys.json          # in-repo dev sample (sha256 hashes); prod replaces via Secret
 ```
+
+The Deployment runs `alembic upgrade head` as an init container, so
+migrations execute before the app starts on every rollout.
 
 ## Database
 
@@ -95,22 +97,23 @@ in your overlay (the base no longer pins a registry — see PR #8).
 oc apply -k openshift/overlays/<your-overlay>/
 ```
 
-This applies (in order, via Kustomize):
-1. The collector ConfigMaps + the migration Job (runs alembic upgrade head)
-2. The collector Deployment + Service + Route
+This applies the collector ConfigMap, Deployment, Service, and Route.
+On every rollout, the Deployment's `alembic` init container runs
+`alembic upgrade head` before the app container starts.
 
 Apply only the collector base: `oc apply -k openshift/collector/`.
 
 ## Resource quotas
 
 Every container declares both `requests` and `limits` for CPU and memory.
-Defaults are conservative; tune from real metrics. The migration Job is
-short-lived and gets a smaller budget than the long-running app.
+Defaults are conservative; tune from real metrics. The migration init
+container is short-lived and gets a smaller budget than the long-running
+app.
 
 | Container | requests cpu / mem | limits cpu / mem |
 |---|---|---|
 | `app` (Deployment) | 100m / 128Mi | 500m / 512Mi |
-| `alembic` (Job) | 50m / 128Mi | 300m / 256Mi |
+| `alembic` (initContainer) | 50m / 128Mi | 300m / 256Mi |
 
 ## Editing the catalog
 
