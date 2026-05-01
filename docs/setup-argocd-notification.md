@@ -53,7 +53,12 @@ data:
 > case per event to roughly 5s + (1s + 5s) + (5s + 5s) + 5s ≈ 25s instead
 > of inheriting the library's generous defaults. Tune to taste.
 
-Then add the tokens to `argocd-notifications-secret`:
+Then add the tokens to `argocd-notifications-secret`. **Use the raw bearer
+value here — never the sha256 hash from `team-keys.json`.** The wire flow
+is `argocd-notifications` substitutes `$riptide-token-<team>` into
+`Authorization: Bearer <raw>`, then riptide hashes the raw value to look
+up the team. If you paste the hash here, riptide will hash *the hash*,
+get a different value, and reject every event with 401.
 
 ```bash
 oc -n argocd patch secret argocd-notifications-secret -p '{
@@ -63,6 +68,10 @@ oc -n argocd patch secret argocd-notifications-secret -p '{
   }
 }'
 ```
+
+The raw tokens are the same values you handed to the team during
+onboarding — see [`onboarding-a-team.md`](onboarding-a-team.md) for how
+they're generated and how the matching sha256 lands in `team-keys.json`.
 
 ## 2) Install the template + triggers
 
