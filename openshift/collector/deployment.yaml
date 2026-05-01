@@ -57,7 +57,7 @@ spec:
             - secretRef:
                 name: riptide-collector-secrets
           volumeMounts:
-            - name: catalog
+            - name: config
               mountPath: /etc/riptide-collector
               readOnly: true
             - name: team-keys
@@ -95,9 +95,9 @@ spec:
             capabilities:
               drop: ["ALL"]
       volumes:
-        - name: catalog
+        - name: config
           configMap:
-            name: riptide-collector-service-catalog
+            name: riptide-collector-config
         - name: team-keys
           secret:
             secretName: riptide-collector-team-keys

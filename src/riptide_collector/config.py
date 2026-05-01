@@ -1,9 +1,9 @@
-"""Team catalog loader, validator, hot-reloader.
+"""Team config loader, validator, hot-reloader.
 
-The catalog file declares teams (name + contact) and org-wide automation
+The config file declares teams (name + contact) and org-wide automation
 rules (bot detection). Cross-source aggregation is done at read time on
 `commit_sha` plus per-source identifiers (`repo_full_name`, `pipeline_name`,
-`app_name`, `repo`); the catalog does not curate service identity.
+`app_name`, `repo`); the config does not curate service identity.
 
 The file is loaded at startup and re-read on mtime change.
 """
@@ -23,7 +23,7 @@ from riptide_collector.parsers import looks_bot_shaped
 logger = get_logger(__name__)
 
 
-class CatalogError(ValueError):
+class RiptideConfigError(ValueError):
     pass
 
 
@@ -49,7 +49,7 @@ DEFAULT_PRODUCTION_STAGE = "prod"
 
 
 @dataclass(frozen=True, slots=True)
-class Catalog:
+class RiptideConfig:
     teams_by_name: dict[str, Team]
     automation: tuple[AutomationSource, ...]
     environments: EnvironmentConfig
@@ -65,62 +65,62 @@ def _build_environments(raw: Any) -> EnvironmentConfig:
     if raw is None:
         return EnvironmentConfig(production_stage=DEFAULT_PRODUCTION_STAGE)
     if not isinstance(raw, dict):
-        raise CatalogError("`environments` must be an object")
+        raise RiptideConfigError("`environments` must be an object")
     stage = raw.get("production_stage", DEFAULT_PRODUCTION_STAGE)
     if not isinstance(stage, str) or not stage.strip():
-        raise CatalogError("`environments.production_stage` must be a non-empty string")
+        raise RiptideConfigError("`environments.production_stage` must be a non-empty string")
     return EnvironmentConfig(production_stage=stage.strip().lower())
 
 
-def _build_catalog(data: dict[str, Any]) -> Catalog:
+def _build_config(data: dict[str, Any]) -> RiptideConfig:
     raw_teams = data.get("teams") or []
     raw_automation = data.get("automation") or {}
     raw_environments = data.get("environments")
 
     if not isinstance(raw_teams, list):
-        raise CatalogError("`teams` must be a list")
+        raise RiptideConfigError("`teams` must be a list")
     if not isinstance(raw_automation, dict):
-        raise CatalogError("`automation` must be an object")
+        raise RiptideConfigError("`automation` must be an object")
 
     teams: dict[str, Team] = {}
     for raw in raw_teams:
         name = raw.get("name")
         email = raw.get("group_email")
         if not name or not isinstance(name, str):
-            raise CatalogError("team is missing `name`")
+            raise RiptideConfigError("team is missing `name`")
         if name in teams:
-            raise CatalogError(f"duplicate team name: {name!r}")
+            raise RiptideConfigError(f"duplicate team name: {name!r}")
         if not email or not isinstance(email, str) or not _validate_email(email):
-            raise CatalogError(f"team {name!r} has invalid `group_email`: {email!r}")
+            raise RiptideConfigError(f"team {name!r} has invalid `group_email`: {email!r}")
         teams[name] = Team(name=name, group_email=email)
 
     automations: list[AutomationSource] = []
     for src_name, cfg in raw_automation.items():
         if not isinstance(cfg, dict):
-            raise CatalogError(f"automation.{src_name} must be an object")
+            raise RiptideConfigError(f"automation.{src_name} must be an object")
         authors = tuple(cfg.get("authors") or [])
         prefixes = tuple(cfg.get("branch_prefixes") or [])
         automations.append(
             AutomationSource(name=src_name, authors=authors, branch_prefixes=prefixes)
         )
 
-    return Catalog(
+    return RiptideConfig(
         teams_by_name=teams,
         automation=tuple(automations),
         environments=_build_environments(raw_environments),
     )
 
 
-def load_catalog_from_path(path: Path) -> Catalog:
+def load_config_from_path(path: Path) -> RiptideConfig:
     with path.open("r", encoding="utf-8") as fh:
         data = json.load(fh)
     if not isinstance(data, dict):
-        raise CatalogError(f"catalog at {path} must be a JSON object at the top level")
-    return _build_catalog(data)
+        raise RiptideConfigError(f"config at {path} must be a JSON object at the top level")
+    return _build_config(data)
 
 
-class CatalogStore:
-    """Thread-safe catalog holder with mtime-based hot reload.
+class RiptideConfigStore:
+    """Thread-safe config holder with mtime-based hot reload.
 
     Single instance per process, owned by the FastAPI app state.
     """
@@ -128,7 +128,7 @@ class CatalogStore:
     def __init__(self, path: Path):
         self._path = path
         self._lock = threading.RLock()
-        self._catalog = load_catalog_from_path(path)
+        self._config = load_config_from_path(path)
         self._mtime = path.stat().st_mtime
         self._reload_failures = 0
 
@@ -140,9 +140,9 @@ class CatalogStore:
     def path(self) -> Path:
         return self._path
 
-    def get(self) -> Catalog:
+    def get(self) -> RiptideConfig:
         with self._lock:
-            return self._catalog
+            return self._config
 
     def maybe_reload(self) -> bool:
         """Re-read the file if mtime changed. Returns True iff reloaded."""
@@ -151,7 +151,7 @@ class CatalogStore:
                 mtime = self._path.stat().st_mtime
             except OSError as exc:
                 logger.error(
-                    "catalog_stat_failed",
+                    "config_stat_failed",
                     path=str(self._path),
                     error=str(exc),
                 )
@@ -161,36 +161,36 @@ class CatalogStore:
             if mtime == self._mtime:
                 return False
             try:
-                new_catalog = load_catalog_from_path(self._path)
-            except (OSError, json.JSONDecodeError, CatalogError) as exc:
+                new_config = load_config_from_path(self._path)
+            except (OSError, json.JSONDecodeError, RiptideConfigError) as exc:
                 logger.error(
-                    "catalog_reload_failed",
+                    "config_reload_failed",
                     path=str(self._path),
                     error=str(exc),
                 )
                 self._reload_failures += 1
                 return False
-            self._catalog = new_catalog
+            self._config = new_config
             self._mtime = mtime
             logger.info(
-                "catalog_reloaded",
-                teams=len(new_catalog.teams_by_name),
+                "config_reloaded",
+                teams=len(new_config.teams_by_name),
             )
             return True
 
     def team(self, name: str | None) -> Team | None:
         if not name:
             return None
-        return self._catalog.teams_by_name.get(name)
+        return self._config.teams_by_name.get(name)
 
     def detect_automation_source(self, author: str | None, branch_name: str | None) -> str | None:
-        catalog = self._catalog
+        config = self._config
         if author:
-            for source in catalog.automation:
+            for source in config.automation:
                 if author in source.authors:
                     return source.name
         if branch_name:
-            for source in catalog.automation:
+            for source in config.automation:
                 for prefix in source.branch_prefixes:
                     if branch_name.startswith(prefix):
                         return source.name

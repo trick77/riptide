@@ -17,7 +17,7 @@ from riptide_collector.main import create_app
 from riptide_collector.models import Base
 from riptide_collector.settings import Settings
 
-VALID_CATALOG: dict[str, Any] = {
+VALID_CONFIG: dict[str, Any] = {
     "teams": [
         {"name": "checkout", "group_email": "team-checkout@example.com"},
         {"name": "platform", "group_email": "team-platform@example.com"},
@@ -81,9 +81,9 @@ async def session_factory(
 
 
 @pytest.fixture
-def catalog_file(tmp_path: Path) -> Path:
-    path = tmp_path / "service-catalog.json"
-    path.write_text(json.dumps(VALID_CATALOG), encoding="utf-8")
+def config_file(tmp_path: Path) -> Path:
+    path = tmp_path / "riptide.json"
+    path.write_text(json.dumps(VALID_CONFIG), encoding="utf-8")
     return path
 
 
@@ -95,9 +95,9 @@ def team_keys_file(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def settings(catalog_file: Path, team_keys_file: Path, db_url: str) -> Settings:
+def settings(config_file: Path, team_keys_file: Path, db_url: str) -> Settings:
     os.environ["RIPTIDE_DB_URL"] = db_url
-    os.environ["RIPTIDE_CATALOG_PATH"] = str(catalog_file)
+    os.environ["RIPTIDE_CONFIG_PATH"] = str(config_file)
     os.environ["RIPTIDE_TEAM_KEYS_PATH"] = str(team_keys_file)
     return Settings()
 

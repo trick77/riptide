@@ -71,7 +71,7 @@ def parse_environment(namespace: str | None) -> str | None:
     Convention: `<thing>-<stage>` (e.g. `payments-prod`, `checkout-intg`).
     Returns the suffix after the last `-`, or None if the namespace is
     empty / has no `-` / has an empty suffix. Unknown suffixes are
-    preserved verbatim — the catalog's `production_stage` decides which
+    preserved verbatim — the config's `production_stage` decides which
     one means production at query time.
     """
     if not isinstance(namespace, str):

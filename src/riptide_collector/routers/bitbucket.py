@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Header, Request, status
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from riptide_collector.catalog import CatalogStore
+from riptide_collector.config import RiptideConfigStore
 from riptide_collector.logging_config import get_logger
 from riptide_collector.models import BitbucketEvent
 from riptide_collector.parsers import (
@@ -60,7 +60,7 @@ def _synth_delivery_id(event_key: str | None, body: dict[str, Any]) -> str:
 
 
 def make_router(
-    catalog: CatalogStore,
+    config: RiptideConfigStore,
     session_factory: async_sessionmaker[AsyncSession],
     auth_dep: Any,
 ) -> APIRouter:
@@ -82,7 +82,7 @@ def make_router(
         if not isinstance(body, dict):
             return {"status": "ignored", "reason": "non-object payload"}
 
-        catalog.maybe_reload()
+        config.maybe_reload()
 
         delivery_id = x_request_uuid or x_hook_uuid or _synth_delivery_id(x_event_key, body)
         event_type = x_event_key or "unknown"
@@ -152,7 +152,7 @@ def make_router(
 
         change_type = parse_change_type(branch_name)
         jira_keys = extract_jira_keys(title, description, branch_name, *commit_messages)
-        automation_source = catalog.detect_automation_source(author, branch_name)
+        automation_source = config.detect_automation_source(author, branch_name)
 
         occurred_at = (
             _parse_dt(body.get("date")) or _parse_dt(body.get("created_on")) or datetime.now(UTC)

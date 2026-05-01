@@ -112,6 +112,6 @@ WHERE created_at > now() - interval '7 days';
 - **Wrong team**: noergler is using another team's bearer. Reset
   `RIPTIDE_TOKEN`.
 - **No rows arriving** but noergler logs say emit succeeded: check that
-  the team in `service-catalog.json` actually has a key entry — startup
+  the team in `riptide.json` actually has a key entry — startup
   cross-validation prevents missing keys, but a stale deployment can
   diverge.

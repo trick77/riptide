@@ -4,12 +4,12 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from riptide_collector.catalog import CatalogStore
+from riptide_collector.config import RiptideConfigStore
 from riptide_collector.team_keys import TeamKeysStore
 
 
 def make_router(
-    catalog: CatalogStore,
+    config: RiptideConfigStore,
     session_factory: async_sessionmaker[AsyncSession],
     team_keys: TeamKeysStore,
     auth_dep: Any,
@@ -33,12 +33,12 @@ def make_router(
                 detail=f"db unreachable: {exc}",
             ) from exc
 
-        catalog_view = catalog.get()
+        config_view = config.get()
         return {
             "status": "ok",
-            "teams": len(catalog_view.teams_by_name),
+            "teams": len(config_view.teams_by_name),
             "team_keys": len(team_keys.team_names()),
-            "catalog_reload_failures": catalog.reload_failures,
+            "config_reload_failures": config.reload_failures,
             "team_keys_reload_failures": team_keys.reload_failures,
         }
 

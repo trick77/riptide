@@ -16,11 +16,11 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://riptide:riptide@localhost:5432/riptide",
         description="SQLAlchemy async DB URL.",
     )
-    catalog_path: Path = Field(
-        default=Path("openshift/collector/service-catalog.json"),
-        description="Path to service-catalog.json. The default points at the "
+    config_path: Path = Field(
+        default=Path("openshift/collector/riptide.json"),
+        description="Path to riptide.json. The default points at the "
         "in-repo sample for `uv run` from the repo root; production overrides "
-        "via RIPTIDE_CATALOG_PATH to a Secret-/ConfigMap-mounted location.",
+        "via RIPTIDE_CONFIG_PATH to a Secret-/ConfigMap-mounted location.",
     )
     team_keys_path: Path = Field(
         default=Path("openshift/collector/team-keys.json"),
@@ -29,9 +29,9 @@ class Settings(BaseSettings):
         "overrides via RIPTIDE_TEAM_KEYS_PATH to a Secret mount.",
     )
     log_level: str = Field(default="INFO")
-    catalog_reload_seconds: float = Field(
+    config_reload_seconds: float = Field(
         default=30.0,
-        description="How often to mtime-check the catalog for hot reload.",
+        description="How often to mtime-check the config for hot reload.",
     )
 
 

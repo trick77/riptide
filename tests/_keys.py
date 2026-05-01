@@ -1,6 +1,6 @@
 """Test bearer constants + their hashes.
 
-Imported by `conftest.py` (catalog/team-keys fixtures) and by individual
+Imported by `conftest.py` (config/team-keys fixtures) and by individual
 test modules. Lives in its own module so test files don't have to rely on
 `from conftest import …` (which only works because pytest puts the tests
 directory on sys.path).

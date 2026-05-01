@@ -157,7 +157,7 @@ def upgrade() -> None:
             "environment",
             sa.String,
             nullable=True,
-            comment="lowercased suffix of destination_namespace after the last '-'; matches catalog.environments.production_stage for prod metrics",
+            comment="lowercased suffix of destination_namespace after the last '-'; matches config.environments.production_stage for prod metrics",
         ),
         sa.Column("operation_phase", sa.String, nullable=True),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
