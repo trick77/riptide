@@ -5,6 +5,18 @@ from typing import Any
 import structlog
 
 
+class _HealthCheckAccessFilter(logging.Filter):
+    _silent_paths = frozenset({"/health", "/ready"})
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 3:
+            path = args[2]
+            if isinstance(path, str) and path.split("?", 1)[0] in self._silent_paths:
+                return False
+        return True
+
+
 def configure_logging(level: str = "INFO") -> None:
     log_level = getattr(logging, level.upper(), logging.INFO)
     logging.basicConfig(
@@ -12,6 +24,7 @@ def configure_logging(level: str = "INFO") -> None:
         stream=sys.stdout,
         level=log_level,
     )
+    logging.getLogger("uvicorn.access").addFilter(_HealthCheckAccessFilter())
 
     processors: list[Any] = [
         structlog.contextvars.merge_contextvars,

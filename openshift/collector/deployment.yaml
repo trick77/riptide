@@ -70,14 +70,14 @@ spec:
               path: /health
               port: http
             initialDelaySeconds: 5
-            periodSeconds: 10
+            periodSeconds: 60
           readinessProbe:
             httpGet:
               path: /ready
               port: http
             initialDelaySeconds: 3
-            periodSeconds: 5
-            failureThreshold: 6
+            periodSeconds: 60
+            failureThreshold: 3
           resources:
             requests:
               cpu: "100m"
