@@ -21,6 +21,30 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+      initContainers:
+        - name: alembic
+          image: riptide-collector:latest
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef:
+                name: riptide-collector-app
+            - secretRef:
+                name: riptide-collector-secrets
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "300m"
+              memory: "256Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
       containers:
         - name: app
           image: riptide-collector:latest

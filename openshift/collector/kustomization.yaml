@@ -6,7 +6,6 @@ resources:
   - service.yaml
   - route.yaml
   - configmap-app.yaml
-  - job-migrate.yaml
 
 configMapGenerator:
   - name: riptide-collector-service-catalog
