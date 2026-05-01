@@ -95,16 +95,15 @@ kind: AppProject
 metadata:
   name: checkout
   namespace: argocd
-spec:
-  # ... destinations, sourceRepos, etc.
-  description: Checkout team apps
-  # default subscription:
-  # (see https://argocd-notifications.readthedocs.io/en/stable/subscriptions/)
-metadata:
   annotations:
+    # default subscription — every Application under this project inherits it
+    # (see https://argocd-notifications.readthedocs.io/en/stable/subscriptions/)
     notifications.argoproj.io/subscribe.on-deployed.riptide-checkout: ""
     notifications.argoproj.io/subscribe.on-sync-succeeded.riptide-checkout: ""
     notifications.argoproj.io/subscribe.on-sync-failed.riptide-checkout: ""
+spec:
+  # ... destinations, sourceRepos, etc.
+  description: Checkout team apps
 ```
 
 Apps under the `checkout` AppProject will fire the riptide webhook with the
