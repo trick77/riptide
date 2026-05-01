@@ -99,7 +99,6 @@ metadata:
     # default subscription — every Application under this project inherits it
     # (see https://argocd-notifications.readthedocs.io/en/stable/subscriptions/)
     notifications.argoproj.io/subscribe.on-deployed.riptide-checkout: ""
-    notifications.argoproj.io/subscribe.on-sync-succeeded.riptide-checkout: ""
     notifications.argoproj.io/subscribe.on-sync-failed.riptide-checkout: ""
 spec:
   # ... destinations, sourceRepos, etc.
@@ -111,6 +110,15 @@ Apps under the `checkout` AppProject will fire the riptide webhook with the
 
 If a team needs a per-app override (rare), set the same annotation directly
 on the `Application` and it overrides the project default.
+
+> **Why only `on-deployed` + `on-sync-failed`.** `on-deployed` already
+> covers the success path (sync `Succeeded` *and* health `Healthy`), so
+> adding `on-sync-succeeded` would just fire a second webhook for the same
+> event. Riptide deduplicates by `delivery_id`, so the second insert is
+> dropped, but you'd still see noise in logs and notifications-controller
+> traffic. If your team has Applications whose `health.status` never
+> reaches `Healthy` (CRDs without a health hook, Jobs, etc.), swap
+> `on-deployed` for `on-sync-succeeded` instead — never subscribe to both.
 
 ### Alternative: global subscriptions in the ConfigMap
 
@@ -126,14 +134,12 @@ data:
         - riptide-checkout
       triggers:
         - on-deployed
-        - on-sync-succeeded
         - on-sync-failed
       selector: app.kubernetes.io/part-of=checkout
     - recipients:
         - riptide-platform
       triggers:
         - on-deployed
-        - on-sync-succeeded
         - on-sync-failed
       selector: app.kubernetes.io/part-of=platform
 ```
