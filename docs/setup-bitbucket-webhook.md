@@ -21,7 +21,9 @@ Wire a Bitbucket repository to send PR + push events to riptide-collector.
    - Repository: **Push**
    - Pull request: **Created**, **Updated**, **Approved**, **Merged**, **Declined**, **Comment created**
 7. **Custom headers**:
-   - `Authorization: Bearer <your-team-token>`
+   - `Authorization: Bearer <your-team-token>` — the **raw** bearer the
+     platform team handed you, not the sha256 hash from `team-keys.json`
+     (see [`onboarding-a-team.md`](onboarding-a-team.md)).
 8. **Save**.
 
 ## Verify

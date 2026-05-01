@@ -53,7 +53,12 @@ data:
 > case per event to roughly 5s + (1s + 5s) + (5s + 5s) + 5s ≈ 25s instead
 > of inheriting the library's generous defaults. Tune to taste.
 
-Then add the tokens to `argocd-notifications-secret`:
+Then add the tokens to `argocd-notifications-secret`. **Use the raw bearer
+value here — never the sha256 hash from `team-keys.json`.** The wire flow
+is `argocd-notifications` substitutes `$riptide-token-<team>` into
+`Authorization: Bearer <raw>`, then riptide hashes the raw value to look
+up the team. If you paste the hash here, riptide will hash *the hash*,
+get a different value, and reject every event with 401.
 
 ```bash
 oc -n argocd patch secret argocd-notifications-secret -p '{
@@ -63,6 +68,10 @@ oc -n argocd patch secret argocd-notifications-secret -p '{
   }
 }'
 ```
+
+The raw tokens are the same values you handed to the team during
+onboarding — see [`onboarding-a-team.md`](onboarding-a-team.md) for how
+they're generated and how the matching sha256 lands in `team-keys.json`.
 
 ## 2) Install the template + triggers
 
@@ -99,7 +108,6 @@ metadata:
     # default subscription — every Application under this project inherits it
     # (see https://argocd-notifications.readthedocs.io/en/stable/subscriptions/)
     notifications.argoproj.io/subscribe.on-deployed.riptide-checkout: ""
-    notifications.argoproj.io/subscribe.on-sync-succeeded.riptide-checkout: ""
     notifications.argoproj.io/subscribe.on-sync-failed.riptide-checkout: ""
 spec:
   # ... destinations, sourceRepos, etc.
@@ -111,6 +119,15 @@ Apps under the `checkout` AppProject will fire the riptide webhook with the
 
 If a team needs a per-app override (rare), set the same annotation directly
 on the `Application` and it overrides the project default.
+
+> **Why only `on-deployed` + `on-sync-failed`.** `on-deployed` already
+> covers the success path (sync `Succeeded` *and* health `Healthy`), so
+> adding `on-sync-succeeded` would just fire a second webhook for the same
+> event. Riptide deduplicates by `delivery_id`, so the second insert is
+> dropped, but you'd still see noise in logs and notifications-controller
+> traffic. If your team has Applications whose `health.status` never
+> reaches `Healthy` (CRDs without a health hook, Jobs, etc.), swap
+> `on-deployed` for `on-sync-succeeded` instead — never subscribe to both.
 
 ### Alternative: global subscriptions in the ConfigMap
 
@@ -126,14 +143,12 @@ data:
         - riptide-checkout
       triggers:
         - on-deployed
-        - on-sync-succeeded
         - on-sync-failed
       selector: app.kubernetes.io/part-of=checkout
     - recipients:
         - riptide-platform
       triggers:
         - on-deployed
-        - on-sync-succeeded
         - on-sync-failed
       selector: app.kubernetes.io/part-of=platform
 ```
