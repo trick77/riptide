@@ -22,10 +22,10 @@ services:
         condition: service_healthy
     environment:
       RIPTIDE_DB_URL: postgresql+asyncpg://riptide:riptide@db:5432/riptide
-      RIPTIDE_CATALOG_PATH: /etc/riptide-collector/service-catalog.json
+      RIPTIDE_CATALOG_PATH: /etc/riptide-collector/riptide-catalog.json
       RIPTIDE_TEAM_KEYS_PATH: /etc/riptide-collector/team-keys.json
     volumes:
-      - ./openshift/collector/service-catalog.json:/etc/riptide-collector/service-catalog.json:ro
+      - ./openshift/collector/riptide-catalog.json:/etc/riptide-collector/riptide-catalog.json:ro
       - ./openshift/collector/team-keys.json:/etc/riptide-collector/team-keys.json:ro
     command: ["alembic", "upgrade", "head"]
 
@@ -38,11 +38,11 @@ services:
         condition: service_completed_successfully
     environment:
       RIPTIDE_DB_URL: postgresql+asyncpg://riptide:riptide@db:5432/riptide
-      RIPTIDE_CATALOG_PATH: /etc/riptide-collector/service-catalog.json
+      RIPTIDE_CATALOG_PATH: /etc/riptide-collector/riptide-catalog.json
       RIPTIDE_TEAM_KEYS_PATH: /etc/riptide-collector/team-keys.json
       RIPTIDE_LOG_LEVEL: INFO
     volumes:
-      - ./openshift/collector/service-catalog.json:/etc/riptide-collector/service-catalog.json:ro
+      - ./openshift/collector/riptide-catalog.json:/etc/riptide-collector/riptide-catalog.json:ro
       # Dev raw bearers (use as `Authorization: Bearer <raw>` against the
       # running app): checkout → "dev-checkout", platform → "dev-platform".
       # These match the sha256 hashes committed in

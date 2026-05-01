@@ -51,7 +51,7 @@ the data captured in v1.
 > `argocd_events.environment` is the lowercased suffix of the destination
 > namespace (after the last `-`) — e.g. `payments-prod` → `prod`,
 > `checkout-intg` → `intg`. Which suffix counts as "production" is configured
-> in `openshift/collector/service-catalog.json` (`environments.production_stage`,
+> in `openshift/collector/riptide-catalog.json` (`environments.production_stage`,
 > default `prod`). The literal `'prod'` in the example queries below is a
 > placeholder — substitute whatever your `production_stage` is set to. Rows
 > ingested before this column existed have `environment = NULL`.
@@ -102,7 +102,7 @@ events arrive pre-priced in USD.
 What riptide does **not** provide today, and the natural seam for it:
 
 - **Currency.** Add a `unit_cost` config (per-runner $/sec) in
-  `openshift/collector/service-catalog.json`, or pull real per-namespace cost from
+  `openshift/collector/riptide-catalog.json`, or pull real per-namespace cost from
   **OpenCost / Kubecost** if it already runs in the cluster, and join on the
   per-source identifier (`pipeline_name`, `app_name`). Either is a follow-up
   component, not a v1 collector concern.

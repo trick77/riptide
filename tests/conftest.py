@@ -82,7 +82,7 @@ async def session_factory(
 
 @pytest.fixture
 def catalog_file(tmp_path: Path) -> Path:
-    path = tmp_path / "service-catalog.json"
+    path = tmp_path / "riptide-catalog.json"
     path.write_text(json.dumps(VALID_CATALOG), encoding="utf-8")
     return path
 

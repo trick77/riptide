@@ -15,7 +15,7 @@ openshift/
     ├── service.yaml
     ├── route.yaml
     ├── configmap-app.yaml      # non-secret env (log level, catalog path, team-keys path)
-    ├── service-catalog.json    # in-repo sample catalog (teams + automation)
+    ├── riptide-catalog.json    # in-repo sample catalog (teams + automation)
     └── team-keys.json          # in-repo dev sample (sha256 hashes); prod replaces via Secret
 ```
 
@@ -71,7 +71,7 @@ oc create secret generic riptide-collector-team-keys \
 shred -u /tmp/team-keys.json
 ```
 
-Every team listed in `service-catalog.json` must have a corresponding entry
+Every team listed in `riptide-catalog.json` must have a corresponding entry
 in `team-keys.json` — the pod fails to start otherwise.
 
 ### 3. Namespace
@@ -117,7 +117,7 @@ app.
 
 ## Editing the catalog
 
-`openshift/collector/service-catalog.json` is the in-repo sample and the
+`openshift/collector/riptide-catalog.json` is the in-repo sample and the
 single source of truth. Editing the ConfigMap in the cluster directly is
 wrong — it gets overwritten on the next `oc apply -k`. To onboard a team,
 see `docs/onboarding-a-team.md`.

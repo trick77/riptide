@@ -7,7 +7,7 @@ already present on each event, and cross-source joins use `commit_sha`.
 
 ## 1. Add the team to the catalog
 
-Open a PR editing [`openshift/collector/service-catalog.json`](../openshift/collector/service-catalog.json):
+Open a PR editing [`openshift/collector/riptide-catalog.json`](../openshift/collector/riptide-catalog.json):
 
 ```json
 {

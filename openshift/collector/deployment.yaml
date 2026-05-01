@@ -97,7 +97,7 @@ spec:
       volumes:
         - name: catalog
           configMap:
-            name: riptide-collector-service-catalog
+            name: riptide-collector-catalog
         - name: team-keys
           secret:
             secretName: riptide-collector-team-keys

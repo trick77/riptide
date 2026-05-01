@@ -17,8 +17,8 @@ class Settings(BaseSettings):
         description="SQLAlchemy async DB URL.",
     )
     catalog_path: Path = Field(
-        default=Path("openshift/collector/service-catalog.json"),
-        description="Path to service-catalog.json. The default points at the "
+        default=Path("openshift/collector/riptide-catalog.json"),
+        description="Path to riptide-catalog.json. The default points at the "
         "in-repo sample for `uv run` from the repo root; production overrides "
         "via RIPTIDE_CATALOG_PATH to a Secret-/ConfigMap-mounted location.",
     )
