@@ -112,3 +112,28 @@ async def client(
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+
+
+@pytest_asyncio.fixture
+async def client_with_ignored_stages(
+    tmp_path: Path,
+    team_keys_file: Path,
+    db_url: str,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[AsyncClient]:
+    del session_factory
+    config_data = json.loads(json.dumps(VALID_CONFIG))
+    config_data["environments"] = {
+        "production_stage": "prod",
+        "ignored_stages": ["dev", "entw", "syst", "stage"],
+    }
+    config_path = tmp_path / "riptide-ignored.json"
+    config_path.write_text(json.dumps(config_data), encoding="utf-8")
+
+    os.environ["RIPTIDE_DB_URL"] = db_url
+    os.environ["RIPTIDE_CONFIG_PATH"] = str(config_path)
+    os.environ["RIPTIDE_TEAM_KEYS_PATH"] = str(team_keys_file)
+    app = create_app(Settings())
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac

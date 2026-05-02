@@ -175,5 +175,8 @@ LIMIT 5;
 lowercased suffix of `destination_namespace` (after the last `-`); which
 suffix counts as "production" is configured in
 `openshift/collector/riptide.json` (`environments.production_stage`,
-default `prod`). Aggregations group by `app_name`; cross-source joins
-(Pipeline, Bitbucket, Noergler) use `revision = commit_sha`.
+default `prod`). To keep the database small, list non-prod stage suffixes
+in `environments.ignored_stages` (e.g. `["dev", "entw", "syst", "stage"]`)
+— matching events return `202 {"status":"ignored"}` and are dropped before
+insert. Aggregations group by `app_name`; cross-source joins (Pipeline,
+Bitbucket, Noergler) use `revision = commit_sha`.
