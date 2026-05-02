@@ -154,3 +154,36 @@ class TestEnvironments:
         path = _write(tmp_path / "c.json", data)
         with pytest.raises(RiptideConfigError, match="production_stage"):
             load_config_from_path(path)
+
+    def test_ignored_stages_default_empty(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "c.json", VALID)
+        config = load_config_from_path(path)
+        assert config.environments.ignored_stages == frozenset()
+
+    def test_reads_ignored_stages_lowercased(self, tmp_path: Path) -> None:
+        data = json.loads(json.dumps(VALID))
+        data["environments"] = {"ignored_stages": ["Dev", "ENTW", " syst "]}
+        path = _write(tmp_path / "c.json", data)
+        config = load_config_from_path(path)
+        assert config.environments.ignored_stages == frozenset({"dev", "entw", "syst"})
+
+    def test_rejects_non_list_ignored_stages(self, tmp_path: Path) -> None:
+        data = json.loads(json.dumps(VALID))
+        data["environments"] = {"ignored_stages": "dev"}
+        path = _write(tmp_path / "c.json", data)
+        with pytest.raises(RiptideConfigError, match="ignored_stages"):
+            load_config_from_path(path)
+
+    def test_rejects_empty_string_ignored_stage(self, tmp_path: Path) -> None:
+        data = json.loads(json.dumps(VALID))
+        data["environments"] = {"ignored_stages": ["dev", "  "]}
+        path = _write(tmp_path / "c.json", data)
+        with pytest.raises(RiptideConfigError, match="ignored_stages"):
+            load_config_from_path(path)
+
+    def test_rejects_production_stage_in_ignored_list(self, tmp_path: Path) -> None:
+        data = json.loads(json.dumps(VALID))
+        data["environments"] = {"production_stage": "prod", "ignored_stages": ["dev", "PROD"]}
+        path = _write(tmp_path / "c.json", data)
+        with pytest.raises(RiptideConfigError, match="production_stage"):
+            load_config_from_path(path)

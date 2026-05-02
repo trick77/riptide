@@ -1,6 +1,7 @@
 {
   "environments": {
-    "production_stage": "prod"
+    "production_stage": "prod",
+    "ignored_stages": []
   },
   "teams": [
     {

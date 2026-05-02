@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from riptide_collector.config import RiptideConfigStore
 from riptide_collector.logging_config import get_logger
 from riptide_collector.models import ArgoCDEvent
 from riptide_collector.parsers import lower, parse_environment
@@ -14,6 +15,7 @@ logger = get_logger(__name__)
 
 
 def make_router(
+    config: RiptideConfigStore,
     session_factory: async_sessionmaker[AsyncSession],
     auth_dep: Any,
 ) -> APIRouter:
@@ -32,6 +34,17 @@ def make_router(
 
         revision = lower(event.revision)
         environment = parse_environment(event.destination_namespace)
+
+        ignored_stages = config.get().environments.ignored_stages
+        if environment is not None and environment in ignored_stages:
+            logger.info(
+                "argocd_event_ignored",
+                app=event.app_name,
+                environment=environment,
+                destination_namespace=event.destination_namespace,
+                team=caller_team,
+            )
+            return {"status": "ignored"}
 
         # Stable dedup key: started_at is fixed for a sync attempt; phase varies
         # across the lifecycle (Running → Succeeded/Failed) and SHOULD produce

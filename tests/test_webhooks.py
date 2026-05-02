@@ -279,6 +279,36 @@ class TestArgoCDWebhook:
         response = await client.post("/webhooks/argocd", json=payload, headers=AUTH)
         assert response.status_code == 422
 
+    async def test_ignored_stage_is_dropped(self, client_with_ignored_stages: AsyncClient) -> None:
+        payload = _load("argocd_synced.json")
+        payload["destination_namespace"] = "checkout-dev"
+        response = await client_with_ignored_stages.post(
+            "/webhooks/argocd", json=payload, headers=AUTH
+        )
+        assert response.status_code == 202
+        assert response.json() == {"status": "ignored"}
+
+        factory = TestBitbucketWebhook._fresh_session_factory(client_with_ignored_stages)
+        async with factory() as session:
+            rows = (await session.execute(select(ArgoCDEvent))).all()
+            assert rows == []
+
+    async def test_non_ignored_stage_still_inserts(
+        self, client_with_ignored_stages: AsyncClient
+    ) -> None:
+        payload = _load("argocd_synced.json")
+        payload["destination_namespace"] = "checkout-prod"
+        response = await client_with_ignored_stages.post(
+            "/webhooks/argocd", json=payload, headers=AUTH
+        )
+        assert response.status_code == 202
+        assert response.json() == {"status": "accepted"}
+
+        factory = TestBitbucketWebhook._fresh_session_factory(client_with_ignored_stages)
+        async with factory() as session:
+            row = (await session.execute(select(ArgoCDEvent))).scalar_one()
+            assert row.environment == "prod"
+
 
 @pytest.mark.parametrize(
     "endpoint,payload",

@@ -75,7 +75,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.make_router(config, session_factory, team_keys, auth_dep))
     app.include_router(bitbucket.make_router(config, session_factory, auth_dep))
     app.include_router(pipeline.make_router(session_factory, auth_dep))
-    app.include_router(argocd.make_router(session_factory, auth_dep))
+    app.include_router(argocd.make_router(config, session_factory, auth_dep))
     app.include_router(noergler.make_router(session_factory, auth_dep))
 
     app.state.config = config

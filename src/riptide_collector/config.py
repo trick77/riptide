@@ -43,6 +43,7 @@ class AutomationSource:
 @dataclass(frozen=True, slots=True)
 class EnvironmentConfig:
     production_stage: str
+    ignored_stages: frozenset[str]
 
 
 DEFAULT_PRODUCTION_STAGE = "prod"
@@ -63,13 +64,36 @@ def _validate_email(addr: str) -> bool:
 
 def _build_environments(raw: Any) -> EnvironmentConfig:
     if raw is None:
-        return EnvironmentConfig(production_stage=DEFAULT_PRODUCTION_STAGE)
+        return EnvironmentConfig(
+            production_stage=DEFAULT_PRODUCTION_STAGE,
+            ignored_stages=frozenset(),
+        )
     if not isinstance(raw, dict):
         raise RiptideConfigError("`environments` must be an object")
     stage = raw.get("production_stage", DEFAULT_PRODUCTION_STAGE)
     if not isinstance(stage, str) or not stage.strip():
         raise RiptideConfigError("`environments.production_stage` must be a non-empty string")
-    return EnvironmentConfig(production_stage=stage.strip().lower())
+    production_stage = stage.strip().lower()
+
+    raw_ignored = raw.get("ignored_stages", [])
+    if not isinstance(raw_ignored, list):
+        raise RiptideConfigError("`environments.ignored_stages` must be a list of strings")
+    ignored: set[str] = set()
+    for item in raw_ignored:
+        if not isinstance(item, str) or not item.strip():
+            raise RiptideConfigError(
+                "`environments.ignored_stages` entries must be non-empty strings"
+            )
+        ignored.add(item.strip().lower())
+    if production_stage in ignored:
+        raise RiptideConfigError(
+            f"`environments.production_stage` ({production_stage!r}) cannot also appear "
+            "in `environments.ignored_stages`"
+        )
+    return EnvironmentConfig(
+        production_stage=production_stage,
+        ignored_stages=frozenset(ignored),
+    )
 
 
 def _build_config(data: dict[str, Any]) -> RiptideConfig:
