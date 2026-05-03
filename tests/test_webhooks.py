@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import json
 from pathlib import Path
 from typing import Any
@@ -7,51 +9,93 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from _keys import CHECKOUT_TOKEN
+from _keys import (
+    CHECKOUT_ARGOCD,
+    CHECKOUT_BITBUCKET,
+    CHECKOUT_JENKINS,
+)
 from riptide_collector.models import ArgoCDEvent, BitbucketEvent, PipelineEvent
 
 FIXTURES = Path(__file__).parent / "fixtures"
-AUTH = {"Authorization": f"Bearer {CHECKOUT_TOKEN}"}
+ARGOCD_AUTH = {"Authorization": f"Bearer {CHECKOUT_ARGOCD}"}
+PIPELINE_AUTH = {"Authorization": f"Bearer {CHECKOUT_JENKINS}"}
 
 
 def _load(name: str) -> dict[str, Any]:
     return json.loads((FIXTURES / name).read_text())
 
 
-class TestAuth:
-    async def test_missing_authorization_returns_401(self, client: AsyncClient) -> None:
-        response = await client.post("/webhooks/bitbucket", json={})
+def _sign(secret: str, body: bytes) -> str:
+    return "sha256=" + hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+
+
+def post_bitbucket(
+    client: AsyncClient,
+    payload: Any,
+    *,
+    team: str = "checkout",
+    secret: str = CHECKOUT_BITBUCKET,
+    extra_headers: dict[str, str] | None = None,
+):
+    """Helper: serialise payload and POST to /webhooks/bitbucket/{team}
+    with a valid X-Hub-Signature so tests don't have to repeat the
+    signing dance.
+    """
+    raw = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "X-Hub-Signature": _sign(secret, raw),
+    }
+    if extra_headers:
+        headers.update(extra_headers)
+    return client.post(f"/webhooks/bitbucket/{team}", content=raw, headers=headers)
+
+
+class TestBitbucketAuth:
+    async def test_missing_signature_returns_401(self, client: AsyncClient) -> None:
+        response = await client.post("/webhooks/bitbucket/checkout", json={})
         assert response.status_code == 401
 
-    async def test_unknown_token_returns_401(self, client: AsyncClient) -> None:
+    async def test_bad_signature_returns_401(self, client: AsyncClient) -> None:
+        raw = b"{}"
         response = await client.post(
-            "/webhooks/bitbucket",
-            json={},
-            headers={"Authorization": "Bearer nope"},
+            "/webhooks/bitbucket/checkout",
+            content=raw,
+            headers={
+                "Content-Type": "application/json",
+                "X-Hub-Signature": "sha256=deadbeef",
+            },
         )
         assert response.status_code == 401
 
-    async def test_malformed_header_returns_401(self, client: AsyncClient) -> None:
+    async def test_unknown_team_returns_401(self, client: AsyncClient) -> None:
+        raw = b"{}"
         response = await client.post(
-            "/webhooks/bitbucket",
-            json={},
-            headers={"Authorization": CHECKOUT_TOKEN},
+            "/webhooks/bitbucket/ghost",
+            content=raw,
+            headers={
+                "Content-Type": "application/json",
+                "X-Hub-Signature": _sign(CHECKOUT_BITBUCKET, raw),
+            },
         )
         assert response.status_code == 401
 
 
 class TestBitbucketWebhook:
-    async def test_pr_merged_inserted_with_team_from_caller(
+    async def test_pr_merged_inserted_with_team_from_path(
         self,
         client: AsyncClient,
         session_factory: async_sessionmaker[AsyncSession],
     ) -> None:
-        del session_factory  # the client uses its own factory; we query via a fresh one
+        del session_factory
         payload = _load("bitbucket_pr_merged.json")
-        response = await client.post(
-            "/webhooks/bitbucket",
-            json=payload,
-            headers={**AUTH, "X-Request-UUID": "uuid-1", "X-Event-Key": "pullrequest:fulfilled"},
+        response = await post_bitbucket(
+            client,
+            payload,
+            extra_headers={
+                "X-Request-UUID": "uuid-1",
+                "X-Event-Key": "pullrequest:fulfilled",
+            },
         )
         assert response.status_code == 202
 
@@ -73,11 +117,7 @@ class TestBitbucketWebhook:
     ) -> None:
         del session_factory
         payload = _load("bitbucket_renovate_pr.json")
-        response = await client.post(
-            "/webhooks/bitbucket",
-            json=payload,
-            headers={**AUTH, "X-Request-UUID": "uuid-r"},
-        )
+        response = await post_bitbucket(client, payload, extra_headers={"X-Request-UUID": "uuid-r"})
         assert response.status_code == 202
 
         async with self._fresh_session_factory(client)() as session:
@@ -92,9 +132,8 @@ class TestBitbucketWebhook:
     ) -> None:
         del session_factory
         payload = _load("bitbucket_pr_merged.json")
-        headers = {**AUTH, "X-Request-UUID": "dup-1"}
-        r1 = await client.post("/webhooks/bitbucket", json=payload, headers=headers)
-        r2 = await client.post("/webhooks/bitbucket", json=payload, headers=headers)
+        r1 = await post_bitbucket(client, payload, extra_headers={"X-Request-UUID": "dup-1"})
+        r2 = await post_bitbucket(client, payload, extra_headers={"X-Request-UUID": "dup-1"})
         assert r1.status_code == 202
         assert r2.status_code == 202
 
@@ -110,10 +149,8 @@ class TestBitbucketWebhook:
         del session_factory
         payload = _load("bitbucket_pr_merged.json")
         payload["repository"]["full_name"] = "ACME/Payments-API"
-        response = await client.post(
-            "/webhooks/bitbucket",
-            json=payload,
-            headers={**AUTH, "X-Request-UUID": "uuid-upper"},
+        response = await post_bitbucket(
+            client, payload, extra_headers={"X-Request-UUID": "uuid-upper"}
         )
         assert response.status_code == 202
 
@@ -121,7 +158,7 @@ class TestBitbucketWebhook:
             row = (await session.execute(select(BitbucketEvent))).scalar_one()
             assert row.repo_full_name == "acme/payments-api"
 
-    async def test_unknown_repo_still_recorded_with_caller_team(
+    async def test_unknown_repo_still_recorded_with_team_from_path(
         self,
         client: AsyncClient,
         session_factory: async_sessionmaker[AsyncSession],
@@ -129,10 +166,8 @@ class TestBitbucketWebhook:
         del session_factory
         payload = _load("bitbucket_pr_merged.json")
         payload["repository"]["full_name"] = "ghost/repo"
-        response = await client.post(
-            "/webhooks/bitbucket",
-            json=payload,
-            headers={**AUTH, "X-Request-UUID": "ghost-1"},
+        response = await post_bitbucket(
+            client, payload, extra_headers={"X-Request-UUID": "ghost-1"}
         )
         assert response.status_code == 202
 
@@ -154,7 +189,7 @@ class TestPipelineWebhook:
         response = await client.post(
             "/webhooks/pipeline",
             json=payload,
-            headers=AUTH,
+            headers=PIPELINE_AUTH,
         )
         assert response.status_code == 202
 
@@ -172,7 +207,7 @@ class TestPipelineWebhook:
         response = await client.post(
             "/webhooks/pipeline",
             json=payload,
-            headers=AUTH,
+            headers=PIPELINE_AUTH,
         )
         assert response.status_code == 202
 
@@ -186,7 +221,7 @@ class TestPipelineWebhook:
     async def test_uppercase_commit_sha_normalised_to_lowercase(self, client: AsyncClient) -> None:
         payload = _load("pipeline_jenkins_completed.json")
         payload["commit_sha"] = payload["commit_sha"].upper()
-        response = await client.post("/webhooks/pipeline", json=payload, headers=AUTH)
+        response = await client.post("/webhooks/pipeline", json=payload, headers=PIPELINE_AUTH)
         assert response.status_code == 202
 
         factory = TestBitbucketWebhook._fresh_session_factory(client)
@@ -200,8 +235,8 @@ class TestPipelineWebhook:
         jenkins = _load("pipeline_jenkins_completed.json")
         tekton = _load("pipeline_tekton_completed.json")
         tekton["run_id"] = jenkins["run_id"]  # force collision attempt
-        r1 = await client.post("/webhooks/pipeline", json=jenkins, headers=AUTH)
-        r2 = await client.post("/webhooks/pipeline", json=tekton, headers=AUTH)
+        r1 = await client.post("/webhooks/pipeline", json=jenkins, headers=PIPELINE_AUTH)
+        r2 = await client.post("/webhooks/pipeline", json=tekton, headers=PIPELINE_AUTH)
         assert r1.status_code == r2.status_code == 202
 
         factory = TestBitbucketWebhook._fresh_session_factory(client)
@@ -212,7 +247,7 @@ class TestPipelineWebhook:
     async def test_missing_required_field_returns_422(self, client: AsyncClient) -> None:
         payload = _load("pipeline_jenkins_completed.json")
         del payload["commit_sha"]
-        response = await client.post("/webhooks/pipeline", json=payload, headers=AUTH)
+        response = await client.post("/webhooks/pipeline", json=payload, headers=PIPELINE_AUTH)
         assert response.status_code == 422
 
 
@@ -222,7 +257,7 @@ class TestArgoCDWebhook:
         response = await client.post(
             "/webhooks/argocd",
             json=payload,
-            headers=AUTH,
+            headers=ARGOCD_AUTH,
         )
         assert response.status_code == 202
 
@@ -241,7 +276,7 @@ class TestArgoCDWebhook:
     ) -> None:
         payload = _load("argocd_synced.json")
         del payload["destination_namespace"]
-        response = await client.post("/webhooks/argocd", json=payload, headers=AUTH)
+        response = await client.post("/webhooks/argocd", json=payload, headers=ARGOCD_AUTH)
         assert response.status_code == 202
 
         factory = TestBitbucketWebhook._fresh_session_factory(client)
@@ -253,7 +288,7 @@ class TestArgoCDWebhook:
     async def test_environment_extracted_from_namespace_suffix(self, client: AsyncClient) -> None:
         payload = _load("argocd_synced.json")
         payload["destination_namespace"] = "checkout-intg"
-        response = await client.post("/webhooks/argocd", json=payload, headers=AUTH)
+        response = await client.post("/webhooks/argocd", json=payload, headers=ARGOCD_AUTH)
         assert response.status_code == 202
 
         factory = TestBitbucketWebhook._fresh_session_factory(client)
@@ -265,7 +300,7 @@ class TestArgoCDWebhook:
         payload = _load("argocd_synced.json")
         # commit SHAs sometimes arrive uppercase from non-git tools
         payload["revision"] = payload["revision"].upper()
-        response = await client.post("/webhooks/argocd", json=payload, headers=AUTH)
+        response = await client.post("/webhooks/argocd", json=payload, headers=ARGOCD_AUTH)
         assert response.status_code == 202
 
         factory = TestBitbucketWebhook._fresh_session_factory(client)
@@ -276,14 +311,14 @@ class TestArgoCDWebhook:
     async def test_missing_revision_returns_422(self, client: AsyncClient) -> None:
         payload = _load("argocd_synced.json")
         del payload["revision"]
-        response = await client.post("/webhooks/argocd", json=payload, headers=AUTH)
+        response = await client.post("/webhooks/argocd", json=payload, headers=ARGOCD_AUTH)
         assert response.status_code == 422
 
     async def test_ignored_stage_is_dropped(self, client_with_ignored_stages: AsyncClient) -> None:
         payload = _load("argocd_synced.json")
         payload["destination_namespace"] = "checkout-dev"
         response = await client_with_ignored_stages.post(
-            "/webhooks/argocd", json=payload, headers=AUTH
+            "/webhooks/argocd", json=payload, headers=ARGOCD_AUTH
         )
         assert response.status_code == 202
         assert response.json() == {"status": "ignored"}
@@ -299,7 +334,7 @@ class TestArgoCDWebhook:
         payload = _load("argocd_synced.json")
         payload["destination_namespace"] = "checkout-prod"
         response = await client_with_ignored_stages.post(
-            "/webhooks/argocd", json=payload, headers=AUTH
+            "/webhooks/argocd", json=payload, headers=ARGOCD_AUTH
         )
         assert response.status_code == 202
         assert response.json() == {"status": "accepted"}
@@ -311,14 +346,17 @@ class TestArgoCDWebhook:
 
 
 @pytest.mark.parametrize(
-    "endpoint,payload",
+    "endpoint,payload,auth",
     [
-        ("/webhooks/pipeline", {"pipeline_name": "x"}),
-        ("/webhooks/argocd", {"app_name": "x"}),
+        ("/webhooks/pipeline", {"pipeline_name": "x"}, PIPELINE_AUTH),
+        ("/webhooks/argocd", {"app_name": "x"}, ARGOCD_AUTH),
     ],
 )
 async def test_invalid_schemas_return_422(
-    client: AsyncClient, endpoint: str, payload: dict[str, Any]
+    client: AsyncClient,
+    endpoint: str,
+    payload: dict[str, Any],
+    auth: dict[str, str],
 ) -> None:
-    response = await client.post(endpoint, json=payload, headers=AUTH)
+    response = await client.post(endpoint, json=payload, headers=auth)
     assert response.status_code == 422

@@ -10,11 +10,15 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from _keys import CHECKOUT_TOKEN, PLATFORM_TOKEN
+from _keys import (
+    CHECKOUT_ARGOCD,
+    CHECKOUT_NOERGLER,
+    PLATFORM_NOERGLER,
+)
 from riptide_collector.models import NoerglerEvent
 
 FIXTURES = Path(__file__).parent / "fixtures"
-AUTH = {"Authorization": f"Bearer {CHECKOUT_TOKEN}"}
+AUTH = {"Authorization": f"Bearer {CHECKOUT_NOERGLER}"}
 
 
 def _load(name: str) -> dict[str, Any]:
@@ -34,7 +38,7 @@ class TestAuthPing:
         assert body["team"] == "checkout"
 
     async def test_platform_bearer_resolves_to_platform(self, client: AsyncClient) -> None:
-        r = await client.get("/auth/ping", headers={"Authorization": f"Bearer {PLATFORM_TOKEN}"})
+        r = await client.get("/auth/ping", headers={"Authorization": f"Bearer {PLATFORM_NOERGLER}"})
         assert r.status_code == 200
         assert r.json()["team"] == "platform"
 
@@ -48,8 +52,14 @@ class TestAuthPing:
 
     async def test_non_bearer_scheme_returns_401(self, client: AsyncClient) -> None:
         # Must reject Basic / token / raw — only "Bearer <token>" is valid.
-        r = await client.get("/auth/ping", headers={"Authorization": f"Basic {CHECKOUT_TOKEN}"})
+        r = await client.get("/auth/ping", headers={"Authorization": f"Basic {CHECKOUT_NOERGLER}"})
         assert r.status_code == 401
+
+    async def test_any_source_token_accepted_on_ping(self, client: AsyncClient) -> None:
+        # /auth/ping uses lookup_any_source — any per-source token works.
+        r = await client.get("/auth/ping", headers={"Authorization": f"Bearer {CHECKOUT_ARGOCD}"})
+        assert r.status_code == 200
+        assert r.json()["team"] == "checkout"
 
 
 class TestAuthRejection:

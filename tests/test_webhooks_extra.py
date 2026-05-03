@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from riptide_collector.models import BitbucketEvent
-from test_webhooks import AUTH, TestBitbucketWebhook
+from test_webhooks import ARGOCD_AUTH, PIPELINE_AUTH, TestBitbucketWebhook, post_bitbucket
 
 
 async def test_push_event_with_revert_commit(
@@ -33,10 +33,8 @@ async def test_push_event_with_revert_commit(
         },
         "date": "2026-04-28T12:00:00Z",
     }
-    response = await client.post(
-        "/webhooks/bitbucket",
-        json=payload,
-        headers={**AUTH, "X-Request-UUID": "push-revert"},
+    response = await post_bitbucket(
+        client, payload, extra_headers={"X-Request-UUID": "push-revert"}
     )
     assert response.status_code == 202
 
@@ -50,10 +48,8 @@ async def test_push_event_with_revert_commit(
 
 
 async def test_non_object_payload_ignored(client: AsyncClient) -> None:
-    response = await client.post(
-        "/webhooks/bitbucket",
-        json=["not", "an", "object"],
-        headers={**AUTH, "X-Request-UUID": "list-1"},
+    response = await post_bitbucket(
+        client, ["not", "an", "object"], extra_headers={"X-Request-UUID": "list-1"}
     )
     assert response.status_code == 202
     assert response.json()["status"] == "ignored"
@@ -71,9 +67,9 @@ async def test_argocd_phase_transitions_create_distinct_rows(
     running = {**base, "operation_phase": "Running"}
     succeeded = {**base, "operation_phase": "Succeeded", "finished_at": "2026-04-28T10:09:45Z"}
 
-    r1 = await client.post("/webhooks/argocd", json=running, headers=AUTH)
-    r2 = await client.post("/webhooks/argocd", json=succeeded, headers=AUTH)
-    r3 = await client.post("/webhooks/argocd", json=succeeded, headers=AUTH)  # retry of phase 2
+    r1 = await client.post("/webhooks/argocd", json=running, headers=ARGOCD_AUTH)
+    r2 = await client.post("/webhooks/argocd", json=succeeded, headers=ARGOCD_AUTH)
+    r3 = await client.post("/webhooks/argocd", json=succeeded, headers=ARGOCD_AUTH)
     assert r1.status_code == r2.status_code == r3.status_code == 202
 
     from riptide_collector.models import ArgoCDEvent
@@ -99,7 +95,7 @@ async def test_pipeline_naive_timestamps_normalised_to_utc(
         "started_at": "2026-04-28T10:00:00",
         "finished_at": "2026-04-28T10:01:00",
     }
-    response = await client.post("/webhooks/pipeline", json=payload, headers=AUTH)
+    response = await client.post("/webhooks/pipeline", json=payload, headers=PIPELINE_AUTH)
     assert response.status_code == 202
 
     from riptide_collector.models import PipelineEvent
@@ -124,8 +120,8 @@ async def test_synth_delivery_id_when_no_uuid(
         },
         "date": "2026-04-28T13:00:00Z",
     }
-    r1 = await client.post("/webhooks/bitbucket", json=payload, headers=AUTH)
-    r2 = await client.post("/webhooks/bitbucket", json=payload, headers=AUTH)
+    r1 = await post_bitbucket(client, payload)
+    r2 = await post_bitbucket(client, payload)
     assert r1.status_code == 202
     assert r2.status_code == 202
 

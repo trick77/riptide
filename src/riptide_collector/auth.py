@@ -1,37 +1,33 @@
-import base64
-import binascii
 from collections.abc import Awaitable, Callable
 
 from fastapi import Header, HTTPException, status
 
 from riptide_collector.logging_config import get_logger
-from riptide_collector.team_keys import TeamKeysStore
+from riptide_collector.team_keys import KNOWN_SOURCES, TeamKeysStore
 
 logger = get_logger(__name__)
 
 
 def make_team_bearer_dependency(
     team_keys: TeamKeysStore,
+    source: str,
 ) -> Callable[[str | None], Awaitable[str]]:
-    """Build a FastAPI dependency that authenticates a request and returns
-    the calling team's name.
+    """Build a FastAPI dependency that authenticates a Bearer-token request
+    against the team's *source-specific* secret and returns the team name.
 
-    Accepts two Authorization schemes:
-      * `Bearer <RAW_TOKEN>` — canonical form used by ArgoCD, Tekton,
-        Jenkins notification configs.
-      * `Basic <b64(team:RAW_TOKEN)>` — used by Bitbucket Data Center, which
-        only emits auth when credentials are embedded in the webhook URL
-        (`https://team:token@host/...`). The username is informational; the
-        password is the same raw team token Bearer accepts. A mismatch
-        between the claimed username and the team resolved from the token
-        is logged as a warning (not a 401) so a typo'd webhook URL surfaces
-        without dropping deliveries.
+    Strict source binding: a token registered under one source cannot
+    authenticate an endpoint that requires a different source. This
+    contains the blast radius of a leaked secret to a single source.
 
-    The dependency:
-      * 401s on missing / malformed Authorization header
-      * 401s on unknown / wrong credentials
-      * returns the team name (str) on success
+    The special pseudo-source `"any"` accepts any of the team's per-source
+    secrets and is used by the source-agnostic `/auth/ping` reachability
+    check.
+
+    Bitbucket is *not* covered by this dependency: BBS is HMAC-only
+    (`/webhooks/bitbucket/{team}` validates `X-Hub-Signature` directly).
     """
+    if source not in KNOWN_SOURCES and source != "any":
+        raise ValueError(f"unknown source {source!r}; allowed: {sorted(KNOWN_SOURCES)} or 'any'")
 
     async def verify_team_bearer(
         authorization: str | None = Header(default=None),
@@ -43,49 +39,29 @@ def make_team_bearer_dependency(
             )
 
         scheme, _, value = authorization.partition(" ")
-        scheme_lower = scheme.lower()
-        claimed_user: str | None = None
+        if scheme.lower() != "bearer":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing or malformed Authorization header.",
+            )
 
-        if scheme_lower == "bearer":
-            token = value.strip()
-            if not token:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Missing or malformed Authorization header.",
-                )
-        elif scheme_lower == "basic":
-            try:
-                decoded = base64.b64decode(value.strip(), validate=True).decode("utf-8")
-            except (binascii.Error, ValueError, UnicodeDecodeError) as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Malformed Basic credentials.",
-                ) from exc
-            if ":" not in decoded:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Malformed Basic credentials.",
-                )
-            claimed_user, _, token = decoded.partition(":")
-        else:
+        token = value.strip()
+        if not token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Missing or malformed Authorization header.",
             )
 
         team_keys.maybe_reload()
-        team = team_keys.lookup(token)
+        team = (
+            team_keys.lookup_any_source(token)
+            if source == "any"
+            else team_keys.lookup(token, source)
+        )
         if team is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials.",
-            )
-
-        if claimed_user and claimed_user != team:
-            logger.warning(
-                "basic_auth_user_team_mismatch",
-                claimed=claimed_user,
-                resolved=team,
             )
 
         return team

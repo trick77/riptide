@@ -29,9 +29,14 @@ per-pipeline aggregations use `pipeline_name`.
 ## Per-team token
 
 Each team has its own bearer (the platform team hands it out — see
-`docs/onboarding-a-team.md`). For shared Jenkins instances, scope each
-folder's `RIPTIDE_TOKEN` credential to that folder so jobs see only their
-team's token. The token identifies the team; do not share across teams.
+`docs/onboarding-a-team.md`). Use the team's **`jenkins`** entry from
+`team-keys.json` — the same key authenticates Tekton's `EventListener`
+since both share `/webhooks/pipeline`. ArgoCD / Bitbucket keys are
+rejected here (strict source binding).
+
+For shared Jenkins instances, scope each folder's `RIPTIDE_TOKEN`
+credential to that folder so jobs see only their team's token. The token
+identifies the team; do not share across teams.
 
 ## Jenkinsfile snippet
 
