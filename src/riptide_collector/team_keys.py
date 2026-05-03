@@ -1,22 +1,26 @@
 """Team bearer-key store with mtime-based hot reload.
 
-Maps team name → sha256 hex of the raw bearer token. Raw keys never touch
-disk; only their hashes do. Lookup hashes the incoming token and uses
-constant-time comparison.
+Maps team name → raw bearer token. Lookup walks every entry with
+`hmac.compare_digest` so the wall time of an authentication doesn't leak
+which team's token was the closest match.
 
 File shape:
     {
-      "<team-name>": "<64-char sha256 hex>",
+      "<team-name>": "<raw-token>",
       ...
     }
+
+The file lives inside a Kubernetes Secret in production. There is no
+on-disk hashing layer: storing raw tokens here matches what already lives
+in argocd-notifications-secret and means there's only one representation
+of the credential to keep straight (raw on the wire, raw on disk, raw in
+this file).
 """
 
 from __future__ import annotations
 
-import hashlib
 import hmac
 import json
-import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -24,8 +28,6 @@ from typing import Any
 from riptide_collector.logging_config import get_logger
 
 logger = get_logger(__name__)
-
-_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class TeamKeysError(ValueError):
@@ -39,10 +41,8 @@ def _validate(data: Any) -> dict[str, str]:
     for team, value in data.items():
         if not isinstance(team, str) or not team:
             raise TeamKeysError("team key must be a non-empty string")
-        if not isinstance(value, str) or not _HASH_RE.match(value):
-            raise TeamKeysError(
-                f"team {team!r} has invalid hash: expected 64-char lowercase sha256 hex"
-            )
+        if not isinstance(value, str) or not value:
+            raise TeamKeysError(f"team {team!r} has invalid value: expected a non-empty string")
         out[team] = value
     return out
 
@@ -51,10 +51,6 @@ def load_team_keys_from_path(path: Path) -> dict[str, str]:
     with path.open("r", encoding="utf-8") as fh:
         data = json.load(fh)
     return _validate(data)
-
-
-def _hash(raw: str) -> str:
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 class TeamKeysStore:
@@ -67,8 +63,6 @@ class TeamKeysStore:
         self._path = path
         self._lock = threading.RLock()
         self._keys = load_team_keys_from_path(path)
-        # Reverse index: hash -> team. Built once per load; lookups are O(1).
-        self._by_hash = {h: team for team, h in self._keys.items()}
         self._mtime = path.stat().st_mtime
         self._reload_failures = 0
 
@@ -87,22 +81,20 @@ class TeamKeysStore:
     def lookup(self, raw_token: str | None) -> str | None:
         """Return the team name for a raw bearer token, or None if no match.
 
-        Always runs `hmac.compare_digest` against every stored hash and
+        Always runs `hmac.compare_digest` against every stored value and
         defers the return until the loop completes — this prevents a timing
         side-channel from leaking *which* team matched (or how far down the
-        dict iteration order it sits). Total work is constant in the
-        team count (which is public anyway). Bearer length is not leaked
-        because we hash the candidate first.
+        dict iteration order it sits). Total work is constant in the team
+        count (which is public anyway).
         """
         if not raw_token:
             return None
-        candidate = _hash(raw_token)
         match: str | None = None
         with self._lock:
-            for stored_hash, team in self._by_hash.items():
+            for team, stored in self._keys.items():
                 # Bitwise OR via short-circuit-free assignment: every iteration
                 # runs compare_digest regardless of prior matches.
-                if hmac.compare_digest(candidate, stored_hash):
+                if hmac.compare_digest(raw_token, stored):
                     match = team
         return match
 
@@ -133,7 +125,6 @@ class TeamKeysStore:
                 self._reload_failures += 1
                 return False
             self._keys = new_keys
-            self._by_hash = {h: team for team, h in new_keys.items()}
             self._mtime = mtime
             logger.info("team_keys_reloaded", teams=len(new_keys))
             return True
