@@ -17,12 +17,13 @@ resolved from, in order:
 
 See scripts/bitbucket-onboarding.env.example for a template.
 
-Auth on the inbound side: BBS DC's webhook config does not honour custom HTTP
-headers (the `configuration.headers` field is ignored / errors). Instead this
-script embeds Basic-auth credentials directly into the webhook URL — BBS
-forwards those as `Authorization: Basic <b64(team:RAW_TEAM_KEY)>`. Riptide's
-auth dep accepts both Bearer (existing tooling) and Basic (this path).
-RIPTIDE_TEAM_KEY is the same raw token the team uses elsewhere (ArgoCD, etc.).
+Auth on the inbound side: BBS DC's webhook config does not honour custom
+HTTP headers (`configuration.headers` is ignored / errors). It does honour
+its own top-level `credentials` block (`{username, password}`), which BBS
+sends to the webhook URL as `Authorization: Basic <b64(username:password)>`.
+This script writes that block; riptide's auth dep accepts Basic alongside
+Bearer. RIPTIDE_TEAM_KEY is the same raw token the team uses elsewhere
+(ArgoCD, etc.).
 
 This script is intentionally stdlib-only so it can run on any host with Python
 3.10+ without a venv or `pip install`.
@@ -103,22 +104,18 @@ def _load_env_file(path: Path) -> dict[str, str]:
     return env
 
 
-def resolve_secrets(env_file: Path | None) -> tuple[str, str]:
-    """Return (BITBUCKET_TOKEN, RIPTIDE_TEAM_KEY).
-
-    Precedence (first match wins): process env > cwd .env > --env-file.
-    Raises SystemExit on missing.
-    """
+def _resolve_env(env_file: Path | None, required: tuple[str, ...]) -> dict[str, str]:
+    """Load `required` env vars from process env > .env in CWD > --env-file."""
     merged: dict[str, str] = {}
     if env_file is not None:
         merged.update(_load_env_file(env_file))
     merged.update(_load_env_file(Path.cwd() / ".env"))
-    for k in ("BITBUCKET_TOKEN", "RIPTIDE_TEAM_KEY"):
+    for k in required:
         value = os.environ.get(k)
         if value:
             merged[k] = value
 
-    missing = [k for k in ("BITBUCKET_TOKEN", "RIPTIDE_TEAM_KEY") if not merged.get(k)]
+    missing = [k for k in required if not merged.get(k)]
     if missing:
         sys.stderr.write(
             "ERROR: missing required environment variable(s): "
@@ -126,7 +123,18 @@ def resolve_secrets(env_file: Path | None) -> tuple[str, str]:
             + "\nSet them in the process env, a .env in CWD, or pass --env-file.\n"
         )
         raise SystemExit(2)
+    return merged
+
+
+def resolve_secrets(env_file: Path | None) -> tuple[str, str]:
+    """Return (BITBUCKET_TOKEN, RIPTIDE_TEAM_KEY) for the onboard/remove paths."""
+    merged = _resolve_env(env_file, ("BITBUCKET_TOKEN", "RIPTIDE_TEAM_KEY"))
     return merged["BITBUCKET_TOKEN"], merged["RIPTIDE_TEAM_KEY"]
+
+
+def resolve_discover_secrets(env_file: Path | None) -> str:
+    """Return BITBUCKET_TOKEN for the --discover path (no RIPTIDE_TEAM_KEY needed)."""
+    return _resolve_env(env_file, ("BITBUCKET_TOKEN",))["BITBUCKET_TOKEN"]
 
 
 def _mask(secret: str) -> str:
@@ -323,6 +331,32 @@ class BitbucketHTTP:
             f"/rest/api/1.0/projects/{project}/repos/{repo}/webhooks/{webhook_id}",
         )
 
+    def list_admin_repos(self) -> list[tuple[str, str]]:
+        """Return [(project_key, repo_slug), ...] for every repo the
+        authenticated user has REPO_ADMIN permission on. Paginated.
+        """
+        out: list[tuple[str, str]] = []
+        start = 0
+        while True:
+            resp = self._request(
+                "GET",
+                "/rest/api/1.0/repos",
+                params={"permission": "REPO_ADMIN", "start": start, "limit": 100},
+            )
+            page = resp.json()
+            for entry in page.get("values") or []:
+                project = (entry.get("project") or {}).get("key")
+                slug = entry.get("slug")
+                if isinstance(project, str) and isinstance(slug, str):
+                    out.append((project, slug))
+            if page.get("isLastPage", True):
+                break
+            next_start = page.get("nextPageStart")
+            if not isinstance(next_start, int) or next_start <= start:
+                break
+            start = next_start
+        return out
+
 
 # --------------------------------------------------------------------------- #
 # Onboarder
@@ -353,7 +387,6 @@ class RepoOnboarder:
         self.team_key = team_key
         self.webhook_name = webhook_name
         self.dry_run = dry_run
-        self._authed_url = _embed_basic_auth(webhook_url, team, team_key)
 
     # -- Step 1 -- #
     def verify_permissions(self, spec: RepoSpec) -> None:
@@ -370,26 +403,28 @@ class RepoOnboarder:
 
     # -- Step 2 -- #
     def _build_webhook_body(self) -> dict[str, Any]:
-        # BBS DC's built-in webhook ignores `configuration.headers` (verified
-        # by HTTP 500 on create against BBS 8.x). Auth is delivered instead via
-        # HTTP Basic in the webhook URL itself: BBS forwards
-        # `https://user:pass@host/...` as `Authorization: Basic <b64(user:pass)>`.
+        # BBS DC stores Basic-auth creds in a top-level `credentials` block
+        # (sibling of `configuration`, not nested). On the wire BBS sends
+        # `Authorization: Basic <b64(username:password)>` to the webhook URL.
+        # `configuration.headers` is silently dropped (and on some versions
+        # 500s), which is why we don't put auth there.
         return {
             "name": self.webhook_name,
-            "url": self._authed_url,
+            "url": self.webhook_url,
             "active": True,
             "events": list(REQUIRED_WEBHOOK_EVENTS),
             "configuration": {},
+            "credentials": {
+                "username": self.team,
+                "password": self.team_key,
+            },
             "sslVerificationRequired": True,
         }
 
     def _diff_webhook(self, existing: dict[str, Any]) -> list[str]:
         diffs: list[str] = []
-        # BBS may echo back the URL with userinfo redacted (or missing). Compare
-        # only the credential-free form to avoid spurious diffs.
-        existing_url = _strip_userinfo(existing.get("url"))
-        if existing_url != self.webhook_url:
-            diffs.append(f"url: {existing_url!r} -> {self.webhook_url!r}")
+        if existing.get("url") != self.webhook_url:
+            diffs.append(f"url: {existing.get('url')!r} -> {self.webhook_url!r}")
         existing_events = set(existing.get("events") or [])
         required = set(REQUIRED_WEBHOOK_EVENTS)
         if existing_events != required:
@@ -398,12 +433,17 @@ class RepoOnboarder:
             diffs.append(f"events: missing={missing} extra={extra}")
         if not existing.get("active", True):
             diffs.append("active: False -> True")
-        # Userinfo on the existing URL is what carries the Basic creds. BBS
-        # redacts it on read-back, so we can't compare values; only flag if
-        # absent entirely. Rotate creds by --remove + fresh onboard.
-        existing_userinfo_present = _has_userinfo(existing.get("url"))
-        if not existing_userinfo_present:
-            diffs.append("url userinfo (Basic creds): (unset) -> (set)")
+        # BBS returns `credentials.username` on read-back but redacts the
+        # password (omitted from the response). Diff what we can see:
+        # username equality + password presence (presence only, since BBS
+        # never echoes the value).
+        existing_creds = existing.get("credentials") or {}
+        if existing_creds.get("username") != self.team:
+            diffs.append(
+                f"credentials.username: {existing_creds.get('username')!r} -> {self.team!r}"
+            )
+        if not existing_creds:
+            diffs.append("credentials: (unset) -> (set)")
         return diffs
 
     def upsert_webhook(self, spec: RepoSpec) -> tuple[int, list[str]]:
@@ -500,49 +540,13 @@ class RepoOnboarder:
         return RepoResult(spec, "ok", detail=f"webhook removed: id={webhook_id}")
 
 
-def _embed_basic_auth(url: str, user: str, password: str) -> str:
-    """Splice `<user>:<percent-encoded password>` into the netloc of `url`.
-
-    Raw team tokens may contain `/`, `+`, `=` etc. (typical of base64-shaped
-    secrets), which would corrupt the URL if pasted unescaped — so we
-    percent-encode the password with `safe=""`. The username is encoded the
-    same way for symmetry.
-    """
-    parts = urllib.parse.urlsplit(url)
-    if not parts.netloc:
-        raise SystemExit(f"ERROR: cannot embed credentials into URL {url!r}")
-    host = parts.hostname or ""
-    port = f":{parts.port}" if parts.port is not None else ""
-    creds = f"{urllib.parse.quote(user, safe='')}:{urllib.parse.quote(password, safe='')}"
-    new_netloc = f"{creds}@{host}{port}"
-    return urllib.parse.urlunsplit(
-        (parts.scheme, new_netloc, parts.path, parts.query, parts.fragment)
-    )
-
-
-def _strip_userinfo(url: Any) -> str | None:
-    if not isinstance(url, str) or not url:
-        return None
-    parts = urllib.parse.urlsplit(url)
-    host = parts.hostname or ""
-    port = f":{parts.port}" if parts.port is not None else ""
-    return urllib.parse.urlunsplit(
-        (parts.scheme, f"{host}{port}", parts.path, parts.query, parts.fragment)
-    )
-
-
-def _has_userinfo(url: Any) -> bool:
-    if not isinstance(url, str) or not url:
-        return False
-    return urllib.parse.urlsplit(url).username is not None
-
-
 def _redact(body: dict[str, Any]) -> dict[str, Any]:
     copy = dict(body)
-    raw_url = copy.get("url")
-    if isinstance(raw_url, str) and _has_userinfo(raw_url):
-        stripped = _strip_userinfo(raw_url) or raw_url
-        copy["url"] = f"{stripped}  (+ Basic auth: ***)"
+    creds = copy.get("credentials")
+    if isinstance(creds, dict) and "password" in creds:
+        redacted = dict(creds)
+        redacted["password"] = "***"
+        copy["credentials"] = redacted
     return copy
 
 
@@ -562,7 +566,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "a real PR after onboarding and run scripts/check_onboarding.py."
         ),
     )
-    parser.add_argument("config", type=Path, help="Path to onboarding JSON config")
+    parser.add_argument(
+        "config",
+        type=Path,
+        nargs="?",
+        help="Path to onboarding JSON config (omit when --discover is set)",
+    )
     parser.add_argument(
         "--name",
         default=DEFAULT_WEBHOOK_NAME,
@@ -578,6 +587,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--env-file", type=Path, default=None, help="Additional .env file to read secrets from"
+    )
+    parser.add_argument(
+        "--discover",
+        action="store_true",
+        help="List every repo the BITBUCKET_TOKEN user can REPO_ADMIN on, "
+        "grouped by project, as JSON on stdout. Doesn't onboard anything. "
+        "Logs go to stderr so the output is pipe-clean. Requires "
+        "--bitbucket-url and BITBUCKET_TOKEN; ignores config / RIPTIDE_TEAM_KEY.",
+    )
+    parser.add_argument(
+        "--bitbucket-url",
+        default=None,
+        help="Base URL for --discover (e.g. https://bitbucket.example.com). Ignored otherwise.",
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable DEBUG logging")
     return parser.parse_args(argv)
@@ -642,12 +664,65 @@ def _run(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def _run_discover(args: argparse.Namespace) -> int:
+    """List every repo the BITBUCKET_TOKEN user can REPO_ADMIN on, grouped by
+    project, as JSON on stdout. Logs to stderr so the output is pipe-clean.
+    """
+    if not args.bitbucket_url:
+        sys.stderr.write("ERROR: --discover requires --bitbucket-url\n")
+        return 2
+    parsed = urlparse(args.bitbucket_url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        sys.stderr.write("ERROR: --bitbucket-url must be an https URL\n")
+        return 2
+
+    token = resolve_discover_secrets(args.env_file)
+    logger.info("Bitbucket URL: %s", args.bitbucket_url)
+    logger.info("Bitbucket token loaded: %s", _mask(token))
+
+    client = BitbucketHTTP(base_url=args.bitbucket_url.rstrip("/"), token=token)
+    try:
+        admin_repos = client.list_admin_repos()
+    except HTTPStatusError as exc:
+        logger.error("discover: HTTP %d: %s", exc.status_code, exc.text[:200])
+        return 1
+    except urllib.error.URLError as exc:
+        logger.error("discover: %s", exc)
+        return 1
+
+    by_project: dict[str, list[str]] = {}
+    for project, slug in admin_repos:
+        by_project.setdefault(project, []).append(slug)
+
+    projects = [
+        {"project": project, "repos": sorted(repos)}
+        for project, repos in sorted(by_project.items())
+    ]
+    logger.info(
+        "discover: %d repos across %d projects",
+        sum(len(p["repos"]) for p in projects),
+        len(projects),
+    )
+    json.dump(projects, sys.stdout, indent=2)
+    sys.stdout.write("\n")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    # Discover dumps JSON to stdout; route everything else (logs) to stderr so
+    # the output is pipe-clean.
+    log_stream = sys.stderr if args.discover else None
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        stream=log_stream,
     )
+    if args.discover:
+        return _run_discover(args)
+    if args.config is None:
+        sys.stderr.write("ERROR: config path is required (or pass --discover)\n")
+        return 2
     return _run(args)
 
 
