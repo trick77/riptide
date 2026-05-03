@@ -24,16 +24,29 @@ from _keys import (
 from riptide_collector.models import BitbucketEvent
 
 _BODY: dict[str, Any] = {
-    "repository": {"full_name": "acme/payments-api"},
-    "pullrequest": {
+    "eventKey": "pr:opened",
+    "date": "2026-04-29T10:00:00+0000",
+    "actor": {"name": "alice"},
+    "pullRequest": {
         "id": 1,
         "title": "feat: ABC-1 add x",
-        "source": {
-            "branch": {"name": "feature/ABC-1-add-x"},
-            "commit": {"hash": "deadbeef" * 5},
+        "fromRef": {
+            "displayId": "feature/ABC-1-add-x",
+            "latestCommit": "deadbeef" * 5,
+            "repository": {
+                "slug": "payments-api",
+                "project": {"key": "ACME"},
+            },
         },
+        "toRef": {
+            "displayId": "master",
+            "repository": {
+                "slug": "payments-api",
+                "project": {"key": "ACME"},
+            },
+        },
+        "author": {"user": {"name": "alice"}},
     },
-    "date": "2026-04-29T10:00:00Z",
 }
 
 
