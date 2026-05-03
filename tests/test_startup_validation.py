@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from _keys import TEAM_KEYS, hash_token
+from _keys import TEAM_KEYS
 from riptide_collector.main import StartupValidationError, create_app
 from riptide_collector.settings import Settings
 
@@ -40,7 +40,7 @@ def test_missing_team_key_fails_startup(tmp_path: Path, db_url: str) -> None:
         ],
         "automation": {},
     }
-    keys = {"checkout": hash_token("ck")}  # no entry for "ghost"
+    keys = {"checkout": "ck-raw"}  # no entry for "ghost"
     settings = _settings(config, keys, tmp_path, db_url)
 
     with pytest.raises(StartupValidationError, match="ghost"):

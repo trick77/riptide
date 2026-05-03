@@ -24,9 +24,9 @@ class Settings(BaseSettings):
     )
     team_keys_path: Path = Field(
         default=Path("openshift/collector/team-keys.json"),
-        description="Path to team-keys.json (sha256 hashes of per-team bearer "
-        "tokens). Default points at the in-repo dev sample; production "
-        "overrides via RIPTIDE_TEAM_KEYS_PATH to a Secret mount.",
+        description="Path to team-keys.json (raw per-team bearer tokens). "
+        "Default points at the in-repo dev sample; production overrides via "
+        "RIPTIDE_TEAM_KEYS_PATH to a Secret mount.",
     )
     log_level: str = Field(default="INFO")
     config_reload_seconds: float = Field(

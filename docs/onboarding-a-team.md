@@ -27,23 +27,21 @@ oc -n $NS rollout restart deployment/riptide-collector
 ## 2. Generate the team's bearer key
 
 The bearer authenticates every webhook from the team's CI / notification
-systems. Riptide stores the **sha256 hash** of the key; the raw value goes
-to the team and is never written to disk on the server side.
+systems. Riptide stores the **raw token** in `team-keys.json` (no on-disk
+hashing layer — the file already lives inside a Kubernetes Secret).
 
 ```bash
 RAW=$(openssl rand -base64 32)
 echo "Give to team checkout (one-way handoff): $RAW"
-printf %s "$RAW" | sha256sum | awk '{print $1}'
-# → 64-char hex hash
 ```
 
-Append the hash to the cluster's `team-keys.json` and rotate the Secret:
+Append the raw token to the cluster's `team-keys.json` and rotate the Secret:
 
 ```bash
 # fetch current, edit, push back
 oc -n $NS get secret riptide-collector-team-keys \
    -o jsonpath='{.data.team-keys\.json}' | base64 -d > /tmp/team-keys.json
-# add: "checkout": "<the-hash>"
+# add: "checkout": "<RAW>"
 oc -n $NS create secret generic riptide-collector-team-keys \
    --from-file=team-keys.json=/tmp/team-keys.json \
    --dry-run=client -o yaml | oc apply -f -

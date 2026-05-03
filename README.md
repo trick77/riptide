@@ -143,6 +143,34 @@ the `riptide-collector-secrets` Secret created from
 The local `compose.yaml` runs a throwaway Postgres for development only —
 production deployments connect to the cluster's existing Postgres.
 
+## Authentication: which token form goes where
+
+Each team has **one raw token**. That same value goes into every place
+listed below. There is no hashing layer — `team-keys.json` stores raw
+tokens directly.
+
+| Where the token lives                           | Stored as                              | Wire format riptide sees                                        |
+| ----------------------------------------------- | -------------------------------------- | --------------------------------------------------------------- |
+| `team-keys.json` (riptide Secret)               | raw                                    | n/a — server-side lookup                                        |
+| `argocd-notifications-secret` `stringData`      | raw                                    | `Authorization: Bearer <raw>`                                   |
+| Tekton trigger Secret                           | raw                                    | `Authorization: Bearer <raw>`                                   |
+| Jenkins credentials store                       | raw                                    | `Authorization: Bearer <raw>`                                   |
+| Bitbucket DC webhook `credentials.password`     | raw (BBS handles the b64 itself)       | `Authorization: Basic <b64(team:raw)>`                          |
+| Bitbucket DC webhook `Custom headers` (legacy)  | raw                                    | `Authorization: Bearer <raw>`                                   |
+| Bitbucket onboarding `RIPTIDE_TEAM_KEY` env var | raw                                    | n/a — local script input                                        |
+
+**Two gotchas worth pinning to memory**:
+
+1. **Kubernetes Secret reads** are base64-wrapped. `oc get secret X -o jsonpath='{.data.Y}'` returns the wrapped form — always pipe through `base64 -d` to get the raw value:
+   ```bash
+   oc -n argocd get secret argocd-notifications-secret \
+     -o jsonpath='{.data.riptide-token-checkout}' | base64 -d
+   ```
+   Use `stringData:` (not `data:`) when *writing* — it does the wrap for you.
+2. **Bitbucket Basic auth** is the only place where a base64 form appears on the wire (`Authorization: Basic <b64(user:pass)>`). BBS does the base64 itself — you never type or paste a base64 token by hand for it. Just put the raw value into the `password` field of BBS's webhook `credentials` block.
+
+If you ever paste base64-of-raw where raw is expected, the symptom is `401 {"detail":"Invalid credentials."}` — riptide's `team-keys.json` doesn't contain the wrapped value, so the lookup fails.
+
 ## Documentation
 
 See [`docs/`](docs/) for setup and onboarding guides:
