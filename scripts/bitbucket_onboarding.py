@@ -17,12 +17,13 @@ resolved from, in order:
 
 See scripts/bitbucket-onboarding.env.example for a template.
 
-Auth on the inbound side: BBS DC's webhook config does not honour custom HTTP
-headers (the `configuration.headers` field is ignored / errors). Instead this
-script embeds Basic-auth credentials directly into the webhook URL — BBS
-forwards those as `Authorization: Basic <b64(team:RAW_TEAM_KEY)>`. Riptide's
-auth dep accepts both Bearer (existing tooling) and Basic (this path).
-RIPTIDE_TEAM_KEY is the same raw token the team uses elsewhere (ArgoCD, etc.).
+Auth on the inbound side: BBS DC's webhook config does not honour custom
+HTTP headers (`configuration.headers` is ignored / errors). It does honour
+its own top-level `credentials` block (`{username, password}`), which BBS
+sends to the webhook URL as `Authorization: Basic <b64(username:password)>`.
+This script writes that block; riptide's auth dep accepts Basic alongside
+Bearer. RIPTIDE_TEAM_KEY is the same raw token the team uses elsewhere
+(ArgoCD, etc.).
 
 This script is intentionally stdlib-only so it can run on any host with Python
 3.10+ without a venv or `pip install`.
@@ -353,7 +354,6 @@ class RepoOnboarder:
         self.team_key = team_key
         self.webhook_name = webhook_name
         self.dry_run = dry_run
-        self._authed_url = _embed_basic_auth(webhook_url, team, team_key)
 
     # -- Step 1 -- #
     def verify_permissions(self, spec: RepoSpec) -> None:
@@ -370,26 +370,28 @@ class RepoOnboarder:
 
     # -- Step 2 -- #
     def _build_webhook_body(self) -> dict[str, Any]:
-        # BBS DC's built-in webhook ignores `configuration.headers` (verified
-        # by HTTP 500 on create against BBS 8.x). Auth is delivered instead via
-        # HTTP Basic in the webhook URL itself: BBS forwards
-        # `https://user:pass@host/...` as `Authorization: Basic <b64(user:pass)>`.
+        # BBS DC stores Basic-auth creds in a top-level `credentials` block
+        # (sibling of `configuration`, not nested). On the wire BBS sends
+        # `Authorization: Basic <b64(username:password)>` to the webhook URL.
+        # `configuration.headers` is silently dropped (and on some versions
+        # 500s), which is why we don't put auth there.
         return {
             "name": self.webhook_name,
-            "url": self._authed_url,
+            "url": self.webhook_url,
             "active": True,
             "events": list(REQUIRED_WEBHOOK_EVENTS),
             "configuration": {},
+            "credentials": {
+                "username": self.team,
+                "password": self.team_key,
+            },
             "sslVerificationRequired": True,
         }
 
     def _diff_webhook(self, existing: dict[str, Any]) -> list[str]:
         diffs: list[str] = []
-        # BBS may echo back the URL with userinfo redacted (or missing). Compare
-        # only the credential-free form to avoid spurious diffs.
-        existing_url = _strip_userinfo(existing.get("url"))
-        if existing_url != self.webhook_url:
-            diffs.append(f"url: {existing_url!r} -> {self.webhook_url!r}")
+        if existing.get("url") != self.webhook_url:
+            diffs.append(f"url: {existing.get('url')!r} -> {self.webhook_url!r}")
         existing_events = set(existing.get("events") or [])
         required = set(REQUIRED_WEBHOOK_EVENTS)
         if existing_events != required:
@@ -398,12 +400,17 @@ class RepoOnboarder:
             diffs.append(f"events: missing={missing} extra={extra}")
         if not existing.get("active", True):
             diffs.append("active: False -> True")
-        # Userinfo on the existing URL is what carries the Basic creds. BBS
-        # redacts it on read-back, so we can't compare values; only flag if
-        # absent entirely. Rotate creds by --remove + fresh onboard.
-        existing_userinfo_present = _has_userinfo(existing.get("url"))
-        if not existing_userinfo_present:
-            diffs.append("url userinfo (Basic creds): (unset) -> (set)")
+        # BBS returns `credentials.username` on read-back but redacts the
+        # password (omitted from the response). Diff what we can see:
+        # username equality + password presence (presence only, since BBS
+        # never echoes the value).
+        existing_creds = existing.get("credentials") or {}
+        if existing_creds.get("username") != self.team:
+            diffs.append(
+                f"credentials.username: {existing_creds.get('username')!r} -> {self.team!r}"
+            )
+        if not existing_creds:
+            diffs.append("credentials: (unset) -> (set)")
         return diffs
 
     def upsert_webhook(self, spec: RepoSpec) -> tuple[int, list[str]]:
@@ -500,49 +507,13 @@ class RepoOnboarder:
         return RepoResult(spec, "ok", detail=f"webhook removed: id={webhook_id}")
 
 
-def _embed_basic_auth(url: str, user: str, password: str) -> str:
-    """Splice `<user>:<percent-encoded password>` into the netloc of `url`.
-
-    Raw team tokens may contain `/`, `+`, `=` etc. (typical of base64-shaped
-    secrets), which would corrupt the URL if pasted unescaped — so we
-    percent-encode the password with `safe=""`. The username is encoded the
-    same way for symmetry.
-    """
-    parts = urllib.parse.urlsplit(url)
-    if not parts.netloc:
-        raise SystemExit(f"ERROR: cannot embed credentials into URL {url!r}")
-    host = parts.hostname or ""
-    port = f":{parts.port}" if parts.port is not None else ""
-    creds = f"{urllib.parse.quote(user, safe='')}:{urllib.parse.quote(password, safe='')}"
-    new_netloc = f"{creds}@{host}{port}"
-    return urllib.parse.urlunsplit(
-        (parts.scheme, new_netloc, parts.path, parts.query, parts.fragment)
-    )
-
-
-def _strip_userinfo(url: Any) -> str | None:
-    if not isinstance(url, str) or not url:
-        return None
-    parts = urllib.parse.urlsplit(url)
-    host = parts.hostname or ""
-    port = f":{parts.port}" if parts.port is not None else ""
-    return urllib.parse.urlunsplit(
-        (parts.scheme, f"{host}{port}", parts.path, parts.query, parts.fragment)
-    )
-
-
-def _has_userinfo(url: Any) -> bool:
-    if not isinstance(url, str) or not url:
-        return False
-    return urllib.parse.urlsplit(url).username is not None
-
-
 def _redact(body: dict[str, Any]) -> dict[str, Any]:
     copy = dict(body)
-    raw_url = copy.get("url")
-    if isinstance(raw_url, str) and _has_userinfo(raw_url):
-        stripped = _strip_userinfo(raw_url) or raw_url
-        copy["url"] = f"{stripped}  (+ Basic auth: ***)"
+    creds = copy.get("credentials")
+    if isinstance(creds, dict) and "password" in creds:
+        redacted = dict(creds)
+        redacted["password"] = "***"
+        copy["credentials"] = redacted
     return copy
 
 
