@@ -433,17 +433,12 @@ class RepoOnboarder:
             diffs.append(f"events: missing={missing} extra={extra}")
         if not existing.get("active", True):
             diffs.append("active: False -> True")
-        # BBS returns `credentials.username` on read-back but redacts the
-        # password (omitted from the response). Diff what we can see:
-        # username equality + password presence (presence only, since BBS
-        # never echoes the value).
-        existing_creds = existing.get("credentials") or {}
-        if existing_creds.get("username") != self.team:
-            diffs.append(
-                f"credentials.username: {existing_creds.get('username')!r} -> {self.team!r}"
-            )
-        if not existing_creds:
-            diffs.append("credentials: (unset) -> (set)")
+        # BBS redacts `credentials.password` on read-back, so we cannot tell
+        # whether the stored password matches what we want to send. Always
+        # rewrite credentials on update — every onboard run is the canonical
+        # source for the password. Cheap PUT; avoids the silent-failure mode
+        # where a stale password sits in BBS forever.
+        diffs.append("credentials: (rewriting — BBS hides password on read-back)")
         return diffs
 
     def upsert_webhook(self, spec: RepoSpec) -> tuple[int, list[str]]:
