@@ -7,44 +7,60 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from riptide_collector.models import BitbucketEvent
-from test_webhooks import ARGOCD_AUTH, PIPELINE_AUTH, TestBitbucketWebhook, post_bitbucket
+from test_webhooks import (
+    ARGOCD_AUTH,
+    PIPELINE_AUTH,
+    TestBitbucketWebhook,
+    _load,
+    post_bitbucket,
+)
 
 
-async def test_push_event_with_revert_commit(
+async def test_push_event_records_branch_and_commit(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
+    # is_revert detection on push is deferred — BBS DC payloads don't
+    # carry commit messages, so we'd need a REST round-trip to look them
+    # up. For now push events land with is_revert=False; this test just
+    # verifies the basic branch/commit/author extraction off the BBS DC
+    # `changes[]` shape.
     del session_factory
-    payload: dict[str, Any] = {
-        "actor": {"nickname": "alice"},
-        "repository": {"full_name": "acme/payments-api"},
-        "push": {
-            "changes": [
-                {
-                    "new": {
-                        "name": "main",
-                        "target": {
-                            "hash": "feedface" * 5,
-                            "message": 'Revert "feature: bad change"\n\nABC-99',
-                        },
-                    }
-                }
-            ]
-        },
-        "date": "2026-04-28T12:00:00Z",
-    }
-    response = await post_bitbucket(
-        client, payload, extra_headers={"X-Request-UUID": "push-revert"}
-    )
+    payload = _load("bitbucket_refs_changed.json")
+    response = await post_bitbucket(client, payload, extra_headers={"X-Request-UUID": "push-1"})
     assert response.status_code == 202
 
     factory = TestBitbucketWebhook._fresh_session_factory(client)
     async with factory() as session:
         row = (await session.execute(select(BitbucketEvent))).scalar_one()
-        assert row.is_revert is True
-        assert "ABC-99" in row.jira_keys
+        assert row.repo_full_name == "acme/payments-api"
         assert row.author == "alice"
-        assert row.branch_name == "main"
+        assert row.branch_name == "master"
+        assert row.commit_sha == "feedface" * 5
+        assert row.is_revert is False
+
+
+async def test_tag_push_ignored_for_branch_extraction(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    # Tag pushes (ref.type == "TAG") arrive on the same `changes[]`
+    # shape as branch pushes but should not populate branch_name —
+    # parse_change_type would otherwise mis-bucket the tag's displayId.
+    del session_factory
+    payload = _load("bitbucket_refs_changed.json")
+    payload["changes"][0]["ref"]["type"] = "TAG"
+    payload["changes"][0]["ref"]["displayId"] = "v1.2.3"
+    payload["changes"][0]["ref"]["id"] = "refs/tags/v1.2.3"
+    response = await post_bitbucket(client, payload, extra_headers={"X-Request-UUID": "tag-push"})
+    assert response.status_code == 202
+
+    factory = TestBitbucketWebhook._fresh_session_factory(client)
+    async with factory() as session:
+        row = (await session.execute(select(BitbucketEvent))).scalar_one()
+        assert row.branch_name is None
+        assert row.commit_sha is None
+        assert row.change_type is None
 
 
 async def test_non_object_payload_ignored(client: AsyncClient) -> None:
@@ -112,13 +128,29 @@ async def test_synth_delivery_id_when_no_uuid(
     client: AsyncClient,
 ) -> None:
     payload: dict[str, Any] = {
-        "repository": {"full_name": "acme/payments-api"},
-        "pullrequest": {
+        "eventKey": "pr:opened",
+        "date": "2026-04-28T13:00:00+0000",
+        "actor": {"name": "alice"},
+        "pullRequest": {
             "id": 7,
             "title": "no headers",
-            "source": {"branch": {"name": "feature/x"}},
+            "fromRef": {
+                "displayId": "feature/x",
+                "latestCommit": "abc1234567890abc1234567890abc1234567890a",
+                "repository": {
+                    "slug": "payments-api",
+                    "project": {"key": "ACME"},
+                },
+            },
+            "toRef": {
+                "displayId": "master",
+                "repository": {
+                    "slug": "payments-api",
+                    "project": {"key": "ACME"},
+                },
+            },
+            "author": {"user": {"name": "alice"}},
         },
-        "date": "2026-04-28T13:00:00Z",
     }
     r1 = await post_bitbucket(client, payload)
     r2 = await post_bitbucket(client, payload)

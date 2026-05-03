@@ -106,7 +106,9 @@ class TestBitbucketWebhook:
             assert row.change_type == "feature"
             assert "ABC-123" in row.jira_keys
             assert "PROJ-9" in row.jira_keys
-            assert row.lines_added == 120
+            assert row.lines_added is None
+            assert row.lines_removed is None
+            assert row.files_changed is None
             assert row.is_automated is False
             assert row.automation_source is None
 
@@ -148,7 +150,10 @@ class TestBitbucketWebhook:
     ) -> None:
         del session_factory
         payload = _load("bitbucket_pr_merged.json")
-        payload["repository"]["full_name"] = "ACME/Payments-API"
+        # BBS DC carries casing in project.key + slug — both should
+        # land lowercase on the join column.
+        payload["pullRequest"]["toRef"]["repository"]["project"]["key"] = "ACME"
+        payload["pullRequest"]["toRef"]["repository"]["slug"] = "Payments-API"
         response = await post_bitbucket(
             client, payload, extra_headers={"X-Request-UUID": "uuid-upper"}
         )
@@ -165,7 +170,8 @@ class TestBitbucketWebhook:
     ) -> None:
         del session_factory
         payload = _load("bitbucket_pr_merged.json")
-        payload["repository"]["full_name"] = "ghost/repo"
+        payload["pullRequest"]["toRef"]["repository"]["project"]["key"] = "ghost"
+        payload["pullRequest"]["toRef"]["repository"]["slug"] = "repo"
         response = await post_bitbucket(
             client, payload, extra_headers={"X-Request-UUID": "ghost-1"}
         )

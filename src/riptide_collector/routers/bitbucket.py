@@ -30,16 +30,6 @@ def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
-def _safe_int(value: Any) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str) and value.isdigit():
-        return int(value)
-    return None
-
-
 def _parse_dt(value: Any) -> datetime | None:
     """Parse an ISO-8601 string and normalise to UTC.
 
@@ -55,12 +45,48 @@ def _parse_dt(value: Any) -> datetime | None:
     return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
+def _extract_repo_full_name(body: dict[str, Any]) -> str | None:
+    """Build `<projectKey>/<slug>` from a BBS DC payload.
+
+    Push events carry `repository` at the top level. PR events nest the
+    repository inside `pullRequest.toRef.repository`; fall back to that
+    if the top-level field is missing.
+    """
+    repo = _as_dict(body.get("repository"))
+    if not repo:
+        pr = _as_dict(body.get("pullRequest"))
+        repo = _as_dict(_as_dict(pr.get("toRef")).get("repository"))
+    project_key = _as_dict(repo.get("project")).get("key")
+    slug = repo.get("slug")
+    if isinstance(project_key, str) and isinstance(slug, str):
+        return f"{project_key}/{slug}"
+    return None
+
+
+def _user_handle(user: dict[str, Any]) -> str | None:
+    """Pick the most stable identifier from a BBS DC user dict.
+
+    `name` is the login (immutable); `slug` is the URL-safe form;
+    `displayName` is human-readable. Prefer login → slug → display.
+    """
+    for key in ("name", "slug", "displayName"):
+        value = user.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
 def _synth_delivery_id(event_key: str | None, body: dict[str, Any]) -> str:
-    pr = _as_dict(body.get("pullrequest"))
+    pr = _as_dict(body.get("pullRequest"))
     pr_id = pr.get("id")
-    repo = _as_dict(body.get("repository")).get("full_name") or "unknown"
-    when = body.get("date") or body.get("created_on") or "?"
-    return f"{event_key or 'unknown'}#{repo}#{pr_id}#{when}"
+    repo = _extract_repo_full_name(body) or "unknown"
+    when = body.get("date") or "?"
+    # Mix in the first change's toHash so two same-second pushes on the
+    # same repo (no PR id, no X-Request-UUID) don't collapse to the same
+    # synthetic id and get silently deduped by ON CONFLICT DO NOTHING.
+    first_change = _as_dict(next(iter(_as_list(body.get("changes"))), None))
+    to_hash = first_change.get("toHash") if isinstance(first_change.get("toHash"), str) else None
+    return f"{event_key or 'unknown'}#{repo}#{pr_id}#{to_hash or '-'}#{when}"
 
 
 def _verify_hmac(secret: str, body: bytes, header: str | None) -> bool:
@@ -137,62 +163,66 @@ def make_router(
         delivery_id = x_request_uuid or x_hook_uuid or _synth_delivery_id(x_event_key, body)
         event_type = x_event_key or "unknown"
 
-        repo_full_name_raw = _as_dict(body.get("repository")).get("full_name")
-        repo_full_name = repo_full_name_raw if isinstance(repo_full_name_raw, str) else None
+        repo_full_name = _extract_repo_full_name(body)
 
-        pr = _as_dict(body.get("pullrequest"))
-        push = _as_dict(body.get("push"))
-
+        pr = _as_dict(body.get("pullRequest"))
         pr_id: int | None = pr.get("id") if isinstance(pr.get("id"), int) else None
         title = pr.get("title") if isinstance(pr.get("title"), str) else None
         description = pr.get("description") if isinstance(pr.get("description"), str) else None
 
-        source = _as_dict(pr.get("source"))
-        branch = _as_dict(source.get("branch"))
-        commit = _as_dict(source.get("commit"))
-        branch_name: str | None = (
-            branch.get("name") if isinstance(branch.get("name"), str) else None
-        )
-        commit_sha: str | None = commit.get("hash") if isinstance(commit.get("hash"), str) else None
-
-        author_section = _as_dict(pr.get("author"))
-        author_candidate = (
-            author_section.get("nickname")
-            or author_section.get("username")
-            or author_section.get("display_name")
-        )
-        author: str | None = author_candidate if isinstance(author_candidate, str) else None
-
-        lines_added = _safe_int(pr.get("lines_added"))
-        lines_removed = _safe_int(pr.get("lines_removed"))
-        files_changed = _safe_int(pr.get("files_changed"))
-
+        branch_name: str | None = None
+        commit_sha: str | None = None
+        author: str | None = None
         is_revert = False
-        commit_messages: list[str] = []
 
-        for change in _as_list(push.get("changes")):
-            change_dict = _as_dict(change)
-            new_section = _as_dict(change_dict.get("new"))
-            target = _as_dict(new_section.get("target"))
-            target_hash = target.get("hash")
-            if not commit_sha and isinstance(target_hash, str):
-                commit_sha = target_hash
-            new_name = new_section.get("name")
-            if not branch_name and isinstance(new_name, str):
-                branch_name = new_name
-            msg = target.get("message")
-            if isinstance(msg, str):
-                commit_messages.append(msg)
-                if is_revert_commit(msg):
-                    is_revert = True
+        if pr:
+            from_ref = _as_dict(pr.get("fromRef"))
+            display_id = from_ref.get("displayId")
+            latest_commit = from_ref.get("latestCommit")
+            if isinstance(display_id, str):
+                branch_name = display_id
+            if isinstance(latest_commit, str):
+                commit_sha = latest_commit
+            author_user = _as_dict(_as_dict(pr.get("author")).get("user"))
+            author = _user_handle(author_user)
+            # PR-side revert detection: the title is the only signal we
+            # have without a REST round-trip. Push-side detection would
+            # need the commit messages between fromHash..toHash.
+            if is_revert_commit(title):
+                is_revert = True
 
-        if not author and push:
-            actor = _as_dict(body.get("actor"))
-            for key in ("nickname", "username", "display_name"):
-                value = actor.get(key)
-                if isinstance(value, str):
-                    author = value
+        # Push: top-level `changes[]` with {ref:{displayId,type}, toHash, type}.
+        # DELETE-type changes have no new commit and are skipped. Tag
+        # pushes (ref.type == "TAG") are skipped too — `branch_name` and
+        # `parse_change_type` would mis-bucket the tag's displayId
+        # otherwise.
+        if not (branch_name and commit_sha):
+            for change in _as_list(body.get("changes")):
+                change_dict = _as_dict(change)
+                if str(change_dict.get("type", "")).upper() == "DELETE":
+                    continue
+                ref = _as_dict(change_dict.get("ref"))
+                if str(ref.get("type", "BRANCH")).upper() != "BRANCH":
+                    continue
+                ref_display = ref.get("displayId")
+                to_hash = change_dict.get("toHash")
+                if not branch_name and isinstance(ref_display, str):
+                    branch_name = ref_display
+                if not commit_sha and isinstance(to_hash, str):
+                    commit_sha = to_hash
+                if branch_name and commit_sha:
                     break
+
+        if not author:
+            author = _user_handle(_as_dict(body.get("actor")))
+
+        # BBS DC PR payloads don't carry diff stats — leave NULL.
+        # TODO: a single REST round-trip per PR event could recover both
+        # these fields and push-side `is_revert` (commit messages between
+        # fromHash..toHash). Tracked separately.
+        lines_added: int | None = None
+        lines_removed: int | None = None
+        files_changed: int | None = None
 
         # Lowercase identifiers used for joins / aggregations. Raw values are
         # preserved on the original `payload` JSONB.
@@ -201,12 +231,10 @@ def make_router(
         commit_sha = lower(commit_sha)
 
         change_type = parse_change_type(branch_name)
-        jira_keys = extract_jira_keys(title, description, branch_name, *commit_messages)
+        jira_keys = extract_jira_keys(title, description, branch_name)
         automation_source = config.detect_automation_source(author, branch_name)
 
-        occurred_at = (
-            _parse_dt(body.get("date")) or _parse_dt(body.get("created_on")) or datetime.now(UTC)
-        )
+        occurred_at = _parse_dt(body.get("date")) or datetime.now(UTC)
 
         async with session_factory() as session:
             stmt = (

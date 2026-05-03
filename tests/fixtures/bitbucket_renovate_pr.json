@@ -1,18 +1,40 @@
 {
-  "actor": {"nickname": "renovate-bot"},
-  "repository": {"full_name": "acme/payments-api"},
-  "pullrequest": {
+  "eventKey": "pr:opened",
+  "date": "2026-04-28T11:00:00+0000",
+  "actor": {
+    "name": "renovate-bot",
+    "displayName": "Renovate Bot",
+    "slug": "renovate-bot"
+  },
+  "pullRequest": {
     "id": 99,
     "title": "Update dependency lodash to v4.17.21",
     "description": "",
-    "author": {"nickname": "renovate-bot"},
-    "source": {
-      "branch": {"name": "renovate/lodash-4.x"},
-      "commit": {"hash": "deadbee1234567890deadbee1234567890deadbe"}
+    "state": "OPEN",
+    "fromRef": {
+      "id": "refs/heads/renovate/lodash-4.x",
+      "displayId": "renovate/lodash-4.x",
+      "latestCommit": "deadbee1234567890deadbee1234567890deadbe",
+      "repository": {
+        "slug": "payments-api",
+        "project": {"key": "ACME"}
+      }
     },
-    "lines_added": 1,
-    "lines_removed": 1,
-    "files_changed": 1
-  },
-  "date": "2026-04-28T11:00:00Z"
+    "toRef": {
+      "id": "refs/heads/master",
+      "displayId": "master",
+      "latestCommit": "0000000000000000000000000000000000000000",
+      "repository": {
+        "slug": "payments-api",
+        "project": {"key": "ACME"}
+      }
+    },
+    "author": {
+      "user": {
+        "name": "renovate-bot",
+        "displayName": "Renovate Bot",
+        "slug": "renovate-bot"
+      }
+    }
+  }
 }

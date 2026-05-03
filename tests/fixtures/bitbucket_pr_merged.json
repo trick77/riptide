@@ -1,18 +1,40 @@
 {
-  "actor": {"nickname": "alice", "display_name": "Alice"},
-  "repository": {"full_name": "acme/payments-api"},
-  "pullrequest": {
+  "eventKey": "pr:merged",
+  "date": "2026-04-28T10:00:00+0000",
+  "actor": {
+    "name": "alice",
+    "displayName": "Alice Example",
+    "slug": "alice"
+  },
+  "pullRequest": {
     "id": 42,
     "title": "ABC-123: Add payment retry",
     "description": "Fixes ABC-123 and PROJ-9",
-    "author": {"nickname": "alice"},
-    "source": {
-      "branch": {"name": "feature/ABC-123-retries"},
-      "commit": {"hash": "abc1234567890abc1234567890abc1234567890a"}
+    "state": "MERGED",
+    "fromRef": {
+      "id": "refs/heads/feature/ABC-123-retries",
+      "displayId": "feature/ABC-123-retries",
+      "latestCommit": "abc1234567890abc1234567890abc1234567890a",
+      "repository": {
+        "slug": "payments-api",
+        "project": {"key": "ACME"}
+      }
     },
-    "lines_added": 120,
-    "lines_removed": 15,
-    "files_changed": 3
-  },
-  "date": "2026-04-28T10:00:00Z"
+    "toRef": {
+      "id": "refs/heads/master",
+      "displayId": "master",
+      "latestCommit": "0000000000000000000000000000000000000000",
+      "repository": {
+        "slug": "payments-api",
+        "project": {"key": "ACME"}
+      }
+    },
+    "author": {
+      "user": {
+        "name": "alice",
+        "displayName": "Alice Example",
+        "slug": "alice"
+      }
+    }
+  }
 }
