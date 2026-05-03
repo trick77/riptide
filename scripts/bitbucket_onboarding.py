@@ -10,10 +10,13 @@ of creating/updating it. Same config file drives both directions.
 
 The JSON config describes target repos, URLs, and the team the inbound
 webhooks are recorded as. Secrets (BITBUCKET_TOKEN, RIPTIDE_TEAM_KEY) are
-resolved from, in order:
-    1. Process environment
+resolved from, in order (first match wins):
+    1. --env-file <path>
     2. .env in CWD
-    3. --env-file <path>
+    3. Process environment
+
+Explicit `--env-file` always wins so a stale exported value in the shell
+doesn't silently override what the operator put in the file.
 
 See scripts/bitbucket-onboarding.env.example for a template.
 
@@ -105,15 +108,21 @@ def _load_env_file(path: Path) -> dict[str, str]:
 
 
 def _resolve_env(env_file: Path | None, required: tuple[str, ...]) -> dict[str, str]:
-    """Load `required` env vars from process env > .env in CWD > --env-file."""
+    """Load `required` env vars from --env-file > .env in CWD > process env.
+
+    Explicit `--env-file` wins over process env so a stale exported value
+    in the operator's shell doesn't silently override what they put in
+    the file. (The previous order was the opposite and caused real
+    confusion in practice.)
+    """
     merged: dict[str, str] = {}
-    if env_file is not None:
-        merged.update(_load_env_file(env_file))
-    merged.update(_load_env_file(Path.cwd() / ".env"))
     for k in required:
         value = os.environ.get(k)
         if value:
             merged[k] = value
+    merged.update(_load_env_file(Path.cwd() / ".env"))
+    if env_file is not None:
+        merged.update(_load_env_file(env_file))
 
     missing = [k for k in required if not merged.get(k)]
     if missing:
