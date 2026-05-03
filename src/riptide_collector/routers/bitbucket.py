@@ -81,7 +81,12 @@ def _synth_delivery_id(event_key: str | None, body: dict[str, Any]) -> str:
     pr_id = pr.get("id")
     repo = _extract_repo_full_name(body) or "unknown"
     when = body.get("date") or "?"
-    return f"{event_key or 'unknown'}#{repo}#{pr_id}#{when}"
+    # Mix in the first change's toHash so two same-second pushes on the
+    # same repo (no PR id, no X-Request-UUID) don't collapse to the same
+    # synthetic id and get silently deduped by ON CONFLICT DO NOTHING.
+    first_change = _as_dict(next(iter(_as_list(body.get("changes"))), None))
+    to_hash = first_change.get("toHash") if isinstance(first_change.get("toHash"), str) else None
+    return f"{event_key or 'unknown'}#{repo}#{pr_id}#{to_hash or '-'}#{when}"
 
 
 def _verify_hmac(secret: str, body: bytes, header: str | None) -> bool:
@@ -186,14 +191,20 @@ def make_router(
             if is_revert_commit(title):
                 is_revert = True
 
-        # Push: top-level `changes[]` with {ref:{displayId}, toHash, type}.
-        # DELETE-type changes have no new commit and are skipped.
+        # Push: top-level `changes[]` with {ref:{displayId,type}, toHash, type}.
+        # DELETE-type changes have no new commit and are skipped. Tag
+        # pushes (ref.type == "TAG") are skipped too — `branch_name` and
+        # `parse_change_type` would mis-bucket the tag's displayId
+        # otherwise.
         if not (branch_name and commit_sha):
             for change in _as_list(body.get("changes")):
                 change_dict = _as_dict(change)
                 if str(change_dict.get("type", "")).upper() == "DELETE":
                     continue
-                ref_display = _as_dict(change_dict.get("ref")).get("displayId")
+                ref = _as_dict(change_dict.get("ref"))
+                if str(ref.get("type", "BRANCH")).upper() != "BRANCH":
+                    continue
+                ref_display = ref.get("displayId")
                 to_hash = change_dict.get("toHash")
                 if not branch_name and isinstance(ref_display, str):
                     branch_name = ref_display
@@ -206,6 +217,9 @@ def make_router(
             author = _user_handle(_as_dict(body.get("actor")))
 
         # BBS DC PR payloads don't carry diff stats — leave NULL.
+        # TODO: a single REST round-trip per PR event could recover both
+        # these fields and push-side `is_revert` (commit messages between
+        # fromHash..toHash). Tracked separately.
         lines_added: int | None = None
         lines_removed: int | None = None
         files_changed: int | None = None
