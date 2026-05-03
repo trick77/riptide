@@ -196,14 +196,17 @@ def make_router(
         # pushes (ref.type == "TAG") are skipped too — `branch_name` and
         # `parse_change_type` would mis-bucket the tag's displayId
         # otherwise.
+        raw_changes = _as_list(body.get("changes"))
+        had_branch_change = False
         if not (branch_name and commit_sha):
-            for change in _as_list(body.get("changes")):
+            for change in raw_changes:
                 change_dict = _as_dict(change)
                 if str(change_dict.get("type", "")).upper() == "DELETE":
                     continue
                 ref = _as_dict(change_dict.get("ref"))
                 if str(ref.get("type", "BRANCH")).upper() != "BRANCH":
                     continue
+                had_branch_change = True
                 ref_display = ref.get("displayId")
                 to_hash = change_dict.get("toHash")
                 if not branch_name and isinstance(ref_display, str):
@@ -212,6 +215,20 @@ def make_router(
                     commit_sha = to_hash
                 if branch_name and commit_sha:
                     break
+
+        # A push event with `changes[]` but no usable branch change
+        # (tag-only or DELETE-only) carries no data we'd join on. Drop
+        # it rather than write an orphan row; still log so the operator
+        # can see the delivery arrived.
+        if not pr and raw_changes and not had_branch_change:
+            logger.info(
+                "bitbucket_event_skipped_no_branch_change",
+                delivery_id=delivery_id,
+                event_type=event_type,
+                repo=lower(repo_full_name),
+                team=team,
+            )
+            return {"status": "ignored", "reason": "no branch change in push"}
 
         if not author:
             author = _user_handle(_as_dict(body.get("actor")))

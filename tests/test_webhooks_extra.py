@@ -40,13 +40,13 @@ async def test_push_event_records_branch_and_commit(
         assert row.is_revert is False
 
 
-async def test_tag_push_ignored_for_branch_extraction(
+async def test_tag_only_push_ignored_and_not_stored(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    # Tag pushes (ref.type == "TAG") arrive on the same `changes[]`
-    # shape as branch pushes but should not populate branch_name —
-    # parse_change_type would otherwise mis-bucket the tag's displayId.
+    # Tag-only pushes carry no joinable data (no branch, no head commit
+    # we want to record). The router should log+drop them rather than
+    # write an orphan row with NULL branch_name/commit_sha.
     del session_factory
     payload = _load("bitbucket_refs_changed.json")
     payload["changes"][0]["ref"]["type"] = "TAG"
@@ -54,13 +54,12 @@ async def test_tag_push_ignored_for_branch_extraction(
     payload["changes"][0]["ref"]["id"] = "refs/tags/v1.2.3"
     response = await post_bitbucket(client, payload, extra_headers={"X-Request-UUID": "tag-push"})
     assert response.status_code == 202
+    assert response.json() == {"status": "ignored", "reason": "no branch change in push"}
 
     factory = TestBitbucketWebhook._fresh_session_factory(client)
     async with factory() as session:
-        row = (await session.execute(select(BitbucketEvent))).scalar_one()
-        assert row.branch_name is None
-        assert row.commit_sha is None
-        assert row.change_type is None
+        rows = (await session.execute(select(BitbucketEvent))).all()
+        assert rows == []
 
 
 async def test_non_object_payload_ignored(client: AsyncClient) -> None:
