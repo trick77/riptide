@@ -119,8 +119,13 @@ class TeamKeysStore:
         against every team's secret for the given source — defers the
         return until the loop completes — so wall-time doesn't leak which
         team matched.
+
+        OUTBOUND_ONLY_SOURCES are rejected up front: even if some future
+        bearer dependency is wired to `bitbucket_api`, the lookup will
+        refuse to authenticate. Belt-and-braces with the same guard in
+        `lookup_any_source`.
         """
-        if not raw_token or source not in KNOWN_SOURCES:
+        if not raw_token or source not in KNOWN_SOURCES or source in OUTBOUND_ONLY_SOURCES:
             return None
         match: str | None = None
         with self._lock:

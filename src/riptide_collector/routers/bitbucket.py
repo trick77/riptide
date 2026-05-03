@@ -323,10 +323,15 @@ def _split_repo(body: dict[str, Any]) -> tuple[str | None, str | None]:
         repo = _as_dict(_as_dict(pr.get("toRef")).get("repository"))
     project_key = _as_dict(repo.get("project")).get("key")
     slug = repo.get("slug")
-    return (
-        project_key if isinstance(project_key, str) else None,
-        slug if isinstance(slug, str) else None,
-    )
+    if not (isinstance(project_key, str) and isinstance(slug, str)):
+        return None, None
+    # Belt-and-braces against URL-path injection: BBS project keys and
+    # repo slugs are alphanumeric + a small set of separators, never
+    # contain '/'. If the payload carries something exotic, refuse to
+    # build a request URL rather than letting it traverse path segments.
+    if "/" in project_key or "/" in slug:
+        return None, None
+    return project_key, slug
 
 
 async def _enrich_pr_size(
@@ -359,6 +364,9 @@ async def _enrich_pr_size(
         if stats is None:
             return
         async with session_factory() as session:
+            # `delivery_id` is the upsert key on bitbucket_events (unique
+            # index from migration 0001). One row per delivery; this
+            # UPDATE is therefore single-row.
             await session.execute(
                 text(
                     "UPDATE bitbucket_events "

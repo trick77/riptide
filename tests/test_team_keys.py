@@ -81,6 +81,22 @@ class TestTeamKeysStoreLookup:
         store = TeamKeysStore(path)
         assert store.lookup("a", "github") is None
 
+    def test_lookup_outbound_only_source_rejected(self, tmp_path: Path) -> None:
+        # bitbucket_api is an outbound BBS DC personal access token used
+        # by the collector to fetch PR diff stats. It must never
+        # authenticate an inbound request, even via direct lookup with
+        # the matching source name.
+        path = _write(
+            tmp_path / "k.json",
+            {"checkout": {"bitbucket": "hmac", "bitbucket_api": "pat"}},
+        )
+        store = TeamKeysStore(path)
+        # Direct retrieval (used by the outbound enrichment task) still works.
+        assert store.get_secret("checkout", "bitbucket_api") == "pat"
+        # But it cannot be exchanged for a team via inbound auth lookups.
+        assert store.lookup("pat", "bitbucket_api") is None
+        assert store.lookup_any_source("pat") is None
+
     def test_lookup_unknown_returns_none(self, tmp_path: Path) -> None:
         path = _write(tmp_path / "k.json", {"checkout": {"argocd": "raw"}})
         store = TeamKeysStore(path)

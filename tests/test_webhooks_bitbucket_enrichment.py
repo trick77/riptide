@@ -226,6 +226,33 @@ async def test_enrichment_fetch_exception_does_not_break_request(
         assert row.lines_added is None
 
 
+async def test_pr_merged_with_path_traversal_in_slug_skips_fetch(
+    client_with_bbs_enrichment: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Defensive: a payload claiming a slug like "../admin" must not
+    # produce an outbound URL. The router refuses to schedule the task
+    # rather than trust httpx URL-encoding to neutralise the traversal.
+    calls = 0
+
+    async def _stub(*_args: Any, **_kwargs: Any) -> DiffStats | None:
+        nonlocal calls
+        calls += 1
+        return DiffStats(0, 0, 0)
+
+    monkeypatch.setattr(BitbucketClient, "fetch_pr_diff_stats", _stub)
+
+    payload = _load("bitbucket_pr_merged.json")
+    payload["pullRequest"]["toRef"]["repository"]["slug"] = "../admin"
+    response = await post_bitbucket(
+        client_with_bbs_enrichment,
+        payload,
+        extra_headers={"X-Request-UUID": "traversal", "X-Event-Key": "pr:merged"},
+    )
+    assert response.status_code == 202
+    assert calls == 0
+
+
 async def test_pr_merged_without_bbs_client_keeps_stats_null(
     client: AsyncClient,
 ) -> None:

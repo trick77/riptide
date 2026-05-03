@@ -114,6 +114,9 @@ class BitbucketClient:
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         client: httpx.AsyncClient | None = None,
     ):
+        # When `client` is provided (tests, custom transports), the
+        # caller owns the timeout; `timeout_seconds` is only used to
+        # configure a freshly-built client.
         self._base_url = base_url.rstrip("/")
         self._client = client or httpx.AsyncClient(timeout=timeout_seconds)
 
