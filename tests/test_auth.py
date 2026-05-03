@@ -1,6 +1,8 @@
-"""Auth-focused tests: per-team bearer wiring on the live FastAPI app."""
+"""Auth-focused tests: per-team bearer + basic wiring on the live FastAPI app."""
 
 from __future__ import annotations
+
+import base64
 
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -24,6 +26,11 @@ _PAYLOAD = {
 
 def _bearer(raw: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {raw}"}
+
+
+def _basic(user: str, password: str) -> dict[str, str]:
+    encoded = base64.b64encode(f"{user}:{password}".encode()).decode("ascii")
+    return {"Authorization": f"Basic {encoded}"}
 
 
 class TestAuthHappyPath:
@@ -87,11 +94,92 @@ class TestAuthRejections:
         )
         assert r.status_code == 401
 
-    async def test_basic_auth_scheme_rejected(self, client: AsyncClient) -> None:
+    async def test_malformed_basic_not_b64(self, client: AsyncClient) -> None:
+        # Raw token after `Basic ` is not valid base64 → 401, not a 500.
         r = await client.post(
             "/webhooks/pipeline",
             json=_PAYLOAD,
             headers={"Authorization": f"Basic {CHECKOUT_TOKEN}"},
+        )
+        assert r.status_code == 401
+
+    async def test_basic_without_colon(self, client: AsyncClient) -> None:
+        encoded = base64.b64encode(CHECKOUT_TOKEN.encode()).decode("ascii")
+        r = await client.post(
+            "/webhooks/pipeline",
+            json=_PAYLOAD,
+            headers={"Authorization": f"Basic {encoded}"},
+        )
+        assert r.status_code == 401
+
+
+class TestBasicAuthHappyPath:
+    """Bitbucket DC delivers credentials via URL-embedded Basic auth.
+    Riptide accepts the same raw team token as the Basic password.
+    """
+
+    async def test_basic_auth_with_correct_team_records_team(
+        self,
+        client: AsyncClient,
+        session_factory: async_sessionmaker[AsyncSession],
+    ) -> None:
+        del session_factory
+        body = dict(_PAYLOAD, run_id="basic-checkout-run")
+        r = await client.post(
+            "/webhooks/pipeline",
+            json=body,
+            headers=_basic("checkout", CHECKOUT_TOKEN),
+        )
+        assert r.status_code == 202
+
+        factory = client._transport.app.state.session_factory  # type: ignore[attr-defined]
+        async with factory() as session:
+            row = (
+                await session.execute(
+                    select(PipelineEvent).where(PipelineEvent.run_id == "basic-checkout-run")
+                )
+            ).scalar_one()
+            assert row.team == "checkout"
+
+    async def test_basic_auth_username_mismatch_still_resolves_by_password(
+        self,
+        client: AsyncClient,
+        session_factory: async_sessionmaker[AsyncSession],
+    ) -> None:
+        # Username is informational only — password is authoritative.
+        del session_factory
+        body = dict(_PAYLOAD, run_id="basic-mismatch-run")
+        r = await client.post(
+            "/webhooks/pipeline",
+            json=body,
+            headers=_basic("typo", PLATFORM_TOKEN),
+        )
+        assert r.status_code == 202
+
+        factory = client._transport.app.state.session_factory  # type: ignore[attr-defined]
+        async with factory() as session:
+            row = (
+                await session.execute(
+                    select(PipelineEvent).where(PipelineEvent.run_id == "basic-mismatch-run")
+                )
+            ).scalar_one()
+            assert row.team == "platform"
+
+
+class TestBasicAuthRejections:
+    async def test_basic_unknown_password(self, client: AsyncClient) -> None:
+        r = await client.post(
+            "/webhooks/pipeline",
+            json=_PAYLOAD,
+            headers=_basic("checkout", "not-a-real-key"),
+        )
+        assert r.status_code == 401
+
+    async def test_basic_empty_password(self, client: AsyncClient) -> None:
+        r = await client.post(
+            "/webhooks/pipeline",
+            json=_PAYLOAD,
+            headers=_basic("checkout", ""),
         )
         assert r.status_code == 401
 

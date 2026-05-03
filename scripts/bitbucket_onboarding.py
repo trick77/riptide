@@ -1,26 +1,28 @@
 """
-Onboard a Bitbucket Data Center repository to riptide webhook delivery.
+Onboard Bitbucket Data Center repositories to riptide webhook delivery.
 
 Usage:
-    python scripts/onboard_repos.py config.json [--name riptide] [--dry-run] [--env-file PATH]
-    python scripts/onboard_repos.py config.json --remove [--dry-run] [--env-file PATH]
+    python scripts/bitbucket_onboarding.py config.json [--name riptide] [--dry-run] [--env-file PATH]
+    python scripts/bitbucket_onboarding.py config.json --remove [--dry-run] [--env-file PATH]
 
 `--remove` deletes the riptide webhook from every repo in the config instead
 of creating/updating it. Same config file drives both directions.
 
-The JSON config describes target repos and URLs. Secrets (BITBUCKET_TOKEN,
-RIPTIDE_TEAM_KEY) are resolved from, in order:
+The JSON config describes target repos, URLs, and the team the inbound
+webhooks are recorded as. Secrets (BITBUCKET_TOKEN, RIPTIDE_TEAM_KEY) are
+resolved from, in order:
     1. Process environment
     2. .env in CWD
     3. --env-file <path>
 
-See scripts/onboarding.env.example for a template.
+See scripts/bitbucket-onboarding.env.example for a template.
 
-RIPTIDE_TEAM_KEY is the plaintext team API key that riptide will receive on
-inbound webhooks as `Authorization: Bearer <key>`. It is programmed into the
-webhook via Bitbucket Data Center's per-webhook custom HTTP headers feature.
-The key must already be registered with riptide for the team named in the
-config.
+Auth on the inbound side: BBS DC's webhook config does not honour custom HTTP
+headers (the `configuration.headers` field is ignored / errors). Instead this
+script embeds Basic-auth credentials directly into the webhook URL — BBS
+forwards those as `Authorization: Basic <b64(team:RAW_TEAM_KEY)>`. Riptide's
+auth dep accepts both Bearer (existing tooling) and Basic (this path).
+RIPTIDE_TEAM_KEY is the same raw token the team uses elsewhere (ArgoCD, etc.).
 
 This script is intentionally stdlib-only so it can run on any host with Python
 3.10+ without a venv or `pip install`.
@@ -42,7 +44,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-logger = logging.getLogger("onboard_repos")
+logger = logging.getLogger("bitbucket_onboarding")
 
 DEFAULT_WEBHOOK_NAME = "riptide"
 
@@ -78,6 +80,7 @@ class RepoSpec:
 class OnboardingInput:
     bitbucket_url: str
     webhook_url: str
+    team: str
     repos: list[RepoSpec]
 
 
@@ -143,6 +146,9 @@ def load_onboarding_input(path: Path) -> OnboardingInput:
 
     bitbucket_url = _require_https(data.get("bitbucket_url"), "bitbucket_url")
     webhook_url = _require_url(data.get("webhook_url"), "webhook_url")
+    team = data.get("team")
+    if not isinstance(team, str) or not team.strip():
+        raise SystemExit("ERROR: 'team' must be a non-empty string")
     projects_raw = data.get("projects")
 
     if not isinstance(projects_raw, list) or not projects_raw:
@@ -176,6 +182,7 @@ def load_onboarding_input(path: Path) -> OnboardingInput:
     return OnboardingInput(
         bitbucket_url=bitbucket_url.rstrip("/"),
         webhook_url=webhook_url,
+        team=team.strip(),
         repos=repos,
     )
 
@@ -335,15 +342,18 @@ class RepoOnboarder:
         self,
         client: BitbucketHTTP,
         webhook_url: str,
+        team: str,
         team_key: str,
         webhook_name: str = DEFAULT_WEBHOOK_NAME,
         dry_run: bool = False,
     ):
         self.client = client
         self.webhook_url = webhook_url
+        self.team = team
         self.team_key = team_key
         self.webhook_name = webhook_name
         self.dry_run = dry_run
+        self._authed_url = _embed_basic_auth(webhook_url, team, team_key)
 
     # -- Step 1 -- #
     def verify_permissions(self, spec: RepoSpec) -> None:
@@ -360,26 +370,26 @@ class RepoOnboarder:
 
     # -- Step 2 -- #
     def _build_webhook_body(self) -> dict[str, Any]:
-        # `configuration.headers` is the BBS Data Center per-webhook custom-header
-        # field. Verified shape against BBS DC 8.x; older builds may differ or
-        # require the headers webhook plugin.
+        # BBS DC's built-in webhook ignores `configuration.headers` (verified
+        # by HTTP 500 on create against BBS 8.x). Auth is delivered instead via
+        # HTTP Basic in the webhook URL itself: BBS forwards
+        # `https://user:pass@host/...` as `Authorization: Basic <b64(user:pass)>`.
         return {
             "name": self.webhook_name,
-            "url": self.webhook_url,
+            "url": self._authed_url,
             "active": True,
             "events": list(REQUIRED_WEBHOOK_EVENTS),
-            "configuration": {
-                "headers": {
-                    "Authorization": f"Bearer {self.team_key}",
-                },
-            },
+            "configuration": {},
             "sslVerificationRequired": True,
         }
 
     def _diff_webhook(self, existing: dict[str, Any]) -> list[str]:
         diffs: list[str] = []
-        if existing.get("url") != self.webhook_url:
-            diffs.append(f"url: {existing.get('url')!r} -> {self.webhook_url!r}")
+        # BBS may echo back the URL with userinfo redacted (or missing). Compare
+        # only the credential-free form to avoid spurious diffs.
+        existing_url = _strip_userinfo(existing.get("url"))
+        if existing_url != self.webhook_url:
+            diffs.append(f"url: {existing_url!r} -> {self.webhook_url!r}")
         existing_events = set(existing.get("events") or [])
         required = set(REQUIRED_WEBHOOK_EVENTS)
         if existing_events != required:
@@ -388,14 +398,12 @@ class RepoOnboarder:
             diffs.append(f"events: missing={missing} extra={extra}")
         if not existing.get("active", True):
             diffs.append("active: False -> True")
-        existing_cfg = existing.get("configuration") or {}
-        existing_headers = existing_cfg.get("headers") or {}
-        # BBS commonly redacts secret-shaped values when reading webhooks back, so
-        # the Authorization value we get here is unreliable. Only flag a diff if
-        # the header is missing entirely; rotate the team key by re-running with
-        # --remove followed by a fresh onboard.
-        if "Authorization" not in existing_headers:
-            diffs.append("configuration.headers.Authorization: (unset) -> (set)")
+        # Userinfo on the existing URL is what carries the Basic creds. BBS
+        # redacts it on read-back, so we can't compare values; only flag if
+        # absent entirely. Rotate creds by --remove + fresh onboard.
+        existing_userinfo_present = _has_userinfo(existing.get("url"))
+        if not existing_userinfo_present:
+            diffs.append("url userinfo (Basic creds): (unset) -> (set)")
         return diffs
 
     def upsert_webhook(self, spec: RepoSpec) -> tuple[int, list[str]]:
@@ -492,14 +500,49 @@ class RepoOnboarder:
         return RepoResult(spec, "ok", detail=f"webhook removed: id={webhook_id}")
 
 
+def _embed_basic_auth(url: str, user: str, password: str) -> str:
+    """Splice `<user>:<percent-encoded password>` into the netloc of `url`.
+
+    Raw team tokens may contain `/`, `+`, `=` etc. (typical of base64-shaped
+    secrets), which would corrupt the URL if pasted unescaped — so we
+    percent-encode the password with `safe=""`. The username is encoded the
+    same way for symmetry.
+    """
+    parts = urllib.parse.urlsplit(url)
+    if not parts.netloc:
+        raise SystemExit(f"ERROR: cannot embed credentials into URL {url!r}")
+    host = parts.hostname or ""
+    port = f":{parts.port}" if parts.port is not None else ""
+    creds = f"{urllib.parse.quote(user, safe='')}:{urllib.parse.quote(password, safe='')}"
+    new_netloc = f"{creds}@{host}{port}"
+    return urllib.parse.urlunsplit(
+        (parts.scheme, new_netloc, parts.path, parts.query, parts.fragment)
+    )
+
+
+def _strip_userinfo(url: Any) -> str | None:
+    if not isinstance(url, str) or not url:
+        return None
+    parts = urllib.parse.urlsplit(url)
+    host = parts.hostname or ""
+    port = f":{parts.port}" if parts.port is not None else ""
+    return urllib.parse.urlunsplit(
+        (parts.scheme, f"{host}{port}", parts.path, parts.query, parts.fragment)
+    )
+
+
+def _has_userinfo(url: Any) -> bool:
+    if not isinstance(url, str) or not url:
+        return False
+    return urllib.parse.urlsplit(url).username is not None
+
+
 def _redact(body: dict[str, Any]) -> dict[str, Any]:
     copy = dict(body)
-    cfg = dict(copy.get("configuration") or {})
-    headers = dict(cfg.get("headers") or {})
-    if "Authorization" in headers:
-        headers["Authorization"] = "Bearer ***"
-    cfg["headers"] = headers
-    copy["configuration"] = cfg
+    raw_url = copy.get("url")
+    if isinstance(raw_url, str) and _has_userinfo(raw_url):
+        stripped = _strip_userinfo(raw_url) or raw_url
+        copy["url"] = f"{stripped}  (+ Basic auth: ***)"
     return copy
 
 
@@ -510,7 +553,7 @@ def _redact(body: dict[str, Any]) -> dict[str, Any]:
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="python scripts/onboard_repos.py",
+        prog="python scripts/bitbucket_onboarding.py",
         description="Onboard Bitbucket Data Center repos to riptide by creating/updating their webhooks (idempotent).",
         epilog=(
             "Write permission check is implicit: if the token lacks repo-write, the webhook "
@@ -556,6 +599,7 @@ def _run(args: argparse.Namespace) -> int:
 
     logger.info("Bitbucket URL: %s", inp.bitbucket_url)
     logger.info("Webhook URL:   %s", inp.webhook_url)
+    logger.info("Team:          %s", inp.team)
     if urlparse(inp.webhook_url).scheme == "http":
         logger.warning("webhook_url is http:// — riptide will receive the team key in cleartext")
     logger.info("Bitbucket token loaded: %s", _mask(token))
@@ -570,6 +614,7 @@ def _run(args: argparse.Namespace) -> int:
     onboarder = RepoOnboarder(
         client,
         webhook_url=inp.webhook_url,
+        team=inp.team,
         team_key=team_key,
         webhook_name=args.name,
         dry_run=args.dry_run,
