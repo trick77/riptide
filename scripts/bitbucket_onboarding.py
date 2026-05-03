@@ -258,7 +258,7 @@ class BitbucketHTTP:
         data: bytes | None = None
         headers = {
             "Authorization": f"Bearer {self.token}",
-            "Accept": "application/json",
+            "Accept": "application/json;charset=UTF-8",
         }
         if body is not None:
             data = json.dumps(body).encode("utf-8")
@@ -276,13 +276,13 @@ class BitbucketHTTP:
             raise HTTPStatusError(exc.code, text, url) from exc
 
     def get_repo(self, project: str, repo: str) -> dict[str, Any]:
-        resp = self._request("GET", f"/rest/api/1.0/projects/{project}/repos/{repo}")
+        resp = self._request("GET", f"/rest/api/latest/projects/{project}/repos/{repo}")
         return resp.json()
 
     def list_pull_requests(self, project: str, repo: str, limit: int = 1) -> dict[str, Any]:
         resp = self._request(
             "GET",
-            f"/rest/api/1.0/projects/{project}/repos/{repo}/pull-requests",
+            f"/rest/api/latest/projects/{project}/repos/{repo}/pull-requests",
             params={"limit": limit},
         )
         return resp.json()
@@ -294,7 +294,7 @@ class BitbucketHTTP:
         while True:
             resp = self._request(
                 "GET",
-                f"/rest/api/1.0/projects/{project}/repos/{repo}/webhooks",
+                f"/rest/api/latest/projects/{project}/repos/{repo}/webhooks",
                 params={"start": start, "limit": 100},
             )
             page = resp.json()
@@ -310,7 +310,7 @@ class BitbucketHTTP:
     def create_webhook(self, project: str, repo: str, body: dict[str, Any]) -> dict[str, Any]:
         resp = self._request(
             "POST",
-            f"/rest/api/1.0/projects/{project}/repos/{repo}/webhooks",
+            f"/rest/api/latest/projects/{project}/repos/{repo}/webhooks",
             body=body,
         )
         return resp.json()
@@ -320,7 +320,7 @@ class BitbucketHTTP:
     ) -> dict[str, Any]:
         resp = self._request(
             "PUT",
-            f"/rest/api/1.0/projects/{project}/repos/{repo}/webhooks/{webhook_id}",
+            f"/rest/api/latest/projects/{project}/repos/{repo}/webhooks/{webhook_id}",
             body=body,
         )
         return resp.json()
@@ -328,7 +328,7 @@ class BitbucketHTTP:
     def delete_webhook(self, project: str, repo: str, webhook_id: int) -> None:
         self._request(
             "DELETE",
-            f"/rest/api/1.0/projects/{project}/repos/{repo}/webhooks/{webhook_id}",
+            f"/rest/api/latest/projects/{project}/repos/{repo}/webhooks/{webhook_id}",
         )
 
     def list_admin_repos(self) -> list[tuple[str, str]]:
@@ -340,7 +340,7 @@ class BitbucketHTTP:
         while True:
             resp = self._request(
                 "GET",
-                "/rest/api/1.0/repos",
+                "/rest/api/latest/repos",
                 params={"permission": "REPO_ADMIN", "start": start, "limit": 100},
             )
             page = resp.json()
