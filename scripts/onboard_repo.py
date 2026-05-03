@@ -14,6 +14,8 @@ RIPTIDE_TEAM_KEY) are resolved from, in order:
     2. .env in CWD
     3. --env-file <path>
 
+See scripts/onboarding.env.example for a template.
+
 RIPTIDE_TEAM_KEY is the plaintext team API key that riptide will receive on
 inbound webhooks as `Authorization: Bearer <key>`. It is programmed into the
 webhook via Bitbucket Data Center's per-webhook custom HTTP headers feature.
