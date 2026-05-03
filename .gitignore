@@ -29,6 +29,10 @@ openshift/overlays/
 .env.*
 !.env.example
 
+# Local scratch / operator-only files (real .env, ad-hoc configs, …)
+hack/*
+!hack/.gitkeep
+
 # IDE
 .idea/
 .vscode/
