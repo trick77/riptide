@@ -21,15 +21,22 @@ data:
 
   trigger.on-deployed: |
     - description: Application deployed
+      # oncePer keys notification dedup on the deployed revision so the
+      # trigger fires once per commit. Without it the trigger only fires
+      # the first time the condition becomes true and then stays silent
+      # across subsequent auto-syncs of new commits.
+      oncePer: app.status.operationState.syncResult.revision
       send: [app-deployed-riptide]
       when: app.status.operationState.phase in ['Succeeded'] and app.status.health.status == 'Healthy'
 
   trigger.on-sync-succeeded: |
     - description: Sync succeeded
+      oncePer: app.status.operationState.syncResult.revision
       send: [app-deployed-riptide]
       when: app.status.operationState.phase in ['Succeeded']
 
   trigger.on-sync-failed: |
     - description: Sync failed
+      oncePer: app.status.operationState.syncResult.revision
       send: [app-deployed-riptide]
       when: app.status.operationState.phase in ['Error', 'Failed']
