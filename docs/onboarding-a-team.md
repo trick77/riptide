@@ -72,14 +72,6 @@ allowed set (`bitbucket`, `argocd`, `jenkins`, `noergler`) are rejected
 at load time. The hot-reloader picks up edits automatically; the restart
 above is just to surface validation errors immediately.
 
-> **Migrating from the old flat shape.** The collector now rejects the
-> pre-PR-#35 `{ "<team>": "<raw>" }` form outright. Rewrite each entry
-> to `{ "<team>": { "<source>": "<raw>", ... } }` before applying.
-> Safety net: if the new file fails to parse, the running pod keeps
-> serving the previously-loaded keys (see `team_keys_reload_failed` in
-> the logs) — so a botched edit doesn't blackhole webhooks. The restart
-> only fails on first-load validation, not hot-reload validation.
-
 ## 3. Wire the team's webhooks
 
 Each source uses the team's source-specific secret:
