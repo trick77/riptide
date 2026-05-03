@@ -76,7 +76,6 @@ class RepoSpec:
 class OnboardingInput:
     bitbucket_url: str
     webhook_url: str
-    team: str
     repos: list[RepoSpec]
 
 
@@ -142,9 +141,6 @@ def load_onboarding_input(path: Path) -> OnboardingInput:
 
     bitbucket_url = _require_https(data.get("bitbucket_url"), "bitbucket_url")
     webhook_url = _require_url(data.get("webhook_url"), "webhook_url")
-    team = data.get("team")
-    if not isinstance(team, str) or not team.strip():
-        raise SystemExit("ERROR: 'team' must be a non-empty string")
     projects_raw = data.get("projects")
 
     if not isinstance(projects_raw, list) or not projects_raw:
@@ -178,7 +174,6 @@ def load_onboarding_input(path: Path) -> OnboardingInput:
     return OnboardingInput(
         bitbucket_url=bitbucket_url.rstrip("/"),
         webhook_url=webhook_url,
-        team=team.strip(),
         repos=repos,
     )
 
@@ -350,13 +345,22 @@ class RepoOnboarder:
 
     # -- Step 1 -- #
     def verify_permissions(self, spec: RepoSpec) -> None:
-        """Confirm read access to repo and its PRs. Raises HTTPStatusError on failure."""
+        """Confirm read access to repo and its PRs. Raises HTTPStatusError on failure.
+
+        The PR-list call looks redundant next to get_repo, but it's the only
+        way to prove the token has PR-read scope (some BBS roles can read
+        repo metadata without seeing PRs). Webhook write scope is checked
+        implicitly: a missing scope surfaces as 403 on create/update.
+        """
         self.client.get_repo(spec.project, spec.repo)
         self.client.list_pull_requests(spec.project, spec.repo, limit=1)
         logger.info("[%s] read permissions OK", spec.key)
 
     # -- Step 2 -- #
     def _build_webhook_body(self) -> dict[str, Any]:
+        # `configuration.headers` is the BBS Data Center per-webhook custom-header
+        # field. Verified shape against BBS DC 8.x; older builds may differ or
+        # require the headers webhook plugin.
         return {
             "name": self.webhook_name,
             "url": self.webhook_url,
@@ -384,12 +388,12 @@ class RepoOnboarder:
             diffs.append("active: False -> True")
         existing_cfg = existing.get("configuration") or {}
         existing_headers = existing_cfg.get("headers") or {}
-        expected_auth = f"Bearer {self.team_key}"
-        if existing_headers.get("Authorization") != expected_auth:
-            if "Authorization" not in existing_headers:
-                diffs.append("configuration.headers.Authorization: (unset) -> (set)")
-            else:
-                diffs.append("configuration.headers.Authorization: (changed)")
+        # BBS commonly redacts secret-shaped values when reading webhooks back, so
+        # the Authorization value we get here is unreliable. Only flag a diff if
+        # the header is missing entirely; rotate the team key by re-running with
+        # --remove followed by a fresh onboard.
+        if "Authorization" not in existing_headers:
+            diffs.append("configuration.headers.Authorization: (unset) -> (set)")
         return diffs
 
     def upsert_webhook(self, spec: RepoSpec) -> tuple[int, list[str]]:
@@ -550,7 +554,8 @@ def _run(args: argparse.Namespace) -> int:
 
     logger.info("Bitbucket URL: %s", inp.bitbucket_url)
     logger.info("Webhook URL:   %s", inp.webhook_url)
-    logger.info("Team:          %s", inp.team)
+    if urlparse(inp.webhook_url).scheme == "http":
+        logger.warning("webhook_url is http:// — riptide will receive the team key in cleartext")
     logger.info("Bitbucket token loaded: %s", _mask(token))
     logger.info("Riptide team key loaded: %s", _mask(team_key))
     logger.info("Target repos (%d): %s", len(inp.repos), ", ".join(r.key for r in inp.repos))

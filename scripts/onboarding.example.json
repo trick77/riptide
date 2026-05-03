@@ -1,7 +1,6 @@
 {
   "bitbucket_url": "https://bitbucket.example.com",
   "webhook_url": "https://riptide.example.com/webhooks/bitbucket",
-  "team": "platform",
   "projects": [
     { "project": "PLAT", "repos": ["riptide", "noergler"] },
     { "project": "APP",  "repos": ["foo", "bar"] }
