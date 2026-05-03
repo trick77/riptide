@@ -2,8 +2,8 @@
 Onboard a Bitbucket Data Center repository to riptide webhook delivery.
 
 Usage:
-    python scripts/onboard_repo.py config.json [--name riptide] [--dry-run] [--env-file PATH]
-    python scripts/onboard_repo.py config.json --remove [--dry-run] [--env-file PATH]
+    python scripts/onboard_repos.py config.json [--name riptide] [--dry-run] [--env-file PATH]
+    python scripts/onboard_repos.py config.json --remove [--dry-run] [--env-file PATH]
 
 `--remove` deletes the riptide webhook from every repo in the config instead
 of creating/updating it. Same config file drives both directions.
@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-logger = logging.getLogger("onboard_repo")
+logger = logging.getLogger("onboard_repos")
 
 DEFAULT_WEBHOOK_NAME = "riptide"
 
@@ -510,7 +510,7 @@ def _redact(body: dict[str, Any]) -> dict[str, Any]:
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="python scripts/onboard_repo.py",
+        prog="python scripts/onboard_repos.py",
         description="Onboard Bitbucket Data Center repos to riptide by creating/updating their webhooks (idempotent).",
         epilog=(
             "Write permission check is implicit: if the token lacks repo-write, the webhook "
@@ -585,6 +585,12 @@ def _run(args: argparse.Namespace) -> int:
             logger.exception("[%s] unexpected error", spec.key)
             result = RepoResult(spec, "failed", detail=f"unexpected: {exc}")
         results.append(result)
+        if result.status == "failed":
+            logger.error("[%s] aborting: %s", spec.key, result.detail)
+            remaining = [s.key for s in inp.repos[len(results) :]]
+            if remaining:
+                logger.error("not processed: %s", ", ".join(remaining))
+            break
 
     _print_summary(results)
     failed = [r for r in results if r.status == "failed"]
