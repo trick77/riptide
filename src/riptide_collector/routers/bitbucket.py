@@ -106,7 +106,14 @@ def make_router(
 
         team_keys.maybe_reload()
         secret = team_keys.get_secret(team, "bitbucket")
-        if secret is None or not _verify_hmac(secret, raw, x_hub_signature):
+        # Run HMAC even for unknown teams against a dummy key so the
+        # rejection path takes the same wall-time as a wrong-signature
+        # path. Without this, "unknown team" returns ~instantly while
+        # "known team, bad signature" pays the SHA-256 over the body —
+        # an attacker can use the gap to enumerate team names. Cheap.
+        verify_secret = secret if secret is not None else "\x00" * 32
+        signature_ok = _verify_hmac(verify_secret, raw, x_hub_signature)
+        if secret is None or not signature_ok:
             logger.warning(
                 "bitbucket_hmac_rejected",
                 team=team,
