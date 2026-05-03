@@ -104,22 +104,18 @@ def _load_env_file(path: Path) -> dict[str, str]:
     return env
 
 
-def resolve_secrets(env_file: Path | None) -> tuple[str, str]:
-    """Return (BITBUCKET_TOKEN, RIPTIDE_TEAM_KEY).
-
-    Precedence (first match wins): process env > cwd .env > --env-file.
-    Raises SystemExit on missing.
-    """
+def _resolve_env(env_file: Path | None, required: tuple[str, ...]) -> dict[str, str]:
+    """Load `required` env vars from process env > .env in CWD > --env-file."""
     merged: dict[str, str] = {}
     if env_file is not None:
         merged.update(_load_env_file(env_file))
     merged.update(_load_env_file(Path.cwd() / ".env"))
-    for k in ("BITBUCKET_TOKEN", "RIPTIDE_TEAM_KEY"):
+    for k in required:
         value = os.environ.get(k)
         if value:
             merged[k] = value
 
-    missing = [k for k in ("BITBUCKET_TOKEN", "RIPTIDE_TEAM_KEY") if not merged.get(k)]
+    missing = [k for k in required if not merged.get(k)]
     if missing:
         sys.stderr.write(
             "ERROR: missing required environment variable(s): "
@@ -127,7 +123,18 @@ def resolve_secrets(env_file: Path | None) -> tuple[str, str]:
             + "\nSet them in the process env, a .env in CWD, or pass --env-file.\n"
         )
         raise SystemExit(2)
+    return merged
+
+
+def resolve_secrets(env_file: Path | None) -> tuple[str, str]:
+    """Return (BITBUCKET_TOKEN, RIPTIDE_TEAM_KEY) for the onboard/remove paths."""
+    merged = _resolve_env(env_file, ("BITBUCKET_TOKEN", "RIPTIDE_TEAM_KEY"))
     return merged["BITBUCKET_TOKEN"], merged["RIPTIDE_TEAM_KEY"]
+
+
+def resolve_discover_secrets(env_file: Path | None) -> str:
+    """Return BITBUCKET_TOKEN for the --discover path (no RIPTIDE_TEAM_KEY needed)."""
+    return _resolve_env(env_file, ("BITBUCKET_TOKEN",))["BITBUCKET_TOKEN"]
 
 
 def _mask(secret: str) -> str:
@@ -323,6 +330,32 @@ class BitbucketHTTP:
             "DELETE",
             f"/rest/api/1.0/projects/{project}/repos/{repo}/webhooks/{webhook_id}",
         )
+
+    def list_admin_repos(self) -> list[tuple[str, str]]:
+        """Return [(project_key, repo_slug), ...] for every repo the
+        authenticated user has REPO_ADMIN permission on. Paginated.
+        """
+        out: list[tuple[str, str]] = []
+        start = 0
+        while True:
+            resp = self._request(
+                "GET",
+                "/rest/api/1.0/repos",
+                params={"permission": "REPO_ADMIN", "start": start, "limit": 100},
+            )
+            page = resp.json()
+            for entry in page.get("values") or []:
+                project = (entry.get("project") or {}).get("key")
+                slug = entry.get("slug")
+                if isinstance(project, str) and isinstance(slug, str):
+                    out.append((project, slug))
+            if page.get("isLastPage", True):
+                break
+            next_start = page.get("nextPageStart")
+            if not isinstance(next_start, int) or next_start <= start:
+                break
+            start = next_start
+        return out
 
 
 # --------------------------------------------------------------------------- #
@@ -533,7 +566,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "a real PR after onboarding and run scripts/check_onboarding.py."
         ),
     )
-    parser.add_argument("config", type=Path, help="Path to onboarding JSON config")
+    parser.add_argument(
+        "config",
+        type=Path,
+        nargs="?",
+        help="Path to onboarding JSON config (omit when --discover is set)",
+    )
     parser.add_argument(
         "--name",
         default=DEFAULT_WEBHOOK_NAME,
@@ -549,6 +587,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--env-file", type=Path, default=None, help="Additional .env file to read secrets from"
+    )
+    parser.add_argument(
+        "--discover",
+        action="store_true",
+        help="List every repo the BITBUCKET_TOKEN user can REPO_ADMIN on, "
+        "grouped by project, as JSON on stdout. Doesn't onboard anything. "
+        "Logs go to stderr so the output is pipe-clean. Requires "
+        "--bitbucket-url and BITBUCKET_TOKEN; ignores config / RIPTIDE_TEAM_KEY.",
+    )
+    parser.add_argument(
+        "--bitbucket-url",
+        default=None,
+        help="Base URL for --discover (e.g. https://bitbucket.example.com). Ignored otherwise.",
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable DEBUG logging")
     return parser.parse_args(argv)
@@ -613,12 +664,65 @@ def _run(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def _run_discover(args: argparse.Namespace) -> int:
+    """List every repo the BITBUCKET_TOKEN user can REPO_ADMIN on, grouped by
+    project, as JSON on stdout. Logs to stderr so the output is pipe-clean.
+    """
+    if not args.bitbucket_url:
+        sys.stderr.write("ERROR: --discover requires --bitbucket-url\n")
+        return 2
+    parsed = urlparse(args.bitbucket_url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        sys.stderr.write("ERROR: --bitbucket-url must be an https URL\n")
+        return 2
+
+    token = resolve_discover_secrets(args.env_file)
+    logger.info("Bitbucket URL: %s", args.bitbucket_url)
+    logger.info("Bitbucket token loaded: %s", _mask(token))
+
+    client = BitbucketHTTP(base_url=args.bitbucket_url.rstrip("/"), token=token)
+    try:
+        admin_repos = client.list_admin_repos()
+    except HTTPStatusError as exc:
+        logger.error("discover: HTTP %d: %s", exc.status_code, exc.text[:200])
+        return 1
+    except urllib.error.URLError as exc:
+        logger.error("discover: %s", exc)
+        return 1
+
+    by_project: dict[str, list[str]] = {}
+    for project, slug in admin_repos:
+        by_project.setdefault(project, []).append(slug)
+
+    projects = [
+        {"project": project, "repos": sorted(repos)}
+        for project, repos in sorted(by_project.items())
+    ]
+    logger.info(
+        "discover: %d repos across %d projects",
+        sum(len(p["repos"]) for p in projects),
+        len(projects),
+    )
+    json.dump(projects, sys.stdout, indent=2)
+    sys.stdout.write("\n")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    # Discover dumps JSON to stdout; route everything else (logs) to stderr so
+    # the output is pipe-clean.
+    log_stream = sys.stderr if args.discover else None
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        stream=log_stream,
     )
+    if args.discover:
+        return _run_discover(args)
+    if args.config is None:
+        sys.stderr.write("ERROR: config path is required (or pass --discover)\n")
+        return 2
     return _run(args)
 
 
