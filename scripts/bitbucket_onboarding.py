@@ -408,13 +408,6 @@ class RepoOnboarder:
         # `Authorization: Basic <b64(username:password)>` to the webhook URL.
         # `configuration.headers` is silently dropped (and on some versions
         # 500s), which is why we don't put auth there.
-        #
-        # Password is URL-encoded before submission. BBS DC's REST endpoint
-        # runs a URL-decode on the incoming password before storing, so a
-        # raw '+' arrives as a space and a base64-padded token loses its
-        # padding. The UI form path doesn't have this problem because the
-        # browser URL-encodes on submit, so the decode round-trips. Encoding
-        # here makes the JSON path round-trip the same way.
         return {
             "name": self.webhook_name,
             "url": self.webhook_url,
@@ -423,7 +416,7 @@ class RepoOnboarder:
             "configuration": {},
             "credentials": {
                 "username": self.team,
-                "password": urllib.parse.quote(self.team_key, safe=""),
+                "password": self.team_key,
             },
             "sslVerificationRequired": True,
         }
