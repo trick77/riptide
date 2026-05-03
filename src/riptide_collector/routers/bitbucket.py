@@ -4,10 +4,12 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, Path, Request, status
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Path, Request, status
+from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from riptide_collector.bbs_client import BitbucketClient
 from riptide_collector.config import RiptideConfigStore
 from riptide_collector.logging_config import get_logger
 from riptide_collector.models import BitbucketEvent
@@ -18,6 +20,8 @@ from riptide_collector.parsers import (
     parse_change_type,
 )
 from riptide_collector.team_keys import TeamKeysStore
+
+PR_MERGED_EVENT_KEY = "pr:merged"
 
 logger = get_logger(__name__)
 
@@ -110,6 +114,7 @@ def make_router(
     config: RiptideConfigStore,
     session_factory: async_sessionmaker[AsyncSession],
     team_keys: TeamKeysStore,
+    bbs_client: BitbucketClient | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
@@ -120,6 +125,7 @@ def make_router(
     )
     async def bitbucket_webhook(  # pyright: ignore[reportUnusedFunction]
         request: Request,
+        background_tasks: BackgroundTasks,
         team: str = Path(..., min_length=1),
         x_event_key: str | None = Header(default=None),
         x_request_uuid: str | None = Header(default=None),
@@ -233,13 +239,9 @@ def make_router(
         if not author:
             author = _user_handle(_as_dict(body.get("actor")))
 
-        # BBS DC PR payloads don't carry diff stats — leave NULL.
-        # TODO: a single REST round-trip per PR event could recover both
-        # these fields and push-side `is_revert` (commit messages between
-        # fromHash..toHash). Tracked separately.
-        lines_added: int | None = None
-        lines_removed: int | None = None
-        files_changed: int | None = None
+        # BBS DC PR payloads don't carry diff stats; the row inserts with
+        # NULLs and a background task fills them in for `pr:merged` events.
+        # Push-side `is_revert` is the same plumbing, deferred separately.
 
         # Lowercase identifiers used for joins / aggregations. Raw values are
         # preserved on the original `payload` JSONB.
@@ -267,9 +269,9 @@ def make_router(
                     change_type=change_type,
                     jira_keys=jira_keys,
                     automation_source=automation_source,
-                    lines_added=lines_added,
-                    lines_removed=lines_removed,
-                    files_changed=files_changed,
+                    lines_added=None,
+                    lines_removed=None,
+                    files_changed=None,
                     is_revert=is_revert,
                     occurred_at=occurred_at,
                     team=team,
@@ -287,6 +289,105 @@ def make_router(
             repo=repo_full_name,
             team=team,
         )
+
+        if x_event_key == PR_MERGED_EVENT_KEY and pr_id is not None and bbs_client is not None:
+            project_key, slug = _split_repo(body)
+            if project_key and slug:
+                background_tasks.add_task(
+                    _enrich_pr_size,
+                    session_factory=session_factory,
+                    team_keys=team_keys,
+                    bbs_client=bbs_client,
+                    delivery_id=delivery_id,
+                    team=team,
+                    project_key=project_key,
+                    slug=slug,
+                    pr_id=pr_id,
+                )
+
         return {"status": "accepted"}
 
     return router
+
+
+def _split_repo(body: dict[str, Any]) -> tuple[str | None, str | None]:
+    """Return the un-lowercased (project_key, slug) for BBS API URL paths.
+
+    The DB columns store the lowercased composite for joins, but the BBS
+    DC REST API path is case-sensitive — use the raw values from the
+    payload.
+    """
+    repo = _as_dict(body.get("repository"))
+    if not repo:
+        pr = _as_dict(body.get("pullRequest"))
+        repo = _as_dict(_as_dict(pr.get("toRef")).get("repository"))
+    project_key = _as_dict(repo.get("project")).get("key")
+    slug = repo.get("slug")
+    return (
+        project_key if isinstance(project_key, str) else None,
+        slug if isinstance(slug, str) else None,
+    )
+
+
+async def _enrich_pr_size(
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    team_keys: TeamKeysStore,
+    bbs_client: BitbucketClient,
+    delivery_id: str,
+    team: str,
+    project_key: str,
+    slug: str,
+    pr_id: int,
+) -> None:
+    """Background task: fetch PR diff stats from BBS DC, UPDATE the row.
+
+    Best-effort. Any exception is caught at the task boundary so a
+    failed enrichment doesn't surface as a server error after the
+    webhook has already returned 202.
+    """
+    try:
+        token = team_keys.get_secret(team, "bitbucket_api")
+        if not token:
+            logger.info(
+                "bitbucket_api_token_missing",
+                team=team,
+                delivery_id=delivery_id,
+            )
+            return
+        stats = await bbs_client.fetch_pr_diff_stats(project_key, slug, pr_id, token)
+        if stats is None:
+            return
+        async with session_factory() as session:
+            await session.execute(
+                text(
+                    "UPDATE bitbucket_events "
+                    "SET lines_added = :a, "
+                    "lines_removed = :r, "
+                    "files_changed = :f "
+                    "WHERE delivery_id = :id"
+                ),
+                {
+                    "a": stats.lines_added,
+                    "r": stats.lines_removed,
+                    "f": stats.files_changed,
+                    "id": delivery_id,
+                },
+            )
+            await session.commit()
+        logger.info(
+            "bitbucket_pr_size_enriched",
+            delivery_id=delivery_id,
+            pr_id=pr_id,
+            lines_added=stats.lines_added,
+            lines_removed=stats.lines_removed,
+            files_changed=stats.files_changed,
+        )
+    except Exception as exc:
+        logger.warning(
+            "bitbucket_pr_size_enrich_failed",
+            delivery_id=delivery_id,
+            pr_id=pr_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )

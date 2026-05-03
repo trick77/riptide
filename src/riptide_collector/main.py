@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from riptide_collector import __version__
 from riptide_collector.auth import make_team_bearer_dependency
+from riptide_collector.bbs_client import BitbucketClient
 from riptide_collector.config import RiptideConfigStore
 from riptide_collector.db import make_engine, make_session_factory
 from riptide_collector.logging_config import configure_logging, get_logger
@@ -50,6 +51,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     noergler_auth = make_team_bearer_dependency(team_keys, "noergler")
     any_auth = make_team_bearer_dependency(team_keys, "any")
 
+    bbs_base_url = config.get().environments.bitbucket_base_url
+    bbs_client = BitbucketClient(bbs_base_url) if bbs_base_url else None
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):  # pyright: ignore[reportUnusedFunction]
         logger.info(
@@ -58,10 +62,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             teams=len(config.get().teams_by_name),
             keys=len(team_keys.team_names()),
             production_stage=config.get().environments.production_stage,
+            bbs_enrichment=bbs_client is not None,
         )
         try:
             yield
         finally:
+            if bbs_client is not None:
+                await bbs_client.aclose()
             await engine.dispose()
             logger.info("riptide_collector_stopped")
 
@@ -76,7 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     app.include_router(health.make_router(config, session_factory, team_keys, any_auth))
-    app.include_router(bitbucket.make_router(config, session_factory, team_keys))
+    app.include_router(bitbucket.make_router(config, session_factory, team_keys, bbs_client))
     app.include_router(pipeline.make_router(session_factory, pipeline_auth))
     app.include_router(argocd.make_router(config, session_factory, argocd_auth))
     app.include_router(noergler.make_router(session_factory, noergler_auth))
@@ -86,6 +93,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.engine = engine
     app.state.session_factory = session_factory
     app.state.settings = settings
+    app.state.bbs_client = bbs_client
 
     return app
 

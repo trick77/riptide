@@ -14,6 +14,7 @@ dependencies = [
     "pydantic-settings>=2.7",
     "structlog>=24.4",
     "email-validator>=2.2",
+    "httpx>=0.28",
 ]
 
 [dependency-groups]
@@ -23,7 +24,6 @@ dev = [
     "pytest-cov>=6.0",
     "coverage[toml]>=7.6",
     "testcontainers[postgres]>=4.9",
-    "httpx>=0.28",
     "ruff>=0.8",
     "pyright>=1.1.391",
     "pre-commit>=4.0",

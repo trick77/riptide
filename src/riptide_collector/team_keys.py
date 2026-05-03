@@ -1,16 +1,17 @@
 """Team bearer-key store with mtime-based hot reload.
 
 Maps team name → per-source raw secret. Each team can have one secret
-per source (`bitbucket`, `argocd`, `jenkins`, `noergler`). A leaked
-secret is therefore scoped to a single source.
+per source (`bitbucket`, `bitbucket_api`, `argocd`, `jenkins`,
+`noergler`). A leaked secret is therefore scoped to a single source.
 
 File shape:
     {
       "<team-name>": {
-        "bitbucket": "<raw-token>",
-        "argocd":    "<raw-token>",
-        "jenkins":   "<raw-token>",
-        "noergler":  "<raw-token>"
+        "bitbucket":     "<raw-token>",
+        "bitbucket_api": "<raw-token>",
+        "argocd":        "<raw-token>",
+        "jenkins":       "<raw-token>",
+        "noergler":      "<raw-token>"
       },
       ...
     }
@@ -18,7 +19,11 @@ File shape:
 Bearer endpoints look up by `(token, source)` so an `argocd` key cannot
 authenticate `/webhooks/pipeline` or `/webhooks/bitbucket`. The Bitbucket
 endpoint uses HMAC instead of Bearer; its `bitbucket` secret is the HMAC
-key BBS programs into `configuration.secret`.
+key BBS programs into `configuration.secret`. The `bitbucket_api` slot
+is an outbound credential — a BBS DC personal access token used by the
+collector to fetch PR diff stats. It is never accepted as an inbound
+credential and therefore never matched by `lookup` / `lookup_any_source`
+on the inbound paths.
 
 Lookups walk every entry with `hmac.compare_digest` so the wall time of
 an authentication doesn't leak which team's token was the closest match.
@@ -36,7 +41,14 @@ from riptide_collector.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-KNOWN_SOURCES: frozenset[str] = frozenset({"bitbucket", "argocd", "jenkins", "noergler"})
+KNOWN_SOURCES: frozenset[str] = frozenset(
+    {"bitbucket", "bitbucket_api", "argocd", "jenkins", "noergler"}
+)
+# Sources that should never authenticate an inbound request. `bitbucket_api`
+# is an outbound BBS DC personal access token used by the collector to
+# fetch PR diff stats — accepting it as an inbound bearer/HMAC would let
+# whoever holds the PAT impersonate webhook deliveries.
+OUTBOUND_ONLY_SOURCES: frozenset[str] = frozenset({"bitbucket_api"})
 
 
 class TeamKeysError(ValueError):
@@ -124,13 +136,19 @@ class TeamKeysStore:
         """Return the team for whom `raw_token` matches *any* of their
         per-source secrets. Used by the source-agnostic ping path
         (`/auth/ping`) where the caller is just proving they hold one of
-        their team's secrets — which one doesn't matter."""
+        their team's secrets — which one doesn't matter.
+
+        OUTBOUND_ONLY_SOURCES are skipped: they are credentials the
+        collector uses to call out, never inbound auth material.
+        """
         if not raw_token:
             return None
         match: str | None = None
         with self._lock:
             for team, sources in self._keys.items():
-                for stored in sources.values():
+                for source, stored in sources.items():
+                    if source in OUTBOUND_ONLY_SOURCES:
+                        continue
                     if hmac.compare_digest(raw_token, stored):
                         match = team
         return match

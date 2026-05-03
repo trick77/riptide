@@ -44,6 +44,11 @@ class AutomationSource:
 class EnvironmentConfig:
     production_stage: str
     ignored_stages: frozenset[str]
+    # Optional. Set when the collector should call back to BBS DC for
+    # per-PR diff stats. None disables the enrichment path; the row's
+    # lines_added / lines_removed / files_changed stay NULL. All teams
+    # share the same BBS DC instance.
+    bitbucket_base_url: str | None = None
 
 
 DEFAULT_PRODUCTION_STAGE = "prod"
@@ -90,9 +95,24 @@ def _build_environments(raw: Any) -> EnvironmentConfig:
             f"`environments.production_stage` ({production_stage!r}) cannot also appear "
             "in `environments.ignored_stages`"
         )
+
+    raw_bbs_url = raw.get("bitbucket_base_url")
+    bitbucket_base_url: str | None = None
+    if raw_bbs_url is not None:
+        if not isinstance(raw_bbs_url, str) or not raw_bbs_url.strip():
+            raise RiptideConfigError(
+                "`environments.bitbucket_base_url` must be a non-empty string when set"
+            )
+        bitbucket_base_url = raw_bbs_url.strip().rstrip("/")
+        if not bitbucket_base_url.startswith(("http://", "https://")):
+            raise RiptideConfigError(
+                "`environments.bitbucket_base_url` must include the http(s):// scheme"
+            )
+
     return EnvironmentConfig(
         production_stage=production_stage,
         ignored_stages=frozenset(ignored),
+        bitbucket_base_url=bitbucket_base_url,
     )
 
 

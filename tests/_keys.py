@@ -24,10 +24,13 @@ PLATFORM_JENKINS = "test-platform-jenkins-bearer"
 CHECKOUT_NOERGLER = "test-checkout-noergler-bearer"
 PLATFORM_NOERGLER = "test-platform-noergler-bearer"
 
+CHECKOUT_BITBUCKET_API = "test-checkout-bitbucket-pat"
+
 
 TEAM_KEYS: dict[str, dict[str, str]] = {
     "checkout": {
         "bitbucket": CHECKOUT_BITBUCKET,
+        "bitbucket_api": CHECKOUT_BITBUCKET_API,
         "argocd": CHECKOUT_ARGOCD,
         "jenkins": CHECKOUT_JENKINS,
         "noergler": CHECKOUT_NOERGLER,
