@@ -2,8 +2,8 @@
 Onboard a Bitbucket Data Center repository to riptide webhook delivery.
 
 Usage:
-    python scripts/onboard-repos.py config.json [--name riptide] [--dry-run] [--env-file PATH]
-    python scripts/onboard-repos.py config.json --remove [--dry-run] [--env-file PATH]
+    python scripts/onboard_repos.py config.json [--name riptide] [--dry-run] [--env-file PATH]
+    python scripts/onboard_repos.py config.json --remove [--dry-run] [--env-file PATH]
 
 `--remove` deletes the riptide webhook from every repo in the config instead
 of creating/updating it. Same config file drives both directions.
@@ -510,7 +510,7 @@ def _redact(body: dict[str, Any]) -> dict[str, Any]:
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="python scripts/onboard-repos.py",
+        prog="python scripts/onboard_repos.py",
         description="Onboard Bitbucket Data Center repos to riptide by creating/updating their webhooks (idempotent).",
         epilog=(
             "Write permission check is implicit: if the token lacks repo-write, the webhook "
