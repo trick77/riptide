@@ -45,7 +45,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     engine = make_engine(settings.db_url)
     session_factory = make_session_factory(engine)
-    auth_dep = make_team_bearer_dependency(team_keys)
+    argocd_auth = make_team_bearer_dependency(team_keys, "argocd")
+    pipeline_auth = make_team_bearer_dependency(team_keys, "jenkins")
+    noergler_auth = make_team_bearer_dependency(team_keys, "noergler")
+    any_auth = make_team_bearer_dependency(team_keys, "any")
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):  # pyright: ignore[reportUnusedFunction]
@@ -72,11 +75,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
 
-    app.include_router(health.make_router(config, session_factory, team_keys, auth_dep))
-    app.include_router(bitbucket.make_router(config, session_factory, auth_dep))
-    app.include_router(pipeline.make_router(session_factory, auth_dep))
-    app.include_router(argocd.make_router(config, session_factory, auth_dep))
-    app.include_router(noergler.make_router(session_factory, auth_dep))
+    app.include_router(health.make_router(config, session_factory, team_keys, any_auth))
+    app.include_router(bitbucket.make_router(config, session_factory, team_keys))
+    app.include_router(pipeline.make_router(session_factory, pipeline_auth))
+    app.include_router(argocd.make_router(config, session_factory, argocd_auth))
+    app.include_router(noergler.make_router(session_factory, noergler_auth))
 
     app.state.config = config
     app.state.team_keys = team_keys

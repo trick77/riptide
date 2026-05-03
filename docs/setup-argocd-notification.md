@@ -53,11 +53,12 @@ data:
 > case per event to roughly 5s + (1s + 5s) + (5s + 5s) + 5s ≈ 25s instead
 > of inheriting the library's generous defaults. Tune to taste.
 
-Then add the tokens to `argocd-notifications-secret`. The same raw token
-goes into `team-keys.json` and into this Secret — there is no hashing layer
-between them. `argocd-notifications` substitutes `$riptide-token-<team>`
-into `Authorization: Bearer <raw>`, riptide compares the incoming value
-constant-time against the entries in `team-keys.json`.
+Then add the tokens to `argocd-notifications-secret`. Use the team's
+**`argocd`** entry from `team-keys.json` — that is the only key that
+authenticates `/webhooks/argocd` (strict source binding; a `jenkins` or
+`bitbucket` token will be rejected). `argocd-notifications` substitutes
+`$riptide-token-<team>` into `Authorization: Bearer <raw>`; riptide
+compares the incoming value constant-time against `<team>.argocd`.
 
 ```bash
 oc -n argocd patch secret argocd-notifications-secret -p '{

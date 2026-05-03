@@ -24,24 +24,41 @@ merging. After merge the running collector pod re-reads the file within
 oc -n $NS rollout restart deployment/riptide-collector
 ```
 
-## 2. Generate the team's bearer key
+## 2. Generate the team's per-source secrets
 
-The bearer authenticates every webhook from the team's CI / notification
-systems. Riptide stores the **raw token** in `team-keys.json` (no on-disk
-hashing layer — the file already lives inside a Kubernetes Secret).
+Each source the team uses gets its **own raw secret** (Bitbucket = HMAC
+key, ArgoCD / Jenkins / Tekton = Bearer token, Noergler = Bearer token
+if used). A leaked secret is therefore scoped to one source.
 
 ```bash
-RAW=$(openssl rand -base64 32)
-echo "Give to team checkout (one-way handoff): $RAW"
+BB=$(openssl rand -base64 32)   # Bitbucket HMAC
+AC=$(openssl rand -base64 32)   # ArgoCD bearer
+JK=$(openssl rand -base64 32)   # Jenkins/Tekton bearer
+echo "Hand off (one-way) to team checkout:"
+echo "  bitbucket=$BB"
+echo "  argocd=$AC"
+echo "  jenkins=$JK"
 ```
 
-Append the raw token to the cluster's `team-keys.json` and rotate the Secret:
+`team-keys.json` is an object keyed by team then by source:
+
+```json
+{
+  "checkout": {
+    "bitbucket": "<BB>",
+    "argocd":    "<AC>",
+    "jenkins":   "<JK>"
+  }
+}
+```
+
+Push it to the cluster and roll the Secret:
 
 ```bash
 # fetch current, edit, push back
 oc -n $NS get secret riptide-collector-team-keys \
    -o jsonpath='{.data.team-keys\.json}' | base64 -d > /tmp/team-keys.json
-# add: "checkout": "<RAW>"
+# edit /tmp/team-keys.json — add the team's nested entry
 oc -n $NS create secret generic riptide-collector-team-keys \
    --from-file=team-keys.json=/tmp/team-keys.json \
    --dry-run=client -o yaml | oc apply -f -
@@ -49,23 +66,27 @@ shred -u /tmp/team-keys.json
 oc -n $NS rollout restart deployment/riptide-collector
 ```
 
-Every team in the config must have an entry in `team-keys.json`, or the
-pod fails to start. The hot-reloader picks up edits automatically; the
-restart above is just to surface validation errors immediately.
+Every team in the config must have an entry in `team-keys.json` (with at
+least one source) or the pod fails to start. Source names outside the
+allowed set (`bitbucket`, `argocd`, `jenkins`, `noergler`) are rejected
+at load time. The hot-reloader picks up edits automatically; the restart
+above is just to surface validation errors immediately.
 
 ## 3. Wire the team's webhooks
 
-The team configures their own webhooks against
-`https://<route>/webhooks/{bitbucket,pipeline,argocd}`, with the raw bearer
-in the `Authorization: Bearer <RAW>` header. See:
+Each source uses the team's source-specific secret:
 
-- **Bitbucket**: [setup-bitbucket-webhook.md](setup-bitbucket-webhook.md)
-- **ArgoCD**: [setup-argocd-notification.md](setup-argocd-notification.md)
-  (use a per-team `NotificationService` with the team's bearer)
-- **Tekton**: [setup-tekton-pipeline.md](setup-tekton-pipeline.md)
-  (per-team `EventListener` with the team's bearer)
-- **Jenkins**: [setup-jenkins-notification.md](setup-jenkins-notification.md)
-  (per-folder notification config with the team's bearer)
+- **Bitbucket** → `POST /webhooks/bitbucket/{team}`, HMAC via
+  `X-Hub-Signature` (BBS handles signing, secret is the team's
+  `bitbucket` key). The canonical path is the onboarder script:
+  [setup-bitbucket-webhook.md](setup-bitbucket-webhook.md).
+- **ArgoCD** → `POST /webhooks/argocd`, `Authorization: Bearer <argocd>`.
+  See [setup-argocd-notification.md](setup-argocd-notification.md).
+- **Tekton** → `POST /webhooks/pipeline`, `Authorization: Bearer <jenkins>`
+  (the `jenkins` key covers both Jenkins and Tekton).
+  See [setup-tekton-pipeline.md](setup-tekton-pipeline.md).
+- **Jenkins** → `POST /webhooks/pipeline`, `Authorization: Bearer <jenkins>`.
+  See [setup-jenkins-notification.md](setup-jenkins-notification.md).
 
 ## 4. Smoke test
 

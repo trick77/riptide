@@ -20,13 +20,20 @@ doesn't silently override what the operator put in the file.
 
 See scripts/bitbucket-onboarding.env.example for a template.
 
-Auth on the inbound side: BBS DC's webhook config does not honour custom
-HTTP headers (`configuration.headers` is ignored / errors). It does honour
-its own top-level `credentials` block (`{username, password}`), which BBS
-sends to the webhook URL as `Authorization: Basic <b64(username:password)>`.
-This script writes that block; riptide's auth dep accepts Basic alongside
-Bearer. RIPTIDE_TEAM_KEY is the same raw token the team uses elsewhere
-(ArgoCD, etc.).
+Auth on the inbound side: BBS HMAC.
+
+BBS DC's webhook can either Basic-auth via its top-level `credentials`
+block or sign deliveries via `configuration.secret` (HMAC-SHA256, sent
+as `X-Hub-Signature: sha256=<hex>`). Empirically the Basic path is broken
+over REST: BBS drops `credentials.password` on POST/PUT (the UI form
+submission works, REST doesn't — verified against BBS DC). HMAC via
+`configuration.secret` round-trips fine.
+
+So this script provisions HMAC: `configuration.secret = RIPTIDE_TEAM_KEY`,
+where RIPTIDE_TEAM_KEY is the team's `bitbucket` entry in
+`team-keys.json`. The webhook URL becomes `<webhook_url>/<team>` so
+riptide's `POST /webhooks/bitbucket/{team}` can identify the caller from
+the path before HMAC validation.
 
 This script is intentionally stdlib-only so it can run on any host with Python
 3.10+ without a venv or `pip install`.
@@ -411,36 +418,36 @@ class RepoOnboarder:
         logger.info("[%s] read permissions OK", spec.key)
 
     # -- Step 2 -- #
+    @property
+    def _team_webhook_url(self) -> str:
+        # Riptide's bitbucket endpoint is `POST /webhooks/bitbucket/{team}`;
+        # team identity comes from the URL path (BBS HMAC carries no team
+        # claim of its own). Strip any trailing slash on the configured
+        # base before appending the team segment to avoid `//team`.
+        return f"{self.webhook_url.rstrip('/')}/{self.team}"
+
     def _build_webhook_body(self) -> dict[str, Any]:
-        # BBS DC stores Basic-auth creds in a top-level `credentials` block
-        # (sibling of `configuration`, not nested). On the wire BBS sends
-        # `Authorization: Basic <b64(username:password)>` to the webhook URL.
-        # `configuration.headers` is silently dropped (and on some versions
-        # 500s), which is why we don't put auth there.
+        # HMAC mode: `configuration.secret` is the HMAC key. BBS signs each
+        # delivery and sends `X-Hub-Signature: sha256=<hex>` over the raw
+        # request body. Riptide validates and 401s on mismatch.
         #
-        # Password is URL-encoded before submission. BBS DC's REST endpoint
-        # runs a URL-decode on the incoming password before storing, so a
-        # raw '+' arrives as a space and a base64-padded token loses its
-        # padding. The UI form path doesn't have this problem because the
-        # browser URL-encodes on submit, so the decode round-trips. Encoding
-        # here makes the JSON path round-trip the same way.
+        # The Basic-auth alternative (`credentials.{username,password}`) is
+        # broken over REST on BBS DC — POST/PUT silently drops the password.
+        # See module docstring.
         return {
             "name": self.webhook_name,
-            "url": self.webhook_url,
+            "url": self._team_webhook_url,
             "active": True,
             "events": list(REQUIRED_WEBHOOK_EVENTS),
-            "configuration": {},
-            "credentials": {
-                "username": self.team,
-                "password": urllib.parse.quote(self.team_key, safe=""),
-            },
+            "configuration": {"secret": self.team_key},
             "sslVerificationRequired": True,
         }
 
     def _diff_webhook(self, existing: dict[str, Any]) -> list[str]:
         diffs: list[str] = []
-        if existing.get("url") != self.webhook_url:
-            diffs.append(f"url: {existing.get('url')!r} -> {self.webhook_url!r}")
+        target_url = self._team_webhook_url
+        if existing.get("url") != target_url:
+            diffs.append(f"url: {existing.get('url')!r} -> {target_url!r}")
         existing_events = set(existing.get("events") or [])
         required = set(REQUIRED_WEBHOOK_EVENTS)
         if existing_events != required:
@@ -449,12 +456,12 @@ class RepoOnboarder:
             diffs.append(f"events: missing={missing} extra={extra}")
         if not existing.get("active", True):
             diffs.append("active: False -> True")
-        # BBS redacts `credentials.password` on read-back, so we cannot tell
-        # whether the stored password matches what we want to send. Always
-        # rewrite credentials on update — every onboard run is the canonical
-        # source for the password. Cheap PUT; avoids the silent-failure mode
-        # where a stale password sits in BBS forever.
-        diffs.append("credentials: (rewriting — BBS hides password on read-back)")
+        # BBS redacts `configuration.secret` on read-back (presence is
+        # visible, value isn't), so we cannot tell whether the stored HMAC
+        # secret matches what we want to send. Always rewrite — every
+        # onboard run is the canonical source. Cheap PUT; avoids the
+        # silent-failure mode where a stale secret sits in BBS forever.
+        diffs.append("configuration.secret: (rewriting — BBS redacts on read-back)")
         return diffs
 
     def upsert_webhook(self, spec: RepoSpec) -> tuple[int, list[str]]:
@@ -553,11 +560,16 @@ class RepoOnboarder:
 
 def _redact(body: dict[str, Any]) -> dict[str, Any]:
     copy = dict(body)
+    cfg = copy.get("configuration")
+    if isinstance(cfg, dict) and "secret" in cfg:
+        redacted = dict(cfg)
+        redacted["secret"] = "***"
+        copy["configuration"] = redacted
     creds = copy.get("credentials")
     if isinstance(creds, dict) and "password" in creds:
-        redacted = dict(creds)
-        redacted["password"] = "***"
-        copy["credentials"] = redacted
+        redacted_creds = dict(creds)
+        redacted_creds["password"] = "***"
+        copy["credentials"] = redacted_creds
     return copy
 
 

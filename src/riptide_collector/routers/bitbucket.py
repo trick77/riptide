@@ -1,7 +1,10 @@
+import hashlib
+import hmac
+import json
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, Request, status
+from fastapi import APIRouter, Header, HTTPException, Path, Request, status
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -14,6 +17,7 @@ from riptide_collector.parsers import (
     lower,
     parse_change_type,
 )
+from riptide_collector.team_keys import TeamKeysStore
 
 logger = get_logger(__name__)
 
@@ -59,26 +63,65 @@ def _synth_delivery_id(event_key: str | None, body: dict[str, Any]) -> str:
     return f"{event_key or 'unknown'}#{repo}#{pr_id}#{when}"
 
 
+def _verify_hmac(secret: str, body: bytes, header: str | None) -> bool:
+    """Validate `X-Hub-Signature: sha256=<hex>` against `body`.
+
+    Constant-time compare via `hmac.compare_digest`. Rejects missing /
+    malformed headers up front; the digest comparison itself only runs
+    on a structurally-valid header so we never call compare_digest on
+    user-controlled junk of arbitrary length.
+    """
+    if not header:
+        return False
+    prefix, _, hex_sig = header.partition("=")
+    if prefix.lower() != "sha256" or not hex_sig:
+        return False
+    expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(hex_sig.lower(), expected.lower())
+
+
 def make_router(
     config: RiptideConfigStore,
     session_factory: async_sessionmaker[AsyncSession],
-    auth_dep: Any,
+    team_keys: TeamKeysStore,
 ) -> APIRouter:
     router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
     @router.post(
-        "/bitbucket",
+        "/bitbucket/{team}",
         status_code=status.HTTP_202_ACCEPTED,
-        summary="Bitbucket webhook sink",
+        summary="Bitbucket DC webhook sink (HMAC-authenticated)",
     )
     async def bitbucket_webhook(  # pyright: ignore[reportUnusedFunction]
         request: Request,
-        caller_team: str = Depends(auth_dep),
+        team: str = Path(..., min_length=1),
         x_event_key: str | None = Header(default=None),
         x_request_uuid: str | None = Header(default=None),
         x_hook_uuid: str | None = Header(default=None),
+        x_hub_signature: str | None = Header(default=None),
     ) -> dict[str, str]:
-        body = await request.json()
+        # Read raw bytes first — HMAC must be computed over the exact
+        # bytes BBS signed, not over a re-serialised JSON.
+        raw = await request.body()
+
+        team_keys.maybe_reload()
+        secret = team_keys.get_secret(team, "bitbucket")
+        if secret is None or not _verify_hmac(secret, raw, x_hub_signature):
+            logger.warning(
+                "bitbucket_hmac_rejected",
+                team=team,
+                has_secret=secret is not None,
+                has_signature=bool(x_hub_signature),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid signature.",
+            )
+
+        try:
+            body = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            return {"status": "ignored", "reason": "non-json payload"}
         if not isinstance(body, dict):
             return {"status": "ignored", "reason": "non-object payload"}
 
@@ -177,7 +220,7 @@ def make_router(
                     files_changed=files_changed,
                     is_revert=is_revert,
                     occurred_at=occurred_at,
-                    team=caller_team,
+                    team=team,
                     payload=body,
                 )
                 .on_conflict_do_nothing(index_elements=["delivery_id"])
@@ -190,7 +233,7 @@ def make_router(
             delivery_id=delivery_id,
             event_type=event_type,
             repo=repo_full_name,
-            team=caller_team,
+            team=team,
         )
         return {"status": "accepted"}
 

@@ -147,8 +147,10 @@ spec:
 ## 3) Provide the team's bearer token Secret
 
 Each team has its own bearer (the platform team hands it out — see
-`docs/onboarding-a-team.md`). Create a Secret per team in their pipeline
-namespace:
+`docs/onboarding-a-team.md`). Use the team's **`jenkins`** entry from
+`team-keys.json` — the same key covers `/webhooks/pipeline` for both
+Jenkins and Tekton. ArgoCD / Bitbucket keys are rejected here (strict
+source binding). Create a Secret per team in their pipeline namespace:
 
 ```bash
 oc -n <pipeline-namespace> create secret generic riptide-token \

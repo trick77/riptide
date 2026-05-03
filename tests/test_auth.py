@@ -1,4 +1,4 @@
-"""Auth-focused tests: per-team bearer + basic wiring on the live FastAPI app."""
+"""Auth-focused tests: per-source bearer + strict source binding."""
 
 from __future__ import annotations
 
@@ -8,10 +8,15 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from _keys import CHECKOUT_TOKEN, PLATFORM_TOKEN
+from _keys import (
+    CHECKOUT_ARGOCD,
+    CHECKOUT_BITBUCKET,
+    CHECKOUT_JENKINS,
+    CHECKOUT_NOERGLER,
+    PLATFORM_JENKINS,
+)
 from riptide_collector.models import PipelineEvent
 
-# Minimal pipeline payload that satisfies the schema.
 _PAYLOAD = {
     "source": "tekton",
     "pipeline_name": "demo-deploy",
@@ -28,13 +33,8 @@ def _bearer(raw: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {raw}"}
 
 
-def _basic(user: str, password: str) -> dict[str, str]:
-    encoded = base64.b64encode(f"{user}:{password}".encode()).decode("ascii")
-    return {"Authorization": f"Basic {encoded}"}
-
-
 class TestAuthHappyPath:
-    async def test_checkout_token_records_team_checkout(
+    async def test_jenkins_token_records_team_checkout(
         self,
         client: AsyncClient,
         session_factory: async_sessionmaker[AsyncSession],
@@ -44,7 +44,7 @@ class TestAuthHappyPath:
         response = await client.post(
             "/webhooks/pipeline",
             json=body,
-            headers=_bearer(CHECKOUT_TOKEN),
+            headers=_bearer(CHECKOUT_JENKINS),
         )
         assert response.status_code == 202
 
@@ -67,7 +67,7 @@ class TestAuthHappyPath:
         response = await client.post(
             "/webhooks/pipeline",
             json=body,
-            headers=_bearer(PLATFORM_TOKEN),
+            headers=_bearer(PLATFORM_JENKINS),
         )
         assert response.status_code == 202
 
@@ -94,17 +94,9 @@ class TestAuthRejections:
         )
         assert r.status_code == 401
 
-    async def test_malformed_basic_not_b64(self, client: AsyncClient) -> None:
-        # Raw token after `Basic ` is not valid base64 → 401, not a 500.
-        r = await client.post(
-            "/webhooks/pipeline",
-            json=_PAYLOAD,
-            headers={"Authorization": f"Basic {CHECKOUT_TOKEN}"},
-        )
-        assert r.status_code == 401
-
-    async def test_basic_without_colon(self, client: AsyncClient) -> None:
-        encoded = base64.b64encode(CHECKOUT_TOKEN.encode()).decode("ascii")
+    async def test_basic_auth_rejected(self, client: AsyncClient) -> None:
+        # Basic auth is no longer accepted on Bearer endpoints.
+        encoded = base64.b64encode(f"checkout:{CHECKOUT_JENKINS}".encode()).decode("ascii")
         r = await client.post(
             "/webhooks/pipeline",
             json=_PAYLOAD,
@@ -113,91 +105,62 @@ class TestAuthRejections:
         assert r.status_code == 401
 
 
-class TestBasicAuthHappyPath:
-    """Bitbucket DC delivers credentials via URL-embedded Basic auth.
-    Riptide accepts the same raw team token as the Basic password.
-    """
+class TestStrictSourceBinding:
+    """A token registered under one source must NOT authenticate another."""
 
-    async def test_basic_auth_with_correct_team_records_team(
-        self,
-        client: AsyncClient,
-        session_factory: async_sessionmaker[AsyncSession],
-    ) -> None:
-        del session_factory
-        body = dict(_PAYLOAD, run_id="basic-checkout-run")
-        r = await client.post(
-            "/webhooks/pipeline",
-            json=body,
-            headers=_basic("checkout", CHECKOUT_TOKEN),
-        )
-        assert r.status_code == 202
-
-        factory = client._transport.app.state.session_factory  # type: ignore[attr-defined]
-        async with factory() as session:
-            row = (
-                await session.execute(
-                    select(PipelineEvent).where(PipelineEvent.run_id == "basic-checkout-run")
-                )
-            ).scalar_one()
-            assert row.team == "checkout"
-
-    async def test_basic_auth_username_mismatch_still_resolves_by_password(
-        self,
-        client: AsyncClient,
-        session_factory: async_sessionmaker[AsyncSession],
-    ) -> None:
-        # Username is informational only — password is authoritative.
-        del session_factory
-        body = dict(_PAYLOAD, run_id="basic-mismatch-run")
-        r = await client.post(
-            "/webhooks/pipeline",
-            json=body,
-            headers=_basic("typo", PLATFORM_TOKEN),
-        )
-        assert r.status_code == 202
-
-        factory = client._transport.app.state.session_factory  # type: ignore[attr-defined]
-        async with factory() as session:
-            row = (
-                await session.execute(
-                    select(PipelineEvent).where(PipelineEvent.run_id == "basic-mismatch-run")
-                )
-            ).scalar_one()
-            assert row.team == "platform"
-
-
-class TestBasicAuthRejections:
-    async def test_basic_unknown_password(self, client: AsyncClient) -> None:
+    async def test_argocd_token_rejected_on_pipeline(self, client: AsyncClient) -> None:
         r = await client.post(
             "/webhooks/pipeline",
             json=_PAYLOAD,
-            headers=_basic("checkout", "not-a-real-key"),
+            headers=_bearer(CHECKOUT_ARGOCD),
         )
         assert r.status_code == 401
 
-    async def test_basic_empty_password(self, client: AsyncClient) -> None:
+    async def test_jenkins_token_rejected_on_argocd(self, client: AsyncClient) -> None:
+        r = await client.post(
+            "/webhooks/argocd",
+            json={
+                "app_name": "x",
+                "revision": "abc1234567890abc1234567890abc1234567890a",
+            },
+            headers=_bearer(CHECKOUT_JENKINS),
+        )
+        assert r.status_code == 401
+
+    async def test_argocd_token_accepted_on_argocd(self, client: AsyncClient) -> None:
+        r = await client.post(
+            "/webhooks/argocd",
+            json={
+                "app_name": "x",
+                "revision": "abc1234567890abc1234567890abc1234567890a",
+            },
+            headers=_bearer(CHECKOUT_ARGOCD),
+        )
+        assert r.status_code == 202
+
+    async def test_noergler_token_rejected_on_pipeline(self, client: AsyncClient) -> None:
         r = await client.post(
             "/webhooks/pipeline",
             json=_PAYLOAD,
-            headers=_basic("checkout", ""),
+            headers=_bearer(CHECKOUT_NOERGLER),
+        )
+        assert r.status_code == 401
+
+    async def test_bitbucket_secret_rejected_on_bearer_endpoint(self, client: AsyncClient) -> None:
+        # The bitbucket HMAC secret is not a bearer token for any other endpoint.
+        r = await client.post(
+            "/webhooks/pipeline",
+            json=_PAYLOAD,
+            headers=_bearer(CHECKOUT_BITBUCKET),
         )
         assert r.status_code == 401
 
 
 class TestPerEndpointAuth:
-    """Make sure every protected endpoint applies the same auth dependency."""
-
     async def test_argocd_unauth(self, client: AsyncClient) -> None:
         r = await client.post(
             "/webhooks/argocd",
             json={"app_name": "x", "revision": "abc1234"},
-        )
-        assert r.status_code == 401
-
-    async def test_bitbucket_unauth(self, client: AsyncClient) -> None:
-        r = await client.post(
-            "/webhooks/bitbucket",
-            json={},
         )
         assert r.status_code == 401
 

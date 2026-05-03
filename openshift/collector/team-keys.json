@@ -1,4 +1,12 @@
 {
-  "checkout": "dev-only-checkout-token-not-for-production",
-  "platform": "dev-only-platform-token-not-for-production"
+  "checkout": {
+    "bitbucket": "dev-only-checkout-bitbucket-not-for-production",
+    "argocd": "dev-only-checkout-argocd-not-for-production",
+    "jenkins": "dev-only-checkout-jenkins-not-for-production"
+  },
+  "platform": {
+    "bitbucket": "dev-only-platform-bitbucket-not-for-production",
+    "argocd": "dev-only-platform-argocd-not-for-production",
+    "jenkins": "dev-only-platform-jenkins-not-for-production"
+  }
 }

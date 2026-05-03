@@ -17,10 +17,15 @@ noergler — riptide already derives them from the Bitbucket source.
 ## Per-team token
 
 Each team has its own bearer (the platform team hands it out — see
-`docs/onboarding-a-team.md`). Each noergler instance carries the **raw**
-bearer of the team that operates it; every event from that instance is
-recorded in riptide with `team = <that team>`. Do not share tokens across
-teams.
+`docs/onboarding-a-team.md`). Use the team's **`noergler`** entry from
+`team-keys.json` — the per-source binding is strict, so the team's
+`argocd` / `jenkins` / `bitbucket` secrets will be rejected here. The
+`noergler` source is optional per team; teams without one cannot post to
+`/webhooks/noergler`.
+
+Each noergler instance carries the **raw** bearer of the team that
+operates it; every event from that instance is recorded in riptide with
+`team = <that team>`. Do not share tokens across teams.
 
 ## Optional configuration
 

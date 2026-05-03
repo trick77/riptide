@@ -19,7 +19,10 @@ from riptide_collector.settings import Settings
 
 
 def _settings(
-    config: dict[str, Any], keys: dict[str, str], tmp_path: Path, db_url: str
+    config: dict[str, Any],
+    keys: dict[str, dict[str, str]],
+    tmp_path: Path,
+    db_url: str,
 ) -> Settings:
     config_file = tmp_path / "config.json"
     config_file.write_text(json.dumps(config), encoding="utf-8")
@@ -40,7 +43,7 @@ def test_missing_team_key_fails_startup(tmp_path: Path, db_url: str) -> None:
         ],
         "automation": {},
     }
-    keys = {"checkout": "ck-raw"}  # no entry for "ghost"
+    keys = {"checkout": {"argocd": "ck-raw"}}  # no entry for "ghost"
     settings = _settings(config, keys, tmp_path, db_url)
 
     with pytest.raises(StartupValidationError, match="ghost"):

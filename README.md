@@ -143,33 +143,60 @@ the `riptide-collector-secrets` Secret created from
 The local `compose.yaml` runs a throwaway Postgres for development only —
 production deployments connect to the cluster's existing Postgres.
 
-## Authentication: which token form goes where
+## Authentication: per-source team keys
 
-Each team has **one raw token**. That same value goes into every place
-listed below. There is no hashing layer — `team-keys.json` stores raw
-tokens directly.
+Each team has **one secret per source** in `team-keys.json`. A leaked
+secret is therefore scoped to a single source — an exposed ArgoCD token
+cannot be replayed against `/webhooks/pipeline` or `/webhooks/bitbucket`.
 
-| Where the token lives                           | Stored as                              | Wire format riptide sees                                        |
-| ----------------------------------------------- | -------------------------------------- | --------------------------------------------------------------- |
-| `team-keys.json` (riptide Secret)               | raw                                    | n/a — server-side lookup                                        |
-| `argocd-notifications-secret` `stringData`      | raw                                    | `Authorization: Bearer <raw>`                                   |
-| Tekton trigger Secret                           | raw                                    | `Authorization: Bearer <raw>`                                   |
-| Jenkins credentials store                       | raw                                    | `Authorization: Bearer <raw>`                                   |
-| Bitbucket DC webhook `credentials.password`     | raw (BBS handles the b64 itself)       | `Authorization: Basic <b64(team:raw)>`                          |
-| Bitbucket DC webhook `Custom headers` (legacy)  | raw                                    | `Authorization: Bearer <raw>`                                   |
-| Bitbucket onboarding `RIPTIDE_TEAM_KEY` env var | raw                                    | n/a — local script input                                        |
+`team-keys.json` shape:
 
-**Two gotchas worth pinning to memory**:
+```json
+{
+  "<team>": {
+    "bitbucket": "<hmac-secret>",
+    "argocd":    "<bearer-token>",
+    "jenkins":   "<bearer-token>",
+    "noergler":  "<bearer-token>"
+  }
+}
+```
 
-1. **Kubernetes Secret reads** are base64-wrapped. `oc get secret X -o jsonpath='{.data.Y}'` returns the wrapped form — always pipe through `base64 -d` to get the raw value:
-   ```bash
-   oc -n argocd get secret argocd-notifications-secret \
-     -o jsonpath='{.data.riptide-token-checkout}' | base64 -d
-   ```
-   Use `stringData:` (not `data:`) when *writing* — it does the wrap for you.
-2. **Bitbucket Basic auth** is the only place where a base64 form appears on the wire (`Authorization: Basic <b64(user:pass)>`). BBS does the base64 itself — you never type or paste a base64 token by hand for it. Just put the raw value into the `password` field of BBS's webhook `credentials` block.
+`noergler` is optional per team; the others are required for any team
+that uses the corresponding source.
 
-If you ever paste base64-of-raw where raw is expected, the symptom is `401 {"detail":"Invalid credentials."}` — riptide's `team-keys.json` doesn't contain the wrapped value, so the lookup fails.
+| Source                    | Endpoint                          | Auth on the wire                                            | `team-keys.json` key |
+| ------------------------- | --------------------------------- | ----------------------------------------------------------- | -------------------- |
+| Bitbucket DC              | `POST /webhooks/bitbucket/{team}` | `X-Hub-Signature: sha256=<hex>` (HMAC over raw body)        | `bitbucket`          |
+| ArgoCD                    | `POST /webhooks/argocd`           | `Authorization: Bearer <raw>`                               | `argocd`             |
+| Jenkins / Tekton          | `POST /webhooks/pipeline`         | `Authorization: Bearer <raw>`                               | `jenkins`            |
+| Noergler *(optional)*     | `POST /webhooks/noergler`         | `Authorization: Bearer <raw>`                               | `noergler`           |
+
+**Strict source binding.** Riptide looks up the bearer against *only* the
+team's secret for the endpoint's source. Argument: an `argocd` token
+presented to `/webhooks/pipeline` returns `401`, even if the same team
+owns both keys.
+
+**Bitbucket is HMAC-only.** BBS DC's REST API silently drops
+`credentials.password` on POST/PUT (verified empirically — UI Save works,
+REST doesn't), so Basic auth via REST is unusable. HMAC via
+`configuration.secret` round-trips fine. The `scripts/bitbucket_onboarding.py`
+script provisions HMAC; team identity comes from the URL path.
+
+**Gotcha — Kubernetes Secret reads are base64-wrapped**. `oc get secret X
+-o jsonpath='{.data.Y}'` returns the wrapped form. Always pipe through
+`base64 -d` to get the raw value:
+
+```bash
+oc -n argocd get secret argocd-notifications-secret \
+  -o jsonpath='{.data.riptide-token-checkout}' | base64 -d
+```
+
+Use `stringData:` (not `data:`) when *writing* — it does the wrap for you.
+
+If you paste base64-of-raw where raw is expected, the symptom is `401
+{"detail":"Invalid credentials."}` — `team-keys.json` doesn't contain the
+wrapped value, so the lookup fails.
 
 ## Documentation
 
