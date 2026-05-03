@@ -23,6 +23,7 @@ config.
 This script is intentionally stdlib-only so it can run on any host with Python
 3.10+ without a venv or `pip install`.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -59,6 +60,7 @@ REQUIRED_WEBHOOK_EVENTS: tuple[str, ...] = (
 # --------------------------------------------------------------------------- #
 # Config loading
 # --------------------------------------------------------------------------- #
+
 
 @dataclass(frozen=True)
 class RepoSpec:
@@ -203,6 +205,7 @@ def _require_url(value: Any, field_name: str) -> str:
 # Minimal stdlib HTTP client for Bitbucket Data Center
 # --------------------------------------------------------------------------- #
 
+
 class HTTPStatusError(Exception):
     def __init__(self, status_code: int, text: str, url: str):
         super().__init__(f"HTTP {status_code} for {url}: {text[:200]}")
@@ -321,6 +324,7 @@ class BitbucketHTTP:
 # Onboarder
 # --------------------------------------------------------------------------- #
 
+
 @dataclass
 class RepoResult:
     repo: RepoSpec
@@ -420,7 +424,8 @@ class RepoOnboarder:
             self.verify_permissions(spec)
         except HTTPStatusError as exc:
             return RepoResult(
-                spec, "failed",
+                spec,
+                "failed",
                 detail=f"permission check HTTP {exc.status_code}: {exc.text[:200]}",
             )
         except urllib.error.URLError as exc:
@@ -430,7 +435,8 @@ class RepoOnboarder:
             _, diff = self.upsert_webhook(spec)
         except HTTPStatusError as exc:
             return RepoResult(
-                spec, "failed",
+                spec,
+                "failed",
                 detail=f"upsert webhook HTTP {exc.status_code}: {exc.text[:200]}",
             )
         except urllib.error.URLError as exc:
@@ -448,7 +454,8 @@ class RepoOnboarder:
             hooks = self.client.list_webhooks(spec.project, spec.repo)
         except HTTPStatusError as exc:
             return RepoResult(
-                spec, "failed",
+                spec,
+                "failed",
                 detail=f"list webhooks HTTP {exc.status_code}: {exc.text[:200]}",
             )
         except urllib.error.URLError as exc:
@@ -468,7 +475,8 @@ class RepoOnboarder:
             self.client.delete_webhook(spec.project, spec.repo, webhook_id)
         except HTTPStatusError as exc:
             return RepoResult(
-                spec, "failed",
+                spec,
+                "failed",
                 detail=f"delete webhook HTTP {exc.status_code}: {exc.text[:200]}",
             )
         except urllib.error.URLError as exc:
@@ -493,6 +501,7 @@ def _redact(body: dict[str, Any]) -> dict[str, Any]:
 # CLI
 # --------------------------------------------------------------------------- #
 
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="python scripts/onboard_repo.py",
@@ -505,13 +514,22 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument("config", type=Path, help="Path to onboarding JSON config")
-    parser.add_argument("--name", default=DEFAULT_WEBHOOK_NAME, help=f"Webhook name (default: {DEFAULT_WEBHOOK_NAME})")
-    parser.add_argument("--dry-run", action="store_true", help="Print planned changes without mutating Bitbucket")
     parser.add_argument(
-        "--remove", action="store_true",
+        "--name",
+        default=DEFAULT_WEBHOOK_NAME,
+        help=f"Webhook name (default: {DEFAULT_WEBHOOK_NAME})",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Print planned changes without mutating Bitbucket"
+    )
+    parser.add_argument(
+        "--remove",
+        action="store_true",
         help="Deboard: delete the webhook from every repo in the config instead of creating/updating it",
     )
-    parser.add_argument("--env-file", type=Path, default=None, help="Additional .env file to read secrets from")
+    parser.add_argument(
+        "--env-file", type=Path, default=None, help="Additional .env file to read secrets from"
+    )
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable DEBUG logging")
     return parser.parse_args(argv)
 
