@@ -102,11 +102,12 @@ metric filters) from the namespace suffix.
 
 ## 3) Route teams to their service via subscriptions
 
-Pick the form that matches your AppProject layout. **Without a
-subscription, no webhook leaves Argo CD** — the notifications controller
-will reconcile the Application (`Start processing` / `Processing
-completed` in its log) and emit nothing else. That silent log pattern is
-the canonical "no subscription matches this app" signature.
+**Without a subscription, no webhook leaves Argo CD** — the notifications
+controller will reconcile the Application (`Start processing` /
+`Processing completed` in its log) and emit nothing else. That silent
+log pattern, plus a missing `notified.notifications.argoproj.io`
+annotation on the Application, is the canonical "no subscription matches
+this app" signature.
 
 > **Why only `on-deployed` + `on-sync-failed`.** `on-deployed` already
 > covers the success path (sync `Succeeded` *and* health `Healthy`), so
@@ -117,16 +118,46 @@ the canonical "no subscription matches this app" signature.
 > reaches `Healthy` (CRDs without a health hook, Jobs, etc.), swap
 > `on-deployed` for `on-sync-succeeded` instead — never subscribe to both.
 
-### Recommended: global subscription with a team-label selector
+> **OpenShift GitOps gotcha.** On argocd-operator-managed ArgoCD (the
+> OpenShift GitOps stack), do **not** rely on
+> `spec.notifications.subscriptions` on the ArgoCD CR or on a global
+> `subscriptions:` key in `argocd-notifications-cm`. The operator owns
+> the ConfigMap and renders subscriptions into a key called `default:`,
+> which the upstream argocd-notifications controller does not read — so
+> the global block is silently ignored, no webhook ever leaves the
+> cluster, and the only signal is the `notified` annotation never being
+> set on Applications. Use per-AppProject annotations instead (below).
 
-Use this when a team owns **multiple** `AppProject`s (one per Bitbucket
-project, etc.) — annotating each project is per-project toil and easy to
-forget when a new one is added. A single subscription with a label
-selector covers every Application the team labels.
+### Recommended: AppProject default annotation
 
-Prereq: every Application carries a stable `team: <team>` label. Riptide's
-own deploy already does this; for tenant Applications add it in the
-template that produces them.
+One annotation on each AppProject the team owns — every Application
+under it inherits it, no per-app boilerplate, and it works on both
+upstream Argo CD and OpenShift GitOps:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: checkout
+  namespace: argocd
+  annotations:
+    notifications.argoproj.io/subscribe.on-deployed.riptide-checkout: ""
+    notifications.argoproj.io/subscribe.on-sync-failed.riptide-checkout: ""
+```
+
+If a team owns several AppProjects (one per Bitbucket project, etc.),
+add the annotation to each — it is the only form that reliably reaches
+the controller on operator-managed ArgoCD.
+
+If a team needs a per-app override (rare), set the same annotation
+directly on the `Application` and it takes precedence.
+
+### Alternative: global subscription with a team-label selector (upstream Argo CD only)
+
+Skip this on OpenShift GitOps — see the gotcha above. On upstream
+Argo CD you can avoid annotating each AppProject with a single label
+selector, provided every Application carries a stable `team: <team>`
+label:
 
 ```yaml
 data:
@@ -164,26 +195,7 @@ Substitute `<argocd-ns>` for whichever namespace runs the notifications
 controller — in apps-in-any-namespace setups this can be a tenant
 namespace (e.g. `argocd-<team>-prod`), not the default `argocd`.
 
-### Alternative: AppProject default annotation
-
-Use this when team ↔ AppProject is **1:1**. One annotation on the project,
-every Application under it inherits it:
-
-```yaml
-apiVersion: argoproj.io/v1alpha1
-kind: AppProject
-metadata:
-  name: checkout
-  namespace: argocd
-  annotations:
-    notifications.argoproj.io/subscribe.on-deployed.riptide-checkout: ""
-    notifications.argoproj.io/subscribe.on-sync-failed.riptide-checkout: ""
-```
-
-If a team needs a per-app override (rare), set the same annotation
-directly on the `Application` and it takes precedence.
-
-The global form and the per-project form are additive, so you can run
+The annotation form and the global form are additive, so you can run
 both during a migration — duplicate fires are absorbed by riptide's
 `delivery_id` dedup.
 
