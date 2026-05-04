@@ -107,29 +107,37 @@ def riptideNotify(String phase) {
                     echo "riptide-notify: OK (http=${resp.status})"
                 } else {
                     // Reached the server but it returned an error status.
-                    echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
-                    echo '!! WARNING: RIPTIDE-COLLECTOR REJECTED THE EVENT            !!'
-                    echo "!! http=${resp.status}  url=${url}"
-                    echo '!! build result is UNAFFECTED — this is best-effort         !!'
-                    echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+                    // Single-string echo so the [Pipeline] echo step marker
+                    // appears once, not five times.
+                    echo([
+                        '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
+                        '!! WARNING: RIPTIDE-COLLECTOR REJECTED THE EVENT            !!',
+                        "http=${resp.status}  url=${url}",
+                        '!! build result is UNAFFECTED — this is best-effort         !!',
+                        '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
+                    ].join('\n'))
                 }
             }
         }
     } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
         // timeout() aborted us — riptide-collector did not respond in time.
         // Do NOT rethrow: that would propagate the abort and fail the build.
-        echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
-        echo '!! WARNING: RIPTIDE-COLLECTOR UNREACHABLE                   !!'
-        echo '!! reason=wall-clock timeout (no response in 15s)           !!'
-        echo '!! build result is UNAFFECTED — this is best-effort         !!'
-        echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+        echo([
+            '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
+            '!! WARNING: RIPTIDE-COLLECTOR UNREACHABLE                   !!',
+            '!! reason=wall-clock timeout (no response in 15s)           !!',
+            '!! build result is UNAFFECTED — this is best-effort         !!',
+            '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
+        ].join('\n'))
     } catch (Throwable t) {
         // Connection refused, DNS failure, TLS error, plugin error, etc.
-        echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
-        echo '!! WARNING: RIPTIDE-COLLECTOR UNREACHABLE                   !!'
-        echo "!! reason=${t.class.simpleName}: ${t.message}"
-        echo '!! build result is UNAFFECTED — this is best-effort         !!'
-        echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+        echo([
+            '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
+            '!! WARNING: RIPTIDE-COLLECTOR UNREACHABLE                   !!',
+            "reason=${t.class.simpleName}: ${t.message}",
+            '!! build result is UNAFFECTED — this is best-effort         !!',
+            '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
+        ].join('\n'))
     }
 }
 

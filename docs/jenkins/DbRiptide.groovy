@@ -312,11 +312,17 @@ private String resolveCollectorUrl(final Map args) {
 }
 
 private void warnRiptide(String reason, String detail) {
-    echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
-    echo "!! WARNING: RIPTIDE-COLLECTOR ${reason.toUpperCase()}"
-    echo "!! ${detail}"
-    echo '!! build result is UNAFFECTED — this is best-effort         !!'
-    echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+    // Single `echo` so the `[Pipeline] echo` step marker appears once,
+    // not five times — keeps the banner visually contiguous in the log.
+    // Inner lines with dynamic content drop the leading `!!` since we
+    // can't pad to a trailing `!!`; fixed-content lines keep both ends.
+    echo([
+            '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
+            "WARNING: RIPTIDE-COLLECTOR ${reason.toUpperCase()}",
+            "${detail}",
+            '!! build result is UNAFFECTED — this is best-effort         !!',
+            '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
+    ].join('\n'))
 }
 
 static String stripTrailingSlash(String url) {
