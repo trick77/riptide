@@ -4,7 +4,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from riptide_collector import __version__
-from riptide_collector.auth import make_team_bearer_dependency
+from riptide_collector.auth import make_hmac_dependency, make_team_bearer_dependency
 from riptide_collector.config import RiptideConfigStore
 from riptide_collector.db import make_engine, make_session_factory
 from riptide_collector.logging_config import configure_logging, get_logger
@@ -49,6 +49,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     pipeline_auth = make_team_bearer_dependency(team_keys, "jenkins")
     noergler_auth = make_team_bearer_dependency(team_keys, "noergler")
     any_auth = make_team_bearer_dependency(team_keys, "any")
+    bitbucket_hmac = make_hmac_dependency(team_keys, "bitbucket")
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):  # pyright: ignore[reportUnusedFunction]
@@ -76,7 +77,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     app.include_router(health.make_router(config, session_factory, team_keys, any_auth))
-    app.include_router(bitbucket.make_router(config, session_factory, team_keys))
+    app.include_router(bitbucket.make_router(config, session_factory, bitbucket_hmac))
     app.include_router(pipeline.make_router(session_factory, pipeline_auth))
     app.include_router(argocd.make_router(config, session_factory, argocd_auth))
     app.include_router(noergler.make_router(session_factory, noergler_auth))

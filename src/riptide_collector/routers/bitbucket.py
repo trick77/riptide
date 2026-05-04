@@ -1,8 +1,7 @@
-import hashlib
-import hmac
 import json
+from collections.abc import Awaitable, Callable
 
-from fastapi import APIRouter, Header, HTTPException, Path, Request, status
+from fastapi import APIRouter, Depends, Header, Path, status
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -14,32 +13,14 @@ from riptide_collector.parsers_bitbucket import (
     BitbucketSkip,
     extract_event,
 )
-from riptide_collector.team_keys import TeamKeysStore
 
 logger = get_logger(__name__)
-
-
-def _verify_hmac(secret: str, body: bytes, header: str | None) -> bool:
-    """Validate `X-Hub-Signature: sha256=<hex>` against `body`.
-
-    Constant-time compare via `hmac.compare_digest`. Rejects missing /
-    malformed headers up front; the digest comparison itself only runs
-    on a structurally-valid header so we never call compare_digest on
-    user-controlled junk of arbitrary length.
-    """
-    if not header:
-        return False
-    prefix, _, hex_sig = header.partition("=")
-    if prefix.lower() != "sha256" or not hex_sig:
-        return False
-    expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(hex_sig.lower(), expected.lower())
 
 
 def make_router(
     config: RiptideConfigStore,
     session_factory: async_sessionmaker[AsyncSession],
-    team_keys: TeamKeysStore,
+    hmac_dep: Callable[..., Awaitable[bytes]],
 ) -> APIRouter:
     router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
@@ -49,38 +30,14 @@ def make_router(
         summary="Bitbucket DC webhook sink (HMAC-authenticated)",
     )
     async def bitbucket_webhook(  # pyright: ignore[reportUnusedFunction]
-        request: Request,
+        raw: bytes = Depends(hmac_dep),
         team: str = Path(..., min_length=1),
         x_event_key: str | None = Header(default=None),
         x_request_uuid: str | None = Header(default=None),
         x_hook_uuid: str | None = Header(default=None),
-        x_hub_signature: str | None = Header(default=None),
     ) -> dict[str, str]:
-        # Read raw bytes first — HMAC must be computed over the exact
-        # bytes BBS signed, not over a re-serialised JSON.
-        raw = await request.body()
-
-        team_keys.maybe_reload()
-        secret = team_keys.get_secret(team, "bitbucket")
-        # Run HMAC even for unknown teams against a dummy key so the
-        # rejection path takes the same wall-time as a wrong-signature
-        # path. Without this, "unknown team" returns ~instantly while
-        # "known team, bad signature" pays the SHA-256 over the body —
-        # an attacker can use the gap to enumerate team names. Cheap.
-        verify_secret = secret if secret is not None else "\x00" * 32
-        signature_ok = _verify_hmac(verify_secret, raw, x_hub_signature)
-        if secret is None or not signature_ok:
-            logger.warning(
-                "bitbucket_hmac_rejected",
-                team=team,
-                has_secret=secret is not None,
-                has_signature=bool(x_hub_signature),
-            )
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid signature.",
-            )
-
+        # HMAC + raw-body read happen in the dependency; we get verified
+        # bytes here. Parse once, dispatch to the pure extractor.
         try:
             body = json.loads(raw) if raw else {}
         except json.JSONDecodeError:
