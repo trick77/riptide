@@ -29,13 +29,17 @@
 void notifyStarted(final Map args) {
 
     def collectorUrl = Argument.getRequiredValue(args, "collectorUrl")
-    def commitSha = Argument.getOptionalValue(args, "commitSha", resolveCommitSha())
+    // `?:` keeps resolveCommitSha() lazy — Groovy evaluates default
+    // arguments eagerly, so passing it as the third arg of
+    // getOptionalValue would `sh 'git rev-parse HEAD'` on every call
+    // even when commitSha was supplied explicitly.
+    def commitSha = Argument.getOptionalValue(args, "commitSha", null) ?: resolveCommitSha()
     def credentialsId = Argument.getOptionalValue(args, "credentialsId", "RIPTIDE_TOKEN")
     def pipelineName = Argument.getOptionalValue(args, "pipelineName", env.JOB_NAME)
     def runId = Argument.getOptionalValue(args, "runId", env.BUILD_NUMBER)
     def startedAt = Argument.getOptionalValue(args, "startedAt", currentBuildStartedAtIso())
-    def timeoutSeconds = Argument.getOptionalValue(args, "timeoutSeconds", 15)
-    def httpTimeoutSeconds = Argument.getOptionalValue(args, "httpTimeoutSeconds", 10)
+    int timeoutSeconds = Argument.getOptionalValue(args, "timeoutSeconds", 15) as int
+    int httpTimeoutSeconds = Argument.getOptionalValue(args, "httpTimeoutSeconds", 10) as int
 
     if (!commitSha) {
         warnRiptide("missing commit", "no commitSha and resolveCommitSha() returned null; skipping STARTED")
@@ -54,13 +58,7 @@ void notifyStarted(final Map args) {
             started_at   : startedAt,
     ]
 
-    postEventBestEffort([
-            collectorUrl       : collectorUrl,
-            credentialsId      : credentialsId,
-            body               : body,
-            timeoutSeconds     : timeoutSeconds,
-            httpTimeoutSeconds : httpTimeoutSeconds,
-    ])
+    postEventBestEffort(collectorUrl, credentialsId, body, timeoutSeconds, httpTimeoutSeconds)
 }
 
 // ---------------------------------------------------------------------------
@@ -73,15 +71,15 @@ void notifyStarted(final Map args) {
 void notifyCompleted(final Map args) {
 
     def collectorUrl = Argument.getRequiredValue(args, "collectorUrl")
-    def commitSha = Argument.getOptionalValue(args, "commitSha", resolveCommitSha())
+    def commitSha = Argument.getOptionalValue(args, "commitSha", null) ?: resolveCommitSha()
     def credentialsId = Argument.getOptionalValue(args, "credentialsId", "RIPTIDE_TOKEN")
     def pipelineName = Argument.getOptionalValue(args, "pipelineName", env.JOB_NAME)
     def runId = Argument.getOptionalValue(args, "runId", env.BUILD_NUMBER)
     def status = Argument.getOptionalValue(args, "status", currentBuild.currentResult ?: 'SUCCESS')
     def startedAt = Argument.getOptionalValue(args, "startedAt", currentBuildStartedAtIso())
     def finishedAt = Argument.getOptionalValue(args, "finishedAt", nowIso())
-    def timeoutSeconds = Argument.getOptionalValue(args, "timeoutSeconds", 15)
-    def httpTimeoutSeconds = Argument.getOptionalValue(args, "httpTimeoutSeconds", 10)
+    int timeoutSeconds = Argument.getOptionalValue(args, "timeoutSeconds", 15) as int
+    int httpTimeoutSeconds = Argument.getOptionalValue(args, "httpTimeoutSeconds", 10) as int
 
     if (!commitSha) {
         warnRiptide("missing commit", "no commitSha and resolveCommitSha() returned null; skipping COMPLETED")
@@ -100,13 +98,7 @@ void notifyCompleted(final Map args) {
     ]
 
     def preResult = currentBuild.result
-    postEventBestEffort([
-            collectorUrl       : collectorUrl,
-            credentialsId      : credentialsId,
-            body               : body,
-            timeoutSeconds     : timeoutSeconds,
-            httpTimeoutSeconds : httpTimeoutSeconds,
-    ])
+    postEventBestEffort(collectorUrl, credentialsId, body, timeoutSeconds, httpTimeoutSeconds)
     // Restore — notify must never demote the build. Guard `preResult != null`
     // because Jenkins refuses `currentBuild.result = null`: you cannot
     // un-fail a build mid-flight, and a no-op assignment risks a warning on
@@ -149,9 +141,7 @@ void runWithEvents(final Map args, Closure body) {
         resolvedStatus = 'FAILURE'
         throw t
     } finally {
-        def completedArgs = new HashMap(args)
-        completedArgs.put('status', resolvedStatus)
-        notifyCompleted(completedArgs)
+        notifyCompleted(args + [status: resolvedStatus])
         if (currentBuild.result != preResult && preResult != null) {
             currentBuild.result = preResult
         }
@@ -161,21 +151,23 @@ void runWithEvents(final Map args, Closure body) {
 // ---------------------------------------------------------------------------
 // Internal: POST one event. Best-effort — catches everything, logs loudly,
 // returns normally. Caller is never aware of network errors.
+//
+// Private helper: positional params, not a `Map args` — public methods
+// already validated their inputs and the helper has no other call sites.
 // ---------------------------------------------------------------------------
-private void postEventBestEffort(final Map args) {
-
-    def collectorUrl = Argument.getRequiredValue(args, "collectorUrl")
-    def credentialsId = Argument.getRequiredValue(args, "credentialsId")
-    def body = Argument.getRequiredValue(args, "body")
-    def timeoutSeconds = Argument.getOptionalValue(args, "timeoutSeconds", 15)
-    def httpTimeoutSeconds = Argument.getOptionalValue(args, "httpTimeoutSeconds", 10)
+private void postEventBestEffort(
+        String collectorUrl,
+        String credentialsId,
+        Map body,
+        int timeoutSeconds,
+        int httpTimeoutSeconds) {
 
     def url = stripTrailingSlash(collectorUrl) + "/webhooks/pipeline"
     def jsonBody = groovy.json.JsonOutput.toJson(body)
 
     try {
         // Hard wall-clock ceiling so a hung connection cannot drag the build.
-        timeout(time: timeoutSeconds as int, unit: 'SECONDS') {
+        timeout(time: timeoutSeconds, unit: 'SECONDS') {
             withCredentials([string(credentialsId: credentialsId, variable: 'TOKEN')]) {
                 def resp = httpRequest(
                         httpMode: 'POST',
@@ -183,7 +175,7 @@ private void postEventBestEffort(final Map args) {
                         customHeaders: [[name: 'Authorization', value: "Bearer ${TOKEN}", maskValue: true]],
                         contentType: 'APPLICATION_JSON',
                         requestBody: jsonBody,
-                        timeout: httpTimeoutSeconds as int,
+                        timeout: httpTimeoutSeconds,
                         quiet: true,
                         validResponseCodes: '100:599',
                         consoleLogResponseBody: false,
