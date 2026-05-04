@@ -20,7 +20,29 @@
 // Notifications are best-effort: a slow or unavailable collector must
 // NEVER fail the build.
 //
+// Picking the collector:
+//   * Default — no `stage` and no `collectorUrl` → DEFAULT_STAGE ('prod').
+//   * `stage: 'test'` — route to the test collector.
+//   * `collectorUrl: '...'` — explicit override (for one-off / sandboxes);
+//     wins over `stage`.
+//   * Unknown `stage` value → warn loudly, fall back to DEFAULT_STAGE.
+//
 // Requires the Jenkins HTTP Request plugin.
+
+import groovy.transform.Field
+
+// REPLACE these URLs with the actual riptide-collector endpoints in your
+// environment. `example.invalid` is RFC 6761 reserved and is guaranteed
+// not to resolve, so a forgotten swap fails loudly via the best-effort
+// `unreachable` warning instead of silently 200-ing some unrelated host.
+@Field
+final Map<String, String> COLLECTOR_URLS = [
+        test: 'https://riptide-test.example.invalid',
+        prod: 'https://riptide.example.invalid',
+]
+
+@Field
+final String DEFAULT_STAGE = 'prod'
 
 // ---------------------------------------------------------------------------
 // Notify STARTED — call right when the build begins.
@@ -28,7 +50,11 @@
 // ---------------------------------------------------------------------------
 void notifyStarted(final Map args) {
 
-    def collectorUrl = Argument.getRequiredValue(args, "collectorUrl")
+    def collectorUrl = resolveCollectorUrl(args)
+    if (!collectorUrl) {
+        warnRiptide("no collector url", "neither collectorUrl nor stage resolved to a URL; skipping STARTED")
+        return
+    }
     // `?:` keeps resolveCommitSha() lazy — Groovy evaluates default
     // arguments eagerly, so passing it as the third arg of
     // getOptionalValue would `sh 'git rev-parse HEAD'` on every call
@@ -70,7 +96,11 @@ void notifyStarted(final Map args) {
 // ---------------------------------------------------------------------------
 void notifyCompleted(final Map args) {
 
-    def collectorUrl = Argument.getRequiredValue(args, "collectorUrl")
+    def collectorUrl = resolveCollectorUrl(args)
+    if (!collectorUrl) {
+        warnRiptide("no collector url", "neither collectorUrl nor stage resolved to a URL; skipping COMPLETED")
+        return
+    }
     def commitSha = Argument.getOptionalValue(args, "commitSha", null) ?: resolveCommitSha()
     def credentialsId = Argument.getOptionalValue(args, "credentialsId", "RIPTIDE_TOKEN")
     def pipelineName = Argument.getOptionalValue(args, "pipelineName", env.JOB_NAME)
@@ -113,12 +143,12 @@ void notifyCompleted(final Map args) {
 // finally block. Use this when you don't want to wire up a `post.always`
 // stage manually.
 //
-//   riptide.runWithEvents(
-//       collectorUrl: 'https://riptide.example.com',
-//       commitSha:    env.GIT_COMMIT,
-//   ) {
+//   riptide.runWithEvents([:]) {              // defaults: stage='prod'
 //       sh './build.sh'
 //   }
+//
+//   // ...or pin to test:
+//   riptide.runWithEvents(stage: 'test') { sh './build.sh' }
 //
 // IMPORTANT: this wrapper runs in-band, so it determines the COMPLETED
 // status from whether the body threw — NOT from `currentBuild.currentResult`,
@@ -238,6 +268,33 @@ String currentBuildStartedAtIso() {
     } catch (Throwable t) {
         return nowIso()
     }
+}
+
+/**
+ * Resolve the collector URL from `args`:
+ *   1. Explicit `collectorUrl:` wins (one-off / sandbox override).
+ *   2. `stage:` is looked up in COLLECTOR_URLS.
+ *   3. Default: COLLECTOR_URLS[DEFAULT_STAGE].
+ *
+ * An unknown `stage` value warns loudly and falls back to DEFAULT_STAGE.
+ * Returns null only if DEFAULT_STAGE itself isn't in COLLECTOR_URLS,
+ * which is a misconfiguration of this file.
+ */
+private String resolveCollectorUrl(final Map args) {
+    def explicit = Argument.getOptionalValue(args, "collectorUrl", null)
+    if (explicit) {
+        return explicit
+    }
+    def stage = Argument.getOptionalValue(args, "stage", DEFAULT_STAGE)
+    def url = COLLECTOR_URLS[stage]
+    if (!url) {
+        warnRiptide(
+                "unknown stage",
+                "stage='${stage}' not in ${COLLECTOR_URLS.keySet()}; falling back to DEFAULT_STAGE='${DEFAULT_STAGE}'"
+        )
+        return COLLECTOR_URLS[DEFAULT_STAGE]
+    }
+    return url
 }
 
 private void warnRiptide(String reason, String detail) {
