@@ -40,6 +40,7 @@ If `docker ps` fails, ask the user to start OrbStack.
 
 ## Repo conventions
 
+- **Layering.** Routers do HTTP + auth + dispatch only. Source-specific payload extraction lives in `parsers_<source>.py` (e.g. `parsers_bitbucket.py`) as pure functions returning a typed `*EventDraft` dataclass — no HTTP, no DB, no config. The router computes config-derived fields (e.g. `automation_source`) and persists. Don't put extraction logic in routers; don't duplicate JSON-shape coercion (`_as_dict`/`_as_list`-style helpers belong with the extractor that uses them).
 - Single Python package, `riptide_collector` (flat top-level, not a namespace package). Future suite components (e.g. `riptide-api`, `riptide-dashboard`) get their own top-level package, e.g. `riptide_dashboard` — leave architectural room for them.
 - Webhook routers are factories that return an `APIRouter`. Bitbucket needs the config for automation detection (`make_router(config, session_factory, auth_dep)`); Pipeline, ArgoCD, and Noergler don't, so they take just `(session_factory, auth_dep)`. They're wired up in `src/riptide_collector/main.py::create_app`. Add the config only when a router actually needs `automation` rules or team metadata.
 - Pydantic schemas: **strict** for `/webhooks/pipeline` and `/webhooks/argocd` (we own the contract — invalid payloads must 422); **permissive raw-dict parsing** for Bitbucket (its payload shapes vary; we best-effort extract).
