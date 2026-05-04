@@ -16,9 +16,20 @@ from httpx import AsyncClient
 from sqlalchemy import select
 
 from _keys import CHECKOUT_BITBUCKET_API
-from riptide_collector.bbs_client import BitbucketClient, DiffStats
+from riptide_collector.bbs_client import BitbucketClient, DiffStats, PushCommitStats
 from riptide_collector.models import BitbucketEvent
+from riptide_collector.routers import bitbucket as bitbucket_router
 from test_webhooks import _load, post_bitbucket
+
+
+@pytest.fixture(autouse=True)
+def _enable_bbs_callbacks(monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]
+    """The router disables BBS DC outbound callbacks via a module-level
+    flag. These tests verify the enrichment wiring is correct, so they
+    flip it back on for their scope. When the operator re-enables the
+    callbacks in production, this file's expectations match reality.
+    """
+    monkeypatch.setattr(bitbucket_router, "_BBS_CALLBACKS_DISABLED", False)
 
 
 def _state_of(client: AsyncClient) -> Any:
@@ -251,6 +262,108 @@ async def test_pr_merged_with_path_traversal_in_slug_skips_fetch(
     )
     assert response.status_code == 202
     assert calls == 0
+
+
+def _patch_push_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+    result: PushCommitStats | None,
+    captured: dict[str, Any] | None = None,
+) -> None:
+    async def _stub(
+        self: BitbucketClient,
+        project_key: str,
+        slug: str,
+        from_hash: str,
+        to_hash: str,
+        token: str,
+    ) -> PushCommitStats | None:
+        del self
+        if captured is not None:
+            captured["project_key"] = project_key
+            captured["slug"] = slug
+            captured["from_hash"] = from_hash
+            captured["to_hash"] = to_hash
+            captured["token"] = token
+        return result
+
+    monkeypatch.setattr(BitbucketClient, "fetch_push_commit_stats", _stub)
+
+
+async def test_push_enriches_row_with_commit_counts(
+    client_with_bbs_enrichment: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    _patch_push_fetch(
+        monkeypatch,
+        PushCommitStats(commit_count=7, author_count=3),
+        captured,
+    )
+
+    payload = _load("bitbucket_refs_changed.json")
+    response = await post_bitbucket(
+        client_with_bbs_enrichment,
+        payload,
+        extra_headers={"X-Request-UUID": "push-enrich", "X-Event-Key": "repo:refs_changed"},
+    )
+    assert response.status_code == 202
+
+    factory = _state_of(client_with_bbs_enrichment).session_factory
+    async with factory() as session:
+        row = (await session.execute(select(BitbucketEvent))).scalar_one()
+        assert row.push_commit_count == 7
+        assert row.push_author_count == 3
+
+    assert captured["project_key"] == "ACME"
+    assert captured["slug"] == "payments-api"
+    assert captured["from_hash"] == "1111111111111111111111111111111111111111"
+    assert captured["to_hash"] == "feedfacefeedfacefeedfacefeedfacefeedface"
+    assert captured["token"] == CHECKOUT_BITBUCKET_API
+
+
+async def test_push_failed_fetch_leaves_columns_null(
+    client_with_bbs_enrichment: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_push_fetch(monkeypatch, None)
+
+    payload = _load("bitbucket_refs_changed.json")
+    response = await post_bitbucket(
+        client_with_bbs_enrichment,
+        payload,
+        extra_headers={"X-Request-UUID": "push-fail", "X-Event-Key": "repo:refs_changed"},
+    )
+    assert response.status_code == 202
+
+    factory = _state_of(client_with_bbs_enrichment).session_factory
+    async with factory() as session:
+        row = (await session.execute(select(BitbucketEvent))).scalar_one()
+        assert row.push_commit_count is None
+        assert row.push_author_count is None
+
+
+async def test_pr_merged_does_not_trigger_push_enrichment(
+    client_with_bbs_enrichment: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    push_calls = 0
+
+    async def _push_stub(*_args: Any, **_kwargs: Any) -> PushCommitStats | None:
+        nonlocal push_calls
+        push_calls += 1
+        return None
+
+    monkeypatch.setattr(BitbucketClient, "fetch_push_commit_stats", _push_stub)
+    _patch_fetch(monkeypatch, DiffStats(0, 0, 0))
+
+    payload = _load("bitbucket_pr_merged.json")
+    response = await post_bitbucket(
+        client_with_bbs_enrichment,
+        payload,
+        extra_headers={"X-Request-UUID": "pr-only", "X-Event-Key": "pr:merged"},
+    )
+    assert response.status_code == 202
+    assert push_calls == 0
 
 
 async def test_pr_merged_without_bbs_client_keeps_stats_null(

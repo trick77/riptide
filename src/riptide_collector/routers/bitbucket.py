@@ -22,6 +22,18 @@ from riptide_collector.parsers import (
 from riptide_collector.team_keys import TeamKeysStore
 
 PR_MERGED_EVENT_KEY = "pr:merged"
+REFS_CHANGED_EVENT_KEY = "repo:refs_changed"
+
+# TODO: re-enable BBS DC outbound callbacks once we're ready to run
+# them in production. Currently disabled everywhere — both the
+# `pr:merged` diff-stat enrichment and the `repo:refs_changed`
+# push-commit enrichment skip their background tasks. The webhook
+# still ingests and persists the raw event; the enriched columns
+# (`lines_added`, `lines_removed`, `files_changed`, `push_commit_count`,
+# `push_author_count`) stay NULL until we flip this back on. Flip to
+# False to re-enable; the rest of the wiring (BitbucketClient, token
+# bucket, retry, team_keys lookup) is untouched.
+_BBS_CALLBACKS_DISABLED = True
 
 logger = get_logger(__name__)
 
@@ -204,23 +216,32 @@ def make_router(
         # otherwise.
         raw_changes = _as_list(body.get("changes"))
         had_branch_change = False
-        if not (branch_name and commit_sha):
-            for change in raw_changes:
-                change_dict = _as_dict(change)
-                if str(change_dict.get("type", "")).upper() == "DELETE":
-                    continue
-                ref = _as_dict(change_dict.get("ref"))
-                if str(ref.get("type", "BRANCH")).upper() != "BRANCH":
-                    continue
-                had_branch_change = True
-                ref_display = ref.get("displayId")
-                to_hash = change_dict.get("toHash")
-                if not branch_name and isinstance(ref_display, str):
-                    branch_name = ref_display
-                if not commit_sha and isinstance(to_hash, str):
-                    commit_sha = to_hash
-                if branch_name and commit_sha:
-                    break
+        # Captured for the push-commits enrichment background task; we
+        # need both endpoints of the range to query
+        # `/commits?since={fromHash}&until={toHash}`.
+        push_from_hash: str | None = None
+        push_to_hash: str | None = None
+        for change in raw_changes:
+            change_dict = _as_dict(change)
+            if str(change_dict.get("type", "")).upper() == "DELETE":
+                continue
+            ref = _as_dict(change_dict.get("ref"))
+            if str(ref.get("type", "BRANCH")).upper() != "BRANCH":
+                continue
+            had_branch_change = True
+            ref_display = ref.get("displayId")
+            to_hash = change_dict.get("toHash")
+            from_hash = change_dict.get("fromHash")
+            if not branch_name and isinstance(ref_display, str):
+                branch_name = ref_display
+            if not commit_sha and isinstance(to_hash, str):
+                commit_sha = to_hash
+            if push_to_hash is None and isinstance(to_hash, str):
+                push_to_hash = to_hash
+            if push_from_hash is None and isinstance(from_hash, str):
+                push_from_hash = from_hash
+            if branch_name and commit_sha and push_from_hash and push_to_hash:
+                break
 
         # A push event with `changes[]` but no usable branch change
         # (tag-only or DELETE-only) carries no data we'd join on. Drop
@@ -290,7 +311,12 @@ def make_router(
             team=team,
         )
 
-        if x_event_key == PR_MERGED_EVENT_KEY and pr_id is not None and bbs_client is not None:
+        if (
+            not _BBS_CALLBACKS_DISABLED
+            and x_event_key == PR_MERGED_EVENT_KEY
+            and pr_id is not None
+            and bbs_client is not None
+        ):
             project_key, slug = _split_repo(body)
             if project_key and slug:
                 background_tasks.add_task(
@@ -303,6 +329,28 @@ def make_router(
                     project_key=project_key,
                     slug=slug,
                     pr_id=pr_id,
+                )
+
+        if (
+            not _BBS_CALLBACKS_DISABLED
+            and x_event_key == REFS_CHANGED_EVENT_KEY
+            and bbs_client is not None
+            and push_from_hash
+            and push_to_hash
+        ):
+            project_key, slug = _split_repo(body)
+            if project_key and slug:
+                background_tasks.add_task(
+                    _enrich_push_commits,
+                    session_factory=session_factory,
+                    team_keys=team_keys,
+                    bbs_client=bbs_client,
+                    delivery_id=delivery_id,
+                    team=team,
+                    project_key=project_key,
+                    slug=slug,
+                    from_hash=push_from_hash,
+                    to_hash=push_to_hash,
                 )
 
         return {"status": "accepted"}
@@ -396,6 +444,67 @@ async def _enrich_pr_size(
             "bitbucket_pr_size_enrich_failed",
             delivery_id=delivery_id,
             pr_id=pr_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+
+
+async def _enrich_push_commits(
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    team_keys: TeamKeysStore,
+    bbs_client: BitbucketClient,
+    delivery_id: str,
+    team: str,
+    project_key: str,
+    slug: str,
+    from_hash: str,
+    to_hash: str,
+) -> None:
+    """Background task: fetch commit count + author count for a push.
+
+    Best-effort, same shape as `_enrich_pr_size`. Failure leaves the
+    columns NULL.
+    """
+    try:
+        token = team_keys.get_secret(team, "bitbucket_api")
+        if not token:
+            logger.info(
+                "bitbucket_api_token_missing",
+                team=team,
+                delivery_id=delivery_id,
+            )
+            return
+        stats = await bbs_client.fetch_push_commit_stats(
+            project_key, slug, from_hash, to_hash, token
+        )
+        if stats is None:
+            return
+        async with session_factory() as session:
+            await session.execute(
+                text(
+                    "UPDATE bitbucket_events "
+                    "SET push_commit_count = :c, "
+                    "push_author_count = :a "
+                    "WHERE delivery_id = :id"
+                ),
+                {
+                    "c": stats.commit_count,
+                    "a": stats.author_count,
+                    "id": delivery_id,
+                },
+            )
+            await session.commit()
+        logger.info(
+            "bitbucket_push_commits_enriched",
+            delivery_id=delivery_id,
+            commit_count=stats.commit_count,
+            author_count=stats.author_count,
+        )
+    except Exception as exc:
+        logger.warning(
+            "bitbucket_push_commits_enrich_failed",
+            delivery_id=delivery_id,
             error=str(exc),
             error_type=type(exc).__name__,
         )

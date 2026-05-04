@@ -55,6 +55,13 @@ class BitbucketEvent(Base):
     lines_added: Mapped[int | None] = mapped_column(Integer, nullable=True)
     lines_removed: Mapped[int | None] = mapped_column(Integer, nullable=True)
     files_changed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Per-push commit stats, enriched via BBS DC `/commits` REST API on
+    # `repo:refs_changed`. NULL until the background task fills them in
+    # (or permanently NULL if the PAT/repo isn't reachable). Author
+    # count is distinct *within* the push only — not deduped across
+    # pushes within a window. See README.
+    push_commit_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    push_author_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_revert: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(

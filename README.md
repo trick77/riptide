@@ -73,7 +73,9 @@ the data captured in v1.
 
 | Metric | How it's computed |
 |---|---|
-| **PR size** | `lines_added`, `lines_removed`, `files_changed` columns on `bitbucket_events` (extracted from the PR payload). |
+| **PR size** | `lines_added`, `lines_removed`, `files_changed` columns on `bitbucket_events`, enriched on `pr:merged` via the BBS DC `/diff` REST API. NULL on `pr:opened` / `pr:declined` rows. |
+| **Commit count** *(per push)* | `SUM(push_commit_count)` on `bitbucket_events WHERE event_type = 'repo:refs_changed'`, group by `team` / `repo_full_name` / week. Enriched per push via the BBS DC `/commits?since={fromHash}&until={toHash}` REST API. |
+| **Commit author count** *(per push)* | `SUM(push_author_count)` on the same rows. Distinct count is computed *within* each push — not deduped across pushes within a window. Switching to `commit_authors text[]` would enable cross-push dedup; not in v1. |
 | **Revert rate** | `COUNT(*) WHERE is_revert = true` over total commits — a free, weak Change-Failure-Rate proxy. |
 | **Hotfix rate** | `COUNT(*) WHERE change_type = 'hotfix'` over total deploys per window — operational-pain signal. |
 | **Change mix** | Distribution of `change_type` (feature / bugfix / hotfix / chore / refactor / docs / other) per team per week. |
