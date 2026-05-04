@@ -5,6 +5,13 @@
 // Jenkinsfile. Mirrors the style of the existing `Argument.getRequiredValue`
 // / `Argument.getOptionalValue` helpers used elsewhere in the library.
 //
+// THIS FILE IS A TEMPLATE. Before deploying it into a Jenkins shared
+// library, edit COLLECTOR_URLS below to point at your real test/prod
+// riptide-collector hostnames. The placeholder values use
+// `example.invalid` (RFC 6761 reserved, DNS-guaranteed not to resolve)
+// so a forgotten swap fails loudly via the best-effort `unreachable`
+// warning instead of silently 200-ing some unrelated host.
+//
 // Riptide pipeline contract (`POST /webhooks/pipeline`):
 //   source         required, e.g. "jenkins"
 //   pipeline_name  required, Jenkins job name
@@ -167,6 +174,12 @@ void runWithEvents(final Map args, Closure body) {
     String resolvedStatus = 'SUCCESS'
     try {
         body()
+    } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException t) {
+        // User-aborted (or upstream timeout): distinguish from a code
+        // FAILURE so dashboards can split "broken build" from "operator
+        // killed it" without joining to Jenkins' own state.
+        resolvedStatus = 'ABORTED'
+        throw t
     } catch (Throwable t) {
         resolvedStatus = 'FAILURE'
         throw t

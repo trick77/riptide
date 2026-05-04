@@ -38,7 +38,32 @@ For shared Jenkins instances, scope each folder's `RIPTIDE_TOKEN`
 credential to that folder so jobs see only their team's token. The token
 identifies the team; do not share across teams.
 
-## Jenkinsfile snippet
+## Recommended: use the shared-library helper
+
+If your team already runs a Jenkins shared library, drop
+`docs/jenkins/DbRiptide.groovy` into it (after editing `COLLECTOR_URLS`
+to point at your real test/prod riptide-collector hostnames) and call
+`notifyCompleted` from `post.always`:
+
+```groovy
+post {
+    always {
+        script {
+            // stage: 'prod' is the default; pass `stage: 'test'` to route
+            // to a non-prod collector, or `collectorUrl: '…'` for a one-off.
+            dbRiptide.notifyCompleted([:])
+        }
+    }
+}
+```
+
+The helper handles HMAC plumbing, `currentBuild.result` snapshot/restore,
+the wall-clock timeout, FlowInterruptedException-vs-Throwable split,
+ABORTED-vs-FAILURE status mapping, and lazy `commit_sha` resolution.
+Prefer this over the inline snippet below — the inline form is for
+teams without a shared library.
+
+## Jenkinsfile snippet (inline, no shared library)
 
 Requires the **HTTP Request** plugin and a `Secret text` credential named
 `RIPTIDE_TOKEN` containing **your team's** raw bearer token.
@@ -55,7 +80,7 @@ def riptideNotify(String phase) {
         pipeline_name: env.JOB_NAME,
         run_id: env.BUILD_NUMBER,
         phase: phase,
-        status: currentBuild.currentResult ?: 'IN_PROGRESS',
+        status: currentBuild.currentResult ?: 'SUCCESS',
         commit_sha: env.GIT_COMMIT,
         started_at: new Date(started).format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC')),
         finished_at: phase == 'COMPLETED'
@@ -120,7 +145,12 @@ pipeline {
             script {
                 def preResult = currentBuild.result
                 riptideNotify('COMPLETED')
-                if (currentBuild.result != preResult) { currentBuild.result = preResult }
+                // Guard `preResult != null` — Jenkins refuses
+                // `currentBuild.result = null`, you cannot un-fail a
+                // build mid-flight.
+                if (currentBuild.result != preResult && preResult != null) {
+                    currentBuild.result = preResult
+                }
             }
         }
     }
