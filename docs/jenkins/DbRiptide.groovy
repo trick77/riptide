@@ -62,11 +62,10 @@ void notifyStarted(final Map args) {
         warnRiptide("no collector url", "neither collectorUrl nor stage resolved to a URL; skipping STARTED")
         return
     }
-    // `?:` keeps resolveCommitSha() lazy — Groovy evaluates default
-    // arguments eagerly, so passing it as the third arg of
-    // getOptionalValue would `sh 'git rev-parse HEAD'` on every call
-    // even when commitSha was supplied explicitly.
-    def commitSha = Argument.getOptionalValue(args, "commitSha", null) ?: resolveCommitSha()
+    // Direct Map access (Argument.getOptionalValue rejects null defaults).
+    // `?:` also keeps resolveCommitSha() lazy — `sh 'git rev-parse HEAD'`
+    // only runs when commitSha wasn't supplied.
+    def commitSha = args.commitSha ?: resolveCommitSha()
     def credentialsId = Argument.getOptionalValue(args, "credentialsId", "RIPTIDE_TOKEN")
     def pipelineName = Argument.getOptionalValue(args, "pipelineName", env.JOB_NAME)
     def runId = Argument.getOptionalValue(args, "runId", env.BUILD_NUMBER)
@@ -108,7 +107,8 @@ void notifyCompleted(final Map args) {
         warnRiptide("no collector url", "neither collectorUrl nor stage resolved to a URL; skipping COMPLETED")
         return
     }
-    def commitSha = Argument.getOptionalValue(args, "commitSha", null) ?: resolveCommitSha()
+    // Direct Map access (Argument.getOptionalValue rejects null defaults).
+    def commitSha = args.commitSha ?: resolveCommitSha()
     def credentialsId = Argument.getOptionalValue(args, "credentialsId", "RIPTIDE_TOKEN")
     def pipelineName = Argument.getOptionalValue(args, "pipelineName", env.JOB_NAME)
     def runId = Argument.getOptionalValue(args, "runId", env.BUILD_NUMBER)
@@ -294,7 +294,8 @@ String currentBuildStartedAtIso() {
  * which is a misconfiguration of this file.
  */
 private String resolveCollectorUrl(final Map args) {
-    def explicit = Argument.getOptionalValue(args, "collectorUrl", null)
+    // Direct Map access (Argument.getOptionalValue rejects null defaults).
+    def explicit = args.collectorUrl
     if (explicit) {
         return explicit
     }
