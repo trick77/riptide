@@ -318,9 +318,9 @@ private void warnRiptide(String reason, String detail) {
     // can't pad to a trailing `!!`; fixed-content lines keep both ends.
     echo([
             '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
-            "WARNING: RIPTIDE-COLLECTOR ${reason.toUpperCase()}",
-            "${detail}",
-            '!! build result is UNAFFECTED — this is best-effort         !!',
+            "  WARNING: RIPTIDE-COLLECTOR ${reason.toUpperCase()}",
+            "  ${detail}",
+            '  build result is UNAFFECTED — this is best-effort',
             '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
     ].join('\n'))
 }
