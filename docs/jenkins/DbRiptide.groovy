@@ -9,7 +9,8 @@
 //   source         required, e.g. "jenkins"
 //   pipeline_name  required, Jenkins job name
 //   run_id         required, Jenkins build number (string)
-//   phase          required, "STARTED" / "COMPLETED" / "FINALIZED"
+//   phase          required, "STARTED" / "COMPLETED" (this helper emits
+//                  these two; "FINALIZED" is reserved for future use)
 //   status         optional, "SUCCESS" / "FAILURE" / "UNSTABLE" / ...
 //   commit_sha     required, >=7 chars
 //   started_at     required, ISO 8601 UTC
@@ -27,8 +28,8 @@
 // ---------------------------------------------------------------------------
 void notifyStarted(final Map args) {
 
-    def commitSha = Argument.getRequiredValue(args, "commitSha")
     def collectorUrl = Argument.getRequiredValue(args, "collectorUrl")
+    def commitSha = Argument.getOptionalValue(args, "commitSha", resolveCommitSha())
     def credentialsId = Argument.getOptionalValue(args, "credentialsId", "RIPTIDE_TOKEN")
     def pipelineName = Argument.getOptionalValue(args, "pipelineName", env.JOB_NAME)
     def runId = Argument.getOptionalValue(args, "runId", env.BUILD_NUMBER)
@@ -36,12 +37,19 @@ void notifyStarted(final Map args) {
     def timeoutSeconds = Argument.getOptionalValue(args, "timeoutSeconds", 15)
     def httpTimeoutSeconds = Argument.getOptionalValue(args, "httpTimeoutSeconds", 10)
 
+    if (!commitSha) {
+        warnRiptide("missing commit", "no commitSha and resolveCommitSha() returned null; skipping STARTED")
+        return
+    }
+
+    // Status is intentionally omitted on STARTED — the schema treats it as
+    // optional and emitting "IN_PROGRESS" would invent a value the rest of
+    // the system never produces.
     def body = [
             source       : 'jenkins',
             pipeline_name: pipelineName,
-            run_id       : runId as String,
+            run_id       : runId,
             phase        : 'STARTED',
-            status       : 'IN_PROGRESS',
             commit_sha   : commitSha,
             started_at   : startedAt,
     ]
@@ -64,8 +72,8 @@ void notifyStarted(final Map args) {
 // ---------------------------------------------------------------------------
 void notifyCompleted(final Map args) {
 
-    def commitSha = Argument.getRequiredValue(args, "commitSha")
     def collectorUrl = Argument.getRequiredValue(args, "collectorUrl")
+    def commitSha = Argument.getOptionalValue(args, "commitSha", resolveCommitSha())
     def credentialsId = Argument.getOptionalValue(args, "credentialsId", "RIPTIDE_TOKEN")
     def pipelineName = Argument.getOptionalValue(args, "pipelineName", env.JOB_NAME)
     def runId = Argument.getOptionalValue(args, "runId", env.BUILD_NUMBER)
@@ -75,10 +83,15 @@ void notifyCompleted(final Map args) {
     def timeoutSeconds = Argument.getOptionalValue(args, "timeoutSeconds", 15)
     def httpTimeoutSeconds = Argument.getOptionalValue(args, "httpTimeoutSeconds", 10)
 
+    if (!commitSha) {
+        warnRiptide("missing commit", "no commitSha and resolveCommitSha() returned null; skipping COMPLETED")
+        return
+    }
+
     def body = [
             source       : 'jenkins',
             pipeline_name: pipelineName,
-            run_id       : runId as String,
+            run_id       : runId,
             phase        : 'COMPLETED',
             status       : status,
             commit_sha   : commitSha,
@@ -94,8 +107,11 @@ void notifyCompleted(final Map args) {
             timeoutSeconds     : timeoutSeconds,
             httpTimeoutSeconds : httpTimeoutSeconds,
     ])
-    // Restore — notify must never demote the build.
-    if (currentBuild.result != preResult) {
+    // Restore — notify must never demote the build. Guard `preResult != null`
+    // because Jenkins refuses `currentBuild.result = null`: you cannot
+    // un-fail a build mid-flight, and a no-op assignment risks a warning on
+    // some core versions.
+    if (currentBuild.result != preResult && preResult != null) {
         currentBuild.result = preResult
     }
 }
@@ -111,18 +127,30 @@ void notifyCompleted(final Map args) {
 //   ) {
 //       sh './build.sh'
 //   }
+//
+// IMPORTANT: this wrapper runs in-band, so it determines the COMPLETED
+// status from whether the body threw — NOT from `currentBuild.currentResult`,
+// which Jenkins only updates AFTER the script block has propagated the
+// exception. Reading currentResult here would falsely report SUCCESS for a
+// build that is about to be marked FAILURE.
+//
+// For maximum fidelity (UNSTABLE / ABORTED / etc.) prefer calling
+// `notifyCompleted` from `post.always { script { ... } }` instead — by then
+// Jenkins has settled the result.
 // ---------------------------------------------------------------------------
 void runWithEvents(final Map args, Closure body) {
 
     notifyStarted(args)
     def preResult = currentBuild.result
+    String resolvedStatus = 'SUCCESS'
     try {
         body()
+    } catch (Throwable t) {
+        resolvedStatus = 'FAILURE'
+        throw t
     } finally {
-        // Capture status from currentBuild.currentResult AFTER the body has
-        // run, so a thrown exception or step failure is reflected.
         def completedArgs = new HashMap(args)
-        completedArgs.put('status', currentBuild.currentResult ?: 'SUCCESS')
+        completedArgs.put('status', resolvedStatus)
         notifyCompleted(completedArgs)
         if (currentBuild.result != preResult && preResult != null) {
             currentBuild.result = preResult
