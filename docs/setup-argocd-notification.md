@@ -102,31 +102,12 @@ metric filters) from the namespace suffix.
 
 ## 3) Route teams to their service via AppProject defaults
 
-Each team should have its own `AppProject`. Set a default subscription on
-the project so every Application under it inherits the right team's
-service — no per-app annotations:
-
-```yaml
-apiVersion: argoproj.io/v1alpha1
-kind: AppProject
-metadata:
-  name: checkout
-  namespace: argocd
-  annotations:
-    # default subscription — every Application under this project inherits it
-    # (see https://argocd-notifications.readthedocs.io/en/stable/subscriptions/)
-    notifications.argoproj.io/subscribe.on-deployed.riptide-checkout: ""
-    notifications.argoproj.io/subscribe.on-sync-failed.riptide-checkout: ""
-spec:
-  # ... destinations, sourceRepos, etc.
-  description: Checkout team apps
-```
-
-Apps under the `checkout` AppProject will fire the riptide webhook with the
-**checkout** team's bearer.
-
-If a team needs a per-app override (rare), set the same annotation directly
-on the `Application` and it overrides the project default.
+**Without a subscription, no webhook leaves Argo CD** — the notifications
+controller will reconcile the Application (`Start processing` /
+`Processing completed` in its log) and emit nothing else. That silent
+log pattern, plus a missing `notified.notifications.argoproj.io`
+annotation on the Application, is the canonical "no subscription matches
+this app" signature.
 
 > **Why only `on-deployed` + `on-sync-failed`.** `on-deployed` already
 > covers the success path (sync `Succeeded` *and* health `Healthy`), so
@@ -137,12 +118,46 @@ on the `Application` and it overrides the project default.
 > reaches `Healthy` (CRDs without a health hook, Jobs, etc.), swap
 > `on-deployed` for `on-sync-succeeded` instead — never subscribe to both.
 
-### Alternative: global subscriptions in the ConfigMap
+> **OpenShift GitOps gotcha.** On argocd-operator-managed ArgoCD (the
+> OpenShift GitOps stack), do **not** rely on
+> `spec.notifications.subscriptions` on the ArgoCD CR or on a global
+> `subscriptions:` key in `argocd-notifications-cm`. The operator owns
+> the ConfigMap and renders subscriptions into a key called `default:`,
+> which the upstream argocd-notifications controller does not read — so
+> the global block is silently ignored, no webhook ever leaves the
+> cluster, and the only signal is the `notified` annotation never being
+> set on Applications. Use per-AppProject annotations instead (below).
 
-If you cannot rely on `AppProject` inheritance (e.g. Applications live
-outside per-team projects), declare subscriptions globally in
-`argocd-notifications-cm` with a selector. One block per team, since each
-team has its own bearer / `NotificationService`:
+### Recommended: AppProject default annotation
+
+One annotation on each AppProject the team owns — every Application
+under it inherits it, no per-app boilerplate, and it works on both
+upstream Argo CD and OpenShift GitOps:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: checkout
+  namespace: argocd
+  annotations:
+    notifications.argoproj.io/subscribe.on-deployed.riptide-checkout: ""
+    notifications.argoproj.io/subscribe.on-sync-failed.riptide-checkout: ""
+```
+
+If a team owns several AppProjects (one per Bitbucket project, etc.),
+add the annotation to each — it is the only form that reliably reaches
+the controller on operator-managed ArgoCD.
+
+If a team needs a per-app override (rare), set the same annotation
+directly on the `Application` and it takes precedence.
+
+### Alternative: global subscription with a team-label selector (upstream Argo CD only)
+
+Skip this on OpenShift GitOps — see the gotcha above. On upstream
+Argo CD you can avoid annotating each AppProject with a single label
+selector, provided every Application carries a stable `team: <team>`
+label:
 
 ```yaml
 data:
@@ -161,11 +176,28 @@ data:
       selector: app.kubernetes.io/part-of=platform
 ```
 
-The `selector` matches labels on the `Application` resource — pick a label
-your Applications consistently carry (e.g. `argocd.argoproj.io/instance`,
-`app.kubernetes.io/part-of`, or a custom team label). AppProject defaults
-are simpler when team ↔ AppProject is 1:1; the global form is the escape
-hatch for everything else.
+Apply with a strategic-merge patch on the existing `argocd-notifications-cm`
+(don't replace it — the template/trigger blocks live there too):
+
+```bash
+oc -n <argocd-ns> patch cm argocd-notifications-cm --type=merge -p "$(cat <<'EOF'
+{
+  "data": {
+    "subscriptions": "- recipients:\n    - riptide-checkout\n  triggers:\n    - on-deployed\n    - on-sync-failed\n  selector: team=checkout\n"
+  }
+}
+EOF
+)"
+oc -n <argocd-ns> rollout restart deploy/argocd-notifications-controller
+```
+
+Substitute `<argocd-ns>` for whichever namespace runs the notifications
+controller — in apps-in-any-namespace setups this can be a tenant
+namespace (e.g. `argocd-<team>-prod`), not the default `argocd`.
+
+The annotation form and the global form are additive, so you can run
+both during a migration — duplicate fires are absorbed by riptide's
+`delivery_id` dedup.
 
 ## Verify
 
