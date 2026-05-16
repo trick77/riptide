@@ -97,8 +97,14 @@ This adds:
   `.app.status.summary.images`). `images` is the bridge for joining Argo CD
   events to pipeline events: `revision` is the GitOps-repo SHA, but image
   tags typically embed the App-repo commit SHA that the pipeline reports.
-- `trigger.on-deployed`, `trigger.on-sync-succeeded`, `trigger.on-sync-failed`
-  (riptide-flavored)
+- `trigger.on-deployed` and `trigger.on-sync-failed` (riptide-flavored).
+  We do **not** ship `on-sync-succeeded`: every ArgoCD reconciliation
+  enters a brief `Succeeded` operationState, which would flood the
+  collector with thousands of no-op events. `on-deployed` already
+  predicates on `health.status == 'Healthy'` and is the right primitive
+  for "this revision actually rolled out". Apps without a health hook
+  (CRDs, Jobs) should expose a health hook rather than reintroduce the
+  noisier trigger.
 
 > **Required field, hard cutover.** `images` is required on the receiver
 > side — webhooks rendered by an outdated ConfigMap will be rejected with
@@ -119,15 +125,6 @@ controller will reconcile the Application (`Start processing` /
 log pattern, plus a missing `notified.notifications.argoproj.io`
 annotation on the Application, is the canonical "no subscription matches
 this app" signature.
-
-> **Why only `on-deployed` + `on-sync-failed`.** `on-deployed` already
-> covers the success path (sync `Succeeded` *and* health `Healthy`), so
-> adding `on-sync-succeeded` would just fire a second webhook for the same
-> event. Riptide deduplicates by `delivery_id`, so the second insert is
-> dropped, but you'd still see noise in logs and notifications-controller
-> traffic. If your team has Applications whose `health.status` never
-> reaches `Healthy` (CRDs without a health hook, Jobs, etc.), swap
-> `on-deployed` for `on-sync-succeeded` instead — never subscribe to both.
 
 > **OpenShift GitOps gotcha.** On argocd-operator-managed ArgoCD (the
 > OpenShift GitOps stack), do **not** rely on
