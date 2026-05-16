@@ -8,6 +8,14 @@ data:
     webhook:
       riptide:
         method: POST
+        # `toJson` / `default` / `list` are sprig functions (notifications-engine
+        # registers sprig.TxtFuncMap in pkg/templates/service.go), so they're
+        # available here. `toJson` serialises the image slice as a valid JSON
+        # array and escapes any quote/backslash inside tag strings; a manual
+        # {{range}} loop would emit invalid JSON if a tag ever contained a `"`.
+        # `default (list) ...` collapses a nil summary into `[]` so the body
+        # is always valid JSON, even before Argo has populated the summary
+        # (which would otherwise render as `null` and fail the receiver schema).
         body: |
           {
             "app_name": "{{.app.metadata.name}}",
@@ -16,7 +24,8 @@ data:
             "operation_phase": "{{.app.status.operationState.phase}}",
             "started_at": "{{.app.status.operationState.startedAt}}",
             "finished_at": "{{.app.status.operationState.finishedAt}}",
-            "destination_namespace": "{{.app.spec.destination.namespace}}"
+            "destination_namespace": "{{.app.spec.destination.namespace}}",
+            "images": {{toJson (default (list) .app.status.summary.images)}}
           }
 
   trigger.on-deployed: |

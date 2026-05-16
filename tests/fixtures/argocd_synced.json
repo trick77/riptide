@@ -5,5 +5,8 @@
   "operation_phase": "Succeeded",
   "started_at": "2026-04-28T10:09:00Z",
   "finished_at": "2026-04-28T10:09:45Z",
-  "destination_namespace": "payments-prod"
+  "destination_namespace": "payments-prod",
+  "images": [
+    "quay.io/team/payments-api:abc1234"
+  ]
 }

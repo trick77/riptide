@@ -91,14 +91,25 @@ oc -n argocd apply -f docs/argocd-notification-template.yaml
 ```
 
 This adds:
-- `template.app-deployed-riptide`
+- `template.app-deployed-riptide` — the webhook body includes `app_name`,
+  `revision`, `sync_status`, `operation_phase`, `started_at`, `finished_at`,
+  `destination_namespace`, and `images` (a JSON array rendered from
+  `.app.status.summary.images`). `images` is the bridge for joining Argo CD
+  events to pipeline events: `revision` is the GitOps-repo SHA, but image
+  tags typically embed the App-repo commit SHA that the pipeline reports.
 - `trigger.on-deployed`, `trigger.on-sync-succeeded`, `trigger.on-sync-failed`
   (riptide-flavored)
 
-If you are upgrading from an earlier riptide release, **re-apply this
-ConfigMap** so the template body includes the new `destination_namespace`
-field — riptide derives the `environment` column (and the prod-vs-non-prod
-metric filters) from the namespace suffix.
+> **Required field, hard cutover.** `images` is required on the receiver
+> side — webhooks rendered by an outdated ConfigMap will be rejected with
+> HTTP 422. Apply this ConfigMap **before** rolling out a receiver that
+> expects `images`, then restart the notifications controller so it
+> re-reads the template:
+> ```bash
+> oc -n argocd apply -f docs/argocd-notification-template.yaml
+> oc -n argocd rollout restart deploy/argocd-notifications-controller
+> ```
+> Reversing the order strands events between deploy and ConfigMap-apply.
 
 ## 3) Route teams to their service via AppProject defaults
 
@@ -218,5 +229,17 @@ suffix counts as "production" is configured in
 default `prod`). To keep the database small, list non-prod stage suffixes
 in `environments.ignored_stages` (e.g. `["dev", "entw", "syst", "stage"]`)
 — matching events return `202 {"status":"ignored"}` and are dropped before
-insert. Aggregations group by `app_name`; cross-source joins (Pipeline,
-Bitbucket, Noergler) use `revision = commit_sha`.
+insert. Aggregations group by `app_name`.
+
+The rendered image list lives in `payload->'images'`:
+
+```sql
+SELECT app_name, payload->'images' AS images FROM argocd_events
+ORDER BY created_at DESC LIMIT 5;
+```
+
+`revision` is the **GitOps-repo SHA**, not the App-repo SHA — direct joins
+to `pipeline_events.commit_sha` or `bitbucket_events.commit_sha` will not
+match. The App-repo SHA is typically embedded in the image tag (e.g.
+`registry/app:abc1234`); a future reader/correlator pulls SHAs out of
+`payload->'images'` to bridge to pipeline events.

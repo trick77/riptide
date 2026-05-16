@@ -18,6 +18,16 @@ class ArgoCDWebhook(BaseModel):
         default=None,
         description="kubernetes namespace the app deployed into; suffix drives `environment`",
     )
+    images: list[str] = Field(
+        ...,
+        description=(
+            "rendered images from the synced manifests (Argo CD field path "
+            "`.app.status.summary.images`). may be empty for apps without pods. "
+            "the App-Repo commit SHA is typically embedded in the image tag and "
+            "bridges argocd.revision (GitOps-repo SHA) to pipeline.commit_sha "
+            "(App-repo SHA) — correlation logic is built on top of this field."
+        ),
+    )
 
     @field_validator("started_at", "finished_at")
     @classmethod
