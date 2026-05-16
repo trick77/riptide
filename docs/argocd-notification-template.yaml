@@ -16,7 +16,8 @@ data:
             "operation_phase": "{{.app.status.operationState.phase}}",
             "started_at": "{{.app.status.operationState.startedAt}}",
             "finished_at": "{{.app.status.operationState.finishedAt}}",
-            "destination_namespace": "{{.app.spec.destination.namespace}}"
+            "destination_namespace": "{{.app.spec.destination.namespace}}",
+            "images": [{{range $i, $img := .app.status.summary.images}}{{if $i}},{{end}}"{{$img}}"{{end}}]
           }
 
   trigger.on-deployed: |

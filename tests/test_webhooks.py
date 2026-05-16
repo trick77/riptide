@@ -320,6 +320,40 @@ class TestArgoCDWebhook:
         response = await client.post("/webhooks/argocd", json=payload, headers=ARGOCD_AUTH)
         assert response.status_code == 422
 
+    async def test_missing_images_returns_422(self, client: AsyncClient) -> None:
+        payload = _load("argocd_synced.json")
+        del payload["images"]
+        response = await client.post("/webhooks/argocd", json=payload, headers=ARGOCD_AUTH)
+        assert response.status_code == 422
+
+    async def test_empty_images_list_accepted(self, client: AsyncClient) -> None:
+        payload = _load("argocd_synced.json")
+        payload["images"] = []
+        response = await client.post("/webhooks/argocd", json=payload, headers=ARGOCD_AUTH)
+        assert response.status_code == 202
+
+        factory = TestBitbucketWebhook._fresh_session_factory(client)
+        async with factory() as session:
+            row = (await session.execute(select(ArgoCDEvent))).scalar_one()
+            assert row.payload["images"] == []
+
+    async def test_images_persisted_in_payload(self, client: AsyncClient) -> None:
+        payload = _load("argocd_synced.json")
+        payload["images"] = [
+            "quay.io/team/payments-api:abc1234",
+            "quay.io/team/payments-worker:abc1234",
+        ]
+        response = await client.post("/webhooks/argocd", json=payload, headers=ARGOCD_AUTH)
+        assert response.status_code == 202
+
+        factory = TestBitbucketWebhook._fresh_session_factory(client)
+        async with factory() as session:
+            row = (await session.execute(select(ArgoCDEvent))).scalar_one()
+            assert row.payload["images"] == [
+                "quay.io/team/payments-api:abc1234",
+                "quay.io/team/payments-worker:abc1234",
+            ]
+
     async def test_ignored_stage_is_dropped(self, client_with_ignored_stages: AsyncClient) -> None:
         payload = _load("argocd_synced.json")
         payload["destination_namespace"] = "checkout-dev"

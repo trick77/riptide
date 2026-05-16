@@ -133,6 +133,7 @@ class TestStrictSourceBinding:
             json={
                 "app_name": "x",
                 "revision": "abc1234567890abc1234567890abc1234567890a",
+                "images": [],
             },
             headers=_bearer(CHECKOUT_ARGOCD),
         )

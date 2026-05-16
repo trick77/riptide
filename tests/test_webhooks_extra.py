@@ -78,6 +78,7 @@ async def test_argocd_phase_transitions_create_distinct_rows(
         "revision": "abc1234567890abc1234567890abc1234567890a",
         "sync_status": "Synced",
         "started_at": "2026-04-28T10:09:00Z",
+        "images": ["quay.io/team/payments-api:abc1234"],
     }
     running = {**base, "operation_phase": "Running"}
     succeeded = {**base, "operation_phase": "Succeeded", "finished_at": "2026-04-28T10:09:45Z"}
