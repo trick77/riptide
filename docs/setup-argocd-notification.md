@@ -100,6 +100,17 @@ This adds:
 - `trigger.on-deployed`, `trigger.on-sync-succeeded`, `trigger.on-sync-failed`
   (riptide-flavored)
 
+> **Required field, hard cutover.** `images` is required on the receiver
+> side — webhooks rendered by an outdated ConfigMap will be rejected with
+> HTTP 422. Apply this ConfigMap **before** rolling out a receiver that
+> expects `images`, then restart the notifications controller so it
+> re-reads the template:
+> ```bash
+> oc -n argocd apply -f docs/argocd-notification-template.yaml
+> oc -n argocd rollout restart deploy/argocd-notifications-controller
+> ```
+> Reversing the order strands events between deploy and ConfigMap-apply.
+
 ## 3) Route teams to their service via AppProject defaults
 
 **Without a subscription, no webhook leaves Argo CD** — the notifications
