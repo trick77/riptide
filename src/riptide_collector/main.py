@@ -63,7 +63,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         logger.info(f"riptide version: {__version__}")
         logger.info(
             "riptide_collector_starting",
-            version=__version__,
+            # version is supplied by the service-metadata processor; passing
+            # it as a kwarg here just produced a duplicate that landed at
+            # position 0 in the JSON dict before the reorder processor.
             teams=len(config.get().teams_by_name),
             keys=len(team_keys.team_names()),
             production_stage=config.get().environments.production_stage,

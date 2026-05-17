@@ -259,6 +259,7 @@ class TestProcessorChain:
         from riptide_collector.logging_config import (
             _make_service_metadata_processor,
             _rename_level,
+            _stable_field_order,
             _strip_reserved,
         )
 
@@ -267,6 +268,7 @@ class TestProcessorChain:
             structlog.processors.EventRenamer("msg"),
             _rename_level,
             _strip_reserved,
+            _stable_field_order,
         ]
         for proc in chain:
             processed = proc(cast(Any, None), "info", processed)
@@ -303,3 +305,54 @@ class TestProcessorChain:
         assert out["splunk_sourcetype"] == "z"
         for forbidden in ("source", "host", "index", "sourcetype"):
             assert forbidden not in out
+
+    def test_stable_leading_key_order_with_user_kwargs(self) -> None:
+        # The regression that triggered this rule: structlog inserts user
+        # kwargs into event_dict *before* the timestamp/service/version/env
+        # processors run, producing JSON where 'version' or 'teams' appears
+        # ahead of 'timestamp'. The reorder processor must restore a stable
+        # leading order regardless of what kwargs the caller passes.
+        out = self._run_chain(
+            "prod",
+            teams=3,
+            keys=2,
+            production_stage="prod",
+            timestamp="2026-05-17T09:04:17Z",
+        )
+        head = list(out.keys())[:5]
+        assert head == ["timestamp", "log_level", "service", "version", "env"]
+        # Caller-supplied kwargs still appear, just after the leading block.
+        assert {"teams", "keys", "production_stage"}.issubset(out.keys())
+
+
+class TestRenderedFieldOrder:
+    """End-to-end: every JSON line emitted by the running app must start
+    with `timestamp` regardless of what call site produced it.
+
+    Catches the regression a tail/grep user would notice immediately — a
+    structlog call that passes kwargs gets the kwargs as leading keys
+    unless the reorder processor is wired into the chain.
+    """
+
+    async def test_every_emitted_line_starts_with_timestamp(
+        self,
+        client: AsyncClient,
+        log_buffer: io.StringIO,
+    ) -> None:
+        # Hit a webhook that runs through every call-site shape: uvicorn
+        # bridge (already covered at startup), the access-log middleware,
+        # and a router that emits webhook_processed with kwargs.
+        headers = {"Authorization": f"Bearer {CHECKOUT_NOERGLER}"}
+        r = await client.post(
+            "/webhooks/noergler",
+            json=_load("noergler_pr_completed_merged.json"),
+            headers=headers,
+        )
+        assert r.status_code == 202
+
+        events = _parse_json_lines(log_buffer.getvalue())
+        assert events, "no JSON log lines captured — fixture or pipeline broken"
+        for line in events:
+            assert next(iter(line)) == "timestamp", (
+                f"line does not start with 'timestamp': {list(line)[:3]} — {line}"
+            )
