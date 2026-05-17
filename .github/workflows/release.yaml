@@ -74,6 +74,12 @@ jobs:
           context: .
           file: ./Containerfile
           push: true
+          # SLSA provenance + SBOM attestations are stored as separate
+          # manifests in the manifest list and show up in the GHCR UI as
+          # 'unknown/unknown' platform — pure noise for a project without
+          # an attestation consumer. Skip both.
+          provenance: false
+          sbom: false
           build-args: |
             RIPTIDE_VERSION=${{ steps.ver.outputs.version }}
           tags: |
