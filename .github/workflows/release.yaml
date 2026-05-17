@@ -77,10 +77,10 @@ jobs:
           build-args: |
             RIPTIDE_VERSION=${{ steps.ver.outputs.version }}
           tags: |
-            ghcr.io/${{ github.repository }}:${{ steps.ver.outputs.version }}
-            ghcr.io/${{ github.repository }}:${{ steps.ver.outputs.major }}.${{ steps.ver.outputs.minor }}
-            ghcr.io/${{ github.repository }}:${{ steps.ver.outputs.major }}
-            ghcr.io/${{ github.repository }}:${{ steps.ver.outputs.short }}
-            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository_owner }}/riptide-collector:${{ steps.ver.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/riptide-collector:${{ steps.ver.outputs.major }}.${{ steps.ver.outputs.minor }}
+            ghcr.io/${{ github.repository_owner }}/riptide-collector:${{ steps.ver.outputs.major }}
+            ghcr.io/${{ github.repository_owner }}/riptide-collector:${{ steps.ver.outputs.short }}
+            ghcr.io/${{ github.repository_owner }}/riptide-collector:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
