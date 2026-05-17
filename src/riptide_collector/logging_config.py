@@ -47,6 +47,26 @@ def _strip_reserved(_logger: Any, _name: str, event_dict: dict[str, Any]) -> dic
     return event_dict
 
 
+# Stable leading-key order on every emitted line. structlog inserts user
+# kwargs into event_dict before TimeStamper / EventRenamer / metadata
+# processors run, which means `logger.info("event", k=v)` produces JSON
+# where `k` appears before `timestamp`. A naive `tail -f | jq` then sees
+# inconsistent column ordering across lines. Forcing the leading order
+# here (and falling through to insertion order for everything else) gives
+# a uniform shape across the uvicorn bridge and every structlog call site
+# without touching the call sites themselves.
+_LEADING_KEYS = ("timestamp", "log_level", "service", "version", "env", "msg")
+
+
+def _stable_field_order(_logger: Any, _name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+    del _logger, _name
+    reordered: dict[str, Any] = {k: event_dict[k] for k in _LEADING_KEYS if k in event_dict}
+    for k, v in event_dict.items():
+        if k not in reordered:
+            reordered[k] = v
+    return reordered
+
+
 def configure_logging(level: str = "INFO", env: str = "dev") -> None:
     log_level = getattr(logging, level.upper(), logging.INFO)
 
@@ -60,6 +80,7 @@ def configure_logging(level: str = "INFO", env: str = "dev") -> None:
         structlog.processors.EventRenamer("msg"),
         _rename_level,
         _strip_reserved,
+        _stable_field_order,
     ]
 
     # Bridge: route stdlib logs (uvicorn, sqlalchemy, alembic) through the
