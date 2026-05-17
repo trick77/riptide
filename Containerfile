@@ -26,6 +26,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Runtime stage — minimal, OpenShift-friendly (random UID, group 0)
 FROM python:3.13-slim AS runtime
 
+# Release workflow injects the semver tag here so logs/responses carry the
+# real version. Defaults to 'dev' for local builds where no version is set.
+ARG RIPTIDE_VERSION=dev
+ENV RIPTIDE_VERSION=${RIPTIDE_VERSION}
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH"

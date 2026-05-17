@@ -58,6 +58,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):  # pyright: ignore[reportUnusedFunction]
+        # Match the noergler shape exactly so a Splunk panel that greps
+        # `msg="<service> version: …"` works across both services.
+        logger.info(f"riptide version: {__version__}")
         logger.info(
             "riptide_collector_starting",
             version=__version__,
