@@ -215,13 +215,48 @@ class TestAuthorFallbacks:
 
     def test_comment_added_uses_actor_not_pr_author(self) -> None:
         # Same rule applies to pr:comment:added — the commenter is the
-        # signal, not the PR opener.
-        body = _load("bitbucket_pr_reviewer_approved.json")
-        body["eventKey"] = "pr:comment:added"
+        # signal, not the PR opener. Dedicated fixture (not the reviewer
+        # fixture with a swapped eventKey) so the shape stays honest.
+        body = _load("bitbucket_pr_comment_added.json")
 
         result = extract_event(
             body,
             x_event_key="pr:comment:added",
+            x_request_uuid="r",
+            x_hook_uuid=None,
+        )
+
+        assert isinstance(result, BitbucketEventDraft)
+        assert result.author == "bob"
+
+    def test_reviewer_unapproved_uses_actor_not_pr_author(self) -> None:
+        # 'pr:reviewer:unapproved' (retracted approval) is also reviewer
+        # engagement and feeds the pickup-time metric. Same actor-wins rule.
+        body = _load("bitbucket_pr_reviewer_approved.json")
+
+        result = extract_event(
+            body,
+            x_event_key="pr:reviewer:unapproved",
+            x_request_uuid="r",
+            x_hook_uuid=None,
+        )
+
+        assert isinstance(result, BitbucketEventDraft)
+        assert result.author == "bob"
+        assert result.event_type == "pr:reviewer:unapproved"
+
+    def test_reviewer_event_falls_back_to_actor_when_pr_author_missing(self) -> None:
+        # Edge case: a Bitbucket DC payload without pullRequest.author (or
+        # with a broken/empty author block). The reviewer-activity path
+        # already prefers actor; this confirms the regular actor fallback
+        # at the end of extract_event still works as a backstop and we
+        # don't end up with author=None.
+        body = _load("bitbucket_pr_reviewer_approved.json")
+        body["pullRequest"]["author"] = {}
+
+        result = extract_event(
+            body,
+            x_event_key="pr:reviewer:approved",
             x_request_uuid="r",
             x_hook_uuid=None,
         )

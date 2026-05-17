@@ -75,6 +75,7 @@ REQUIRED_WEBHOOK_EVENTS: tuple[str, ...] = (
     "pr:from_ref_updated",
     "pr:comment:added",
     "pr:reviewer:approved",
+    "pr:reviewer:unapproved",
     "pr:reviewer:needs_work",
     "pr:reviewer:updated",
     "pr:merged",
