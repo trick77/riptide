@@ -56,7 +56,10 @@ def make_router(
 
         if isinstance(parsed, BitbucketSkip):
             logger.info(
-                "bitbucket_event_skipped_no_branch_change",
+                "webhook_processed",
+                webhook_source="bitbucket",
+                outcome="skipped",
+                reason=parsed.reason,
                 delivery_id=parsed.delivery_id,
                 event_type=parsed.event_type,
                 repo=parsed.repo_full_name,
@@ -70,35 +73,48 @@ def make_router(
         draft = parsed
         automation_source = config.detect_automation_source(draft.author, draft.branch_name)
 
-        async with session_factory() as session:
-            stmt = (
-                pg_insert(BitbucketEvent)
-                .values(
-                    delivery_id=draft.delivery_id,
-                    event_type=draft.event_type,
-                    repo_full_name=draft.repo_full_name,
-                    pr_id=draft.pr_id,
-                    commit_sha=draft.commit_sha,
-                    author=draft.author,
-                    branch_name=draft.branch_name,
-                    change_type=draft.change_type,
-                    jira_keys=draft.jira_keys,
-                    automation_source=automation_source,
-                    lines_added=None,
-                    lines_removed=None,
-                    files_changed=None,
-                    is_revert=draft.is_revert,
-                    occurred_at=draft.occurred_at,
-                    team=team,
-                    payload=draft.payload,
+        try:
+            async with session_factory() as session:
+                stmt = (
+                    pg_insert(BitbucketEvent)
+                    .values(
+                        delivery_id=draft.delivery_id,
+                        event_type=draft.event_type,
+                        repo_full_name=draft.repo_full_name,
+                        pr_id=draft.pr_id,
+                        commit_sha=draft.commit_sha,
+                        author=draft.author,
+                        branch_name=draft.branch_name,
+                        change_type=draft.change_type,
+                        jira_keys=draft.jira_keys,
+                        automation_source=automation_source,
+                        lines_added=None,
+                        lines_removed=None,
+                        files_changed=None,
+                        is_revert=draft.is_revert,
+                        occurred_at=draft.occurred_at,
+                        team=team,
+                        payload=draft.payload,
+                    )
+                    .on_conflict_do_nothing(index_elements=["delivery_id"])
+                    .returning(BitbucketEvent.delivery_id)
                 )
-                .on_conflict_do_nothing(index_elements=["delivery_id"])
+                inserted = (await session.execute(stmt)).scalar_one_or_none()
+                await session.commit()
+        except Exception:
+            logger.exception(
+                "webhook_persist_failed",
+                webhook_source="bitbucket",
+                delivery_id=draft.delivery_id,
+                team=team,
             )
-            await session.execute(stmt)
-            await session.commit()
+            raise
 
+        outcome = "accepted" if inserted is not None else "deduped"
         logger.info(
-            "bitbucket_event_received",
+            "webhook_processed",
+            webhook_source="bitbucket",
+            outcome=outcome,
             delivery_id=draft.delivery_id,
             event_type=draft.event_type,
             repo=draft.repo_full_name,

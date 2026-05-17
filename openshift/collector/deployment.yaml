@@ -18,6 +18,12 @@ spec:
       labels:
         app.kubernetes.io/name: riptide-collector
         app.kubernetes.io/component: collector
+      annotations:
+        # Splunk Connect for Kubernetes reads these per-pod annotations.
+        # The sourcetype must have `KV_MODE=json` configured in props.conf
+        # so Splunk auto-extracts our JSON log fields. The index annotation
+        # can be overridden per overlay.
+        splunk.com/sourcetype: "riptide:collector:json"
     spec:
       securityContext:
         runAsNonRoot: true

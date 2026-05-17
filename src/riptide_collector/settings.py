@@ -29,6 +29,11 @@ class Settings(BaseSettings):
         "RIPTIDE_TEAM_KEYS_PATH to a Secret mount.",
     )
     log_level: str = Field(default="INFO")
+    env: str = Field(
+        default="dev",
+        description="Deployment environment name (dev / intg / prod). "
+        "Stamped onto every log record as `env`.",
+    )
     config_reload_seconds: float = Field(
         default=30.0,
         description="How often to mtime-check the config for hot reload.",
