@@ -80,7 +80,7 @@ def make_router(
             pipeline=event.pipeline_name,
             run_id=event.run_id,
             phase=event.phase,
-            run_status=event.status,
+            status=event.status,
             team=caller_team,
         )
         return {"status": "accepted"}
