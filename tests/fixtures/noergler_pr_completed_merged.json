@@ -1,0 +1,20 @@
+{
+  "event_type": "pr_completed",
+  "outcome": "merged",
+  "pr_key": "PROJ/payments-api#42",
+  "repo": "acme/payments-api",
+  "source_commit_sha": "abc1234567890abc1234567890abc1234567890a",
+  "merge_commit_sha": "def4567890abc1234567890abc1234567890abcd",
+  "lines_added": 320,
+  "lines_removed": 75,
+  "files_changed": 12,
+  "total_runs": 3,
+  "total_prompt_tokens": 38420,
+  "total_completion_tokens": 2110,
+  "total_elapsed_ms": 24800,
+  "total_findings_count": 7,
+  "total_cost_usd": "0.382100",
+  "models_used": ["gpt-4o-2024-08-06"],
+  "first_review_at": "2026-04-29T17:30:00Z",
+  "closed_at": "2026-04-29T18:42:00Z"
+}

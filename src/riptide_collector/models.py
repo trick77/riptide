@@ -115,22 +115,34 @@ class NoerglerEvent(Base):
         Index("ix_noergler_events_event_type", "event_type"),
         Index("ix_noergler_events_pr_key", "pr_key"),
         Index("ix_noergler_events_commit_sha", "commit_sha"),
-        Index("ix_noergler_events_model", "model"),
+        Index("ix_noergler_events_outcome", "outcome"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     delivery_id: Mapped[str] = mapped_column(String, nullable=False)
+    # 'pr_completed' | 'feedback' — historical rows may carry the deprecated
+    # 'completed' value before the per-run → per-PR rollup switch.
     event_type: Mapped[str] = mapped_column(String, nullable=False)
     pr_key: Mapped[str | None] = mapped_column(String, nullable=True)
     repo: Mapped[str | None] = mapped_column(String, nullable=True)
+    # pr_completed: source-branch HEAD at close time. feedback: optional join key.
     commit_sha: Mapped[str | None] = mapped_column(String, nullable=True)
-    run_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    model: Mapped[str | None] = mapped_column(String, nullable=True)
+    # pr_completed-only:
+    outcome: Mapped[str | None] = mapped_column(String, nullable=True)
+    merge_commit_sha: Mapped[str | None] = mapped_column(String, nullable=True)
+    lines_added: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lines_removed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    files_changed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_runs: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    models_used: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
+    first_review_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Aggregated finops totals across all review runs that fed into this PR rollup.
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     elapsed_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     findings_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
+    # feedback-only:
     finding_id: Mapped[str | None] = mapped_column(String, nullable=True)
     verdict: Mapped[str | None] = mapped_column(String, nullable=True)
     actor: Mapped[str | None] = mapped_column(String, nullable=True)
