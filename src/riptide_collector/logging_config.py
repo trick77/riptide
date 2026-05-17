@@ -77,6 +77,16 @@ def configure_logging(level: str = "INFO", env: str = "dev") -> None:
     root.handlers = [handler]
     root.setLevel(log_level)
 
+    # uvicorn attaches its own StreamHandlers to 'uvicorn' / 'uvicorn.error' /
+    # 'uvicorn.access' with propagate=False, which means startup lines like
+    # "INFO:     Started server process" never hit our root JSON handler.
+    # Strip those handlers and re-enable propagation so every uvicorn log
+    # flows through the JSON pipeline.
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        uv_logger = logging.getLogger(name)
+        uv_logger.handlers = []
+        uv_logger.propagate = True
+
     # uvicorn's access log becomes redundant once our middleware emits
     # http_request; keep only warnings/errors from it.
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
