@@ -29,6 +29,10 @@
     "mend": {
       "authors": ["mend-bot", "mend[bot]"],
       "branch_prefixes": ["whitesource-"]
+    },
+    "noergler": {
+      "authors": ["noergler"],
+      "branch_prefixes": []
     }
   }
 }

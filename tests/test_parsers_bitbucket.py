@@ -192,6 +192,57 @@ class TestAuthorFallbacks:
         assert isinstance(result, BitbucketEventDraft)
         assert result.author == "alice"
 
+    def test_reviewer_event_uses_actor_not_pr_author(self) -> None:
+        # Given — pr:reviewer:approved fixture has pullRequest.author=alice
+        # and top-level actor=bob (the reviewer doing the approval).
+        body = _load("bitbucket_pr_reviewer_approved.json")
+
+        # When
+        result = extract_event(
+            body,
+            x_event_key="pr:reviewer:approved",
+            x_request_uuid="r",
+            x_hook_uuid=None,
+        )
+
+        # Then — for review-pickup analytics we want the reviewer's handle,
+        # not the PR opener's; the parser must prefer actor for these events.
+        assert isinstance(result, BitbucketEventDraft)
+        assert result.author == "bob"
+        # pr_id still extracted from the payload so feedback joins back
+        # to the opener via bitbucket_events rows for the same pr_id.
+        assert result.pr_id == 42
+
+    def test_comment_added_uses_actor_not_pr_author(self) -> None:
+        # Same rule applies to pr:comment:added — the commenter is the
+        # signal, not the PR opener.
+        body = _load("bitbucket_pr_reviewer_approved.json")
+        body["eventKey"] = "pr:comment:added"
+
+        result = extract_event(
+            body,
+            x_event_key="pr:comment:added",
+            x_request_uuid="r",
+            x_hook_uuid=None,
+        )
+
+        assert isinstance(result, BitbucketEventDraft)
+        assert result.author == "bob"
+
+    def test_pr_opened_keeps_pr_author_not_actor(self) -> None:
+        # Regression guard: for PR-lifecycle events (opened / merged /
+        # from_ref_updated / deleted) we still want the PR author, even
+        # if a maintainer (different actor) triggered the event.
+        body = _load("bitbucket_pr_merged.json")
+        body["actor"] = {"name": "carol", "slug": "carol"}
+
+        result = extract_event(body, x_event_key="pr:merged", x_request_uuid="r", x_hook_uuid=None)
+
+        assert isinstance(result, BitbucketEventDraft)
+        # alice opened the PR; carol merged it. The historical row should
+        # still attribute the PR to alice.
+        assert result.author == "alice"
+
 
 class TestEventTypeAndOccurredAt:
     def test_event_type_defaults_to_unknown_when_header_missing(self) -> None:
