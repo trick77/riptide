@@ -62,7 +62,7 @@ def make_router(
             webhook_source="noergler",
             outcome="accepted" if inserted is not None else "deduped",
             delivery_id=values["delivery_id"],
-            noergler_event_type=values["event_type"],
+            event_type=values["event_type"],
             team=caller_team,
         )
         return {"status": "accepted"}

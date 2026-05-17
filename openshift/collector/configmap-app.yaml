@@ -4,8 +4,10 @@ metadata:
   name: riptide-collector-app
 data:
   RIPTIDE_LOG_LEVEL: "INFO"
-  # Stamped on every log record as `env`. Override per overlay (intg / prod).
-  RIPTIDE_ENV: "prod"
+  # Stamped on every log record as `env`. Each overlay MUST patch this to
+  # the real environment ("intg" / "prod"). The "unknown" sentinel makes a
+  # missing patch loud at first glance in Splunk rather than mis-tagging.
+  RIPTIDE_ENV: "unknown"
   RIPTIDE_CONFIG_PATH: "/etc/riptide-collector/riptide.json"
   RIPTIDE_TEAM_KEYS_PATH: "/etc/riptide-collector-team-keys/team-keys.json"
   RIPTIDE_CONFIG_RELOAD_SECONDS: "30"

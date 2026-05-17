@@ -87,15 +87,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Response:
         # Liveness/readiness checks fire every few seconds; logging them
         # buries real traffic in Splunk. Pass through unobserved.
-        if request.url.path in _SILENT_PATHS:
+        # rstrip handles `/health/` (trailing slash) too.
+        if request.url.path.rstrip("/") in _SILENT_PATHS:
             return await call_next(request)
         request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+        bound = ("request_id", "method", "path")
         structlog.contextvars.bind_contextvars(
             request_id=request_id,
             method=request.method,
             path=request.url.path,
         )
         started = time.perf_counter()
+        # Sentinel for the unhandled-exception path: if call_next raises
+        # before we overwrite status_code, the finally block still emits
+        # a numeric status. FastAPI's default exception handler turns the
+        # exception into a real 500 response after the middleware unwinds.
         status_code = 500
         try:
             response: Response = await call_next(request)
@@ -107,7 +113,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=status_code,
                 duration_ms=round((time.perf_counter() - started) * 1000, 1),
             )
-            structlog.contextvars.clear_contextvars()
+            # Unbind only what we bound — don't nuke contextvars set by
+            # callers up the stack (lifespan, future auth layers).
+            structlog.contextvars.unbind_contextvars(*bound)
 
     app.include_router(health.make_router(config, session_factory, team_keys, any_auth))
     app.include_router(bitbucket.make_router(config, session_factory, bitbucket_hmac))
