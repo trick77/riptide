@@ -81,7 +81,7 @@ the data captured in v1.
 | **Untracked-work rate** | `COUNT(*) WHERE jira_keys = '{}'` over merged PRs — process-compliance signal. |
 | **Per-ticket flow** | `WHERE 'ABC-1234' = ANY(jira_keys)` returns every event for a ticket across Bitbucket / pipeline / Argo (joined via commit_sha). |
 | **Human vs automated split** | `WHERE NOT is_automated` (Renovate / Dependabot / Snyk / Mend / generic-bot detection runs at write time and tags `automation_source`). Default dashboards exclude bots; bot velocity is a separate CI-health view. |
-| **AI reviewer precision** *(noergler)* | `1 - count(noergler_events WHERE event_type='feedback' AND verdict='disagreed') / count(noergler_events WHERE event_type='completed')` per repo × week. Higher = the AI review is more useful. |
+| **AI reviewer precision** *(noergler)* | `1 - count(noergler_events WHERE event_type='feedback' AND verdict='disagreed') / count(noergler_events WHERE event_type='pr_completed')` per repo × week. Higher = the AI review is more useful. Filter on `outcome='merged'` to score precision only on PRs that shipped. |
 
 ### FinOps signals
 
@@ -92,7 +92,9 @@ events arrive pre-priced in USD.
 
 | Signal | How it's computed |
 |---|---|
-| **LLM review spend per model / team** *(noergler)* | `SUM(noergler_events.cost_usd), SUM(prompt_tokens + completion_tokens) GROUP BY model, team` over `event_type = 'completed'`. Pre-priced — no multiplier needed. |
+| **LLM review spend per PR / team** *(noergler)* | `SUM(cost_usd), SUM(prompt_tokens + completion_tokens) GROUP BY team` over `event_type = 'pr_completed'`. Each row is a per-PR rollup (one event per merged / declined / deleted PR). Filter on `outcome='merged'` for "spend that actually shipped"; keep all outcomes for total LLM-review spend including abandoned PRs. Pre-priced — no multiplier needed. |
+| **LLM review cost per KLOC** *(noergler)* | `SUM(cost_usd) / NULLIF(SUM(lines_added + lines_removed), 0) * 1000 GROUP BY team, outcome` over `noergler_events WHERE event_type='pr_completed'`. Diff-size normalised cost — fair comparison across small fixes and large refactors. |
+| **Wasted LLM review** *(noergler)* | `SUM(cost_usd) FROM noergler_events WHERE event_type='pr_completed' AND outcome IN ('declined','deleted')`. Review effort spent on code that never shipped. |
 | **CI compute time per pipeline / team** | `SUM(pipeline_events.duration_seconds) GROUP BY pipeline_name, team`. The unit metric for CI cost attribution. |
 | **Wasted CI** | `SUM(duration_seconds) WHERE status IN ('FAILURE','Failed')` — failed builds × time. Quantifies the cost of flakes / broken tests. |
 | **Bot-driven pipeline churn** | `pipeline_events` joined to `bitbucket_events` via `commit_sha` filtered on `is_automated = true`. Renovate / Dependabot can drive 40–70% of pipeline runs in many orgs; useful input for batching policies. |

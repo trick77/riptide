@@ -200,7 +200,7 @@ class TestWebhookProcessedSchema:
     async def test_noergler_uses_generic_event_type_field(
         self, client: AsyncClient, log_buffer: io.StringIO
     ) -> None:
-        payload = _load("noergler_completed.json")
+        payload = _load("noergler_pr_completed_merged.json")
         headers = {"Authorization": f"Bearer {CHECKOUT_NOERGLER}"}
 
         r = await client.post("/webhooks/noergler", json=payload, headers=headers)
@@ -212,7 +212,7 @@ class TestWebhookProcessedSchema:
         assert ev["webhook_source"] == "noergler"
         # Field is `event_type`, not `noergler_event_type` — webhook_source
         # already disambiguates in Splunk panels.
-        assert ev["event_type"] == "completed"
+        assert ev["event_type"] == "pr_completed"
         assert "noergler_event_type" not in ev
 
 
