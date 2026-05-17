@@ -60,12 +60,24 @@ logger = logging.getLogger("bitbucket_onboarding")
 DEFAULT_WEBHOOK_NAME = "riptide"
 
 # Events riptide's bitbucket router (src/riptide_collector/routers/bitbucket.py)
-# can extract data from: PR lifecycle + push (for revert detection in
+# can extract data from: PR lifecycle, reviewer activity (for DX Core 4
+# "code review pickup time"), and push (for revert detection in
 # `push.changes[]`).
+#
+# Pickup time per DX Core 4 = MIN(timestamp) across the first reviewer
+# action of any kind. A single signal (e.g. only `pr:comment:added`) is
+# not enough — reviewers often approve silently without typing anything,
+# and a comment-only signal both misses those and inflates the metric
+# with bot comments. The four reviewer-activity events here together
+# cover the workflows BBS DC reviewers actually use.
 REQUIRED_WEBHOOK_EVENTS: tuple[str, ...] = (
     "pr:opened",
     "pr:from_ref_updated",
     "pr:comment:added",
+    "pr:reviewer:approved",
+    "pr:reviewer:unapproved",
+    "pr:reviewer:needs_work",
+    "pr:reviewer:updated",
     "pr:merged",
     "pr:deleted",
     "repo:refs_changed",

@@ -16,6 +16,20 @@ from riptide_collector.parsers import (
     parse_change_type,
 )
 
+# Events where the meaningful actor is the reviewer/commenter, not the
+# PR author. Used to power the DX Core 4 "code review pickup time" metric:
+# MIN(occurred_at WHERE event_type IN these AND author != pr_opener)
+# answers "when did someone other than the PR author engage with the PR".
+_REVIEWER_ACTIVITY_EVENTS = frozenset(
+    {
+        "pr:comment:added",
+        "pr:reviewer:approved",
+        "pr:reviewer:needs_work",
+        "pr:reviewer:updated",
+        "pr:reviewer:unapproved",
+    }
+)
+
 
 @dataclass(frozen=True)
 class BitbucketEventDraft:
@@ -151,6 +165,13 @@ def extract_event(
     author: str | None = None
     is_revert = False
 
+    # Reviewer-activity events carry the actor (the reviewer / commenter)
+    # as the meaningful "who did this" — different from pr.author who
+    # opened the PR. We need that to attribute the "first review pickup"
+    # signal (DX Core 4) to the right user and to filter out the
+    # PR-author-self-comment and bot-comment noise.
+    is_reviewer_activity = event_type in _REVIEWER_ACTIVITY_EVENTS
+
     if pr:
         from_ref = _as_dict(pr.get("fromRef"))
         display_id = from_ref.get("displayId")
@@ -159,8 +180,9 @@ def extract_event(
             branch_name = display_id
         if isinstance(latest_commit, str):
             commit_sha = latest_commit
-        author_user = _as_dict(_as_dict(pr.get("author")).get("user"))
-        author = _user_handle(author_user)
+        if not is_reviewer_activity:
+            author_user = _as_dict(_as_dict(pr.get("author")).get("user"))
+            author = _user_handle(author_user)
         # PR-side revert detection: the title is the only signal we have
         # without a REST round-trip. Push-side detection would need the
         # commit messages between fromHash..toHash.

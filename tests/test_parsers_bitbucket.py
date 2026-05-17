@@ -192,6 +192,92 @@ class TestAuthorFallbacks:
         assert isinstance(result, BitbucketEventDraft)
         assert result.author == "alice"
 
+    def test_reviewer_event_uses_actor_not_pr_author(self) -> None:
+        # Given — pr:reviewer:approved fixture has pullRequest.author=alice
+        # and top-level actor=bob (the reviewer doing the approval).
+        body = _load("bitbucket_pr_reviewer_approved.json")
+
+        # When
+        result = extract_event(
+            body,
+            x_event_key="pr:reviewer:approved",
+            x_request_uuid="r",
+            x_hook_uuid=None,
+        )
+
+        # Then — for review-pickup analytics we want the reviewer's handle,
+        # not the PR opener's; the parser must prefer actor for these events.
+        assert isinstance(result, BitbucketEventDraft)
+        assert result.author == "bob"
+        # pr_id still extracted from the payload so feedback joins back
+        # to the opener via bitbucket_events rows for the same pr_id.
+        assert result.pr_id == 42
+
+    def test_comment_added_uses_actor_not_pr_author(self) -> None:
+        # Same rule applies to pr:comment:added — the commenter is the
+        # signal, not the PR opener. Dedicated fixture (not the reviewer
+        # fixture with a swapped eventKey) so the shape stays honest.
+        body = _load("bitbucket_pr_comment_added.json")
+
+        result = extract_event(
+            body,
+            x_event_key="pr:comment:added",
+            x_request_uuid="r",
+            x_hook_uuid=None,
+        )
+
+        assert isinstance(result, BitbucketEventDraft)
+        assert result.author == "bob"
+
+    def test_reviewer_unapproved_uses_actor_not_pr_author(self) -> None:
+        # 'pr:reviewer:unapproved' (retracted approval) is also reviewer
+        # engagement and feeds the pickup-time metric. Same actor-wins rule.
+        body = _load("bitbucket_pr_reviewer_approved.json")
+
+        result = extract_event(
+            body,
+            x_event_key="pr:reviewer:unapproved",
+            x_request_uuid="r",
+            x_hook_uuid=None,
+        )
+
+        assert isinstance(result, BitbucketEventDraft)
+        assert result.author == "bob"
+        assert result.event_type == "pr:reviewer:unapproved"
+
+    def test_reviewer_event_falls_back_to_actor_when_pr_author_missing(self) -> None:
+        # Edge case: a Bitbucket DC payload without pullRequest.author (or
+        # with a broken/empty author block). The reviewer-activity path
+        # already prefers actor; this confirms the regular actor fallback
+        # at the end of extract_event still works as a backstop and we
+        # don't end up with author=None.
+        body = _load("bitbucket_pr_reviewer_approved.json")
+        body["pullRequest"]["author"] = {}
+
+        result = extract_event(
+            body,
+            x_event_key="pr:reviewer:approved",
+            x_request_uuid="r",
+            x_hook_uuid=None,
+        )
+
+        assert isinstance(result, BitbucketEventDraft)
+        assert result.author == "bob"
+
+    def test_pr_opened_keeps_pr_author_not_actor(self) -> None:
+        # Regression guard: for PR-lifecycle events (opened / merged /
+        # from_ref_updated / deleted) we still want the PR author, even
+        # if a maintainer (different actor) triggered the event.
+        body = _load("bitbucket_pr_merged.json")
+        body["actor"] = {"name": "carol", "slug": "carol"}
+
+        result = extract_event(body, x_event_key="pr:merged", x_request_uuid="r", x_hook_uuid=None)
+
+        assert isinstance(result, BitbucketEventDraft)
+        # alice opened the PR; carol merged it. The historical row should
+        # still attribute the PR to alice.
+        assert result.author == "alice"
+
 
 class TestEventTypeAndOccurredAt:
     def test_event_type_defaults_to_unknown_when_header_missing(self) -> None:

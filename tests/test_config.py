@@ -127,6 +127,18 @@ class TestAutomationDetection:
         store = RiptideConfigStore(path)
         assert store.detect_automation_source("alice", "feature/x") is None
 
+    def test_review_bot_author_match(self, tmp_path: Path) -> None:
+        # Review-time bots (e.g. noergler) need a config entry to be
+        # recognised because their handle ("noergler") doesn't match the
+        # `*-bot` / `*[bot]` heuristic. With the entry in place, comment
+        # rows authored by noergler land with is_automated=true and the
+        # DX Core 4 pickup-time query filters them out.
+        data = json.loads(json.dumps(VALID))
+        data["automation"]["noergler"] = {"authors": ["noergler"], "branch_prefixes": []}
+        path = _write(tmp_path / "c.json", data)
+        store = RiptideConfigStore(path)
+        assert store.detect_automation_source("noergler", None) == "noergler"
+
 
 class TestEnvironments:
     def test_defaults_when_block_absent(self, tmp_path: Path) -> None:
