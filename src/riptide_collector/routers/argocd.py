@@ -35,56 +35,72 @@ def make_router(
         revision = lower(event.revision)
         environment = parse_environment(event.destination_namespace)
 
+        # Compute the dedup key unconditionally so the `ignored` log line
+        # carries it too — Triage starts from `delivery_id`.
+        started_repr = event.started_at.isoformat() if event.started_at else "unknown"
+        delivery_id = (
+            f"{event.app_name}#{revision}#{started_repr}#{event.operation_phase or 'unknown'}"
+        )
+
         ignored_stages = config.get().environments.ignored_stages
         if environment is not None and environment in ignored_stages:
             logger.info(
-                "argocd_event_ignored",
+                "webhook_processed",
+                webhook_source="argocd",
+                outcome="ignored",
+                reason="stage_in_ignored_stages",
+                delivery_id=delivery_id,
                 app=event.app_name,
+                revision=revision,
+                phase=event.operation_phase,
                 environment=environment,
                 destination_namespace=event.destination_namespace,
                 team=caller_team,
             )
             return {"status": "ignored"}
 
-        # Stable dedup key: started_at is fixed for a sync attempt; phase varies
-        # across the lifecycle (Running → Succeeded/Failed) and SHOULD produce
-        # distinct rows. finished_at is excluded — it can drift between retries
-        # of the same phase and would cause duplicates.
-        started_repr = event.started_at.isoformat() if event.started_at else "unknown"
-        delivery_id = (
-            f"{event.app_name}#{revision}#{started_repr}#{event.operation_phase or 'unknown'}"
-        )
-
-        async with session_factory() as session:
-            stmt = (
-                pg_insert(ArgoCDEvent)
-                .values(
-                    delivery_id=delivery_id,
-                    app_name=event.app_name,
-                    revision=revision,
-                    sync_status=event.sync_status,
-                    operation_phase=event.operation_phase,
-                    started_at=event.started_at,
-                    finished_at=event.finished_at,
-                    occurred_at=event.finished_at or event.started_at or datetime.now(UTC),
-                    team=caller_team,
-                    destination_namespace=event.destination_namespace,
-                    environment=environment,
-                    payload=raw,
+        try:
+            async with session_factory() as session:
+                stmt = (
+                    pg_insert(ArgoCDEvent)
+                    .values(
+                        delivery_id=delivery_id,
+                        app_name=event.app_name,
+                        revision=revision,
+                        sync_status=event.sync_status,
+                        operation_phase=event.operation_phase,
+                        started_at=event.started_at,
+                        finished_at=event.finished_at,
+                        occurred_at=event.finished_at or event.started_at or datetime.now(UTC),
+                        team=caller_team,
+                        destination_namespace=event.destination_namespace,
+                        environment=environment,
+                        payload=raw,
+                    )
+                    .on_conflict_do_nothing(index_elements=["delivery_id"])
+                    .returning(ArgoCDEvent.delivery_id)
                 )
-                .on_conflict_do_nothing(index_elements=["delivery_id"])
+                inserted = (await session.execute(stmt)).scalar_one_or_none()
+                await session.commit()
+        except Exception:
+            logger.exception(
+                "webhook_persist_failed",
+                webhook_source="argocd",
+                delivery_id=delivery_id,
+                team=caller_team,
             )
-            await session.execute(stmt)
-            await session.commit()
+            raise
 
         logger.info(
-            "argocd_event_received",
+            "webhook_processed",
+            webhook_source="argocd",
+            outcome="accepted" if inserted is not None else "deduped",
             delivery_id=delivery_id,
             app=event.app_name,
             revision=revision,
             phase=event.operation_phase,
-            team=caller_team,
             environment=environment,
+            team=caller_team,
         )
         return {"status": "accepted"}
 

@@ -37,36 +37,50 @@ def make_router(
 
         commit_sha = lower(event.commit_sha)
 
-        async with session_factory() as session:
-            stmt = (
-                pg_insert(PipelineEvent)
-                .values(
-                    delivery_id=delivery_id,
-                    source=event.source,
-                    pipeline_name=event.pipeline_name,
-                    run_id=event.run_id,
-                    phase=event.phase,
-                    status=event.status,
-                    commit_sha=commit_sha,
-                    started_at=event.started_at,
-                    finished_at=event.finished_at,
-                    occurred_at=event.finished_at or event.started_at or datetime.now(UTC),
-                    team=caller_team,
-                    payload=raw,
+        try:
+            async with session_factory() as session:
+                stmt = (
+                    pg_insert(PipelineEvent)
+                    .values(
+                        delivery_id=delivery_id,
+                        source=event.source,
+                        pipeline_name=event.pipeline_name,
+                        run_id=event.run_id,
+                        phase=event.phase,
+                        status=event.status,
+                        commit_sha=commit_sha,
+                        started_at=event.started_at,
+                        finished_at=event.finished_at,
+                        occurred_at=event.finished_at or event.started_at or datetime.now(UTC),
+                        team=caller_team,
+                        payload=raw,
+                    )
+                    .on_conflict_do_nothing(index_elements=["delivery_id"])
+                    .returning(PipelineEvent.delivery_id)
                 )
-                .on_conflict_do_nothing(index_elements=["delivery_id"])
+                inserted = (await session.execute(stmt)).scalar_one_or_none()
+                await session.commit()
+        except Exception:
+            logger.exception(
+                "webhook_persist_failed",
+                webhook_source="pipeline",
+                delivery_id=delivery_id,
+                team=caller_team,
             )
-            await session.execute(stmt)
-            await session.commit()
+            raise
 
+        # `source` is the CI vendor (jenkins / tekton …). Splunk reserves the
+        # field name `source`, so it travels under `ci_system` on the wire.
         logger.info(
-            "pipeline_event_received",
+            "webhook_processed",
+            webhook_source="pipeline",
+            outcome="accepted" if inserted is not None else "deduped",
             delivery_id=delivery_id,
-            source=event.source,
+            ci_system=event.source,
             pipeline=event.pipeline_name,
-            run=event.run_id,
+            run_id=event.run_id,
             phase=event.phase,
-            status=event.status,
+            run_status=event.status,
             team=caller_team,
         )
         return {"status": "accepted"}

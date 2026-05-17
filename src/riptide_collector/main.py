@@ -1,7 +1,10 @@
+import time
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI
+import structlog
+from fastapi import FastAPI, Request, Response
 
 from riptide_collector import __version__
 from riptide_collector.auth import make_hmac_dependency, make_team_bearer_dependency
@@ -13,6 +16,8 @@ from riptide_collector.settings import Settings, load_settings
 from riptide_collector.team_keys import TeamKeysStore
 
 logger = get_logger(__name__)
+
+_SILENT_PATHS = frozenset({"/health", "/ready"})
 
 
 class StartupValidationError(RuntimeError):
@@ -37,7 +42,7 @@ def _cross_validate(config: RiptideConfigStore, team_keys: TeamKeysStore) -> Non
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, env=settings.env)
 
     config = RiptideConfigStore(settings.config_path)
     team_keys = TeamKeysStore(settings.team_keys_path)
@@ -75,6 +80,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ),
         lifespan=lifespan,
     )
+
+    @app.middleware("http")
+    async def access_log(  # pyright: ignore[reportUnusedFunction]
+        request: Request, call_next: Any
+    ) -> Response:
+        # Liveness/readiness checks fire every few seconds; logging them
+        # buries real traffic in Splunk. Pass through unobserved.
+        if request.url.path in _SILENT_PATHS:
+            return await call_next(request)
+        request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+        structlog.contextvars.bind_contextvars(
+            request_id=request_id,
+            method=request.method,
+            path=request.url.path,
+        )
+        started = time.perf_counter()
+        status_code = 500
+        try:
+            response: Response = await call_next(request)
+            status_code = response.status_code
+            return response
+        finally:
+            logger.info(
+                "http_request",
+                status_code=status_code,
+                duration_ms=round((time.perf_counter() - started) * 1000, 1),
+            )
+            structlog.contextvars.clear_contextvars()
 
     app.include_router(health.make_router(config, session_factory, team_keys, any_auth))
     app.include_router(bitbucket.make_router(config, session_factory, bitbucket_hmac))

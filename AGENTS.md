@@ -48,6 +48,26 @@ If `docker ps` fails, ask the user to start OrbStack.
 - Tests use real Postgres via testcontainers, never SQLite. The `client` fixture in `tests/conftest.py` depends on `session_factory` which truncates tables per test.
 - `.pre-commit-config.yaml` runs ruff + pyright + uv-lock-check; expect CI to enforce the same.
 
+## Logging & Splunk
+
+- **One JSON object per line, on stdout.** OpenShift's Splunk Connect for Kubernetes (SCK) tails the container log; Splunk auto-extracts fields via `KV_MODE=json` for sourcetype `riptide:collector:json` (set as pod annotation in `openshift/collector/deployment.yaml`).
+- **Stdlib loggers (uvicorn, sqlalchemy, alembic) are bridged through structlog.** Do NOT add separate logging handlers or re-init `logging.basicConfig` — `configure_logging()` in `logging_config.py` is the single entry point.
+- **Splunk-reserved field names are forbidden as kwargs**: `source`, `sourcetype`, `host`, `index`, `time`, `_time`, `_raw`, `event`. The CI vendor field is `ci_system` (not `source`); the structlog event name lives in `msg` (renamed from `event`); severity lives in `log_level` (renamed from `level`). A runtime processor (`_strip_reserved`) namespaces accidental reserved kwargs under `splunk_<name>` as a safety net — do not rely on it; pick the right name from the start.
+- **Webhook handlers emit exactly one `msg=webhook_processed` log per request** with required fields `webhook_source ∈ {bitbucket,pipeline,argocd,noergler}`, `outcome ∈ {accepted,deduped,ignored,skipped}`, `delivery_id`, `team`. Source-specific fields go alongside (e.g. `app`, `revision`, `phase` for argocd). Include `delivery_id` even on `ignored`/`skipped` paths so triage has a key.
+- **`outcome=deduped`** is detected via `RETURNING delivery_id` on the `INSERT ... ON CONFLICT DO NOTHING` — a `None` scalar means the row already existed. Preserve this when adding new sources.
+- **Persist failures**: wrap the `async with session_factory()` block in `try/except Exception: logger.exception("webhook_persist_failed", ...); raise`. Never swallow.
+- **Access log** is emitted by the `access_log` middleware in `main.py` as `msg=http_request` with `request_id`, `method`, `path`, `status_code`, `duration_ms`. `request_id` is bound to contextvars so any log within the request inherits it. `/health` and `/ready` are silenced; uvicorn.access is set to WARNING (do not lower it).
+- **Splunk `props.conf` snippet** (owned by platform team, kept here for reference):
+  ```
+  [riptide:collector:json]
+  SHOULD_LINEMERGE = false
+  LINE_BREAKER     = ([\r\n]+)
+  KV_MODE          = json
+  TIME_PREFIX      = "timestamp":\s*"
+  TIME_FORMAT      = %Y-%m-%dT%H:%M:%S.%6NZ
+  TRUNCATE         = 0
+  ```
+
 ## OpenShift layout
 
 `openshift/` is **suite-level**, structured per-component. The collector lives in `openshift/collector/`. When adding a new component:

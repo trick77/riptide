@@ -38,19 +38,31 @@ def make_router(
         else:
             values = _values_feedback(event, caller_team, raw)
 
-        async with session_factory() as session:
-            stmt = (
-                pg_insert(NoerglerEvent)
-                .values(**values)
-                .on_conflict_do_nothing(index_elements=["delivery_id"])
+        try:
+            async with session_factory() as session:
+                stmt = (
+                    pg_insert(NoerglerEvent)
+                    .values(**values)
+                    .on_conflict_do_nothing(index_elements=["delivery_id"])
+                    .returning(NoerglerEvent.delivery_id)
+                )
+                inserted = (await session.execute(stmt)).scalar_one_or_none()
+                await session.commit()
+        except Exception:
+            logger.exception(
+                "webhook_persist_failed",
+                webhook_source="noergler",
+                delivery_id=values["delivery_id"],
+                team=caller_team,
             )
-            await session.execute(stmt)
-            await session.commit()
+            raise
 
         logger.info(
-            "noergler_event_received",
+            "webhook_processed",
+            webhook_source="noergler",
+            outcome="accepted" if inserted is not None else "deduped",
             delivery_id=values["delivery_id"],
-            event_type=values["event_type"],
+            noergler_event_type=values["event_type"],
             team=caller_team,
         )
         return {"status": "accepted"}

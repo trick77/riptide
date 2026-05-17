@@ -125,7 +125,8 @@ def make_hmac_dependency(
         signature_ok = _verify_hmac_sha256(verify_secret, raw, x_hub_signature)
         if secret is None or not signature_ok:
             logger.warning(
-                f"{source}_hmac_rejected",
+                "hmac_rejected",
+                webhook_source=source,
                 team=team,
                 has_secret=secret is not None,
                 has_signature=bool(x_hub_signature),
