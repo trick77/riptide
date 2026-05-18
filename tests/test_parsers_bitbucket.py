@@ -57,6 +57,37 @@ class TestExtractPrMerged:
         assert result.is_revert is True
 
 
+class TestExtractPrDeclined:
+    def test_pr_declined_fixture_returns_draft_with_lowercased_join_keys(self) -> None:
+        # Given
+        body = _load("bitbucket_pr_declined.json")
+
+        # When
+        result = extract_event(
+            body,
+            x_event_key="pr:declined",
+            x_request_uuid="req-decl",
+            x_hook_uuid=None,
+        )
+
+        # Then — declined-PRs share the merged payload shape; the parser
+        # must persist them with full join keys so they show up in
+        # downstream rollups (e.g. noergler outcome='declined' joins).
+        assert isinstance(result, BitbucketEventDraft)
+        assert result.delivery_id == "req-decl"
+        assert result.event_type == "pr:declined"
+        assert result.repo_full_name == "acme/payments-api"
+        assert result.pr_id == 42
+        assert result.commit_sha == "abc1234567890abc1234567890abc1234567890a"
+        assert result.branch_name == "feature/abc-123-retries"
+        assert result.author == "alice"
+        assert result.is_revert is False
+        assert result.change_type == "feature"
+        assert "ABC-123" in result.jira_keys
+        assert "PROJ-9" in result.jira_keys
+        assert result.payload is body
+
+
 class TestExtractPrModified:
     def test_draft_to_ready_flip_emits_synthetic_ready_for_review(self) -> None:
         # Given — pr:modified payload with previousDraft=true, draft=false.
