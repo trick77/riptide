@@ -63,11 +63,68 @@ the data captured in v1.
 | **Deployment frequency** | `COUNT(*)` of `argocd_events` per `app_name` / `team` / time window where `operation_phase = 'Succeeded' AND environment = 'prod'`. Drop the `environment` filter (or slice by it) for staging visibility. |
 | **Lead time for changes** | For each merged PR, `MIN(bitbucket_events.occurred_at)` for the PR (first commit) → `argocd_events.occurred_at` of the prod deploy that carries the same `commit_sha` and `environment = 'prod'`. Joined via the SHA. Stratify by `bitbucket_events.change_type` (feature / hotfix / bugfix / …) to see hotfix lead time vs. feature lead time separately. |
 | **PR cycle time** | `pullrequest:fulfilled.occurred_at − pullrequest:created.occurred_at` per PR id. |
-| **Time to first review** *(DX Core 4 "code review pickup time")* | `MIN(occurred_at) WHERE event_type IN ('pr:comment:added', 'pr:reviewer:approved', 'pr:reviewer:unapproved', 'pr:reviewer:needs_work', 'pr:reviewer:updated') AND author != <pr_opener_handle> AND NOT is_automated` per PR, minus the matching `pr:opened` row. The five-event union covers every reviewer touch Bitbucket DC emits — silent approvals, retracted approvals, "needs work" flips, and bare reviewer-status changes; `NOT is_automated` strips bot comments (noergler / Renovate / etc.) — every review-time bot must have its handle in the `automation` config block, otherwise its instant comment drives the metric toward zero. |
+| **Time to first review** *(DX Core 4 "code review pickup time")* | Two-part computation per PR — see the SQL block below the table. Clock-start = `COALESCE(pr:ready_for_review, pr:opened)`: PRs opened ready start at `pr:opened`; PRs opened as drafts start at the synthetic `pr:ready_for_review` (emitted by the parser when a `pr:modified` payload carries `previousDraft=true, draft=false`). Engagement = first reviewer touch (`pr:comment:added`, `pr:reviewer:approved`, `pr:reviewer:unapproved`, `pr:reviewer:needs_work`, `pr:reviewer:updated`) where `author != pr_opener AND NOT is_automated AND occurred_at >= clock-start`. The five-event reviewer union covers every touch Bitbucket DC emits (silent approvals, retracted approvals, "needs work" flips, bare reviewer-status changes); the `occurred_at >= clock-start` guard drops early-feedback comments solicited during the draft phase, which would otherwise produce negative pickup times. `NOT is_automated` strips bot comments (noergler / Renovate / etc.) — every review-time bot must have its handle in the `automation` config block, otherwise its instant comment drives the metric toward zero. |
 | **Build success rate** | `pipeline_events` with `phase = 'COMPLETED'` grouped by `status`. Slice by `source` to compare Jenkins vs Tekton, by `pipeline_name` / `team` for ownership. |
 | **Build duration** | `pipeline_events.duration_seconds` (a Postgres `GENERATED ALWAYS AS (finished_at − started_at)` column). |
 | **Deploy success rate** | `argocd_events` with `operation_phase IN ('Succeeded', 'Failed')` aggregated, filtered to `environment = 'prod'` for the prod-only view. |
 | **Deploy duration** | `argocd_events.duration_seconds` (generated column). Filter by `environment = 'prod'` for production-only timing. |
+
+#### Pickup-time query
+
+The collector emits a synthetic `pr:ready_for_review` row when a `pr:modified`
+payload carries a draft→ready flip (`previousDraft=true, draft=false`); other
+`pr:modified` variants — title / description / target-branch changes — are
+dropped at parse time. The raw `eventKey` survives on `payload.eventKey` for
+traceability. With that in place, the metric is one CTE:
+
+```sql
+WITH pickup_start AS (
+  SELECT
+    repo_full_name,
+    pr_id,
+    COALESCE(
+      MIN(occurred_at) FILTER (WHERE event_type = 'pr:ready_for_review'),
+      MIN(occurred_at) FILTER (
+        WHERE event_type = 'pr:opened'
+          AND COALESCE(payload->'pullRequest'->>'draft', 'false') = 'false'
+      )
+    ) AS clock_start,
+    MAX(author) FILTER (WHERE event_type = 'pr:opened') AS pr_opener
+  FROM bitbucket_events
+  GROUP BY repo_full_name, pr_id
+)
+SELECT
+  e.repo_full_name,
+  e.pr_id,
+  MIN(e.occurred_at) - ps.clock_start AS pickup_interval
+FROM bitbucket_events e
+JOIN pickup_start ps USING (repo_full_name, pr_id)
+WHERE ps.clock_start IS NOT NULL
+  AND e.event_type IN (
+        'pr:comment:added',
+        'pr:reviewer:approved',
+        'pr:reviewer:unapproved',
+        'pr:reviewer:needs_work',
+        'pr:reviewer:updated'
+      )
+  AND e.author IS DISTINCT FROM ps.pr_opener
+  AND NOT e.is_automated
+  AND e.occurred_at >= ps.clock_start
+GROUP BY e.repo_full_name, e.pr_id, ps.clock_start;
+```
+
+The `occurred_at >= ps.clock_start` filter is load-bearing: a reviewer can
+comment on a draft PR (typically when the author solicits early feedback), and
+without this guard the engagement timestamp could land before the ready signal
+and produce a negative interval. Both "early feedback in draft" and "the act of
+flipping the switch" are intentionally excluded from the metric — pickup time
+measures reviewer engagement *after the PR is ready*, nothing else.
+
+The `draft = false` guard inside the `pr:opened` branch of the `COALESCE` is the
+same rule applied to the opposite tail: a PR opened as a draft that never gets
+flipped to ready has no clock-start, so it's excluded from the metric entirely.
+Early-feedback comments on a never-ready draft don't inflate the numerator,
+because there's no clock-start to subtract from in the first place.
 
 ### Quality / process signals from Bitbucket
 

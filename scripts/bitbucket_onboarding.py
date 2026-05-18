@@ -68,10 +68,17 @@ DEFAULT_WEBHOOK_NAME = "riptide"
 # action of any kind. A single signal (e.g. only `pr:comment:added`) is
 # not enough — reviewers often approve silently without typing anything,
 # and a comment-only signal both misses those and inflates the metric
-# with bot comments. The four reviewer-activity events here together
+# with bot comments. The five reviewer-activity events here together
 # cover the workflows BBS DC reviewers actually use.
+#
+# `pr:modified` is the pickup-time **start** signal, not engagement: BBS
+# emits it on title / description / target-branch / draft-status changes.
+# The parser keeps only the draft→ready flips (re-typed as a synthetic
+# `pr:ready_for_review`) so the pickup clock starts when the PR actually
+# becomes reviewable, not when it was opened as a draft.
 REQUIRED_WEBHOOK_EVENTS: tuple[str, ...] = (
     "pr:opened",
+    "pr:modified",
     "pr:from_ref_updated",
     "pr:comment:added",
     "pr:reviewer:approved",

@@ -57,6 +57,121 @@ class TestExtractPrMerged:
         assert result.is_revert is True
 
 
+class TestExtractPrModified:
+    def test_draft_to_ready_flip_emits_synthetic_ready_for_review(self) -> None:
+        # Given — pr:modified payload with previousDraft=true, draft=false.
+        # This is the DX Core 4 pickup-time start signal for PRs that were
+        # opened as drafts.
+        body = _load("bitbucket_pr_modified_draft_to_ready.json")
+
+        # When
+        result = extract_event(
+            body,
+            x_event_key="pr:modified",
+            x_request_uuid="req-modified-flip",
+            x_hook_uuid=None,
+        )
+
+        # Then — re-typed to the synthetic event so downstream queries
+        # don't have to dig into previousDraft on the raw payload.
+        assert isinstance(result, BitbucketEventDraft)
+        assert result.event_type == "pr:ready_for_review"
+        assert result.pr_id == 42
+        assert result.repo_full_name == "acme/payments-api"
+        # Raw payload preserves the original eventKey for traceability.
+        assert result.payload["eventKey"] == "pr:modified"
+        assert result.payload["previousDraft"] is True
+
+    def test_draft_to_ready_uses_actor_as_author(self) -> None:
+        # Given — a maintainer (not the PR author) flips the draft switch.
+        # Pickup-time attribution should follow whoever performed the
+        # action, same rule as reviewer-activity events.
+        body = _load("bitbucket_pr_modified_draft_to_ready.json")
+        body["actor"] = {"name": "carol", "displayName": "Carol Maintainer", "slug": "carol"}
+
+        # When
+        result = extract_event(
+            body, x_event_key="pr:modified", x_request_uuid="r", x_hook_uuid=None
+        )
+
+        # Then
+        assert isinstance(result, BitbucketEventDraft)
+        assert result.event_type == "pr:ready_for_review"
+        # carol flipped it, even though alice originally opened the PR.
+        assert result.author == "carol"
+
+    def test_title_only_modify_returns_skip(self) -> None:
+        # Given — pr:modified with previousDraft=false (i.e. just a title /
+        # description / target change). Carries no metric we track today,
+        # so the parser drops it rather than bloating the table.
+        body = _load("bitbucket_pr_modified_title_only.json")
+
+        # When
+        result = extract_event(
+            body, x_event_key="pr:modified", x_request_uuid="r", x_hook_uuid=None
+        )
+
+        # Then
+        assert isinstance(result, BitbucketSkip)
+        assert result.reason == "pr:modified without draft→ready flip"
+        # event_type on the skip reflects what BBS sent, not the synthetic
+        # rename (we never emitted a synthetic for this delivery).
+        assert result.event_type == "pr:modified"
+        assert result.repo_full_name == "acme/payments-api"
+
+    def test_ready_to_draft_returns_skip(self) -> None:
+        # Given — the reverse flip (ready → draft). Not a pickup signal;
+        # if we tracked "PR rework rate" later this would be useful, but
+        # for v1 it carries no metric so we skip it.
+        body = _load("bitbucket_pr_modified_draft_to_ready.json")
+        body["previousDraft"] = False
+        body["pullRequest"]["draft"] = True
+
+        # When
+        result = extract_event(
+            body, x_event_key="pr:modified", x_request_uuid="r", x_hook_uuid=None
+        )
+
+        # Then
+        assert isinstance(result, BitbucketSkip)
+        assert result.reason == "pr:modified without draft→ready flip"
+
+    def test_pr_opened_as_draft_passes_through_unchanged(self) -> None:
+        # Regression guard: an opened-as-draft PR must still produce a
+        # regular pr:opened row — the pickup-time SQL inspects
+        # payload->'pullRequest'->>'draft' on that row to decide whether
+        # it counts as a clock-start. If the parser ever started filtering
+        # or re-typing opened-as-draft, the SQL would silently break.
+        body = _load("bitbucket_pr_merged.json")
+        body["eventKey"] = "pr:opened"
+        body["pullRequest"]["state"] = "OPEN"
+        body["pullRequest"]["draft"] = True
+
+        # When
+        result = extract_event(body, x_event_key="pr:opened", x_request_uuid="r", x_hook_uuid=None)
+
+        # Then
+        assert isinstance(result, BitbucketEventDraft)
+        assert result.event_type == "pr:opened"
+        assert result.payload["pullRequest"]["draft"] is True
+
+    def test_modified_without_draft_fields_returns_skip(self) -> None:
+        # Given — a BBS DC version (or payload) without draft tracking at
+        # all: no previousDraft, no pullRequest.draft. The parser must
+        # not emit a synthetic ready-for-review row from absence-of-data.
+        body = _load("bitbucket_pr_modified_title_only.json")
+        del body["previousDraft"]
+        del body["pullRequest"]["draft"]
+
+        # When
+        result = extract_event(
+            body, x_event_key="pr:modified", x_request_uuid="r", x_hook_uuid=None
+        )
+
+        # Then
+        assert isinstance(result, BitbucketSkip)
+
+
 class TestExtractRefsChanged:
     def test_branch_push_extracts_to_hash_and_branch(self) -> None:
         # Given
