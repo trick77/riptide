@@ -47,9 +47,19 @@ The script is idempotent (rerun after edits), supports `--dry-run` and
    value). BBS uses this to sign each delivery.
 7. **Triggers** — select:
    - Repository: **Push**
-   - Pull request: **Created**, **Updated**, **Approved**, **Merged**,
-     **Declined**, **Comment created**
+   - Pull request: **Opened**, **Source branch updated**, **Modified**,
+     **Approved**, **Unapproved**, **Needs work**, **Reviewer updated**,
+     **Merged**, **Deleted**, **Comment added**
 8. **Save**.
+
+The **Modified** trigger is required for DX Core 4 pickup-time accuracy on
+PRs opened as drafts: BBS emits `pr:modified` on title / description /
+target / draft changes, and the parser keeps only the draft→ready flips
+(re-typed as a synthetic `pr:ready_for_review` row) — that's the
+clock-start signal for the pickup metric documented in the README. The
+**Reviewer updated** trigger covers silent reviewer-status changes
+(adding / removing reviewers without a comment) that also feed the
+pickup metric.
 
 Do **not** use the `Custom headers` field for auth and do **not** populate
 the top-level `credentials` block via REST — BBS DC silently drops

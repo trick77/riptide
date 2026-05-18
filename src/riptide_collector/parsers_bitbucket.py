@@ -16,10 +16,13 @@ from riptide_collector.parsers import (
     parse_change_type,
 )
 
-# Events where the meaningful actor is the reviewer/commenter, not the
-# PR author. Used to power the DX Core 4 "code review pickup time" metric:
-# MIN(occurred_at WHERE event_type IN these AND author != pr_opener)
-# answers "when did someone other than the PR author engage with the PR".
+# Author selection only: events where `actor` is the meaningful "who did
+# this" — the reviewer / commenter — and `pullRequest.author` is the PR
+# opener. The parser uses this set to skip the pr.author lookup so the
+# row attributes the action to the human who performed it. The DX Core 4
+# pickup-time metric WHERE clause is documented in README; it overlaps
+# with this set but isn't derived from it (e.g. `pr:ready_for_review`
+# uses the same actor-as-author rule but is a clock-start, not engagement).
 _REVIEWER_ACTIVITY_EVENTS = frozenset(
     {
         "pr:comment:added",
@@ -29,6 +32,15 @@ _REVIEWER_ACTIVITY_EVENTS = frozenset(
         "pr:reviewer:unapproved",
     }
 )
+
+# Synthetic event_type emitted by the parser when a `pr:modified` payload
+# carries a draft→ready flip (`previousDraft: true` + `pullRequest.draft: false`).
+# Re-typing at parse time keeps downstream metric queries trivial — they can
+# look for a row instead of digging into `payload->'previousDraft'`. The raw
+# eventKey is preserved on `payload.eventKey`. This is the pickup-clock
+# START signal for PRs that were opened as drafts; see the pickup-time
+# section in README for the COALESCE(opened, ready_for_review) pattern.
+_SYNTHETIC_READY_FOR_REVIEW = "pr:ready_for_review"
 
 
 @dataclass(frozen=True)
@@ -160,6 +172,24 @@ def extract_event(
     title = pr.get("title") if isinstance(pr.get("title"), str) else None
     description = pr.get("description") if isinstance(pr.get("description"), str) else None
 
+    # `pr:modified` fires on title / description / target / draft changes.
+    # Only the draft→ready flip feeds a metric we track (DX Core 4 pickup
+    # time start signal); other variants carry no signal worth a DB row.
+    # Re-type the flip as `pr:ready_for_review` so downstream queries don't
+    # have to dig into `previousDraft`; skip the rest as no-ops.
+    if event_type == "pr:modified":
+        previous_draft = body.get("previousDraft")
+        current_draft = pr.get("draft")
+        if previous_draft is True and current_draft is False:
+            event_type = _SYNTHETIC_READY_FOR_REVIEW
+        else:
+            return BitbucketSkip(
+                reason="pr:modified without draft→ready flip",
+                delivery_id=delivery_id,
+                event_type="pr:modified",
+                repo_full_name=lower(raw_repo_full_name),
+            )
+
     branch_name: str | None = None
     commit_sha: str | None = None
     author: str | None = None
@@ -169,8 +199,13 @@ def extract_event(
     # as the meaningful "who did this" — different from pr.author who
     # opened the PR. We need that to attribute the "first review pickup"
     # signal (DX Core 4) to the right user and to filter out the
-    # PR-author-self-comment and bot-comment noise.
-    is_reviewer_activity = event_type in _REVIEWER_ACTIVITY_EVENTS
+    # PR-author-self-comment and bot-comment noise. The synthetic
+    # `pr:ready_for_review` follows the same rule: the actor is whoever
+    # flipped the switch (often the PR author, sometimes a maintainer),
+    # which may differ from `pullRequest.author`.
+    is_actor_authored = (
+        event_type in _REVIEWER_ACTIVITY_EVENTS or event_type == _SYNTHETIC_READY_FOR_REVIEW
+    )
 
     if pr:
         from_ref = _as_dict(pr.get("fromRef"))
@@ -180,7 +215,7 @@ def extract_event(
             branch_name = display_id
         if isinstance(latest_commit, str):
             commit_sha = latest_commit
-        if not is_reviewer_activity:
+        if not is_actor_authored:
             author_user = _as_dict(_as_dict(pr.get("author")).get("user"))
             author = _user_handle(author_user)
         # PR-side revert detection: the title is the only signal we have
