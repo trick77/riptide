@@ -26,8 +26,8 @@ jobs:
         run: uv run ruff check .
       - name: ruff format
         run: uv run ruff format --check .
-      - name: pyright
-        run: uv run pyright
+      - name: basedpyright
+        run: uv run basedpyright
 
   test:
     runs-on: ubuntu-latest
@@ -64,4 +64,3 @@ jobs:
           name: coverage-xml
           path: coverage.xml
           if-no-files-found: ignore
-

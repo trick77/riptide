@@ -25,7 +25,7 @@ dev = [
     "testcontainers[postgres]>=4.9",
     "httpx>=0.28",
     "ruff>=0.8",
-    "pyright>=1.1.391",
+    "basedpyright>=1.39.6",
     "pre-commit>=4.0",
 ]
 
@@ -49,7 +49,7 @@ ignore = ["E501"]
 "migrations/**" = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 "tests/**" = ["B"]
 
-[tool.pyright]
+[tool.basedpyright]
 pythonVersion = "3.13"
 include = ["src", "tests", "migrations"]
 exclude = ["**/__pycache__", "**/.venv"]
@@ -61,12 +61,12 @@ reportUnknownMemberType = false
 reportUnknownVariableType = false
 reportUnknownArgumentType = false
 
-[[tool.pyright.executionEnvironments]]
+[[tool.basedpyright.executionEnvironments]]
 root = "tests"
 reportPrivateUsage = false
 reportUnknownLambdaType = false
 
-[[tool.pyright.executionEnvironments]]
+[[tool.basedpyright.executionEnvironments]]
 root = "migrations"
 reportPrivateUsage = false
 

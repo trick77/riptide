@@ -17,10 +17,10 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  - repo: https://github.com/RobertCraigie/pyright-python
-    rev: v1.1.391
+  - repo: https://github.com/DetachHead/basedpyright-prek-mirror
+    rev: v1.39.6
     hooks:
-      - id: pyright
+      - id: basedpyright
 
   - repo: https://github.com/astral-sh/uv-pre-commit
     rev: 0.5.13
