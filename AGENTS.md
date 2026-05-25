@@ -12,7 +12,7 @@ uv run pytest tests/test_parsers.py  # one file
 uv run pytest -k test_revert         # one test by keyword
 uv run ruff check . && uv run ruff format --check .   # lint + format check
 uv run ruff format .                 # auto-format
-uv run pyright                       # type-check (strict mode for src/)
+uv run basedpyright                  # type-check (strict mode for src/)
 RIPTIDE_DB_URL=... uv run alembic upgrade head        # apply migrations
 RIPTIDE_DB_URL=... uv run alembic downgrade base      # tear down
 podman-compose up                    # local dev: Postgres + migrations + app on :8000
@@ -44,9 +44,9 @@ If `docker ps` fails, ask the user to start OrbStack.
 - Single Python package, `riptide_collector` (flat top-level, not a namespace package). Future suite components (e.g. `riptide-api`, `riptide-dashboard`) get their own top-level package, e.g. `riptide_dashboard` — leave architectural room for them.
 - Webhook routers are factories that return an `APIRouter`. Bitbucket needs the config for automation detection (`make_router(config, session_factory, auth_dep)`); Pipeline, ArgoCD, and Noergler don't, so they take just `(session_factory, auth_dep)`. They're wired up in `src/riptide_collector/main.py::create_app`. Add the config only when a router actually needs `automation` rules or team metadata.
 - Pydantic schemas: **strict** for `/webhooks/pipeline` and `/webhooks/argocd` (we own the contract — invalid payloads must 422); **permissive raw-dict parsing** for Bitbucket (its payload shapes vary; we best-effort extract).
-- Use `_as_dict()` / `_as_list()` helpers in `routers/bitbucket.py` to coerce arbitrary JSON shapes — pyright strict won't accept chained `.get()` on `Optional[dict]`.
+- Use `_as_dict()` / `_as_list()` helpers in `routers/bitbucket.py` to coerce arbitrary JSON shapes — basedpyright strict won't accept chained `.get()` on `Optional[dict]`.
 - Tests use real Postgres via testcontainers, never SQLite. The `client` fixture in `tests/conftest.py` depends on `session_factory` which truncates tables per test.
-- `.pre-commit-config.yaml` runs ruff + pyright + uv-lock-check; expect CI to enforce the same.
+- `.pre-commit-config.yaml` runs ruff + basedpyright + uv-lock-check; expect CI to enforce the same.
 
 ## Logging & Splunk
 
