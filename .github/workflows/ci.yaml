@@ -16,7 +16,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
@@ -49,7 +49,7 @@ jobs:
       # Bypass testcontainers and run tests against the service Postgres above.
       RIPTIDE_TEST_DB_URL: postgresql+asyncpg://riptide:riptide@localhost:5432/riptide
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
