@@ -24,7 +24,14 @@ FROM lead_time_changes
 WHERE environment = 'prod'
   AND NOT is_merge
   AND NOT author_is_service_account
-  AND author NOT IN (SELECT unnest(:automation_handles))
+  -- Match the login AND the display name, the same rule the rest of riptide
+  -- uses: a bot is often provisioned with a nondescript login. NOT EXISTS
+  -- rather than NOT IN, so a commit with an unresolved author is kept rather
+  -- than silently dropped by NULL propagation.
+  AND NOT EXISTS (
+        SELECT 1 FROM unnest(:automation_handles) AS h(handle)
+        WHERE lower(h.handle) IN (lower(author), lower(author_display_name))
+      )
   AND first_deployed_at > now() - interval '90 days';
 ```
 
@@ -65,19 +72,34 @@ change" and reads 26.7 h on the same data — 7× too flattering.
 - **`authored_at` is the commit's own timestamp**, which a rebase rewrites.
   That is DORA's "code committed"; `committed_at` sits next to it for comparison.
 - **Coverage is bounded by range resolution.** A deploy whose commit range cannot
-  be resolved contributes nothing — it is absent, never counted as fast. Check it:
+  be resolved contributes nothing — it is absent, never counted as fast. Count
+  deploys, not bumps: one deploy fans out to a row per bumped component.
 
   ```sql
-  SELECT count(*) AS deploys,
-         count(*) FILTER (WHERE r.deployed_at IS NULL) AS unresolved
+  SELECT count(DISTINCT a.id) AS deploys,
+         count(DISTINCT a.id) FILTER (WHERE r.deployed_at IS NULL) AS unresolved
   FROM argocd_events a
   LEFT JOIN deploy_commit_ranges r
          ON r.app_name = a.app_name AND r.deployed_at = a.occurred_at
   WHERE a.operation_phase = 'Succeeded';
   ```
 
+- **A missing boundary commit costs a whole release, not one change.** The range
+  needs both endpoint SHAs, so if either is absent — the `commits[]` cap below,
+  or an ingest gap — every change in that window disappears. It does not recover
+  later either: the next release's range starts at *this* release's head, so the
+  window is skipped, not deferred.
 - **Bitbucket caps `commits[]` at 5 per push.** Measured, that bites 0.6 % of
-  master pushes; it drops changes rather than mis-timing the ones it keeps.
+  master pushes. For changes it keeps it is harmless, but via the point above a
+  dropped commit that happens to be a release boundary costs its whole window.
+- **Boundary commits are assumed to be push tips.** Range membership is decided
+  by push time, so every commit of a push lands on one side of the boundary.
+  That is exact when the boundary SHA is the tip of its push, which is what a
+  release cut normally is. Where it is not, commits sharing that push are
+  attributed to the neighbouring release. Likewise the GitOps release commit
+  must be a push tip to be found at all — a release split across two pushes
+  where Argo reports only the second revision leaves the first unresolvable.
+  Both go away with `image_ref`-based ranges.
 - **Ranges come from release notes today.** `deploy_commit_ranges` reads the
   compare links a release-note generator writes into the GitOps commit, so a
   release landed as a direct version bump is invisible to it. That is the view to

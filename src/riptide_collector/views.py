@@ -53,6 +53,19 @@ WHERE b.event_type = 'repo:refs_changed'
 # compare link carrying the previous and the new App-repo SHA; those two bound
 # the range the deploy shipped. The LIKE prefilter keeps the regex off every
 # push payload in the table.
+#
+# Two assumptions, both true of the release generators this was built against
+# and both stated in docs/dora-lead-time.md:
+#
+# - The GitOps release commit is a push *tip*, since `commit_sha` stores the
+#   push's toHash. A release split across two pushes where Argo only ever
+#   reports the second revision leaves the first push's bumps unresolvable.
+# - Both boundary SHAs are push tips in the App repo, which is what makes the
+#   push-timestamp range below exact. Where a boundary is not the tip, the
+#   commits that share its push are attributed to the wrong side.
+#
+# Both disappear once senders report `pipeline_events.image_ref`: the range
+# then comes from consecutive deploys of the same app, with no message parsing.
 DEPLOY_COMMIT_RANGES = r"""
 CREATE VIEW deploy_commit_ranges AS
 WITH release_commit AS (
@@ -70,9 +83,12 @@ WITH release_commit AS (
 bump AS (
     SELECT
         app_name, environment, team, deployed_at,
+        -- Slugs may carry '_' and '.', so the class is wider than it looks;
+        -- the repo join below compares the slug exactly rather than with LIKE,
+        -- where '_' would act as a wildcard.
         regexp_matches(
             body,
-            'repos/([a-z0-9-]+)/compare/diff\?targetBranch=([0-9a-f]{40})&sourceBranch=([0-9a-f]{40})',
+            'repos/([a-z0-9._-]+)/compare/diff\?targetBranch=([0-9a-f]{40})&sourceBranch=([0-9a-f]{40})',
             'g'
         ) AS m
     FROM release_commit
@@ -90,7 +106,7 @@ SELECT
 FROM bump
 JOIN commit_sightings prev
   ON prev.commit_sha = bump.m[2]
- AND prev.repo_full_name LIKE '%/' || bump.m[1]
+ AND split_part(prev.repo_full_name, '/', 2) = bump.m[1]
 JOIN commit_sightings curr
   ON curr.commit_sha = bump.m[3]
  AND curr.repo_full_name = prev.repo_full_name
@@ -98,6 +114,12 @@ JOIN commit_sightings curr
 
 # First deploy only: a change reaches production once, even though the release
 # rolls out to every App of the service.
+#
+# The range is matched by push time, so every commit of a push belongs to one
+# side of the boundary. That is exact while the boundary SHA is the push tip
+# (see above) and it is why a boundary commit riptide never saw drops the whole
+# release window rather than one commit — `deploy_commit_ranges` needs both
+# ends. Those windows are absent from the metric, never counted as fast.
 LEAD_TIME_CHANGES = """
 CREATE VIEW lead_time_changes AS
 SELECT

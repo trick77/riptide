@@ -121,13 +121,17 @@ async def seeded(
             at=BASE,
             commits=[_commit(SHA_PREV, at=BASE, message="previous release head")],
         )
-        # Three changes land on master, each committed two hours apart.
+        # Three changes land on master, each committed two hours apart. The
+        # first push carries two commits, as a PR merge of two commits does.
         await _push(
             session,
             delivery_id="p1",
             repo=APP_REPO,
             at=BASE + timedelta(hours=2),
-            commits=[_commit("b" * 40, at=BASE + timedelta(hours=2))],
+            commits=[
+                _commit("b" * 40, at=BASE + timedelta(hours=1)),
+                _commit("9" * 40, at=BASE + timedelta(hours=2)),
+            ],
         )
         await _push(
             session,
@@ -235,7 +239,7 @@ class TestCommitSightings:
         # The feature-branch commit is absent: a change enters the release
         # stream when it lands on master, and counting both double-counts it.
         assert "e" * 40 not in rows
-        assert {SHA_PREV, "b" * 40, "c" * 40, SHA_HEAD} == set(rows)
+        assert {SHA_PREV, "b" * 40, "9" * 40, "c" * 40, SHA_HEAD} == set(rows)
 
     async def test_classification_columns(self, seeded: Any) -> None:
         async with seeded() as session:
@@ -269,8 +273,8 @@ class TestLeadTimeChanges:
                 )
             ).scalar_one()
 
-        # Committed at BASE+2h, first prod deploy at BASE+10h.
-        assert row == 8
+        # Committed at BASE+1h, first prod deploy at BASE+10h.
+        assert row == 9
 
     async def test_second_deploy_of_the_same_release_does_not_recount(self, seeded: Any) -> None:
         async with seeded() as session:
@@ -301,7 +305,27 @@ class TestLeadTimeChanges:
 
         # The range is (previous head, this head]: the old head shipped last time.
         assert SHA_PREV not in shas
-        assert set(shas) == {"b" * 40, "c" * 40, SHA_HEAD}
+        assert set(shas) == {"b" * 40, "9" * 40, "c" * 40, SHA_HEAD}
+
+    async def test_every_commit_of_a_push_is_counted(self, seeded: Any) -> None:
+        # Range membership is decided per push, so both commits of a
+        # two-commit push are attributed to the same release — and each keeps
+        # its own commit timestamp, an hour apart here.
+        async with seeded() as session:
+            rows = dict(
+                (
+                    await session.execute(
+                        text(
+                            "SELECT commit_sha, extract(epoch FROM lead_time)/3600 "
+                            "FROM lead_time_changes WHERE environment = 'prod' "
+                            "  AND commit_sha IN (:a, :b)"
+                        ),
+                        {"a": "b" * 40, "b": "9" * 40},
+                    )
+                ).all()
+            )
+
+        assert rows == {"b" * 40: 9, "9" * 40: 8}
 
     async def test_environments_are_measured_separately(self, seeded: Any) -> None:
         async with seeded() as session:
@@ -317,7 +341,7 @@ class TestLeadTimeChanges:
                 ).all()
             )
 
-        assert rows == {"intg": 6, "prod": 8}
+        assert rows == {"intg": 7, "prod": 9}
 
     async def test_default_metric_filter_keeps_only_real_changes(self, seeded: Any) -> None:
         async with seeded() as session:
@@ -336,5 +360,6 @@ class TestLeadTimeChanges:
             )
 
         # The merge commit and the release-plugin commit are artifacts of
-        # shipping, not changes that were shipped.
-        assert shas == ["b" * 40]
+        # shipping, not changes that were shipped. Both commits of the
+        # two-commit push survive.
+        assert sorted(shas) == sorted(["b" * 40, "9" * 40])

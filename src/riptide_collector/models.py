@@ -29,6 +29,14 @@ class BitbucketEvent(Base):
         Index("ix_bitbucket_events_repo_full_name", "repo_full_name"),
         Index("ix_bitbucket_events_pr_id", "pr_id"),
         Index("ix_bitbucket_events_commit_sha", "commit_sha"),
+        # Serves the lead-time views: repo equality + branch equality +
+        # occurred_at range, which is exactly how a release window is looked up.
+        Index(
+            "ix_bitbucket_events_repo_branch_occurred",
+            "repo_full_name",
+            "branch_name",
+            "occurred_at",
+        ),
         Index(
             "ix_bitbucket_events_jira_keys_gin",
             "jira_keys",
