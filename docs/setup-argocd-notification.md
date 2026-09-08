@@ -95,8 +95,9 @@ This adds:
   `revision`, `sync_status`, `operation_phase`, `started_at`, `finished_at`,
   `destination_namespace`, and `images` (a JSON array rendered from
   `.app.status.summary.images`). `images` is the bridge for joining Argo CD
-  events to pipeline events: `revision` is the GitOps-repo SHA, but image
-  tags typically embed the App-repo commit SHA that the pipeline reports.
+  events to pipeline events: `revision` is the GitOps-repo SHA, but the image
+  references match `pipeline_events.image_ref` verbatim, and the pipeline row
+  carries the App-repo `commit_sha`.
 - `trigger.on-deployed` and `trigger.on-sync-failed` (riptide-flavored).
   We do **not** ship `on-sync-succeeded`: every ArgoCD reconciliation
   enters a brief `Succeeded` operationState, which would flood the
@@ -237,6 +238,8 @@ ORDER BY created_at DESC LIMIT 5;
 
 `revision` is the **GitOps-repo SHA**, not the App-repo SHA — direct joins
 to `pipeline_events.commit_sha` or `bitbucket_events.commit_sha` will not
-match. The App-repo SHA is typically embedded in the image tag (e.g.
-`registry/app:abc1234`); a future reader/correlator pulls SHAs out of
-`payload->'images'` to bridge to pipeline events.
+match. Nor is the image tag a commit SHA: in practice it is a version
+(`registry/app:2.0.41`). The reliable bridge is the full image reference —
+`payload->'images'` against `pipeline_events.image_ref`, which the CI sender
+reports — and the pipeline row then carries the App-repo `commit_sha`. See
+[Correlating deploys back to commits](correlating-deploys-to-commits.md).

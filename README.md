@@ -60,10 +60,10 @@ the data captured in v1.
 
 | Metric | How it's computed |
 |---|---|
-| **Deployment frequency** | `COUNT(*)` of `argocd_events` per `app_name` / `team` / time window where `operation_phase = 'Succeeded' AND environment = 'prod'`. Drop the `environment` filter (or slice by it) for staging visibility. |
-| **Lead time for changes** | For each merged PR, `MIN(bitbucket_events.occurred_at)` for the PR (first commit) → `argocd_events.occurred_at` of the prod deploy that carries the same `commit_sha` and `environment = 'prod'`. Joined via the SHA. Stratify by `bitbucket_events.change_type` (feature / hotfix / bugfix / …) to see hotfix lead time vs. feature lead time separately. |
+| **Deployment frequency** | `COUNT(DISTINCT revision)` of `argocd_events` per `team` / time window where `operation_phase = 'Succeeded' AND environment = 'prod'`. Count revisions, not rows: one release reconciles every Argo App that shares the GitOps revision, so `COUNT(*)` per `app_name` overcounts releases. Group by `app_name` for the per-App drill-down. |
+| **Lead time for changes** | Deploy → build → commit, joined on the image reference: `argocd_events.payload->'images'` contains the full image refs Argo rendered, `pipeline_events.image_ref` is what the build published. From the pipeline row, `commit_sha` gives the App-repo commit; its first sighting in `bitbucket_events` starts the clock, the `argocd_events.occurred_at` of the prod deploy ends it. Stratify by `bitbucket_events.change_type` (feature / hotfix / bugfix / …) to separate hotfix from feature lead time. `argocd_events.revision` is the GitOps-repo SHA and does **not** join to `commit_sha` — see [Correlating deploys back to commits](docs/correlating-deploys-to-commits.md), which also documents the read-time fallback for events collected before senders reported `image_ref`. |
 | **PR cycle time** | `pullrequest:fulfilled.occurred_at − pullrequest:created.occurred_at` per PR id. |
-| **Time to first review** *(DX Core 4 "code review pickup time")* | Two-part computation per PR — see the SQL block below the table. Clock-start = `COALESCE(pr:ready_for_review, pr:opened)`: PRs opened ready start at `pr:opened`; PRs opened as drafts start at the synthetic `pr:ready_for_review` (emitted by the parser when a `pr:modified` payload carries `previousDraft=true, draft=false`). Engagement = first reviewer touch (`pr:comment:added`, `pr:reviewer:approved`, `pr:reviewer:unapproved`, `pr:reviewer:needs_work`, `pr:reviewer:updated`) where `author != pr_opener AND NOT is_automated AND occurred_at >= clock-start`. The five-event reviewer union covers every touch Bitbucket DC emits (silent approvals, retracted approvals, "needs work" flips, bare reviewer-status changes); the `occurred_at >= clock-start` guard drops early-feedback comments solicited during the draft phase, which would otherwise produce negative pickup times. `NOT is_automated` strips bot comments (noergler / Renovate / etc.) — every review-time bot must have its handle in the `automation` config block, otherwise its instant comment drives the metric toward zero. |
+| **Time to first review** *(DX Core 4 "code review pickup time")* | Two-part computation per PR — see the SQL block below the table. Clock-start = `COALESCE(pr:ready_for_review, pr:opened)`: PRs opened ready start at `pr:opened`; PRs opened as drafts start at the synthetic `pr:ready_for_review` (emitted by the parser when a `pr:modified` payload carries `previousDraft=true, draft=false`). Engagement = first reviewer touch (`pr:comment:added`, `pr:reviewer:approved`, `pr:reviewer:unapproved`, `pr:reviewer:needs_work`, `pr:reviewer:updated`) where `author != pr_opener AND NOT is_automated AND occurred_at >= clock-start`. The five-event reviewer union covers every touch Bitbucket DC emits (silent approvals, retracted approvals, "needs work" flips, bare reviewer-status changes); the `occurred_at >= clock-start` guard drops early-feedback comments solicited during the draft phase, which would otherwise produce negative pickup times. `NOT is_automated` strips bot comments (noergler / Renovate / etc.) — every review-time bot must be recognisable, otherwise its instant comment drives the metric toward zero. Detection matches the `automation` config block against **both** the login handle (`author`) and the display name (`author_display_name`), because a bot is often provisioned as an ordinary user account whose login says nothing; noergler additionally self-reports its account as `noergler_events.reviewer_handle`. |
 | **Build success rate** | `pipeline_events` with `phase = 'COMPLETED'` grouped by `status`. Slice by `source` to compare Jenkins vs Tekton, by `pipeline_name` / `team` for ownership. |
 | **Build duration** | `pipeline_events.duration_seconds` (a Postgres `GENERATED ALWAYS AS (finished_at − started_at)` column). |
 | **Deploy success rate** | `argocd_events` with `operation_phase IN ('Succeeded', 'Failed')` aggregated, filtered to `environment = 'prod'` for the prod-only view. |
@@ -130,7 +130,7 @@ because there's no clock-start to subtract from in the first place.
 
 | Metric | How it's computed |
 |---|---|
-| **PR size** | `lines_added`, `lines_removed`, `files_changed` columns on `bitbucket_events` (extracted from the PR payload). |
+| **PR size** | `lines_added`, `lines_removed`, `files_changed` on `noergler_events` (`event_type = 'pr_completed'`), joined to Bitbucket PRs on `pr_key` = `'<repo_full_name>#<pr_id>'`. The same columns exist on `bitbucket_events` but are always NULL: Bitbucket DC webhooks carry no diff stats, and fetching them would put an outbound REST call in the ingest path. Covers the repos noergler reviews. |
 | **Revert rate** | `COUNT(*) WHERE is_revert = true` over total commits — a free, weak Change-Failure-Rate proxy. |
 | **Hotfix rate** | `COUNT(*) WHERE change_type = 'hotfix'` over total deploys per window — operational-pain signal. |
 | **Change mix** | Distribution of `change_type` (feature / bugfix / hotfix / chore / refactor / docs / other) per team per week. |
@@ -178,9 +178,12 @@ What riptide does **not** provide today, and the natural seam for it:
 - **Pre-aggregated metric tables.** Compute on read; only materialize when
   query volume justifies it.
 
-The universal join key across all three sources is the **commit SHA**
-(`bitbucket_events.commit_sha`, `pipeline_events.commit_sha`,
-`argocd_events.revision`).
+Bitbucket and pipeline events join on the **commit SHA**
+(`bitbucket_events.commit_sha` = `pipeline_events.commit_sha`, App-repo SHA on
+both sides). Argo CD does not: `argocd_events.revision` is the GitOps-repo SHA.
+Deploys reach the commit through the image reference — `pipeline_events.image_ref`
+against `argocd_events.payload->'images'` — as described in
+[Correlating deploys back to commits](docs/correlating-deploys-to-commits.md).
 
 ## Quickstart (local)
 

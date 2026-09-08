@@ -196,6 +196,31 @@ class TestPrCompletedMerged:
             assert len(rows) == 1
 
 
+class TestReviewerHandle:
+    async def test_reviewer_handle_persisted_case_preserved(self, client: AsyncClient) -> None:
+        # Self-reported so riptide can recognise the reviewer's own PR
+        # comments as automation without every installation configuring the
+        # handle by hand. Stored as delivered — it is matched against the git
+        # host's user handles, which riptide does not lowercase either.
+        payload = _load("noergler_pr_completed_merged.json")
+        payload["reviewer_handle"] = "Rop"
+        r = await client.post("/webhooks/noergler", json=payload, headers=AUTH)
+        assert r.status_code == 202
+
+        async with _fresh_session_factory(client)() as session:
+            row = (await session.execute(select(NoerglerEvent))).scalar_one()
+            assert row.reviewer_handle == "Rop"
+
+    async def test_reviewer_handle_optional(self, client: AsyncClient) -> None:
+        payload = _load("noergler_pr_completed_merged.json")
+        r = await client.post("/webhooks/noergler", json=payload, headers=AUTH)
+        assert r.status_code == 202
+
+        async with _fresh_session_factory(client)() as session:
+            row = (await session.execute(select(NoerglerEvent))).scalar_one()
+            assert row.reviewer_handle is None
+
+
 class TestPrCompletedNonMerged:
     async def test_declined_recorded_with_outcome(self, client: AsyncClient) -> None:
         payload = _load("noergler_pr_completed_declined.json")

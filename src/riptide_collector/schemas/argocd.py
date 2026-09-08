@@ -23,9 +23,11 @@ class ArgoCDWebhook(BaseModel):
         description=(
             "rendered images from the synced manifests (Argo CD field path "
             "`.app.status.summary.images`). may be empty for apps without pods. "
-            "the App-Repo commit SHA is typically embedded in the image tag and "
-            "bridges argocd.revision (GitOps-repo SHA) to pipeline.commit_sha "
-            "(App-repo SHA) — correlation logic is built on top of this field."
+            "these are full image references (`registry/path:tag`) and they are "
+            "the bridge from a deploy to the build that produced it: they match "
+            "pipeline_events.image_ref verbatim. do not parse a commit SHA out of "
+            "the tag — tags are usually versions. argocd.revision is the "
+            "GitOps-repo SHA and never matches pipeline.commit_sha."
         ),
     )
 

@@ -42,6 +42,16 @@ class NoerglerPrCompleted(_Common):
     )
     pr_key: str = Field(..., min_length=1, description="Bitbucket PR key, e.g. 'PROJ/repo#42'")
     repo: str = Field(..., min_length=1)
+    reviewer_handle: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "The account the reviewer posts its comments under on the git host. "
+            "Self-reporting it lets riptide recognise the reviewer's own comments as "
+            "automation without every installation configuring the handle by hand — "
+            "otherwise the bot counts as a human reviewer and collapses review-pickup time."
+        ),
+    )
     source_commit_sha: str = Field(
         ...,
         min_length=7,

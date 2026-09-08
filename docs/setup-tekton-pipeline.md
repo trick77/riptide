@@ -31,6 +31,12 @@ spec:
       description: $(tasks.status) from the calling Pipeline (Succeeded/Failed/Completed)
     - name: commit-sha
       description: git SHA built / deployed
+    - name: image-ref
+      description: >-
+        full reference of the image this run published
+        (registry/path/app:tag), or "" if it published none. Links the Argo CD
+        deploy back to this build; see docs/correlating-deploys-to-commits.md
+      default: ""
     - name: started-at
       description: PipelineRun status.startTime (ISO 8601 UTC)
     - name: finished-at
@@ -63,10 +69,12 @@ spec:
           --arg phase "COMPLETED" \
           --arg st "$STATUS" \
           --arg sha "$(params.commit-sha)" \
+          --arg img "$(params.image-ref)" \
           --arg sa "$(params.started-at)" \
           --arg fa "$(params.finished-at)" \
           '{source:$src, pipeline_name:$pn, run_id:$rid, phase:$phase,
-            status:$st, commit_sha:$sha, started_at:$sa, finished_at:$fa}')
+            status:$st, commit_sha:$sha, started_at:$sa, finished_at:$fa}
+           + (if $img == "" then {} else {image_ref:$img} end)')
         # --connect-timeout caps TCP/TLS handshake; --max-time caps the full
         # request. One quick retry handles transient blips. Any non-2xx is
         # logged and ignored — the PipelineRun result is unaffected.
@@ -138,6 +146,8 @@ spec:
           value: $(tasks.status)
         - name: commit-sha
           value: $(params.commit-sha)
+        - name: image-ref
+          value: $(tasks.build.results.image-ref)
         - name: started-at
           value: $(context.pipelineRun.startTime)
         - name: finished-at

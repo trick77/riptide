@@ -36,6 +36,16 @@ class PipelineWebhook(BaseModel):
     phase: str = Field(..., min_length=1, description="STARTED / COMPLETED / FINALIZED")
     status: str | None = Field(default=None, description="SUCCESS / FAILURE / etc.")
     commit_sha: str = Field(..., min_length=7, description="git commit SHA being built")
+    image_ref: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "full image reference the run published, e.g. 'registry/path/app:2.0.41'. "
+            "Argo CD reports the same strings in its rendered image list, so sending it "
+            "makes deploy → build → commit an exact join even when the tag is a version "
+            "rather than a commit SHA. Omit it for runs that publish no image."
+        ),
+    )
     started_at: datetime
     finished_at: datetime | None = None
 

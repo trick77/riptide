@@ -71,7 +71,11 @@ def make_router(
         # this assert turns into a typing error rather than a silent bug.
         assert isinstance(parsed, BitbucketEventDraft)
         draft = parsed
-        automation_source = config.detect_automation_source(draft.author, draft.branch_name)
+        automation_source = config.detect_automation_source(
+            draft.author,
+            draft.branch_name,
+            draft.author_display_name,
+        )
 
         try:
             async with session_factory() as session:
@@ -84,6 +88,7 @@ def make_router(
                         pr_id=draft.pr_id,
                         commit_sha=draft.commit_sha,
                         author=draft.author,
+                        author_display_name=draft.author_display_name,
                         branch_name=draft.branch_name,
                         change_type=draft.change_type,
                         jira_keys=draft.jira_keys,

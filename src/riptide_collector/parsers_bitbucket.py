@@ -61,6 +61,10 @@ class BitbucketEventDraft:
     pr_id: int | None
     commit_sha: str | None
     author: str | None
+    # The same user's `displayName`, kept alongside the login so bot
+    # detection can match on either. Some review bots post under an
+    # ordinary-looking login and are only recognisable by display name.
+    author_display_name: str | None
     branch_name: str | None
     change_type: str | None
     jira_keys: list[str]
@@ -136,6 +140,17 @@ def _user_handle(user: dict[str, Any]) -> str | None:
     return None
 
 
+def _user_display_name(user: dict[str, Any]) -> str | None:
+    """The human-readable name of a BBS DC user, if it differs from the handle.
+
+    A bot account is often provisioned with a nondescript login and only
+    identifies itself through `displayName`, so this travels with the
+    author for automation detection.
+    """
+    value = user.get("displayName")
+    return value if isinstance(value, str) and value else None
+
+
 def _synth_delivery_id(event_key: str | None, body: dict[str, Any]) -> str:
     pr = _as_dict(body.get("pullRequest"))
     pr_id = pr.get("id")
@@ -193,6 +208,7 @@ def extract_event(
     branch_name: str | None = None
     commit_sha: str | None = None
     author: str | None = None
+    author_display_name: str | None = None
     is_revert = False
 
     # Reviewer-activity events carry the actor (the reviewer / commenter)
@@ -218,6 +234,7 @@ def extract_event(
         if not is_actor_authored:
             author_user = _as_dict(_as_dict(pr.get("author")).get("user"))
             author = _user_handle(author_user)
+            author_display_name = _user_display_name(author_user)
         # PR-side revert detection: the title is the only signal we have
         # without a REST round-trip. Push-side detection would need the
         # commit messages between fromHash..toHash.
@@ -259,7 +276,9 @@ def extract_event(
         )
 
     if not author:
-        author = _user_handle(_as_dict(body.get("actor")))
+        actor = _as_dict(body.get("actor"))
+        author = _user_handle(actor)
+        author_display_name = _user_display_name(actor)
 
     repo_full_name = lower(raw_repo_full_name)
     branch_name = lower(branch_name)
@@ -272,6 +291,7 @@ def extract_event(
         pr_id=pr_id,
         commit_sha=commit_sha,
         author=author,
+        author_display_name=author_display_name,
         branch_name=branch_name,
         change_type=parse_change_type(branch_name),
         jira_keys=extract_jira_keys(title, description, branch_name),

@@ -8,7 +8,7 @@ lifecycle — PR open/merge/close already comes in via Bitbucket):
 
 | Event | When | Carries |
 |---|---|---|
-| `completed` | After an LLM review run finishes | model, token counts, elapsed time, cost (finops) |
+| `pr_completed` | Once per PR, when it reaches a terminal outcome (merged / declined / deleted) | outcome, final diff size, aggregated token counts, elapsed time, cost, models used (finops) |
 | `feedback` | When a reviewer disagrees with or acknowledges a finding | finding id, verdict, actor (reviewer-precision) |
 
 Lead-time, activity, and other PR-lifecycle metrics are **not** emitted by
@@ -47,28 +47,46 @@ noergler verifies reachability and bearer validity at startup via
 
 ## Payloads
 
-### `completed`
+### `pr_completed`
 
 ```json
 {
-  "event_type": "completed",
+  "event_type": "pr_completed",
+  "outcome": "merged",
   "pr_key": "PROJ/payments-api#42",
   "repo": "acme/payments-api",
-  "commit_sha": "<git sha being reviewed>",
-  "run_id": "<noergler-internal review-run id>",
-  "model": "gpt-4o-2024-08-06",
-  "prompt_tokens": 12345,
-  "completion_tokens": 678,
-  "elapsed_ms": 8200,
-  "findings_count": 3,
-  "cost_usd": "0.124500",
-  "finished_at": "2026-04-29T18:01:00Z"
+  "reviewer_handle": "riptide-reviewer",
+  "source_commit_sha": "<source-branch HEAD when the PR closed>",
+  "merge_commit_sha": "<merge commit, only when outcome = merged>",
+  "lines_added": 320,
+  "lines_removed": 75,
+  "files_changed": 12,
+  "total_runs": 3,
+  "total_prompt_tokens": 38420,
+  "total_completion_tokens": 2110,
+  "total_elapsed_ms": 24800,
+  "total_findings_count": 7,
+  "total_cost_usd": "0.382100",
+  "models_used": ["gpt-4o-2024-08-06"],
+  "first_review_at": "2026-04-29T17:30:00Z",
+  "closed_at": "2026-04-29T18:42:00Z"
 }
 ```
 
-`run_id` alone is the idempotency key — noergler may safely retry. The
-`commit_sha` enables joins to `bitbucket_events`, `pipeline_events`, and
-`argocd_events` for cost-vs-deployment analysis.
+One rollup per PR: `(pr_key, outcome)` is the idempotency key, so noergler may
+safely retry. `outcome` is `merged`, `declined` or `deleted` — only merged PRs
+shipped, so throughput and DORA queries filter on it, while FinOps keeps all
+three to see review spend on code that never landed. `source_commit_sha` and
+`merge_commit_sha` join to `bitbucket_events` and `pipeline_events` for
+cost-vs-deployment analysis. `pr_key` (`<repo>#<pr id>`) joins to
+`bitbucket_events (repo_full_name, pr_id)` — that is also where riptide gets PR
+diff sizes from, since Bitbucket's webhooks carry none.
+
+`reviewer_handle` is optional but recommended: it is the account noergler posts
+its review comments under on the git host. Reporting it lets riptide recognise
+those comments as automation without every installation adding the handle to its
+`automation` config; unrecognised, the bot counts as a human reviewer and drives
+the code-review pickup-time metric toward zero.
 
 ### `feedback`
 
@@ -91,20 +109,26 @@ Idempotency key is `(finding_id, verdict)`.
 ## Verify
 
 ```sql
--- finops: cost-by-model, last 7 days
-SELECT model,
+-- finops: cost by model, last 7 days
+SELECT m AS model,
        SUM(prompt_tokens + completion_tokens) AS tokens,
        SUM(cost_usd) AS spend,
-       COUNT(*) AS runs
-FROM noergler_events
-WHERE event_type = 'completed' AND created_at > now() - interval '7 days'
-GROUP BY model
+       COUNT(*) AS prs
+FROM noergler_events, unnest(models_used) AS m
+WHERE event_type = 'pr_completed' AND created_at > now() - interval '7 days'
+GROUP BY 1
 ORDER BY spend DESC;
 
--- reviewer precision: 1 - disagreed/total, last 7 days
+-- review spend that never shipped, last 7 days
+SELECT outcome, COUNT(*) AS prs, SUM(cost_usd) AS spend
+FROM noergler_events
+WHERE event_type = 'pr_completed' AND created_at > now() - interval '7 days'
+GROUP BY 1;
+
+-- reviewer precision: 1 - disagreed PRs / reviewed PRs, last 7 days
 SELECT 1.0 - (
-    SUM(CASE WHEN event_type='feedback' AND verdict='disagreed' THEN 1 ELSE 0 END)
-    / NULLIF(SUM(CASE WHEN event_type='completed' THEN findings_count ELSE 0 END), 0)
+    COUNT(*) FILTER (WHERE event_type = 'feedback' AND verdict = 'disagreed')::numeric
+    / NULLIF(COUNT(*) FILTER (WHERE event_type = 'pr_completed'), 0)
 ) AS precision_estimate
 FROM noergler_events
 WHERE created_at > now() - interval '7 days';

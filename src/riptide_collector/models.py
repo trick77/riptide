@@ -43,6 +43,10 @@ class BitbucketEvent(Base):
     pr_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     commit_sha: Mapped[str | None] = mapped_column(String, nullable=True)
     author: Mapped[str | None] = mapped_column(String, nullable=True)
+    # `actor.displayName` next to the login handle: bot accounts are often
+    # provisioned with a nondescript login and only identify themselves here,
+    # so read-time queries filtering bots need both.
+    author_display_name: Mapped[str | None] = mapped_column(String, nullable=True)
     branch_name: Mapped[str | None] = mapped_column(String, nullable=True)
     change_type: Mapped[str | None] = mapped_column(String, nullable=True)
     jira_keys: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, server_default="{}")
@@ -87,6 +91,11 @@ class PipelineEvent(Base):
     phase: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str | None] = mapped_column(String, nullable=True)
     commit_sha: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Full image reference the run published, e.g. `registry/path/app:2.0.41`.
+    # Argo CD stores exactly these strings in `payload->'images'`, which makes
+    # `argocd_events → pipeline_events → commit_sha` an exact join even when the
+    # image tag is a version rather than a commit SHA.
+    image_ref: Mapped[str | None] = mapped_column(String, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_seconds: Mapped[int | None] = mapped_column(
@@ -129,6 +138,10 @@ class NoerglerEvent(Base):
     commit_sha: Mapped[str | None] = mapped_column(String, nullable=True)
     # pr_completed-only:
     outcome: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The reviewer's own account handle on the git host. Self-reported so
+    # riptide learns the bot's identity from the stream instead of every
+    # installation configuring it by hand.
+    reviewer_handle: Mapped[str | None] = mapped_column(String, nullable=True)
     merge_commit_sha: Mapped[str | None] = mapped_column(String, nullable=True)
     lines_added: Mapped[int | None] = mapped_column(Integer, nullable=True)
     lines_removed: Mapped[int | None] = mapped_column(Integer, nullable=True)

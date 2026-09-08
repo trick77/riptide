@@ -86,6 +86,9 @@ def _values_pr_completed(
         "outcome": event.outcome,
         "pr_key": lower(event.pr_key),
         "repo": lower(event.repo),
+        # Kept case-preserved: it is matched against the git host's own
+        # user handles, which riptide stores as delivered.
+        "reviewer_handle": event.reviewer_handle,
         "commit_sha": lower(event.source_commit_sha),
         "merge_commit_sha": lower(event.merge_commit_sha) if event.merge_commit_sha else None,
         "lines_added": event.lines_added,

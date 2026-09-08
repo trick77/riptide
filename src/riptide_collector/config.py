@@ -207,17 +207,31 @@ class RiptideConfigStore:
             return None
         return self._config.teams_by_name.get(name)
 
-    def detect_automation_source(self, author: str | None, branch_name: str | None) -> str | None:
+    def detect_automation_source(
+        self,
+        author: str | None,
+        branch_name: str | None,
+        author_display_name: str | None = None,
+    ) -> str | None:
+        """Match an event's author against the configured automation sources.
+
+        `authors` entries are matched against both the login handle and the
+        display name: a bot provisioned as an ordinary user account (nondescript
+        login, bot name only in `displayName`) is otherwise indistinguishable
+        from a human, and its instant review comments drive the DX Core 4
+        pickup-time metric toward zero.
+        """
         config = self._config
-        if author:
+        handles = [name for name in (author, author_display_name) if name]
+        for handle in handles:
             for source in config.automation:
-                if author in source.authors:
+                if handle in source.authors:
                     return source.name
         if branch_name:
             for source in config.automation:
                 for prefix in source.branch_prefixes:
                     if branch_name.startswith(prefix):
                         return source.name
-        if looks_bot_shaped(author):
+        if any(looks_bot_shaped(handle) for handle in handles):
             return "other-bot"
         return None
