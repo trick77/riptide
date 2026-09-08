@@ -312,6 +312,7 @@ See [`docs/`](docs/) for setup and onboarding guides:
 - [Setup: ArgoCD notification](docs/setup-argocd-notification.md)
 - [Setup: Noergler notification](docs/setup-noergler-notification.md)
 - [Onboarding a team](docs/onboarding-a-team.md)
+- [Change notes](docs/change-notes.md) — what to do on the operator side after a deploy
 - [Lead time for changes (DORA)](docs/dora-lead-time.md)
 - [Correlating deploys back to commits](docs/correlating-deploys-to-commits.md)
 - [OpenShift manifests](openshift/README.md)
