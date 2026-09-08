@@ -224,9 +224,9 @@ class RiptideConfigStore:
 
         `author_is_service_account` is the git host's own verdict about the
         account (Bitbucket DC marks its built-in system user `type: SERVICE`).
-        It is checked last, as a fallback: an explicitly configured source
-        keeps its own name, but a server account nobody configured is still
-        recognised as non-human without anyone listing it.
+        It ranks below the configured sources — those name the tool, which is
+        more specific — but above the `*-bot` name heuristic, since a stated
+        fact beats a guess from the handle.
         """
         config = self._config
         handles = [name for name in (author, author_display_name) if name]
@@ -243,8 +243,12 @@ class RiptideConfigStore:
                 for prefix in source.branch_prefixes:
                     if branch_name.startswith(prefix):
                         return source.name
-        if any(looks_bot_shaped(handle) for handle in handles):
-            return "other-bot"
+        # The host's verdict beats guessing from the name: an account called
+        # `ci-bot` that Bitbucket reports as a service account is a service
+        # account, and mislabelling it `other-bot` would put a technical user
+        # into bot-velocity views, which are meant to show work bots author.
         if author_is_service_account:
             return "service-account"
+        if any(looks_bot_shaped(handle) for handle in handles):
+            return "other-bot"
         return None

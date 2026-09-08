@@ -227,6 +227,15 @@ class TestServiceAccountDetection:
 
         assert store.detect_automation_source("alice", "feature/x", "Alice", False) is None
 
+    def test_bot_shaped_name_does_not_mask_a_service_account(self, tmp_path: Path) -> None:
+        # A stated fact beats a guess from the handle: labelling a technical
+        # account `other-bot` would drop it into bot-velocity views, which
+        # exist to show work that bots actually author.
+        path = _write(tmp_path / "c.json", VALID)
+        store = RiptideConfigStore(path)
+
+        assert store.detect_automation_source("ci-bot", None, None, True) == "service-account"
+
 
 class TestAutomationByDisplayName:
     def test_display_name_match_when_login_is_ordinary(self, tmp_path: Path) -> None:
