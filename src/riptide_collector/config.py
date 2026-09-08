@@ -212,6 +212,7 @@ class RiptideConfigStore:
         author: str | None,
         branch_name: str | None,
         author_display_name: str | None = None,
+        author_is_service_account: bool = False,
     ) -> str | None:
         """Match an event's author against the configured automation sources.
 
@@ -220,6 +221,12 @@ class RiptideConfigStore:
         login, bot name only in `displayName`) is otherwise indistinguishable
         from a human, and its instant review comments drive the DX Core 4
         pickup-time metric toward zero.
+
+        `author_is_service_account` is the git host's own verdict about the
+        account (Bitbucket DC marks its built-in system user `type: SERVICE`).
+        It is checked last, as a fallback: an explicitly configured source
+        keeps its own name, but a server account nobody configured is still
+        recognised as non-human without anyone listing it.
         """
         config = self._config
         handles = [name for name in (author, author_display_name) if name]
@@ -238,4 +245,6 @@ class RiptideConfigStore:
                         return source.name
         if any(looks_bot_shaped(handle) for handle in handles):
             return "other-bot"
+        if author_is_service_account:
+            return "service-account"
         return None
