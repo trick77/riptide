@@ -116,15 +116,22 @@ Idempotency key is `(finding_id, verdict)`.
 ## Verify
 
 ```sql
--- finops: cost by model, last 7 days
-SELECT m AS model,
-       SUM(prompt_tokens + completion_tokens) AS tokens,
-       SUM(cost_usd) AS spend,
-       COUNT(*) AS prs
+-- finops: which models were in play, last 7 days. The rollup is per PR, not
+-- per model, so cost cannot be split across a multi-model PR — this counts
+-- PRs a model took part in, not spend attributable to it.
+SELECT m AS model, COUNT(*) AS prs_involved
 FROM noergler_events, unnest(models_used) AS m
 WHERE event_type = 'pr_completed' AND created_at > now() - interval '7 days'
 GROUP BY 1
-ORDER BY spend DESC;
+ORDER BY prs_involved DESC;
+
+-- finops: spend, last 7 days (per PR, the level the data actually supports)
+SELECT SUM(cost_usd) AS spend,
+       SUM(prompt_tokens + completion_tokens) AS tokens,
+       COUNT(*) AS prs,
+       COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_prs
+FROM noergler_events
+WHERE event_type = 'pr_completed' AND created_at > now() - interval '7 days';
 
 -- review spend that never shipped, last 7 days
 SELECT outcome, COUNT(*) AS prs, SUM(cost_usd) AS spend

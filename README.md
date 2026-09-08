@@ -118,7 +118,9 @@ WHERE ps.clock_start IS NOT NULL
       )
   AND e.author IS DISTINCT FROM ps.pr_opener
   AND NOT e.is_automated
-  AND lower(e.author) NOT IN (SELECT handle FROM bot_identities)
+  AND NOT EXISTS (
+        SELECT 1 FROM bot_identities b WHERE b.handle = lower(e.author)
+      )
   AND e.occurred_at >= ps.clock_start
 GROUP BY e.repo_full_name, e.pr_id, ps.clock_start;
 ```
