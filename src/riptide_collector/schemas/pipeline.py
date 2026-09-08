@@ -38,12 +38,12 @@ class PipelineWebhook(BaseModel):
     commit_sha: str = Field(..., min_length=7, description="git commit SHA being built")
     image_ref: str | None = Field(
         default=None,
-        min_length=1,
         description=(
             "full image reference the run published, e.g. 'registry/path/app:2.0.41'. "
             "Argo CD reports the same strings in its rendered image list, so sending it "
             "makes deploy → build → commit an exact join even when the tag is a version "
-            "rather than a commit SHA. Omit it for runs that publish no image."
+            "rather than a commit SHA. Omit it (or send an empty string) for runs "
+            "that publish no image."
         ),
     )
     started_at: datetime
@@ -53,3 +53,11 @@ class PipelineWebhook(BaseModel):
     @classmethod
     def _normalise_tz(cls, v: datetime | None) -> datetime | None:
         return _to_utc(v)
+
+    @field_validator("image_ref")
+    @classmethod
+    def _empty_image_ref_is_none(cls, v: str | None) -> str | None:
+        # Templating a param that wasn't set yields "" far more often than it
+        # yields an absent key. Rejecting that would drop the whole run —
+        # build duration and success/failure with it — over an optional field.
+        return v.strip() or None if v else None

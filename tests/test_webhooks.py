@@ -238,6 +238,19 @@ class TestPipelineWebhook:
             row = (await session.execute(select(PipelineEvent))).scalar_one()
             assert row.image_ref == "registry.example.com/acme/payments-api:2.0.41"
 
+    async def test_empty_image_ref_accepted_as_null(self, client: AsyncClient) -> None:
+        # Templating an unset param yields "" more often than an absent key;
+        # rejecting it would drop the run's duration and status too.
+        payload = _load("pipeline_jenkins_completed.json")
+        payload["image_ref"] = ""
+        response = await client.post("/webhooks/pipeline", json=payload, headers=PIPELINE_AUTH)
+        assert response.status_code == 202
+
+        factory = TestBitbucketWebhook._fresh_session_factory(client)
+        async with factory() as session:
+            row = (await session.execute(select(PipelineEvent))).scalar_one()
+            assert row.image_ref is None
+
     async def test_image_ref_optional(self, client: AsyncClient) -> None:
         # Senders that publish no image (test-only runs) stay valid.
         payload = _load("pipeline_jenkins_completed.json")

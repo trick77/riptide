@@ -214,6 +214,16 @@ class TestAutomationByDisplayName:
 
         assert store.detect_automation_source("rop", None, "noergler") == "noergler"
 
+    def test_display_name_match_is_case_insensitive(self, tmp_path: Path) -> None:
+        # Display names are human-formatted; a case-only mismatch against the
+        # configured handle would silently reproduce the zero-pickup-time bug.
+        data = json.loads(json.dumps(VALID))
+        data["automation"]["noergler"] = {"authors": ["noergler"], "branch_prefixes": []}
+        path = _write(tmp_path / "c.json", data)
+        store = RiptideConfigStore(path)
+
+        assert store.detect_automation_source("rop", None, "Noergler") == "noergler"
+
     def test_bot_shaped_display_name_falls_back_to_other_bot(self, tmp_path: Path) -> None:
         path = _write(tmp_path / "c.json", VALID)
         store = RiptideConfigStore(path)

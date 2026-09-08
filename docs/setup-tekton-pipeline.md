@@ -121,6 +121,13 @@ metadata:
 spec:
   params:
     - name: commit-sha
+    # The image reference this run publishes. A Pipeline param, deliberately
+    # not `$(tasks.build.results.image-ref)`: Tekton *skips* a finally task
+    # that consumes an uninitialized result, so a failed build would stop
+    # notifying riptide altogether — losing exactly the rows the build
+    # success-rate metric needs.
+    - name: image-ref
+      default: ""
   tasks:
     - name: build
       taskRef: { name: build }
@@ -147,7 +154,7 @@ spec:
         - name: commit-sha
           value: $(params.commit-sha)
         - name: image-ref
-          value: $(tasks.build.results.image-ref)
+          value: $(params.image-ref)
         - name: started-at
           value: $(context.pipelineRun.startTime)
         - name: finished-at

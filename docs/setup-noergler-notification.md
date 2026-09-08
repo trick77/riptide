@@ -74,7 +74,11 @@ noergler verifies reachability and bearer validity at startup via
 ```
 
 One rollup per PR: `(pr_key, outcome)` is the idempotency key, so noergler may
-safely retry. `outcome` is `merged`, `declined` or `deleted` — only merged PRs
+safely retry. `total_cost_usd` may be omitted when the sender cannot price the
+run (unpriced model, gateway not reporting a cost header) — send no cost rather
+than a `0`, and never drop the whole rollup: outcome, diff size, tokens and runs
+still feed the delivery metrics, and a NULL cost makes the pricing gap visible
+(`count(*) FILTER (WHERE cost_usd IS NULL)`). `outcome` is `merged`, `declined` or `deleted` — only merged PRs
 shipped, so throughput and DORA queries filter on it, while FinOps keeps all
 three to see review spend on code that never landed. `source_commit_sha` and
 `merge_commit_sha` join to `bitbucket_events` and `pipeline_events` for
@@ -83,10 +87,13 @@ cost-vs-deployment analysis. `pr_key` (`<repo>#<pr id>`) joins to
 diff sizes from, since Bitbucket's webhooks carry none.
 
 `reviewer_handle` is optional but recommended: it is the account noergler posts
-its review comments under on the git host. Reporting it lets riptide recognise
-those comments as automation without every installation adding the handle to its
-`automation` config; unrecognised, the bot counts as a human reviewer and drives
-the code-review pickup-time metric toward zero.
+its review comments under on the git host. Reporting it lets riptide's read-time
+queries recognise those comments as automation — see the `bot_identities` CTE in
+the pickup-time query in the README — without every installation adding the
+handle to its `automation` config. Unrecognised, the bot counts as a human
+reviewer and drives the code-review pickup-time metric toward zero. Adding the
+handle to `automation` as well is still worthwhile: that also tags new rows
+`is_automated` at ingest.
 
 ### `feedback`
 
@@ -125,10 +132,12 @@ FROM noergler_events
 WHERE event_type = 'pr_completed' AND created_at > now() - interval '7 days'
 GROUP BY 1;
 
--- reviewer precision: 1 - disagreed PRs / reviewed PRs, last 7 days
+-- reviewer precision: 1 - disagreed findings / reported findings, last 7 days.
+-- Both sides count findings: a PR can collect several disagreements, so a
+-- per-PR denominator can drive the estimate below zero.
 SELECT 1.0 - (
     COUNT(*) FILTER (WHERE event_type = 'feedback' AND verdict = 'disagreed')::numeric
-    / NULLIF(COUNT(*) FILTER (WHERE event_type = 'pr_completed'), 0)
+    / NULLIF(SUM(findings_count) FILTER (WHERE event_type = 'pr_completed'), 0)
 ) AS precision_estimate
 FROM noergler_events
 WHERE created_at > now() - interval '7 days';

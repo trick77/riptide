@@ -223,9 +223,13 @@ class RiptideConfigStore:
         """
         config = self._config
         handles = [name for name in (author, author_display_name) if name]
-        for handle in handles:
+        # Case-insensitive: login handles are usually lowercase, but display
+        # names are human-formatted ("Noergler" vs the configured "noergler"),
+        # and a silent near-miss reintroduces the bug this matching exists for.
+        folded = [handle.casefold() for handle in handles]
+        for handle in folded:
             for source in config.automation:
-                if handle in source.authors:
+                if any(handle == known.casefold() for known in source.authors):
                     return source.name
         if branch_name:
             for source in config.automation:

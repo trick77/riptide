@@ -63,7 +63,7 @@ the data captured in v1.
 | **Deployment frequency** | `COUNT(DISTINCT revision)` of `argocd_events` per `team` / time window where `operation_phase = 'Succeeded' AND environment = 'prod'`. Count revisions, not rows: one release reconciles every Argo App that shares the GitOps revision, so `COUNT(*)` per `app_name` overcounts releases. Group by `app_name` for the per-App drill-down. |
 | **Lead time for changes** | Deploy → build → commit, joined on the image reference: `argocd_events.payload->'images'` contains the full image refs Argo rendered, `pipeline_events.image_ref` is what the build published. From the pipeline row, `commit_sha` gives the App-repo commit; its first sighting in `bitbucket_events` starts the clock, the `argocd_events.occurred_at` of the prod deploy ends it. Stratify by `bitbucket_events.change_type` (feature / hotfix / bugfix / …) to separate hotfix from feature lead time. `argocd_events.revision` is the GitOps-repo SHA and does **not** join to `commit_sha` — see [Correlating deploys back to commits](docs/correlating-deploys-to-commits.md), which also documents the read-time fallback for events collected before senders reported `image_ref`. |
 | **PR cycle time** | `pullrequest:fulfilled.occurred_at − pullrequest:created.occurred_at` per PR id. |
-| **Time to first review** *(DX Core 4 "code review pickup time")* | Two-part computation per PR — see the SQL block below the table. Clock-start = `COALESCE(pr:ready_for_review, pr:opened)`: PRs opened ready start at `pr:opened`; PRs opened as drafts start at the synthetic `pr:ready_for_review` (emitted by the parser when a `pr:modified` payload carries `previousDraft=true, draft=false`). Engagement = first reviewer touch (`pr:comment:added`, `pr:reviewer:approved`, `pr:reviewer:unapproved`, `pr:reviewer:needs_work`, `pr:reviewer:updated`) where `author != pr_opener AND NOT is_automated AND occurred_at >= clock-start`. The five-event reviewer union covers every touch Bitbucket DC emits (silent approvals, retracted approvals, "needs work" flips, bare reviewer-status changes); the `occurred_at >= clock-start` guard drops early-feedback comments solicited during the draft phase, which would otherwise produce negative pickup times. `NOT is_automated` strips bot comments (noergler / Renovate / etc.) — every review-time bot must be recognisable, otherwise its instant comment drives the metric toward zero. Detection matches the `automation` config block against **both** the login handle (`author`) and the display name (`author_display_name`), because a bot is often provisioned as an ordinary user account whose login says nothing; noergler additionally self-reports its account as `noergler_events.reviewer_handle`. |
+| **Time to first review** *(DX Core 4 "code review pickup time")* | Two-part computation per PR — see the SQL block below the table. Clock-start = `COALESCE(pr:ready_for_review, pr:opened)`: PRs opened ready start at `pr:opened`; PRs opened as drafts start at the synthetic `pr:ready_for_review` (emitted by the parser when a `pr:modified` payload carries `previousDraft=true, draft=false`). Engagement = first reviewer touch (`pr:comment:added`, `pr:reviewer:approved`, `pr:reviewer:unapproved`, `pr:reviewer:needs_work`, `pr:reviewer:updated`) where `author != pr_opener AND NOT is_automated AND occurred_at >= clock-start`. The five-event reviewer union covers every touch Bitbucket DC emits (silent approvals, retracted approvals, "needs work" flips, bare reviewer-status changes); the `occurred_at >= clock-start` guard drops early-feedback comments solicited during the draft phase, which would otherwise produce negative pickup times. `NOT is_automated` strips bot comments (noergler / Renovate / etc.) — every review-time bot must be recognisable, otherwise its instant comment drives the metric toward zero. Detection matches the `automation` config block against **both** the login handle (`author`) and the display name (`author_display_name`), because a bot is often provisioned as an ordinary user account whose login says nothing. `is_automated` is decided at ingest, so rows written before a bot was recognised stay marked human: the `bot_identities` CTE in the query below filters those at read time from the handles noergler self-reports (`noergler_events.reviewer_handle`). |
 | **Build success rate** | `pipeline_events` with `phase = 'COMPLETED'` grouped by `status`. Slice by `source` to compare Jenkins vs Tekton, by `pipeline_name` / `team` for ownership. |
 | **Build duration** | `pipeline_events.duration_seconds` (a Postgres `GENERATED ALWAYS AS (finished_at − started_at)` column). |
 | **Deploy success rate** | `argocd_events` with `operation_phase IN ('Succeeded', 'Failed')` aggregated, filtered to `environment = 'prod'` for the prod-only view. |
@@ -78,7 +78,16 @@ dropped at parse time. The raw `eventKey` survives on `payload.eventKey` for
 traceability. With that in place, the metric is one CTE:
 
 ```sql
-WITH pickup_start AS (
+WITH bot_identities AS (
+  -- Identities riptide learned from the stream rather than from config:
+  -- noergler reports the account it comments under. `is_automated` was
+  -- decided at ingest, so rows written before an identity was known are
+  -- filtered here instead.
+  SELECT DISTINCT lower(reviewer_handle) AS handle
+  FROM noergler_events
+  WHERE reviewer_handle IS NOT NULL
+),
+pickup_start AS (
   SELECT
     repo_full_name,
     pr_id,
@@ -109,6 +118,7 @@ WHERE ps.clock_start IS NOT NULL
       )
   AND e.author IS DISTINCT FROM ps.pr_opener
   AND NOT e.is_automated
+  AND lower(e.author) NOT IN (SELECT handle FROM bot_identities)
   AND e.occurred_at >= ps.clock_start
 GROUP BY e.repo_full_name, e.pr_id, ps.clock_start;
 ```
@@ -138,7 +148,7 @@ because there's no clock-start to subtract from in the first place.
 | **Untracked-work rate** | `COUNT(*) WHERE jira_keys = '{}'` over merged PRs — process-compliance signal. |
 | **Per-ticket flow** | `WHERE 'ABC-1234' = ANY(jira_keys)` returns every event for a ticket across Bitbucket / pipeline / Argo (joined via commit_sha). |
 | **Human vs automated split** | `WHERE NOT is_automated` (Renovate / Dependabot / Snyk / Mend / generic-bot detection runs at write time and tags `automation_source`). Default dashboards exclude bots; bot velocity is a separate CI-health view. |
-| **AI reviewer precision** *(noergler)* | `1 - count(noergler_events WHERE event_type='feedback' AND verdict='disagreed') / count(noergler_events WHERE event_type='pr_completed')` per repo × week. Higher = the AI review is more useful. Filter on `outcome='merged'` to score precision only on PRs that shipped. |
+| **AI reviewer precision** *(noergler)* | `1 - count(noergler_events WHERE event_type='feedback' AND verdict='disagreed') / sum(findings_count) FILTER (WHERE event_type='pr_completed')` per repo × week — findings on both sides, since one PR can collect several disagreements. Higher = the AI review is more useful. Filter on `outcome='merged'` to score precision only on PRs that shipped. |
 
 ### FinOps signals
 

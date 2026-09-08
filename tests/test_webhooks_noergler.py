@@ -196,6 +196,29 @@ class TestPrCompletedMerged:
             assert len(rows) == 1
 
 
+class TestUnpricedRollup:
+    async def test_rollup_without_cost_accepted(self, client: AsyncClient) -> None:
+        # An unpriced model must not cost us the whole PR record: outcome,
+        # diff size, tokens and runs still feed the delivery metrics, and the
+        # NULL cost makes the FinOps gap visible instead of hiding it in a 0.
+        payload = _load("noergler_pr_completed_merged.json")
+        del payload["total_cost_usd"]
+        r = await client.post("/webhooks/noergler", json=payload, headers=AUTH)
+        assert r.status_code == 202
+
+        async with _fresh_session_factory(client)() as session:
+            row = (await session.execute(select(NoerglerEvent))).scalar_one()
+            assert row.cost_usd is None
+            assert row.outcome == "merged"
+            assert row.total_runs == 3
+
+    async def test_negative_cost_still_rejected(self, client: AsyncClient) -> None:
+        payload = _load("noergler_pr_completed_merged.json")
+        payload["total_cost_usd"] = "-1.0"
+        r = await client.post("/webhooks/noergler", json=payload, headers=AUTH)
+        assert r.status_code == 422
+
+
 class TestReviewerHandle:
     async def test_reviewer_handle_persisted_case_preserved(self, client: AsyncClient) -> None:
         # Self-reported so riptide can recognise the reviewer's own PR
@@ -210,6 +233,16 @@ class TestReviewerHandle:
         async with _fresh_session_factory(client)() as session:
             row = (await session.execute(select(NoerglerEvent))).scalar_one()
             assert row.reviewer_handle == "Rop"
+
+    async def test_empty_reviewer_handle_accepted_as_null(self, client: AsyncClient) -> None:
+        payload = _load("noergler_pr_completed_merged.json")
+        payload["reviewer_handle"] = ""
+        r = await client.post("/webhooks/noergler", json=payload, headers=AUTH)
+        assert r.status_code == 202
+
+        async with _fresh_session_factory(client)() as session:
+            row = (await session.execute(select(NoerglerEvent))).scalar_one()
+            assert row.reviewer_handle is None
 
     async def test_reviewer_handle_optional(self, client: AsyncClient) -> None:
         payload = _load("noergler_pr_completed_merged.json")

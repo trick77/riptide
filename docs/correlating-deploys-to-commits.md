@@ -23,7 +23,12 @@ select a.app_name, a.environment, a.occurred_at as deployed_at,
 from argocd_events a
 cross join lateral jsonb_array_elements_text(a.payload->'images') as img(ref)
 join pipeline_events p on p.image_ref = img.ref
-where a.operation_phase = 'Succeeded';
+-- A sender that reports image_ref on every phase writes STARTED and COMPLETED
+-- rows carrying the same reference; without this filter each deploy fans out
+-- across them and every count or average built on the join is inflated.
+where a.operation_phase = 'Succeeded'
+  and p.phase = 'COMPLETED'
+  and p.status = 'SUCCESS';
 ```
 
 Lead time then measures from the first sighting of `p.commit_sha` in

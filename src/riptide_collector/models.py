@@ -81,6 +81,7 @@ class PipelineEvent(Base):
         Index("ix_pipeline_events_source", "source"),
         Index("ix_pipeline_events_pipeline_name", "pipeline_name"),
         Index("ix_pipeline_events_commit_sha", "commit_sha"),
+        Index("ix_pipeline_events_image_ref", "image_ref"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

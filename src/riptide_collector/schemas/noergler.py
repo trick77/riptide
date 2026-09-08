@@ -44,7 +44,6 @@ class NoerglerPrCompleted(_Common):
     repo: str = Field(..., min_length=1)
     reviewer_handle: str | None = Field(
         default=None,
-        min_length=1,
         description=(
             "The account the reviewer posts its comments under on the git host. "
             "Self-reporting it lets riptide recognise the reviewer's own comments as "
@@ -70,7 +69,17 @@ class NoerglerPrCompleted(_Common):
     total_completion_tokens: int = Field(..., ge=0)
     total_elapsed_ms: int = Field(..., ge=0)
     total_findings_count: int = Field(..., ge=0)
-    total_cost_usd: Decimal = Field(..., ge=0)
+    total_cost_usd: Decimal | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Aggregated review cost. Omit it when the sender cannot price the run "
+            "(unpriced model, gateway not reporting cost) — never send 0, which "
+            "would silently understate FinOps. A rollup without cost still carries "
+            "the outcome, diff size, tokens and runs, so dropping the whole event "
+            "over a missing price would cost delivery metrics as well."
+        ),
+    )
     models_used: list[str] = Field(
         ...,
         min_length=1,
@@ -93,6 +102,13 @@ class NoerglerPrCompleted(_Common):
         if any(not m.strip() for m in v):
             raise ValueError("models_used entries must be non-empty strings")
         return v
+
+    @field_validator("reviewer_handle")
+    @classmethod
+    def _empty_reviewer_handle_is_none(cls, v: str | None) -> str | None:
+        # An unset handle arrives as "" as often as it is omitted; rejecting
+        # it would cost the whole rollup over an optional field.
+        return v.strip() or None if v else None
 
     @model_validator(mode="after")
     def _check_merge_commit_consistency(self) -> NoerglerPrCompleted:
