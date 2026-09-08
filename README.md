@@ -8,6 +8,7 @@ Ingestion service for the **riptide** DevOps delivery-metrics suite.
 
 - [Overview](#overview)
 - [What it collects](#what-it-collects)
+- [Reading the event tables](#reading-the-event-tables)
 - [Metrics](#metrics)
 - [Quickstart (local)](#quickstart-local)
 - [Database](#database)
@@ -37,6 +38,31 @@ Raw events from:
 
 …stored append-only in Postgres for later metric computation by other suite
 components or ad-hoc SQL.
+
+## Reading the event tables
+
+Before writing a query, know what an event means. Two readings look obvious
+and are wrong, both measured on 3.5 months of production data:
+
+**`repo:refs_changed` is a ref-movement log, not developer activity.** It says
+master now points at a different commit — it does not say a person pushed. In
+that dataset, 16 295 of these events were on `master` and only 1 210 carried a
+human name; every one of those was a merge commit (`Pull request #NNN: …`),
+already counted on the PR side as `pr:merged`. The other 15 000 were release
+tooling: `[maven-release-plugin] prepare for next development iteration`,
+`[gradle-release] …`, a component-version job, and Renovate landing updates.
+Build per-author or per-repo activity views on PR events; use
+`repo:refs_changed` for what moved, and for revert detection.
+
+**`change_type` only means something where a branch prefix exists.** It is
+parsed from `branch_name`, so a push to `master` has nothing to classify and
+falls to `other`. Computed over all events it read 83 % `other`, which says
+nothing about the work: restrict it to `pr:opened` / `pr:merged` rows, where
+the source branch carries the prefix.
+
+The general rule: an event's name describes what the git host did, not who did
+it or why. Check `author` and the commit message before reading intent into a
+row count.
 
 ## Metrics
 
@@ -149,7 +175,7 @@ because there's no clock-start to subtract from in the first place.
 | **PR size** | `lines_added`, `lines_removed`, `files_changed` on `noergler_events` (`event_type = 'pr_completed'`), joined to Bitbucket PRs on `pr_key` = `'<repo_full_name>#<pr_id>'`. The same columns exist on `bitbucket_events` but are always NULL: Bitbucket DC webhooks carry no diff stats, and fetching them would put an outbound REST call in the ingest path. Covers the repos noergler reviews. |
 | **Revert rate** | `COUNT(*) WHERE is_revert = true` over total commits — a free, weak Change-Failure-Rate proxy. |
 | **Hotfix rate** | `COUNT(*) WHERE change_type = 'hotfix'` over total deploys per window — operational-pain signal. |
-| **Change mix** | Distribution of `change_type` (feature / bugfix / hotfix / chore / refactor / docs / other) per team per week. |
+| **Change mix** | Distribution of `change_type` (feature / bugfix / hotfix / chore / refactor / docs / other) per team per week, over `pr:opened` / `pr:merged` rows only — a push to `master` has no prefix to classify and would swamp the distribution with `other`. |
 | **Tickets per deploy** | `COUNT(DISTINCT unnest(jira_keys))` per deploy — small-batch indicator. Jira keys are extracted at write time from PR title, description, branch name, and commit messages via regex `[A-Z][A-Z0-9]+-\d+`, deduplicated, GIN-indexed. |
 | **Untracked-work rate** | `COUNT(*) WHERE jira_keys = '{}'` over merged PRs — process-compliance signal. |
 | **Per-ticket flow** | `WHERE 'ABC-1234' = ANY(jira_keys)` returns every event for a ticket across Bitbucket / pipeline / Argo (joined via commit_sha). |
