@@ -32,6 +32,7 @@ openshift/overlays/
 # Local scratch / operator-only files (real .env, ad-hoc configs, …)
 hack/*
 !hack/.gitkeep
+!hack/export-tables.sh
 
 # IDE
 .idea/
