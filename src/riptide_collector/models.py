@@ -97,6 +97,12 @@ class PipelineEvent(Base):
     # `argocd_events → pipeline_events → commit_sha` an exact join even when the
     # image tag is a version rather than a commit SHA.
     image_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The git-host account this CI acts through, and what that account is
+    # ('bot' | 'service' | 'human'). Senders declare their own identity;
+    # riptide stores the declaration rather than guessing from the name, and
+    # read-time queries drop non-human accounts from human-activity metrics.
+    actor_handle: Mapped[str | None] = mapped_column(String, nullable=True)
+    actor_account_kind: Mapped[str | None] = mapped_column(String, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_seconds: Mapped[int | None] = mapped_column(
@@ -144,7 +150,8 @@ class NoerglerEvent(Base):
     # than carrying bot names in its config. The handle is the join key back to
     # the Bitbucket rows those review comments produced.
     reviewer_handle: Mapped[str | None] = mapped_column(String, nullable=True)
-    reviewer_is_bot: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # 'bot' | 'service' | 'human' — see PipelineEvent.actor_account_kind.
+    reviewer_account_kind: Mapped[str | None] = mapped_column(String, nullable=True)
     merge_commit_sha: Mapped[str | None] = mapped_column(String, nullable=True)
     lines_added: Mapped[int | None] = mapped_column(Integer, nullable=True)
     lines_removed: Mapped[int | None] = mapped_column(Integer, nullable=True)

@@ -51,13 +51,15 @@ class NoerglerPrCompleted(_Common):
             "ordinary user. Self-reporting it keeps the handle out of riptide's config."
         ),
     )
-    reviewer_is_bot: bool = Field(
-        default=True,
+    reviewer_account_kind: Literal["bot", "service", "human"] = Field(
+        default="bot",
         description=(
-            "Whether that account is automation. Sent alongside the handle so riptide "
-            "does not have to assume what a reported identity means: it stores the "
-            "sender's declaration and excludes declared-automation accounts from "
-            "human-review metrics. Set false if the reviewer posts as a person."
+            "What that account is. Sent alongside the handle so riptide does not have "
+            "to assume what a reported identity means: it stores the sender's "
+            "declaration and excludes 'bot' and 'service' accounts from human metrics. "
+            "'bot' acts on its own (a review bot, Renovate); 'service' is a technical "
+            "account a system acts through (a CI user pushing merges); 'human' is a "
+            "person, and is counted as one."
         ),
     )
     source_commit_sha: str = Field(

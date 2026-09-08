@@ -56,7 +56,7 @@ noergler verifies reachability and bearer validity at startup via
   "pr_key": "PROJ/payments-api#42",
   "repo": "acme/payments-api",
   "reviewer_handle": "riptide-reviewer",
-  "reviewer_is_bot": true,
+  "reviewer_account_kind": "bot",
   "source_commit_sha": "<source-branch HEAD when the PR closed>",
   "merge_commit_sha": "<merge commit, only when outcome = merged>",
   "lines_added": 320,
@@ -87,13 +87,14 @@ cost-vs-deployment analysis. `pr_key` (`<repo>#<pr id>`) joins to
 `bitbucket_events (repo_full_name, pr_id)` — that is also where riptide gets PR
 diff sizes from, since Bitbucket's webhooks carry none.
 
-`reviewer_handle` and `reviewer_is_bot` are optional but recommended: together
-they are the sender declaring **which account it acts as and that the account is
-automation**. riptide stores that declaration rather than keeping bot names of
-its own — but it does need the handle, because the review comments arrive from
-Bitbucket, where the reviewer is just another user, and the handle is the only
-key back to those rows. `reviewer_is_bot` defaults to `true`; set it `false` if
-the reviewer posts as a person.
+`reviewer_handle` and `reviewer_account_kind` are optional but recommended:
+together they are the sender declaring **which account it acts as, and what that
+account is**. riptide stores that declaration rather than keeping account names
+of its own — but it does need the handle, because the review comments arrive
+from Bitbucket, where the reviewer is just another user, and the handle is the
+only key back to those rows. `reviewer_account_kind` is `bot` (the default, an
+actor working on its own), `service` (a technical account a system acts through)
+or `human` (a person, counted as one).
 
 Read-time queries exclude declared-automation accounts — see the
 `bot_identities` CTE in the pickup-time query in the README. Undeclared, the bot

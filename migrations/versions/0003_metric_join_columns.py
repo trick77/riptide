@@ -9,11 +9,12 @@ Three additive nullable columns, all driven by what production data showed:
   Argo CD stores exactly these strings in `payload->'images'`, so this is
   the exact join from a deploy back to the build and its commit — image
   tags are versions, not commit SHAs.
-- `noergler_events.reviewer_handle` / `reviewer_is_bot`: the account the
-  reviewer acts as and whether it is automation, both self-reported, so
-  automation identity comes from the stream rather than per-installation
-  configuration. The handle is the join key back to the Bitbucket rows the
-  reviewer's comments produced.
+- `noergler_events.reviewer_handle` / `reviewer_account_kind` and
+  `pipeline_events.actor_handle` / `actor_account_kind`: the git-host account a
+  sender acts through and what that account is (bot / service / human), both
+  self-declared, so automation identity comes from the stream rather than
+  per-installation configuration. The handle is the join key back to the
+  Bitbucket rows that account produced.
 
 Revision ID: 0003
 Revises: 0002
@@ -63,10 +64,28 @@ def upgrade() -> None:
     op.add_column(
         "noergler_events",
         sa.Column(
-            "reviewer_is_bot",
-            sa.Boolean,
+            "reviewer_account_kind",
+            sa.String,
             nullable=True,
-            comment="whether reviewer_handle is automation, as declared by the sender",
+            comment="bot | service | human — what reviewer_handle is, per the sender",
+        ),
+    )
+    op.add_column(
+        "pipeline_events",
+        sa.Column(
+            "actor_handle",
+            sa.String,
+            nullable=True,
+            comment="git-host account this CI acts through; self-declared",
+        ),
+    )
+    op.add_column(
+        "pipeline_events",
+        sa.Column(
+            "actor_account_kind",
+            sa.String,
+            nullable=True,
+            comment="bot | service | human — what actor_handle is, per the sender",
         ),
     )
     op.create_index("ix_pipeline_events_image_ref", "pipeline_events", ["image_ref"])
@@ -74,7 +93,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("ix_pipeline_events_image_ref", table_name="pipeline_events")
-    op.drop_column("noergler_events", "reviewer_is_bot")
+    op.drop_column("pipeline_events", "actor_account_kind")
+    op.drop_column("pipeline_events", "actor_handle")
+    op.drop_column("noergler_events", "reviewer_account_kind")
     op.drop_column("noergler_events", "reviewer_handle")
     op.drop_column("pipeline_events", "image_ref")
     op.drop_column("bitbucket_events", "author_display_name")

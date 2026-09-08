@@ -238,6 +238,33 @@ class TestPipelineWebhook:
             row = (await session.execute(select(PipelineEvent))).scalar_one()
             assert row.image_ref == "registry.example.com/acme/payments-api:2.0.41"
 
+    async def test_ci_service_account_declaration_persisted(self, client: AsyncClient) -> None:
+        # A CI account can author a third of all repository events; declaring
+        # it keeps those out of human-activity metrics without riptide
+        # knowing any account names itself.
+        payload = _load("pipeline_jenkins_completed.json")
+        payload["actor_handle"] = "ci-service"
+        response = await client.post("/webhooks/pipeline", json=payload, headers=PIPELINE_AUTH)
+        assert response.status_code == 202
+
+        factory = TestBitbucketWebhook._fresh_session_factory(client)
+        async with factory() as session:
+            row = (await session.execute(select(PipelineEvent))).scalar_one()
+            assert row.actor_handle == "ci-service"
+            # A technical account unless the sender says otherwise.
+            assert row.actor_account_kind == "service"
+
+    async def test_actor_kind_null_without_a_handle(self, client: AsyncClient) -> None:
+        payload = _load("pipeline_jenkins_completed.json")
+        response = await client.post("/webhooks/pipeline", json=payload, headers=PIPELINE_AUTH)
+        assert response.status_code == 202
+
+        factory = TestBitbucketWebhook._fresh_session_factory(client)
+        async with factory() as session:
+            row = (await session.execute(select(PipelineEvent))).scalar_one()
+            assert row.actor_handle is None
+            assert row.actor_account_kind is None
+
     async def test_empty_image_ref_accepted_as_null(self, client: AsyncClient) -> None:
         # Templating an unset param yields "" more often than an absent key;
         # rejecting it would drop the run's duration and status too.

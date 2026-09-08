@@ -90,7 +90,7 @@ def _values_pr_completed(
         # user handles, which riptide stores as delivered. The flag is the
         # sender's declaration about that account, not our inference.
         "reviewer_handle": event.reviewer_handle,
-        "reviewer_is_bot": event.reviewer_is_bot if event.reviewer_handle else None,
+        "reviewer_account_kind": event.reviewer_account_kind if event.reviewer_handle else None,
         "commit_sha": lower(event.source_commit_sha),
         "merge_commit_sha": lower(event.merge_commit_sha) if event.merge_commit_sha else None,
         "lines_added": event.lines_added,
