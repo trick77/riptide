@@ -33,6 +33,7 @@ openshift/overlays/
 hack/*
 !hack/.gitkeep
 !hack/export-tables.sh
+!hack/truncate-tables.sh
 
 # IDE
 .idea/
