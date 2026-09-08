@@ -220,6 +220,32 @@ class TestUnpricedRollup:
 
 
 class TestReviewerHandle:
+    async def test_declared_human_reviewer_not_flagged_as_bot(self, client: AsyncClient) -> None:
+        # The flag is the sender's declaration about its own account; riptide
+        # stores it rather than assuming every reported handle is a bot.
+        payload = _load("noergler_pr_completed_merged.json")
+        payload["reviewer_handle"] = "alice"
+        payload["reviewer_is_bot"] = False
+        r = await client.post("/webhooks/noergler", json=payload, headers=AUTH)
+        assert r.status_code == 202
+
+        async with _fresh_session_factory(client)() as session:
+            row = (await session.execute(select(NoerglerEvent))).scalar_one()
+            assert row.reviewer_handle == "alice"
+            assert row.reviewer_is_bot is False
+
+    async def test_is_bot_null_without_a_handle(self, client: AsyncClient) -> None:
+        # A flag with no account to attach it to is meaningless, so it is not
+        # stored as a standalone truth.
+        payload = _load("noergler_pr_completed_merged.json")
+        r = await client.post("/webhooks/noergler", json=payload, headers=AUTH)
+        assert r.status_code == 202
+
+        async with _fresh_session_factory(client)() as session:
+            row = (await session.execute(select(NoerglerEvent))).scalar_one()
+            assert row.reviewer_handle is None
+            assert row.reviewer_is_bot is None
+
     async def test_reviewer_handle_persisted_case_preserved(self, client: AsyncClient) -> None:
         # Self-reported so riptide can recognise the reviewer's own PR
         # comments as automation without every installation configuring the
@@ -233,6 +259,8 @@ class TestReviewerHandle:
         async with _fresh_session_factory(client)() as session:
             row = (await session.execute(select(NoerglerEvent))).scalar_one()
             assert row.reviewer_handle == "Rop"
+            # Automation unless the sender says otherwise.
+            assert row.reviewer_is_bot is True
 
     async def test_empty_reviewer_handle_accepted_as_null(self, client: AsyncClient) -> None:
         payload = _load("noergler_pr_completed_merged.json")

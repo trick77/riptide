@@ -139,10 +139,12 @@ class NoerglerEvent(Base):
     commit_sha: Mapped[str | None] = mapped_column(String, nullable=True)
     # pr_completed-only:
     outcome: Mapped[str | None] = mapped_column(String, nullable=True)
-    # The reviewer's own account handle on the git host. Self-reported so
-    # riptide learns the bot's identity from the stream instead of every
-    # installation configuring it by hand.
+    # The reviewer's own account on the git host, and whether that account is
+    # automation. Self-reported: riptide stores the sender's declaration rather
+    # than carrying bot names in its config. The handle is the join key back to
+    # the Bitbucket rows those review comments produced.
     reviewer_handle: Mapped[str | None] = mapped_column(String, nullable=True)
+    reviewer_is_bot: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     merge_commit_sha: Mapped[str | None] = mapped_column(String, nullable=True)
     lines_added: Mapped[int | None] = mapped_column(Integer, nullable=True)
     lines_removed: Mapped[int | None] = mapped_column(Integer, nullable=True)

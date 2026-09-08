@@ -46,9 +46,18 @@ class NoerglerPrCompleted(_Common):
         default=None,
         description=(
             "The account the reviewer posts its comments under on the git host. "
-            "Self-reporting it lets riptide recognise the reviewer's own comments as "
-            "automation without every installation configuring the handle by hand — "
-            "otherwise the bot counts as a human reviewer and collapses review-pickup time."
+            "It is the join key back to the Bitbucket events those comments produced — "
+            "riptide cannot recognise them any other way, since Bitbucket reports an "
+            "ordinary user. Self-reporting it keeps the handle out of riptide's config."
+        ),
+    )
+    reviewer_is_bot: bool = Field(
+        default=True,
+        description=(
+            "Whether that account is automation. Sent alongside the handle so riptide "
+            "does not have to assume what a reported identity means: it stores the "
+            "sender's declaration and excludes declared-automation accounts from "
+            "human-review metrics. Set false if the reviewer posts as a person."
         ),
     )
     source_commit_sha: str = Field(

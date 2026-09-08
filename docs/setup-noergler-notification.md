@@ -56,6 +56,7 @@ noergler verifies reachability and bearer validity at startup via
   "pr_key": "PROJ/payments-api#42",
   "repo": "acme/payments-api",
   "reviewer_handle": "riptide-reviewer",
+  "reviewer_is_bot": true,
   "source_commit_sha": "<source-branch HEAD when the PR closed>",
   "merge_commit_sha": "<merge commit, only when outcome = merged>",
   "lines_added": 320,
@@ -86,14 +87,19 @@ cost-vs-deployment analysis. `pr_key` (`<repo>#<pr id>`) joins to
 `bitbucket_events (repo_full_name, pr_id)` — that is also where riptide gets PR
 diff sizes from, since Bitbucket's webhooks carry none.
 
-`reviewer_handle` is optional but recommended: it is the account noergler posts
-its review comments under on the git host. Reporting it lets riptide's read-time
-queries recognise those comments as automation — see the `bot_identities` CTE in
-the pickup-time query in the README — without every installation adding the
-handle to its `automation` config. Unrecognised, the bot counts as a human
-reviewer and drives the code-review pickup-time metric toward zero. Adding the
-handle to `automation` as well is still worthwhile: that also tags new rows
-`is_automated` at ingest.
+`reviewer_handle` and `reviewer_is_bot` are optional but recommended: together
+they are the sender declaring **which account it acts as and that the account is
+automation**. riptide stores that declaration rather than keeping bot names of
+its own — but it does need the handle, because the review comments arrive from
+Bitbucket, where the reviewer is just another user, and the handle is the only
+key back to those rows. `reviewer_is_bot` defaults to `true`; set it `false` if
+the reviewer posts as a person.
+
+Read-time queries exclude declared-automation accounts — see the
+`bot_identities` CTE in the pickup-time query in the README. Undeclared, the bot
+counts as a human reviewer and drives code-review pickup time toward zero.
+Adding the handle to the `automation` config as well is still worthwhile: that
+tags new rows `is_automated` at ingest.
 
 ### `feedback`
 

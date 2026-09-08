@@ -9,9 +9,11 @@ Three additive nullable columns, all driven by what production data showed:
   Argo CD stores exactly these strings in `payload->'images'`, so this is
   the exact join from a deploy back to the build and its commit — image
   tags are versions, not commit SHAs.
-- `noergler_events.reviewer_handle`: the reviewer's own account handle,
-  self-reported, so automation identity comes from the stream rather than
-  per-installation configuration.
+- `noergler_events.reviewer_handle` / `reviewer_is_bot`: the account the
+  reviewer acts as and whether it is automation, both self-reported, so
+  automation identity comes from the stream rather than per-installation
+  configuration. The handle is the join key back to the Bitbucket rows the
+  reviewer's comments produced.
 
 Revision ID: 0003
 Revises: 0002
@@ -58,11 +60,21 @@ def upgrade() -> None:
             comment="git-host account the reviewer posts under; self-reported automation identity",
         ),
     )
+    op.add_column(
+        "noergler_events",
+        sa.Column(
+            "reviewer_is_bot",
+            sa.Boolean,
+            nullable=True,
+            comment="whether reviewer_handle is automation, as declared by the sender",
+        ),
+    )
     op.create_index("ix_pipeline_events_image_ref", "pipeline_events", ["image_ref"])
 
 
 def downgrade() -> None:
     op.drop_index("ix_pipeline_events_image_ref", table_name="pipeline_events")
+    op.drop_column("noergler_events", "reviewer_is_bot")
     op.drop_column("noergler_events", "reviewer_handle")
     op.drop_column("pipeline_events", "image_ref")
     op.drop_column("bitbucket_events", "author_display_name")
