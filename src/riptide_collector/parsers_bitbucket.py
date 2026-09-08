@@ -65,6 +65,10 @@ class BitbucketEventDraft:
     # detection can match on either. Some review bots post under an
     # ordinary-looking login and are only recognisable by display name.
     author_display_name: str | None
+    # Bitbucket's own verdict on the account: DC marks its built-in system
+    # user (default PR tasks, stale-PR notices) `type: SERVICE`. Trusting the
+    # host beats asking every installation to name a server-side account.
+    author_is_service_account: bool
     branch_name: str | None
     change_type: str | None
     jira_keys: list[str]
@@ -151,6 +155,17 @@ def _user_display_name(user: dict[str, Any]) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _is_service_account(user: dict[str, Any]) -> bool:
+    """Whether Bitbucket itself classifies this user as a service account.
+
+    BBS DC sets `type` to NORMAL for people and SERVICE for accounts the
+    server acts as — the built-in system user that files default PR tasks and
+    posts stale-PR notices. Those comments land within a second of a PR being
+    opened, so counted as human they make review pickup time look instant.
+    """
+    return str(user.get("type", "")).upper() == "SERVICE"
+
+
 def _synth_delivery_id(event_key: str | None, body: dict[str, Any]) -> str:
     pr = _as_dict(body.get("pullRequest"))
     pr_id = pr.get("id")
@@ -209,6 +224,7 @@ def extract_event(
     commit_sha: str | None = None
     author: str | None = None
     author_display_name: str | None = None
+    author_is_service_account = False
     is_revert = False
 
     # Reviewer-activity events carry the actor (the reviewer / commenter)
@@ -235,6 +251,7 @@ def extract_event(
             author_user = _as_dict(_as_dict(pr.get("author")).get("user"))
             author = _user_handle(author_user)
             author_display_name = _user_display_name(author_user)
+            author_is_service_account = _is_service_account(author_user)
         # PR-side revert detection: the title is the only signal we have
         # without a REST round-trip. Push-side detection would need the
         # commit messages between fromHash..toHash.
@@ -279,6 +296,7 @@ def extract_event(
         actor = _as_dict(body.get("actor"))
         author = _user_handle(actor)
         author_display_name = _user_display_name(actor)
+        author_is_service_account = _is_service_account(actor)
 
     repo_full_name = lower(raw_repo_full_name)
     branch_name = lower(branch_name)
@@ -292,6 +310,7 @@ def extract_event(
         commit_sha=commit_sha,
         author=author,
         author_display_name=author_display_name,
+        author_is_service_account=author_is_service_account,
         branch_name=branch_name,
         change_type=parse_change_type(branch_name),
         jira_keys=extract_jira_keys(title, description, branch_name),

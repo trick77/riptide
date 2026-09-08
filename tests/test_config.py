@@ -201,6 +201,42 @@ class TestEnvironments:
             load_config_from_path(path)
 
 
+class TestServiceAccountDetection:
+    def test_host_declared_service_account_is_automation(self, tmp_path: Path) -> None:
+        # Bitbucket marks its own system user as a service account, so no
+        # installation has to list it by name.
+        path = _write(tmp_path / "c.json", VALID)
+        store = RiptideConfigStore(path)
+
+        assert (
+            store.detect_automation_source("bitbucket.system-user", None, "Bitbucket", True)
+            == "service-account"
+        )
+
+    def test_configured_source_keeps_its_own_name(self, tmp_path: Path) -> None:
+        # The host's verdict is a fallback: a configured bot stays attributed
+        # to the tool it is, so per-source views keep working.
+        path = _write(tmp_path / "c.json", VALID)
+        store = RiptideConfigStore(path)
+
+        assert store.detect_automation_source("renovate-bot", None, None, True) == "renovate"
+
+    def test_human_unaffected(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "c.json", VALID)
+        store = RiptideConfigStore(path)
+
+        assert store.detect_automation_source("alice", "feature/x", "Alice", False) is None
+
+    def test_bot_shaped_name_does_not_mask_a_service_account(self, tmp_path: Path) -> None:
+        # A stated fact beats a guess from the handle: labelling a technical
+        # account `other-bot` would drop it into bot-velocity views, which
+        # exist to show work that bots actually author.
+        path = _write(tmp_path / "c.json", VALID)
+        store = RiptideConfigStore(path)
+
+        assert store.detect_automation_source("ci-bot", None, None, True) == "service-account"
+
+
 class TestAutomationByDisplayName:
     def test_display_name_match_when_login_is_ordinary(self, tmp_path: Path) -> None:
         # A review bot provisioned as a normal user account: the login is a

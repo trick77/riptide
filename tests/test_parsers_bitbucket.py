@@ -452,6 +452,65 @@ class TestEventTypeAndOccurredAt:
         assert result.occurred_at.tzinfo is not None
 
 
+class TestServiceAccounts:
+    def test_service_type_actor_flagged(self) -> None:
+        # Bitbucket's built-in system user (default PR tasks, stale-PR
+        # notices) comments within a second of a PR opening.
+        body = _load("bitbucket_pr_comment_added.json")
+        body["actor"]["type"] = "SERVICE"
+
+        result = extract_event(
+            body,
+            x_event_key="pr:comment:added",
+            x_request_uuid="r",
+            x_hook_uuid=None,
+        )
+
+        assert isinstance(result, BitbucketEventDraft)
+        assert result.author_is_service_account is True
+
+    def test_normal_type_actor_not_flagged(self) -> None:
+        body = _load("bitbucket_pr_comment_added.json")
+        body["actor"]["type"] = "NORMAL"
+
+        result = extract_event(
+            body,
+            x_event_key="pr:comment:added",
+            x_request_uuid="r",
+            x_hook_uuid=None,
+        )
+
+        assert isinstance(result, BitbucketEventDraft)
+        assert result.author_is_service_account is False
+
+    def test_missing_type_defaults_to_not_a_service_account(self) -> None:
+        # Older payloads and other hosts may not send `type` at all; absence
+        # must not promote a person to a service account.
+        body = _load("bitbucket_pr_comment_added.json")
+        body["actor"].pop("type", None)
+
+        result = extract_event(
+            body,
+            x_event_key="pr:comment:added",
+            x_request_uuid="r",
+            x_hook_uuid=None,
+        )
+
+        assert isinstance(result, BitbucketEventDraft)
+        assert result.author_is_service_account is False
+
+    def test_pr_author_service_type_flagged(self) -> None:
+        # PR lifecycle events attribute to the PR opener, so the check has to
+        # follow the same user the author came from.
+        body = _load("bitbucket_pr_merged.json")
+        body["pullRequest"]["author"]["user"]["type"] = "SERVICE"
+
+        result = extract_event(body, x_event_key="pr:merged", x_request_uuid="r", x_hook_uuid=None)
+
+        assert isinstance(result, BitbucketEventDraft)
+        assert result.author_is_service_account is True
+
+
 class TestAuthorDisplayName:
     def test_actor_display_name_travels_with_reviewer_events(self) -> None:
         # Given a reviewer-activity event, where the actor is the author

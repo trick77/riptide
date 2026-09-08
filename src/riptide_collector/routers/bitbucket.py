@@ -75,6 +75,7 @@ def make_router(
             draft.author,
             draft.branch_name,
             draft.author_display_name,
+            draft.author_is_service_account,
         )
 
         try:

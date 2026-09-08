@@ -212,6 +212,7 @@ class RiptideConfigStore:
         author: str | None,
         branch_name: str | None,
         author_display_name: str | None = None,
+        author_is_service_account: bool = False,
     ) -> str | None:
         """Match an event's author against the configured automation sources.
 
@@ -220,6 +221,12 @@ class RiptideConfigStore:
         login, bot name only in `displayName`) is otherwise indistinguishable
         from a human, and its instant review comments drive the DX Core 4
         pickup-time metric toward zero.
+
+        `author_is_service_account` is the git host's own verdict about the
+        account (Bitbucket DC marks its built-in system user `type: SERVICE`).
+        It ranks below the configured sources — those name the tool, which is
+        more specific — but above the `*-bot` name heuristic, since a stated
+        fact beats a guess from the handle.
         """
         config = self._config
         handles = [name for name in (author, author_display_name) if name]
@@ -236,6 +243,12 @@ class RiptideConfigStore:
                 for prefix in source.branch_prefixes:
                     if branch_name.startswith(prefix):
                         return source.name
+        # The host's verdict beats guessing from the name: an account called
+        # `ci-bot` that Bitbucket reports as a service account is a service
+        # account, and mislabelling it `other-bot` would put a technical user
+        # into bot-velocity views, which are meant to show work bots author.
+        if author_is_service_account:
+            return "service-account"
         if any(looks_bot_shaped(handle) for handle in handles):
             return "other-bot"
         return None

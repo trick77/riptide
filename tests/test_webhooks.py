@@ -127,6 +127,35 @@ class TestBitbucketWebhook:
             assert row.automation_source == "renovate"
             assert row.is_automated is True
 
+    async def test_host_service_account_tagged_as_automated(
+        self,
+        client: AsyncClient,
+        session_factory: async_sessionmaker[AsyncSession],
+    ) -> None:
+        # End to end: Bitbucket's own system user posts the default PR tasks
+        # seconds after a PR opens. Tagged from the host's `type: SERVICE`,
+        # with nothing in the automation config naming the account.
+        del session_factory
+        payload = _load("bitbucket_pr_comment_added.json")
+        payload["actor"] = {
+            "name": "bitbucket.system-user",
+            "slug": "bitbucket.system-user",
+            "displayName": "Bitbucket",
+            "type": "SERVICE",
+        }
+        response = await post_bitbucket(
+            client,
+            payload,
+            extra_headers={"X-Request-UUID": "uuid-s", "X-Event-Key": "pr:comment:added"},
+        )
+        assert response.status_code == 202
+
+        async with self._fresh_session_factory(client)() as session:
+            row = (await session.execute(select(BitbucketEvent))).scalar_one()
+            assert row.author == "bitbucket.system-user"
+            assert row.automation_source == "service-account"
+            assert row.is_automated is True
+
     async def test_idempotency_same_uuid_inserts_once(
         self,
         client: AsyncClient,
