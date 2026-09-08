@@ -199,3 +199,45 @@ class TestEnvironments:
         path = _write(tmp_path / "c.json", data)
         with pytest.raises(RiptideConfigError, match="production_stage"):
             load_config_from_path(path)
+
+
+class TestAutomationByDisplayName:
+    def test_display_name_match_when_login_is_ordinary(self, tmp_path: Path) -> None:
+        # A review bot provisioned as a normal user account: the login is a
+        # short handle like any human's, and only `displayName` says what it
+        # is. Matching the login alone lets it count as a human reviewer,
+        # which drives the DX Core 4 pickup-time metric toward zero.
+        data = json.loads(json.dumps(VALID))
+        data["automation"]["noergler"] = {"authors": ["noergler"], "branch_prefixes": []}
+        path = _write(tmp_path / "c.json", data)
+        store = RiptideConfigStore(path)
+
+        assert store.detect_automation_source("rop", None, "noergler") == "noergler"
+
+    def test_display_name_match_is_case_insensitive(self, tmp_path: Path) -> None:
+        # Display names are human-formatted; a case-only mismatch against the
+        # configured handle would silently reproduce the zero-pickup-time bug.
+        data = json.loads(json.dumps(VALID))
+        data["automation"]["noergler"] = {"authors": ["noergler"], "branch_prefixes": []}
+        path = _write(tmp_path / "c.json", data)
+        store = RiptideConfigStore(path)
+
+        assert store.detect_automation_source("rop", None, "Noergler") == "noergler"
+
+    def test_bot_shaped_display_name_falls_back_to_other_bot(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "c.json", VALID)
+        store = RiptideConfigStore(path)
+
+        assert store.detect_automation_source("svc01", None, "release-bot") == "other-bot"
+
+    def test_human_display_name_stays_human(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "c.json", VALID)
+        store = RiptideConfigStore(path)
+
+        assert store.detect_automation_source("alice", "feature/x", "Alice Example") is None
+
+    def test_login_match_still_wins_without_display_name(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "c.json", VALID)
+        store = RiptideConfigStore(path)
+
+        assert store.detect_automation_source("renovate-bot", None) == "renovate"

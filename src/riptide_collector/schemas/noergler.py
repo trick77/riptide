@@ -42,6 +42,26 @@ class NoerglerPrCompleted(_Common):
     )
     pr_key: str = Field(..., min_length=1, description="Bitbucket PR key, e.g. 'PROJ/repo#42'")
     repo: str = Field(..., min_length=1)
+    reviewer_handle: str | None = Field(
+        default=None,
+        description=(
+            "The account the reviewer posts its comments under on the git host. "
+            "It is the join key back to the Bitbucket events those comments produced — "
+            "riptide cannot recognise them any other way, since Bitbucket reports an "
+            "ordinary user. Self-reporting it keeps the handle out of riptide's config."
+        ),
+    )
+    reviewer_account_kind: Literal["bot", "service", "human"] = Field(
+        default="bot",
+        description=(
+            "What that account is. Sent alongside the handle so riptide does not have "
+            "to assume what a reported identity means: it stores the sender's "
+            "declaration and excludes 'bot' and 'service' accounts from human metrics. "
+            "'bot' acts on its own (a review bot, Renovate); 'service' is a technical "
+            "account a system acts through (a CI user pushing merges); 'human' is a "
+            "person, and is counted as one."
+        ),
+    )
     source_commit_sha: str = Field(
         ...,
         min_length=7,
@@ -60,7 +80,17 @@ class NoerglerPrCompleted(_Common):
     total_completion_tokens: int = Field(..., ge=0)
     total_elapsed_ms: int = Field(..., ge=0)
     total_findings_count: int = Field(..., ge=0)
-    total_cost_usd: Decimal = Field(..., ge=0)
+    total_cost_usd: Decimal | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Aggregated review cost. Omit it when the sender cannot price the run "
+            "(unpriced model, gateway not reporting cost) — never send 0, which "
+            "would silently understate FinOps. A rollup without cost still carries "
+            "the outcome, diff size, tokens and runs, so dropping the whole event "
+            "over a missing price would cost delivery metrics as well."
+        ),
+    )
     models_used: list[str] = Field(
         ...,
         min_length=1,
@@ -83,6 +113,13 @@ class NoerglerPrCompleted(_Common):
         if any(not m.strip() for m in v):
             raise ValueError("models_used entries must be non-empty strings")
         return v
+
+    @field_validator("reviewer_handle")
+    @classmethod
+    def _empty_reviewer_handle_is_none(cls, v: str | None) -> str | None:
+        # An unset handle arrives as "" as often as it is omitted; rejecting
+        # it would cost the whole rollup over an optional field.
+        return v.strip() or None if v else None
 
     @model_validator(mode="after")
     def _check_merge_commit_consistency(self) -> NoerglerPrCompleted:

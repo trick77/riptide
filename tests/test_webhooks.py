@@ -224,6 +224,71 @@ class TestPipelineWebhook:
             assert row.run_id == "payments-api-deploy-7gx2k"
             assert row.pipeline_name == "payments-api-deploy"
 
+    async def test_image_ref_persisted(self, client: AsyncClient) -> None:
+        # The full image reference is what Argo CD reports in its rendered
+        # image list, so storing it verbatim makes deploy → build → commit an
+        # exact join even when the tag is a version instead of a commit SHA.
+        payload = _load("pipeline_jenkins_completed.json")
+        payload["image_ref"] = "registry.example.com/acme/payments-api:2.0.41"
+        response = await client.post("/webhooks/pipeline", json=payload, headers=PIPELINE_AUTH)
+        assert response.status_code == 202
+
+        factory = TestBitbucketWebhook._fresh_session_factory(client)
+        async with factory() as session:
+            row = (await session.execute(select(PipelineEvent))).scalar_one()
+            assert row.image_ref == "registry.example.com/acme/payments-api:2.0.41"
+
+    async def test_ci_service_account_declaration_persisted(self, client: AsyncClient) -> None:
+        # A CI account can author a third of all repository events; declaring
+        # it keeps those out of human-activity metrics without riptide
+        # knowing any account names itself.
+        payload = _load("pipeline_jenkins_completed.json")
+        payload["actor_handle"] = "ci-service"
+        response = await client.post("/webhooks/pipeline", json=payload, headers=PIPELINE_AUTH)
+        assert response.status_code == 202
+
+        factory = TestBitbucketWebhook._fresh_session_factory(client)
+        async with factory() as session:
+            row = (await session.execute(select(PipelineEvent))).scalar_one()
+            assert row.actor_handle == "ci-service"
+            # A technical account unless the sender says otherwise.
+            assert row.actor_account_kind == "service"
+
+    async def test_actor_kind_null_without_a_handle(self, client: AsyncClient) -> None:
+        payload = _load("pipeline_jenkins_completed.json")
+        response = await client.post("/webhooks/pipeline", json=payload, headers=PIPELINE_AUTH)
+        assert response.status_code == 202
+
+        factory = TestBitbucketWebhook._fresh_session_factory(client)
+        async with factory() as session:
+            row = (await session.execute(select(PipelineEvent))).scalar_one()
+            assert row.actor_handle is None
+            assert row.actor_account_kind is None
+
+    async def test_empty_image_ref_accepted_as_null(self, client: AsyncClient) -> None:
+        # Templating an unset param yields "" more often than an absent key;
+        # rejecting it would drop the run's duration and status too.
+        payload = _load("pipeline_jenkins_completed.json")
+        payload["image_ref"] = ""
+        response = await client.post("/webhooks/pipeline", json=payload, headers=PIPELINE_AUTH)
+        assert response.status_code == 202
+
+        factory = TestBitbucketWebhook._fresh_session_factory(client)
+        async with factory() as session:
+            row = (await session.execute(select(PipelineEvent))).scalar_one()
+            assert row.image_ref is None
+
+    async def test_image_ref_optional(self, client: AsyncClient) -> None:
+        # Senders that publish no image (test-only runs) stay valid.
+        payload = _load("pipeline_jenkins_completed.json")
+        response = await client.post("/webhooks/pipeline", json=payload, headers=PIPELINE_AUTH)
+        assert response.status_code == 202
+
+        factory = TestBitbucketWebhook._fresh_session_factory(client)
+        async with factory() as session:
+            row = (await session.execute(select(PipelineEvent))).scalar_one()
+            assert row.image_ref is None
+
     async def test_uppercase_commit_sha_normalised_to_lowercase(self, client: AsyncClient) -> None:
         payload = _load("pipeline_jenkins_completed.json")
         payload["commit_sha"] = payload["commit_sha"].upper()

@@ -43,6 +43,10 @@ class BitbucketEvent(Base):
     pr_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     commit_sha: Mapped[str | None] = mapped_column(String, nullable=True)
     author: Mapped[str | None] = mapped_column(String, nullable=True)
+    # `actor.displayName` next to the login handle: bot accounts are often
+    # provisioned with a nondescript login and only identify themselves here,
+    # so read-time queries filtering bots need both.
+    author_display_name: Mapped[str | None] = mapped_column(String, nullable=True)
     branch_name: Mapped[str | None] = mapped_column(String, nullable=True)
     change_type: Mapped[str | None] = mapped_column(String, nullable=True)
     jira_keys: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, server_default="{}")
@@ -77,6 +81,7 @@ class PipelineEvent(Base):
         Index("ix_pipeline_events_source", "source"),
         Index("ix_pipeline_events_pipeline_name", "pipeline_name"),
         Index("ix_pipeline_events_commit_sha", "commit_sha"),
+        Index("ix_pipeline_events_image_ref", "image_ref"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -87,6 +92,17 @@ class PipelineEvent(Base):
     phase: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str | None] = mapped_column(String, nullable=True)
     commit_sha: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Full image reference the run published, e.g. `registry/path/app:2.0.41`.
+    # Argo CD stores exactly these strings in `payload->'images'`, which makes
+    # `argocd_events → pipeline_events → commit_sha` an exact join even when the
+    # image tag is a version rather than a commit SHA.
+    image_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The git-host account this CI acts through, and what that account is
+    # ('bot' | 'service' | 'human'). Senders declare their own identity;
+    # riptide stores the declaration rather than guessing from the name, and
+    # read-time queries drop non-human accounts from human-activity metrics.
+    actor_handle: Mapped[str | None] = mapped_column(String, nullable=True)
+    actor_account_kind: Mapped[str | None] = mapped_column(String, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_seconds: Mapped[int | None] = mapped_column(
@@ -129,6 +145,13 @@ class NoerglerEvent(Base):
     commit_sha: Mapped[str | None] = mapped_column(String, nullable=True)
     # pr_completed-only:
     outcome: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The reviewer's own account on the git host, and whether that account is
+    # automation. Self-reported: riptide stores the sender's declaration rather
+    # than carrying bot names in its config. The handle is the join key back to
+    # the Bitbucket rows those review comments produced.
+    reviewer_handle: Mapped[str | None] = mapped_column(String, nullable=True)
+    # 'bot' | 'service' | 'human' — see PipelineEvent.actor_account_kind.
+    reviewer_account_kind: Mapped[str | None] = mapped_column(String, nullable=True)
     merge_commit_sha: Mapped[str | None] = mapped_column(String, nullable=True)
     lines_added: Mapped[int | None] = mapped_column(Integer, nullable=True)
     lines_removed: Mapped[int | None] = mapped_column(Integer, nullable=True)

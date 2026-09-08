@@ -8,7 +8,7 @@ lifecycle — PR open/merge/close already comes in via Bitbucket):
 
 | Event | When | Carries |
 |---|---|---|
-| `completed` | After an LLM review run finishes | model, token counts, elapsed time, cost (finops) |
+| `pr_completed` | Once per PR, when it reaches a terminal outcome (merged / declined / deleted) | outcome, final diff size, aggregated token counts, elapsed time, cost, models used (finops) |
 | `feedback` | When a reviewer disagrees with or acknowledges a finding | finding id, verdict, actor (reviewer-precision) |
 
 Lead-time, activity, and other PR-lifecycle metrics are **not** emitted by
@@ -47,28 +47,60 @@ noergler verifies reachability and bearer validity at startup via
 
 ## Payloads
 
-### `completed`
+### `pr_completed`
 
 ```json
 {
-  "event_type": "completed",
+  "event_type": "pr_completed",
+  "outcome": "merged",
   "pr_key": "PROJ/payments-api#42",
   "repo": "acme/payments-api",
-  "commit_sha": "<git sha being reviewed>",
-  "run_id": "<noergler-internal review-run id>",
-  "model": "gpt-4o-2024-08-06",
-  "prompt_tokens": 12345,
-  "completion_tokens": 678,
-  "elapsed_ms": 8200,
-  "findings_count": 3,
-  "cost_usd": "0.124500",
-  "finished_at": "2026-04-29T18:01:00Z"
+  "reviewer_handle": "riptide-reviewer",
+  "reviewer_account_kind": "bot",
+  "source_commit_sha": "<source-branch HEAD when the PR closed>",
+  "merge_commit_sha": "<merge commit, only when outcome = merged>",
+  "lines_added": 320,
+  "lines_removed": 75,
+  "files_changed": 12,
+  "total_runs": 3,
+  "total_prompt_tokens": 38420,
+  "total_completion_tokens": 2110,
+  "total_elapsed_ms": 24800,
+  "total_findings_count": 7,
+  "total_cost_usd": "0.382100",
+  "models_used": ["gpt-4o-2024-08-06"],
+  "first_review_at": "2026-04-29T17:30:00Z",
+  "closed_at": "2026-04-29T18:42:00Z"
 }
 ```
 
-`run_id` alone is the idempotency key — noergler may safely retry. The
-`commit_sha` enables joins to `bitbucket_events`, `pipeline_events`, and
-`argocd_events` for cost-vs-deployment analysis.
+One rollup per PR: `(pr_key, outcome)` is the idempotency key, so noergler may
+safely retry. `total_cost_usd` may be omitted when the sender cannot price the
+run (unpriced model, gateway not reporting a cost header) — send no cost rather
+than a `0`, and never drop the whole rollup: outcome, diff size, tokens and runs
+still feed the delivery metrics, and a NULL cost makes the pricing gap visible
+(`count(*) FILTER (WHERE cost_usd IS NULL)`). `outcome` is `merged`, `declined` or `deleted` — only merged PRs
+shipped, so throughput and DORA queries filter on it, while FinOps keeps all
+three to see review spend on code that never landed. `source_commit_sha` and
+`merge_commit_sha` join to `bitbucket_events` and `pipeline_events` for
+cost-vs-deployment analysis. `pr_key` (`<repo>#<pr id>`) joins to
+`bitbucket_events (repo_full_name, pr_id)` — that is also where riptide gets PR
+diff sizes from, since Bitbucket's webhooks carry none.
+
+`reviewer_handle` and `reviewer_account_kind` are optional but recommended:
+together they are the sender declaring **which account it acts as, and what that
+account is**. riptide stores that declaration rather than keeping account names
+of its own — but it does need the handle, because the review comments arrive
+from Bitbucket, where the reviewer is just another user, and the handle is the
+only key back to those rows. `reviewer_account_kind` is `bot` (the default, an
+actor working on its own), `service` (a technical account a system acts through)
+or `human` (a person, counted as one).
+
+Read-time queries exclude declared-automation accounts — see the
+`bot_identities` CTE in the pickup-time query in the README. Undeclared, the bot
+counts as a human reviewer and drives code-review pickup time toward zero.
+Adding the handle to the `automation` config as well is still worthwhile: that
+tags new rows `is_automated` at ingest.
 
 ### `feedback`
 
@@ -91,20 +123,35 @@ Idempotency key is `(finding_id, verdict)`.
 ## Verify
 
 ```sql
--- finops: cost-by-model, last 7 days
-SELECT model,
-       SUM(prompt_tokens + completion_tokens) AS tokens,
-       SUM(cost_usd) AS spend,
-       COUNT(*) AS runs
-FROM noergler_events
-WHERE event_type = 'completed' AND created_at > now() - interval '7 days'
-GROUP BY model
-ORDER BY spend DESC;
+-- finops: which models were in play, last 7 days. The rollup is per PR, not
+-- per model, so cost cannot be split across a multi-model PR — this counts
+-- PRs a model took part in, not spend attributable to it.
+SELECT m AS model, COUNT(*) AS prs_involved
+FROM noergler_events, unnest(models_used) AS m
+WHERE event_type = 'pr_completed' AND created_at > now() - interval '7 days'
+GROUP BY 1
+ORDER BY prs_involved DESC;
 
--- reviewer precision: 1 - disagreed/total, last 7 days
+-- finops: spend, last 7 days (per PR, the level the data actually supports)
+SELECT SUM(cost_usd) AS spend,
+       SUM(prompt_tokens + completion_tokens) AS tokens,
+       COUNT(*) AS prs,
+       COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_prs
+FROM noergler_events
+WHERE event_type = 'pr_completed' AND created_at > now() - interval '7 days';
+
+-- review spend that never shipped, last 7 days
+SELECT outcome, COUNT(*) AS prs, SUM(cost_usd) AS spend
+FROM noergler_events
+WHERE event_type = 'pr_completed' AND created_at > now() - interval '7 days'
+GROUP BY 1;
+
+-- reviewer precision: 1 - disagreed findings / reported findings, last 7 days.
+-- Both sides count findings: a PR can collect several disagreements, so a
+-- per-PR denominator can drive the estimate below zero.
 SELECT 1.0 - (
-    SUM(CASE WHEN event_type='feedback' AND verdict='disagreed' THEN 1 ELSE 0 END)
-    / NULLIF(SUM(CASE WHEN event_type='completed' THEN findings_count ELSE 0 END), 0)
+    COUNT(*) FILTER (WHERE event_type = 'feedback' AND verdict = 'disagreed')::numeric
+    / NULLIF(SUM(findings_count) FILTER (WHERE event_type = 'pr_completed'), 0)
 ) AS precision_estimate
 FROM noergler_events
 WHERE created_at > now() - interval '7 days';

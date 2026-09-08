@@ -17,14 +17,30 @@ mandatory** — without them the metrics break.
   "phase": "COMPLETED",
   "status": "<SUCCESS|FAILURE|UNSTABLE|...>",
   "commit_sha": "<env.GIT_COMMIT>",
+  "image_ref": "<registry/path/app:tag, optional>",
+  "actor_handle": "<git account Jenkins acts through, optional>",
+  "actor_account_kind": "service",
   "started_at": "<ISO 8601 UTC>",
   "finished_at": "<ISO 8601 UTC>"
 }
 ```
 
 The `team` column is populated from the bearer token, not the payload.
-Cross-source joins (to Bitbucket / ArgoCD / Noergler) use `commit_sha`;
-per-pipeline aggregations use `pipeline_name`.
+Cross-source joins (to Bitbucket / Noergler) use `commit_sha`; per-pipeline
+aggregations use `pipeline_name`.
+
+`actor_handle` is the git-host account Jenkins itself commits and pushes as.
+Declaring it (with `actor_account_kind: "service"`) keeps those events out of
+human-activity metrics — a CI account can easily author a third of all
+repository events, and counted as a person it distorts every per-author view.
+riptide stores the declaration instead of guessing from the name.
+
+`image_ref` is optional but send it whenever the run publishes an image: it is
+the only reliable link from an Argo CD deploy back to the commit, because
+`argocd_events.revision` is the GitOps-repo SHA and image tags are versions
+rather than SHAs. Send the **full** reference, exactly as pushed
+(`registry.example.com/team/app:2.0.41`), so it matches the strings Argo CD
+reports. See [Correlating deploys back to commits](correlating-deploys-to-commits.md).
 
 ## Per-team token
 
@@ -82,6 +98,13 @@ def riptideNotify(String phase) {
         phase: phase,
         status: currentBuild.currentResult ?: 'SUCCESS',
         commit_sha: env.GIT_COMMIT,
+        // Full reference of the image this run pushed, or null. Links the
+        // deploy back to this build — Argo CD reports the same string.
+        image_ref: env.RIPTIDE_IMAGE_REF ?: null,
+        // The git account Jenkins acts through, so its pushes and merges
+        // don't count as human activity.
+        actor_handle: env.RIPTIDE_ACTOR_HANDLE ?: null,
+        actor_account_kind: 'service',
         started_at: new Date(started).format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC')),
         finished_at: phase == 'COMPLETED'
             ? new Date(finished).format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))

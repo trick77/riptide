@@ -49,6 +49,14 @@ def make_router(
                         phase=event.phase,
                         status=event.status,
                         commit_sha=commit_sha,
+                        image_ref=event.image_ref,
+                        # The kind is the sender's statement about its own
+                        # account; without a handle there is nothing for it
+                        # to describe.
+                        actor_handle=event.actor_handle,
+                        actor_account_kind=(
+                            event.actor_account_kind if event.actor_handle else None
+                        ),
                         started_at=event.started_at,
                         finished_at=event.finished_at,
                         occurred_at=event.finished_at or event.started_at or datetime.now(UTC),

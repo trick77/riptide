@@ -450,3 +450,53 @@ class TestEventTypeAndOccurredAt:
         assert isinstance(result, BitbucketEventDraft)
         assert result.occurred_at.year == 2026
         assert result.occurred_at.tzinfo is not None
+
+
+class TestAuthorDisplayName:
+    def test_actor_display_name_travels_with_reviewer_events(self) -> None:
+        # Given a reviewer-activity event, where the actor is the author
+        body = _load("bitbucket_pr_comment_added.json")
+
+        # When
+        result = extract_event(
+            body,
+            x_event_key="pr:comment:added",
+            x_request_uuid="r",
+            x_hook_uuid=None,
+        )
+
+        # Then the display name is carried alongside the login handle, so a
+        # bot posting under an ordinary-looking login can still be detected.
+        assert isinstance(result, BitbucketEventDraft)
+        assert result.author == "bob"
+        assert result.author_display_name == "Bob Reviewer"
+
+    def test_pr_author_display_name_used_for_non_reviewer_events(self) -> None:
+        # Given a PR lifecycle event, where the PR opener is the author
+        body = _load("bitbucket_pr_merged.json")
+        body["pullRequest"]["author"]["user"]["displayName"] = "Alice Example"
+
+        # When
+        result = extract_event(body, x_event_key="pr:merged", x_request_uuid="r", x_hook_uuid=None)
+
+        # Then
+        assert isinstance(result, BitbucketEventDraft)
+        assert result.author == "alice"
+        assert result.author_display_name == "Alice Example"
+
+    def test_missing_display_name_is_none(self) -> None:
+        # Given
+        body = _load("bitbucket_pr_comment_added.json")
+        del body["actor"]["displayName"]
+
+        # When
+        result = extract_event(
+            body,
+            x_event_key="pr:comment:added",
+            x_request_uuid="r",
+            x_hook_uuid=None,
+        )
+
+        # Then
+        assert isinstance(result, BitbucketEventDraft)
+        assert result.author_display_name is None
