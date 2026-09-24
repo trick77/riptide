@@ -257,6 +257,23 @@ func (o *object) literal(field, def string, choices ...string) string {
 	return ""
 }
 
+// maxSpan is the longest started..finished span the generated
+// duration_seconds column (an int4 of seconds) can hold.
+const maxSpan = time.Duration(math.MaxInt32) * time.Second
+
+// checkSpan rejects a start/finish pair whose duration would overflow
+// duration_seconds, e.g. a sender's zero time.Time as started_at: Postgres
+// would refuse the row on every retry.
+func (o *object) checkSpan(field string, started, finished *time.Time) {
+	if started == nil || finished == nil || o.hasError("started_at") {
+		return
+	}
+	span := finished.Sub(*started)
+	if span > maxSpan || span < -maxSpan {
+		o.fail(field, "value_error", "Value error, finished_at is too far from started_at: the duration must fit 2147483647 seconds")
+	}
+}
+
 func (o *object) missing(field string) {
 	o.fail(field, "missing", "Field required")
 }

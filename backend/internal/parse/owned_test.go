@@ -450,3 +450,20 @@ func TestValidationErrorMessage(t *testing.T) {
 		t.Errorf("message = %q", err.Error())
 	}
 }
+
+// A zero time.Time as started_at would overflow duration_seconds at insert.
+func TestSpanMustFitDurationColumn(t *testing.T) {
+	p := fixture(t, "pipeline_jenkins_completed.json")
+	p["started_at"] = "0001-01-01T00:00:00Z"
+	_, err := Pipeline(encode(t, p))
+	expectInvalid(t, err, "body.finished_at", "value_error")
+	a := fixture(t, "argocd_synced.json")
+	a["finished_at"] = "2100-01-01T00:00:00Z"
+	a["started_at"] = "1990-01-01T00:00:00Z"
+	_, err = ArgoCD(encode(t, a), fixedNow)
+	expectInvalid(t, err, "body.finished_at", "value_error")
+	a["started_at"] = "2090-01-01T00:00:00Z"
+	if _, err = ArgoCD(encode(t, a), fixedNow); err != nil {
+		t.Errorf("a ten-year span rejected: %v", err)
+	}
+}

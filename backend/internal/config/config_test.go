@@ -456,3 +456,16 @@ func TestReloadRevertDoesNotRecount(t *testing.T) {
 		t.Errorf("recounted: %d/%d", rt.ConfigReloadFailures(), rt.KeysReloadFailures())
 	}
 }
+
+// A config waiting for its keys is counted once, even when a keys file that
+// still lacks the team arrives in between.
+func TestConfigWaitingForKeysCountsOnce(t *testing.T) {
+	rt, cfgPath, keysPath, _ := newRuntime(t)
+	write(t, cfgPath, strings.Replace(validConfig, `"teams": [`, `"teams": [{"name": "team-y", "group_email": "y@example.com"},`, 1))
+	rt.Reload()
+	write(t, keysPath, `{"checkout": {"argocd": "a"}, "platform": {"argocd": "p"}, "other": {"argocd": "o"}}`)
+	rt.Reload()
+	if rt.ConfigReloadFailures() != 1 {
+		t.Errorf("config failures = %d", rt.ConfigReloadFailures())
+	}
+}

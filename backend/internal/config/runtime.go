@@ -28,12 +28,12 @@ type Runtime struct {
 	// nothing, so a bad file is parsed, logged and counted once, not every
 	// 30 seconds.
 	seenCfg, seenKeys string
-	// lastCross is the config+keys pair whose cross-validation last failed,
-	// so a config waiting for keys the kubelet has not mounted yet is
-	// reported once.
-	lastCross    string
-	cfgFailures  atomic.Int64
-	keysFailures atomic.Int64
+	// crossCfg and crossKeys are the versions whose cross-validation failure
+	// was last reported, per file, so a config waiting for keys the kubelet
+	// has not mounted yet is reported once, whatever keys arrive meanwhile.
+	crossCfg, crossKeys [sha256.Size]byte
+	cfgFailures         atomic.Int64
+	keysFailures        atomic.Int64
 }
 
 // Load reads and cross-validates both files. Any fault is fatal: a
@@ -157,19 +157,16 @@ func (r *Runtime) Reload() {
 
 	extra, err := CrossValidate(cfg, keys)
 	if err != nil {
-		pair := fmt.Sprintf("%x+%x", cfgSum[:8], keysSum[:8])
-		if pair != r.lastCross {
-			r.lastCross = pair
-			if cfgChanged {
-				r.fail("config_reload_failed", r.configPath, err, &r.cfgFailures)
-			}
-			if keysChanged {
-				r.fail("team_keys_reload_failed", r.keysPath, err, &r.keysFailures)
-			}
+		if cfgChanged && cfgSum != r.crossCfg {
+			r.crossCfg = cfgSum
+			r.fail("config_reload_failed", r.configPath, err, &r.cfgFailures)
+		}
+		if keysChanged && keysSum != r.crossKeys {
+			r.crossKeys = keysSum
+			r.fail("team_keys_reload_failed", r.keysPath, err, &r.keysFailures)
 		}
 		return
 	}
-	r.lastCross = ""
 	if cfgChanged {
 		r.cfg.Store(cfg)
 		r.cfgSum = cfgSum
