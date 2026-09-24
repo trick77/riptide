@@ -1,0 +1,44 @@
+{
+  "eventKey": "pr:modified",
+  "date": "2026-04-28T10:04:00+0000",
+  "actor": {
+    "name": "alice",
+    "displayName": "Alice Example",
+    "slug": "alice"
+  },
+  "pullRequest": {
+    "id": 42,
+    "title": "ABC-123: Add payment retry (typo fix)",
+    "description": "Fixes ABC-123 and PROJ-9",
+    "state": "OPEN",
+    "draft": false,
+    "fromRef": {
+      "id": "refs/heads/feature/ABC-123-retries",
+      "displayId": "feature/ABC-123-retries",
+      "latestCommit": "abc1234567890abc1234567890abc1234567890a",
+      "repository": {
+        "slug": "payments-api",
+        "project": {"key": "ACME"}
+      }
+    },
+    "toRef": {
+      "id": "refs/heads/master",
+      "displayId": "master",
+      "repository": {
+        "slug": "payments-api",
+        "project": {"key": "ACME"}
+      }
+    },
+    "author": {
+      "user": {
+        "name": "alice",
+        "displayName": "Alice Example",
+        "slug": "alice"
+      }
+    }
+  },
+  "previousTitle": "ABC-123: Add payment retry",
+  "previousDescription": "Fixes ABC-123 and PROJ-9",
+  "previousTarget": null,
+  "previousDraft": false
+}
