@@ -26,9 +26,8 @@ same change. The app refuses to start while a migration is pending.
 still accepted (the driver suffix is stripped); plain `postgres://` is the form
 to use going forward. Add `?sslmode=disable` only where the database has no TLS.
 
-**Release by hand once.** The push trigger in `release.yaml` is commented out
-so the merge does not cut a patch release onto `:latest`. Dispatch the Release
-workflow with `minor`, check the image, then restore the trigger.
+**The first Go image is 0.2.0**, released by hand as a minor bump; pushes to
+master release automatically again from there.
 
 Behaviour that changed on the wire, all of it fixes:
 
