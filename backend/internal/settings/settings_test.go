@@ -20,8 +20,8 @@ func TestDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Settings{
-		DBURL: "postgres://riptide:riptide@localhost:5432/riptide", ConfigPath: "openshift/collector/riptide.json",
-		TeamKeysPath: "openshift/collector/team-keys.json", LogLevel: "INFO", Env: "dev",
+		DBURL: "postgres://riptide:riptide@localhost:5432/riptide", ConfigPath: "config/riptide.json",
+		TeamKeysPath: "config/team-keys.json", LogLevel: "INFO", Env: "dev",
 		ReloadInterval: 30 * time.Second, ListenAddr: ":8000",
 	}
 	if s != want {

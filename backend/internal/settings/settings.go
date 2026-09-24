@@ -37,8 +37,8 @@ type Lookup func(string) (string, bool)
 // Defaults point at the in-repo dev samples, for a run from the repo root.
 const (
 	defaultDBURL        = "postgres://riptide:riptide@localhost:5432/riptide" //nolint:gosec // the compose dev database
-	defaultConfigPath   = "openshift/collector/riptide.json"
-	defaultTeamKeysPath = "openshift/collector/team-keys.json"
+	defaultConfigPath   = "config/riptide.json"
+	defaultTeamKeysPath = "config/team-keys.json"
 )
 
 // Load resolves the settings from lookup.

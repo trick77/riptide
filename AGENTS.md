@@ -2,7 +2,7 @@
 
 ## Commands
 
-The Go module is in `backend/`; `ci/` (coverage gates), `scripts/` (operator scripts: table export/truncate, onboarding examples), `docs/`, `openshift/` and `archive/` are at the root. `hack/` holds OpenShift/Kubernetes helpers only; anything else gets its own home. Go commands run from `backend/`, scripts and `make` from the root.
+The Go module is in `backend/`; `ci/` (coverage gates), `scripts/` (operator scripts: table export/truncate, onboarding examples), `config/` (sample `riptide.json` and dev `team-keys.json`), `docs/` and `archive/` are at the root. Go commands run from `backend/`, scripts and `make` from the root.
 
 ```bash
 docker compose up -d db              # Postgres 17 on :5432 for the store/api tests
@@ -12,7 +12,7 @@ make backend-coverage                # coverprofile → Cobertura → ci/coverag
 ./ci/patch-coverage.sh origin/master     # ≥ 75 % of changed lines covered
 gofmt -l .                           # must print nothing
 cd backend && go vet ./... && golangci-lint run ./...
-riptide migrate                      # init container; `serve` never migrates
+riptide migrate                      # run before serve; `serve` never migrates
 docker compose up                    # Postgres + migrate + app on :8000
 ```
 
@@ -23,7 +23,7 @@ docker compose up                    # Postgres + migrate + app on :8000
 - **Append-only.** Handlers `INSERT … ON CONFLICT (delivery_id) DO NOTHING`. Never `UPDATE` / `DELETE` event rows. `delivery_id` = per-source dedup key, so retries are idempotent.
 - **Raw payload always stored** in `payload JSONB`, whole body, even for fields already extracted into columns. Don't drop unused fields.
 - **`riptide.json` is config, not data.** Teams + org-wide automation rules. Edits via PR, the pod re-reads it every `RIPTIDE_CONFIG_RELOAD_SECONDS` and applies a changed, valid file. Never move it into Postgres.
-- **Team keys are a separate file**, production-mounted from a Secret, never committed. Raw tokens, compared in constant time, hot-reloaded with the config; a reload that leaves a configured team without keys, or gives two teams one token, is rejected. The bearer **is** the team identity — every webhook tagged `team = caller_team`.
+- **Team keys are a separate file**, mounted in production, never committed. Raw tokens, compared in constant time, hot-reloaded with the config; a reload that leaves a configured team without keys, or gives two teams one token, is rejected. The bearer **is** the team identity — every webhook tagged `team = caller_team`.
 - **No `service` column, no `service_id` on the wire.** Aggregate per source by `repo_full_name` / `pipeline_name` / `app_name` / `repo`, org-wide by `team`. Join identifiers are lowercased at ingest (`commit_sha`, `revision`, `repo_full_name`, `branch_name`, `repo`) → case-stable. It served only single-pane labelling and was dropped; never propose it again.
 - **Metrics computed on read.** No aggregation tables, no rollup jobs in v1. Schema additions preserve raw events.
 - **Correlation, in priority order.** Bitbucket↔Pipeline: `commit_sha` (App-repo SHA both sides, deterministic). Argo CD: the **full image reference** — senders report `pipeline_events.image_ref` (`registry/path:tag`), Argo stores the same strings in `payload->'images'`. `argocd_events.revision` is the GitOps-repo SHA (four Apps of one service share one) and matches neither other source. Image **tags are not SHAs** — measured: 0 of 4 936 refs, all semver; never parse a SHA out of a tag. Pre-`image_ref` rows: read-time fallback in `docs/correlating-deploys-to-commits.md`. Never `service_id` or name mappings.
@@ -35,7 +35,8 @@ docker compose up                    # Postgres + migrate + app on :8000
 - **Noergler carries finops + reviewer-precision only.** `event_type` ∈ `pr_completed` | `feedback`; the pre-rollup `completed` is rejected. Never re-emit PR lifecycle — `bitbucket_events` covers open / merged / declined. Dedup keys `pr_completed#<pr_key>#<outcome>`, `feedback#<finding_id>#<verdict>`. `pr_completed` is also the source for PR diff size (Bitbucket webhooks carry none) and for the reviewer's own account.
 - **Senders verify at startup via `GET /auth/ping`** — authenticated, returns the caller's team, so a wrong token fails fast. Never reuse `/health` (unauth liveness) or `/ready` (unauth readiness).
 - **`modified_at` has a Postgres trigger** (`riptide_set_modified_at`), so any `UPDATE`, raw SQL included, bumps it. Keep the trigger when changing migrations.
-- **Database is external.** Never add a Postgres Deployment to `openshift/`.
+- **Database is external.** riptide ships no Postgres.
+- **No Kubernetes in this repo.** No OpenShift / Kubernetes manifests, Helm, Kustomize or cluster helper scripts. Deployment lives outside this repo.
 
 ## Repo conventions
 
@@ -63,15 +64,9 @@ docker compose up                    # Postgres + migrate + app on :8000
 - **Access log** binds `request_id` (from a safe `X-Request-Id`, else generated, echoed back) with `logging.With`, so every line of the request carries it; one `http_request` line per request. `/health` and `/ready` silenced.
 - Splunk `props.conf` is owned by the platform team; reference copy in [`docs/splunk-props.conf`](docs/splunk-props.conf).
 
-## OpenShift layout
-
-`openshift/` is suite-level, one directory per component. New component → own `openshift/<component>/kustomization.yaml`, added to `resources:` in `openshift/kustomization.yaml`. Every container: explicit cpu+memory `requests` AND `limits`, no exceptions. `runAsNonRoot: true`, `readOnlyRootFilesystem: true`, never a fixed `runAsUser` — OpenShift assigns a random UID per project. Migrations run as the `migrate` init container.
-
 ## Out of v1
 
 Push back unless the user is explicit:
 - Change failure rate / failed deployment recovery time — no reliable incident source; schema leaves room for rollback-proxy detection
 - Backfill workers (ingestion is forward-only)
 - Aggregation API or metric endpoints (reads are SQL, or a future sibling component)
-- Helm chart (Kustomize suffices)
-- Postgres manifests

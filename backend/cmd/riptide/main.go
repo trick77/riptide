@@ -82,7 +82,7 @@ func withSettings(fn func(settings.Settings, *slog.Logger) error) error {
 	return fn(s, logging.Setup(s.LogLevel, s.Env))
 }
 
-// migrate applies pending migrations and exits: the init container's job.
+// migrate applies pending migrations and exits; it runs before serve.
 // Only the database URL is needed; the config files are not read.
 func migrate(s settings.Settings, log *slog.Logger) error {
 	log.Info("riptide-collector version: " + buildinfo.Version())
