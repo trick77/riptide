@@ -50,6 +50,7 @@ func Pipeline(raw []byte) (*PipelineDraft, error) {
 		Payload:      raw,
 	}
 	kind := o.literal("actor_account_kind", "service", accountKinds...)
+	o.checkSpan("finished_at", &d.StartedAt, d.FinishedAt)
 	if err := o.err(); err != nil {
 		return nil, err
 	}
@@ -101,6 +102,7 @@ func ArgoCD(raw []byte, now time.Time) (*ArgoCDDraft, error) {
 		Payload:              raw,
 	}
 	o.stringList("images", true)
+	o.checkSpan("finished_at", d.StartedAt, d.FinishedAt)
 	if err := o.err(); err != nil {
 		return nil, err
 	}
