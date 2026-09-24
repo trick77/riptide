@@ -4,6 +4,9 @@
 -- This is the schema the Python collector reached at Alembic revision 0004,
 -- squashed into one file for the Go rewrite. Every counter column is BIGINT,
 -- where Alembic had INTEGER, so a large value never overflows into a 500.
+-- Column order follows Alembic's (columns added by 0002/0003 come after
+-- payload), so a CSV exported from the Python-era database reloads with a
+-- plain \copy.
 --
 -- Never edit this file once applied; add 0002_*.sql.
 
@@ -26,7 +29,6 @@ CREATE TABLE bitbucket_events (
     pr_id               BIGINT,
     commit_sha          VARCHAR,
     author              VARCHAR,
-    author_display_name VARCHAR,
     branch_name         VARCHAR,
     change_type         VARCHAR,
     jira_keys           VARCHAR[] NOT NULL DEFAULT '{}',
@@ -41,6 +43,7 @@ CREATE TABLE bitbucket_events (
     modified_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     team                VARCHAR,
     payload             JSONB NOT NULL,
+    author_display_name VARCHAR,
     CONSTRAINT uq_bitbucket_events_delivery_id UNIQUE (delivery_id)
 );
 COMMENT ON COLUMN bitbucket_events.author_display_name IS 'actor.displayName; bot accounts often identify themselves only here';
@@ -61,9 +64,6 @@ CREATE TABLE pipeline_events (
     phase              VARCHAR NOT NULL,
     status             VARCHAR,
     commit_sha         VARCHAR,
-    image_ref          VARCHAR,
-    actor_handle       VARCHAR,
-    actor_account_kind VARCHAR,
     started_at         TIMESTAMPTZ,
     finished_at        TIMESTAMPTZ,
     duration_seconds   INTEGER GENERATED ALWAYS AS (EXTRACT(EPOCH FROM finished_at - started_at)::int) STORED,
@@ -72,6 +72,9 @@ CREATE TABLE pipeline_events (
     modified_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     team               VARCHAR,
     payload            JSONB NOT NULL,
+    image_ref          VARCHAR,
+    actor_handle       VARCHAR,
+    actor_account_kind VARCHAR,
     CONSTRAINT uq_pipeline_events_delivery_id UNIQUE (delivery_id)
 );
 COMMENT ON COLUMN pipeline_events.source IS 'ci system that produced the event: jenkins / tekton / etc.';
@@ -116,16 +119,6 @@ CREATE TABLE noergler_events (
     pr_key                VARCHAR,
     repo                  VARCHAR,
     commit_sha            VARCHAR,
-    outcome               VARCHAR,
-    reviewer_handle       VARCHAR,
-    reviewer_account_kind VARCHAR,
-    merge_commit_sha      VARCHAR,
-    lines_added           BIGINT,
-    lines_removed         BIGINT,
-    files_changed         BIGINT,
-    total_runs            BIGINT,
-    models_used           VARCHAR[],
-    first_review_at       TIMESTAMPTZ,
     prompt_tokens         BIGINT,
     completion_tokens     BIGINT,
     elapsed_ms            BIGINT,
@@ -139,6 +132,16 @@ CREATE TABLE noergler_events (
     modified_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     team                  VARCHAR,
     payload               JSONB NOT NULL,
+    outcome               VARCHAR,
+    merge_commit_sha      VARCHAR,
+    lines_added           BIGINT,
+    lines_removed         BIGINT,
+    files_changed         BIGINT,
+    total_runs            BIGINT,
+    models_used           VARCHAR[],
+    first_review_at       TIMESTAMPTZ,
+    reviewer_handle       VARCHAR,
+    reviewer_account_kind VARCHAR,
     CONSTRAINT uq_noergler_events_delivery_id UNIQUE (delivery_id)
 );
 COMMENT ON COLUMN noergler_events.event_type IS 'pr_completed | feedback';

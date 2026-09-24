@@ -16,9 +16,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/trick77/riptide/internal/config"
 	"github.com/trick77/riptide/internal/httpapi"
 	"github.com/trick77/riptide/internal/parse"
+	"github.com/trick77/riptide/internal/store"
 )
 
 // Body size limits. Bitbucket pushes carry up to five commits with messages
@@ -191,12 +194,30 @@ func writeValidation(w http.ResponseWriter, err error) {
 	httpapi.WriteDetail(w, http.StatusUnprocessableEntity, err.Error())
 }
 
-// persistFailed logs a failed insert and answers 500. Never swallowed: the
-// sender sees the failure and retries, and the retry dedupes.
+// persistFailed answers a failed insert. A value Postgres refuses is the
+// body's fault and answered 422, logged as `webhook_payload_unstorable`.
+// Anything else is logged as `webhook_persist_failed` and answered 500: never
+// swallowed, so the sender retries, and the retry dedupes.
 func (d Deps) persistFailed(w http.ResponseWriter, r *http.Request, source, deliveryID, team string, err error) {
+	if store.IsDataError(err) {
+		d.Log.WarnContext(r.Context(), "webhook_payload_unstorable",
+			"webhook_source", source, "delivery_id", deliveryID, "team", team, "error", err.Error())
+		httpapi.WriteJSON(w, http.StatusUnprocessableEntity, httpapi.Detail{Detail: []parse.FieldError{{
+			Type: "json_invalid", Loc: []string{"body"}, Msg: "Postgres cannot store this body as JSONB: " + pgMessage(err),
+		}}})
+		return
+	}
 	d.Log.ErrorContext(r.Context(), "webhook_persist_failed",
 		"webhook_source", source, "delivery_id", deliveryID, "team", team, "error", err.Error())
 	httpapi.WriteDetail(w, http.StatusInternalServerError, "Internal Server Error")
+}
+
+func pgMessage(err error) string {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Message
+	}
+	return err.Error()
 }
 
 func outcome(inserted bool) string {

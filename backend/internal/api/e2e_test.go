@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -191,5 +192,17 @@ func TestE2ENoergler(t *testing.T) {
 	if n := count(t, pool, `SELECT count(*) FROM noergler_events WHERE event_type = 'feedback' AND actor = 'alice@example.com'
 		AND finding_id = 'finding-2026-04-29-0001' AND models_used IS NULL`); n != 2 {
 		t.Errorf("feedback rows = %d", n)
+	}
+}
+
+func TestE2EUnstorablePayload(t *testing.T) {
+	h, pool := dbHarness(t)
+	body := strings.Replace(string(jsonBytes(t, fixture(t, "pipeline_jenkins_completed.json"))), `"SUCCESS"`, `"SUCC\u0000ESS"`, 1)
+	expectStatus(t, h.bearer(t, "/webhooks/pipeline", checkoutJenkins, body), http.StatusUnprocessableEntity)
+	bb := strings.Replace(string(jsonBytes(t, fixture(t, "bitbucket_pr_merged.json"))), `"MERGED"`, `"MER\u0000GED"`, 1)
+	w := h.bitbucket(t, "checkout", checkoutBitbucket, "pr:merged", bb, nil)
+	expectBody(t, w, `{"status":"ignored","reason":"payload not storable as JSONB"}`)
+	if n := count(t, pool, `SELECT (SELECT count(*) FROM pipeline_events) + (SELECT count(*) FROM bitbucket_events)`); n != 0 {
+		t.Errorf("rows = %d", n)
 	}
 }

@@ -84,13 +84,13 @@ func Bitbucket(raw []byte, h BitbucketHeaders, now time.Time) (*BitbucketDraft, 
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return skip("empty payload", nil)
 	}
-	if !Storable(raw) {
-		return skip("payload not storable as JSONB", nil)
+	if !wellFormed(raw) {
+		return skip("non-json payload", nil)
 	}
 	var decoded any
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
-	if err := dec.Decode(&decoded); err != nil || dec.More() {
+	if err := dec.Decode(&decoded); err != nil {
 		return skip("non-json payload", nil)
 	}
 	body, ok := decoded.(map[string]any)

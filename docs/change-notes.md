@@ -51,8 +51,11 @@ Behaviour that changed on the wire, all of it fixes:
   configured team without keys, or gives two teams the same key, is rejected
   and logged.
 - Bodies over 1 MiB (10 MiB for Bitbucket) get a 413; numbers too large for
-  their column get a 422 instead of a 500; `/ready`'s 503 no longer echoes the
-  database error.
+  their column get a 422 instead of a 500; so does JSON that Postgres cannot
+  store as JSONB (a `\u0000` escape), which Bitbucket gets answered as
+  `202 ignored`. `/ready`'s 503 no longer echoes the database error.
+- 422 details list `type`, `loc` and `msg` per field; pydantic's `input`, an
+  echo of the whole request body, is gone.
 
 ## 2026-09-08 — bot and service-account detection
 

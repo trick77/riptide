@@ -25,6 +25,7 @@ var knownSources = map[string]bool{
 // mounted from a Secret and never committed. The bearer IS the team identity.
 type Keys struct {
 	teams map[string]map[string]string
+	names []string // sorted, computed once: lookups run per request
 }
 
 // ParseKeys validates the file contents: a non-empty object of known source
@@ -65,6 +66,7 @@ func ParseKeys(data []byte) (*Keys, error) {
 			k.teams[team][source] = token
 		}
 	}
+	k.names = sortedKeys(k.teams)
 	return k, nil
 }
 
@@ -77,8 +79,9 @@ func sortedKeys[V any](m map[string]V) []string {
 	return out
 }
 
-// TeamNames returns the teams that have keys, sorted.
-func (k *Keys) TeamNames() []string { return sortedKeys(k.teams) }
+// TeamNames returns the teams that have keys, sorted. Callers must not
+// modify the slice.
+func (k *Keys) TeamNames() []string { return k.names }
 
 // Has reports whether team has an entry at all.
 func (k *Keys) Has(team string) bool {
@@ -101,7 +104,7 @@ func (k *Keys) Lookup(token, source string) (string, bool) {
 		return "", false
 	}
 	match := ""
-	for _, team := range k.TeamNames() {
+	for _, team := range k.names {
 		stored, ok := k.teams[team][source]
 		if !ok {
 			continue
@@ -121,7 +124,7 @@ func (k *Keys) LookupAnySource(token string) (string, bool) {
 		return "", false
 	}
 	match := ""
-	for _, team := range k.TeamNames() {
+	for _, team := range k.names {
 		for _, stored := range k.teams[team] {
 			if subtle.ConstantTimeCompare([]byte(token), []byte(stored)) == 1 {
 				match = team
