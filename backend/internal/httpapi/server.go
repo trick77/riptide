@@ -4,6 +4,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -81,12 +82,16 @@ func (p *probeWriter) Write(b []byte) (int, error) {
 }
 
 // WriteJSON renders a JSON body with the status. Bodies are structs, not
-// maps, so the key order is stable; no trailing newline, byte for byte what
-// the Python collector sent.
+// maps, so the key order is stable. Like FastAPI's responses: no trailing
+// newline, and <, > and & left unescaped.
 func WriteJSON(w http.ResponseWriter, status int, body any) {
-	b, err := json.Marshal(body)
-	if err != nil {
-		b = []byte(`{"detail":"Internal Server Error"}`)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	b := []byte(`{"detail":"Internal Server Error"}`)
+	if err := enc.Encode(body); err == nil {
+		b = bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
+	} else {
 		status = http.StatusInternalServerError
 	}
 	w.Header().Set("Content-Type", "application/json")

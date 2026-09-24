@@ -171,6 +171,10 @@ func TestPipelineFields(t *testing.T) {
 		expectInvalid(t, err, "body", "json_invalid")
 		_, err = Pipeline([]byte("{\"source\":\"\xff\"}"))
 		expectInvalid(t, err, "body", "json_invalid")
+		_, err = Pipeline([]byte(`{"source":"\u0000"}`))
+		expectInvalid(t, err, "body", "json_invalid")
+		_, err = Pipeline([]byte(`null`))
+		expectInvalid(t, err, "body", "model_attributes_type")
 	})
 }
 

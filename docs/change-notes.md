@@ -13,7 +13,7 @@ Real account handles, hostnames and tokens belong in the mounted
 own migration history (`schema_migrations`) and does not read the Alembic one;
 its first migration creates the whole schema and fails on a database that
 already has the tables. History restarts, as it did for noergler. To keep the
-old rows, export them first with `hack/export-tables.sh` (against the old
+old rows, export them first with `scripts/export-tables.sh` (against the old
 database, before switching) and reload them with the `\copy` commands in the
 archive's README.txt. The counter columns are `BIGINT` now; the CSVs load
 unchanged.

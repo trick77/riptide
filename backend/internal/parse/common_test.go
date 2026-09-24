@@ -146,3 +146,28 @@ func TestISOFormatMatchesPython(t *testing.T) {
 		t.Errorf("isoFormat = %q", got)
 	}
 }
+
+func TestJSONBSafe(t *testing.T) {
+	for _, c := range []struct {
+		raw  string
+		want bool
+	}{
+		{`{"a": "plain"}`, true},
+		{`{"a": "é \n \" \\"}`, true},
+		{`{"a": "😀"}`, true},                       // a surrogate pair
+		{`{"a": "quoting \\u0000 as text"}`, true}, // escaped backslash, then text
+		{`{"a": "\\A"}`, true},                     // escaped backslash, then a real escape
+		{`{"u0000": "\u0000"}`, false},             // NUL
+		{`{"a": "x\u0000"}`, false},
+		{`{"a": "\ud800"}`, false},  // lone high surrogate
+		{`{"a": "\ud800A"}`, false}, // high surrogate, no low
+		{`{"a": "\udc00"}`, false},  // lone low surrogate
+		{`{"a": "\ud800\\"}`, false},
+		{`{"a": "\u12"}`, false},     // truncated (invalid JSON anyway)
+		{`{"key \u0000": 1}`, false}, // keys count too
+	} {
+		if got := jsonbSafe([]byte(c.raw)); got != c.want {
+			t.Errorf("jsonbSafe(%s) = %v, want %v", c.raw, got, c.want)
+		}
+	}
+}

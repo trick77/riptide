@@ -5,13 +5,13 @@
 # read by any Postgres version, by pandas/DuckDB/Excel, or by hand.
 #
 # Usage:
-#   hack/export-tables.sh [-o OUTDIR] [-t TABLE]... [-k] [-n] [DB_URL]
+#   scripts/export-tables.sh [-o OUTDIR] [-t TABLE]... [-k] [-n] [DB_URL]
 #
 #   DB_URL      postgresql://user:pass@host:5432/riptide
 #               SQLAlchemy form works too, the +asyncpg / +psycopg driver
 #               suffix is stripped. Falls back to $RIPTIDE_DB_URL, then to
 #               RIPTIDE_DB_URL= in the repo .env, then to the compose default.
-#   -o OUTDIR   where the archive lands (default: hack/)
+#   -o OUTDIR   where the archive lands (default: exports/, gitignored)
 #   -t TABLE    export only this table (repeatable; default: all riptide tables)
 #   -k          keep the unpacked staging directory next to the archive
 #   -n          no compression, plain .tar
@@ -31,7 +31,7 @@ ALL_TABLES=(
   schema_migrations
 )
 
-OUTDIR="$REPO_ROOT/hack"
+OUTDIR="$REPO_ROOT/exports"
 TABLES=()
 KEEP=0
 COMPRESS=1

@@ -437,3 +437,22 @@ func TestReloadReportsEachFailureOnce(t *testing.T) {
 		t.Errorf("logs = %s", logs.String())
 	}
 }
+
+// A broken config, reverted while mismatched keys wait: the pair actually
+// checked (live config + new keys) did not change, so nothing is reported
+// twice.
+func TestReloadRevertDoesNotRecount(t *testing.T) {
+	rt, cfgPath, keysPath, _ := newRuntime(t)
+	write(t, cfgPath, `not json`)
+	write(t, keysPath, `{"checkout": {"argocd": "a"}}`) // drops platform: inconsistent
+	rt.Reload()
+	if rt.ConfigReloadFailures() != 1 || rt.KeysReloadFailures() != 1 {
+		t.Fatalf("failures = %d/%d", rt.ConfigReloadFailures(), rt.KeysReloadFailures())
+	}
+	write(t, cfgPath, validConfig)
+	rt.Reload()
+	rt.Reload()
+	if rt.ConfigReloadFailures() != 1 || rt.KeysReloadFailures() != 1 {
+		t.Errorf("recounted: %d/%d", rt.ConfigReloadFailures(), rt.KeysReloadFailures())
+	}
+}

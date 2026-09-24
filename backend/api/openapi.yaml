@@ -242,8 +242,12 @@ paths:
                   status: { type: string, const: ok }
                   teams: { type: integer, description: Teams in the live config. }
                   team_keys: { type: integer, description: Teams in the live key file. }
-                  config_reload_failures: { type: integer }
-                  team_keys_reload_failures: { type: integer }
+                  config_reload_failures:
+                    type: integer
+                    description: Distinct config versions rejected since start; a bad file counts once however long it stays.
+                  team_keys_reload_failures:
+                    type: integer
+                    description: Distinct team-keys versions rejected since start.
         "503":
           description: The database is unreachable.
           content:

@@ -7,14 +7,14 @@
 # keeps ingesting into empty tables; no migration re-run is needed.
 #
 # Usage:
-#   hack/truncate-tables.sh [-t TABLE]... [-b] [-y] [-n] [DB_URL]
+#   scripts/truncate-tables.sh [-t TABLE]... [-b] [-y] [-n] [DB_URL]
 #
 #   DB_URL      postgresql://user:pass@host:5432/riptide
 #               SQLAlchemy form works too, the +asyncpg / +psycopg driver
 #               suffix is stripped. Falls back to $RIPTIDE_DB_URL, then to
 #               RIPTIDE_DB_URL= in the repo .env, then to the compose default.
 #   -t TABLE    truncate only this table (repeatable; default: all event tables)
-#   -b          take a CSV backup first via hack/export-tables.sh, and abort
+#   -b          take a CSV backup first via scripts/export-tables.sh, and abort
 #               if that export fails
 #   -y          skip the confirmation prompt (for non-interactive use)
 #   -n          dry run: report what would be deleted, change nothing
@@ -102,7 +102,7 @@ fi
 # --- backup ------------------------------------------------------------------
 if [ "$BACKUP" -eq 1 ]; then
   echo "backing up first…"
-  "$REPO_ROOT/hack/export-tables.sh" "$DB_URL" || {
+  "$REPO_ROOT/scripts/export-tables.sh" "$DB_URL" || {
     echo "error: backup failed, refusing to truncate" >&2; exit 1; }
 fi
 

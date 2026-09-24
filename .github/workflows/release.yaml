@@ -18,6 +18,7 @@ on:
   #     - ".gitignore"
   #     - "compose.yaml"
   #     - "hack/**"
+  #     - "ci/**"
   #     - "scripts/**"
   #     - "openshift/**"
   workflow_dispatch:
