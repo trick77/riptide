@@ -11,11 +11,9 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/trick77/riptide/internal/parse"
@@ -242,15 +240,6 @@ func (s *Store) InsertNoergler(ctx context.Context, d *parse.NoerglerDraft, team
 		d.ReviewerAccountKind, d.MergeCommitSHA, d.LinesAdded, d.LinesRemoved, d.FilesChanged,
 		d.TotalRuns, d.ModelsUsed, d.FirstReviewAt, d.PromptTokens, d.CompletionTokens, d.ElapsedMS,
 		d.FindingsCount, d.CostUSD, d.FindingID, d.Verdict, d.Actor, d.OccurredAt, team, string(d.Payload))
-}
-
-// IsDataError reports whether Postgres rejected a value rather than failed:
-// SQLSTATE class 22, data exception. JSONB refuses some JSON the parser
-// accepts (a \u0000 escape, an unpaired surrogate), and no retry of the same
-// body can ever succeed, so the caller answers it as a bad request, not a 500.
-func IsDataError(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && strings.HasPrefix(pgErr.Code, "22")
 }
 
 func nullable(s string) *string {

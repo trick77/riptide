@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# hack/patch-coverage.sh [base-ref]
+# ci/patch-coverage.sh [base-ref]
 #
 # Patch coverage: the lines this branch adds or changes must be at least
-# PATCH_MIN% covered. Complements hack/coverage-gate.sh, which enforces the
+# PATCH_MIN% covered. Complements ci/coverage-gate.sh, which enforces the
 # absolute project floor — the two answer different questions:
 #
 #   coverage-gate.sh   "is the codebase as a whole tested enough?"   (75% floor)
@@ -18,7 +18,9 @@
 # number: a branch can clear the project floor comfortably while the handful of
 # lines it actually changed go untested, and only the patch gate sees that.
 #
-# Ported from loom, which has run this since its early days.
+# Ported from loom, which has run this since its early days. diff-cover itself
+# is replaced by ci/diff-cover.go, the subset used here in Go, so CI needs no
+# Python.
 #
 # Coverage reports must already exist — CI produces them before calling this.
 set -euo pipefail
@@ -51,14 +53,14 @@ fi
 #
 # Opt out with [skip patch-coverage] in a commit message on the branch.
 #
-# This skips ONLY patch coverage. hack/coverage-gate.sh still enforces the
+# This skips ONLY patch coverage. ci/coverage-gate.sh still enforces the
 # absolute floor in the same CI job, so overall coverage can never silently
 # fall — the worst this can do is let already-untested lines stay untested.
 if git log --format='%B' "$(git merge-base "$BASE_REF" HEAD)"..HEAD 2>/dev/null |
   grep -qF '[skip patch-coverage]'; then
   echo "::warning::patch-coverage SKIPPED — a commit on this branch carries [skip patch-coverage]."
   echo "patch-coverage: SKIPPED by [skip patch-coverage] in a commit message." >&2
-  echo "  The absolute floor (hack/coverage-gate.sh) still applies and is" >&2
+  echo "  The absolute floor (ci/coverage-gate.sh) still applies and is" >&2
   echo "  enforced separately, so total coverage cannot fall unnoticed." >&2
   exit 0
 fi
@@ -139,7 +141,7 @@ assert_matched() {
 }
 
 # --- backend ------------------------------------------------------------------
-# CI already converts the coverprofile to Cobertura for hack/coverage-gate.sh;
+# CI already converts the coverprofile to Cobertura for ci/coverage-gate.sh;
 # reuse that artifact rather than regenerating it.
 if [[ -f coverage/backend.xml ]]; then
   checked=1
@@ -189,10 +191,10 @@ if [[ -f coverage/backend.xml ]]; then
   # carries no non-comment token, so a trailing `// why` and a string holding
   # "http://x" both stay counted. It is deliberately conservative: a file it
   # cannot read or parse keeps every line it had.
-  go run hack/strip-comment-lines.go "$MODULE_DIR" \
+  go run ./ci/strip-comment-lines.go "$MODULE_DIR" \
     < coverage/backend-rooted.xml > coverage/backend-code-only.xml
 
-  diff-cover coverage/backend-code-only.xml \
+  go run ./ci/diff-cover.go coverage/backend-code-only.xml \
     --compare-branch "$BASE_REF" \
     --fail-under "$PATCH_MIN" \
     --format "markdown:coverage/backend-patch.md" || fail=1
@@ -211,7 +213,7 @@ if [[ -f coverage/ui/lcov.info ]]; then
   # Rewrite them to repo-root-relative so they match git's paths.
   sed 's|^SF:|SF:ui/|' coverage/ui/lcov.info > coverage/ui-lcov-rooted.info
 
-  diff-cover coverage/ui-lcov-rooted.info \
+  go run ./ci/diff-cover.go coverage/ui-lcov-rooted.info \
     --compare-branch "$BASE_REF" \
     --fail-under "$PATCH_MIN" \
     --format "markdown:coverage/ui-patch.md" || fail=1

@@ -2,14 +2,14 @@
 
 ## Commands
 
-The Go module is in `backend/`; `hack/`, `docs/`, `openshift/` and `archive/` are at the root. Go commands run from `backend/`, scripts and `make` from the root.
+The Go module is in `backend/`; `ci/` (coverage gates), `scripts/` (operator scripts: table export/truncate, onboarding examples), `docs/`, `openshift/` and `archive/` are at the root. `hack/` holds OpenShift/Kubernetes helpers only; anything else gets its own home. Go commands run from `backend/`, scripts and `make` from the root.
 
 ```bash
 docker compose up -d db              # Postgres 17 on :5432 for the store/api tests
 export RIPTIDE_TEST_DSN='postgres://riptide:riptide@localhost:5432/riptide?sslmode=disable'
 cd backend && go test -race ./...    # DB tests skip without RIPTIDE_TEST_DSN
-make backend-coverage                # coverprofile → Cobertura → hack/coverage-gate.sh (85 % floor, cmd/ excluded)
-./hack/patch-coverage.sh origin/master   # ≥ 75 % of changed lines covered (needs diff-cover)
+make backend-coverage                # coverprofile → Cobertura → ci/coverage-gate.sh (85 % floor, cmd/ excluded)
+./ci/patch-coverage.sh origin/master     # ≥ 75 % of changed lines covered
 gofmt -l .                           # must print nothing
 cd backend && go vet ./... && golangci-lint run ./...
 riptide migrate                      # init container; `serve` never migrates
@@ -49,7 +49,7 @@ docker compose up                    # Postgres + migrate + app on :8000
 - **Migrations**: `internal/store/migrations/NNNN_*.sql`, embedded, applied in name order by `riptide migrate` under an advisory lock and recorded in `schema_migrations`. Never edit an applied migration; add the next number. `serve` checks `SchemaCurrent` at startup and refuses to run behind.
 - `backend/` is the collector (`cmd/riptide`, `internal/*`). A future suite component gets its own top-level directory and module, not a package in this one.
 - Tests: real Postgres, never SQLite. `internal/testdb` gives each test its own schema; tests skip without `RIPTIDE_TEST_DSN`. Fixtures are `internal/parse/testdata/*.json`.
-- Coverage floor 85 % of lines (`hack/coverage-floors`), patch coverage 75 %. The `hack/` gate scripts are shared verbatim across the repo family; don't fork them.
+- Coverage floor 85 % of lines (`ci/coverage-floors`), patch coverage 75 %. The `ci/` gate scripts come from the repo family (noergler, loom); here they call `ci/diff-cover.go` and `ci/cobertura-lines.go` instead of Python, so CI runs no Python. Keep it that way.
 
 ## Logging & Splunk
 

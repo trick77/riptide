@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# hack/coverage-gate.sh <backend|ui>
+# ci/coverage-gate.sh <backend|ui>
 #
-# Fails when line coverage falls below the hard floor in hack/coverage-floors.
+# Fails when line coverage falls below the hard floor in ci/coverage-floors.
 #
 # Backend coverage comes from a Cobertura XML conversion of the coverprofile,
+# read by ci/cobertura-lines.go (Go, so CI needs no Python),
 # not from `go tool cover -func`: that prints only per-function statement
 # percentages, exposes no line metric, and gives no way to exclude a package.
 # Anything under cmd/ (main() wiring) is deliberately not counted. Matching the
@@ -17,7 +18,7 @@ export LC_ALL=C
 export LC_NUMERIC=C
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FLOORS="${COVERAGE_FLOORS:-$ROOT/hack/coverage-floors}"
+FLOORS="${COVERAGE_FLOORS:-$ROOT/ci/coverage-floors}"
 SIDE="${1:-}"
 
 die() { echo "coverage-gate: $*" >&2; exit 2; }
@@ -38,34 +39,10 @@ if [ "$SIDE" = backend ]; then
   FILE="${COVERAGE_FILE:-$ROOT/coverage/backend.xml}"
   [ -f "$FILE" ] || die "no Cobertura XML at $FILE — run the tests first"
   set +e
-  PCT="$(python3 -c '
-import sys
-import xml.etree.ElementTree as ET
-
-path = sys.argv[1]
-try:
-    root = ET.parse(path).getroot()
-except ET.ParseError:
-    sys.exit(3)
-
-tot = cov = 0
-for cls in root.iter("class"):
-    fn = cls.get("filename", "")
-    if fn.startswith("cmd/") or "/cmd/" in fn:
-        continue
-    for line in cls.iter("line"):
-        tot += 1
-        if int(line.get("hits", "0")) > 0:
-            cov += 1
-
-if tot == 0:
-    print("0.0")
-else:
-    print("%.1f" % (100 * cov / tot))
-' "$FILE" 2>/dev/null)"
-  PY_RC=$?
+  PCT="$(cd "$ROOT" && go run ./ci/cobertura-lines.go "$FILE" 2>/dev/null)"
+  GO_RC=$?
   set -e
-  [ "$PY_RC" -eq 0 ] || die "malformed Cobertura XML at $FILE"
+  [ "$GO_RC" -eq 0 ] || die "malformed Cobertura XML at $FILE"
 else
   FILE="${COVERAGE_FILE:-$ROOT/coverage/ui/coverage-summary.json}"
   [ -f "$FILE" ] || die "no coverage summary at $FILE — run the UI tests first"

@@ -430,23 +430,25 @@ func TestPersistFailureIs500AndLogged(t *testing.T) {
 
 // JSON that JSONB refuses (a \u0000 escape) is the body's fault: a 422 on the
 // owned contracts, a skip for Bitbucket, never a 500 that retries forever.
+// And a real insert failure stays a 500.
 func TestUnstorablePayload(t *testing.T) {
 	h := newHarness(t, nil)
-	h.mem.fail = errUnstorable
-	w := h.bearer(t, "/webhooks/pipeline", checkoutJenkins, fixture(t, "pipeline_jenkins_completed.json"))
+	body := strings.Replace(string(jsonBytes(t, fixture(t, "pipeline_jenkins_completed.json"))), `"SUCCESS"`, `"SUCC\u0000ESS"`, 1)
+	w := h.bearer(t, "/webhooks/pipeline", checkoutJenkins, body)
 	expectStatus(t, w, http.StatusUnprocessableEntity)
-	if !strings.Contains(w.Body.String(), `"loc":["body"]`) || !strings.Contains(w.Body.String(), "unsupported Unicode escape sequence") {
+	if !strings.Contains(w.Body.String(), `"loc":["body"]`) || !strings.Contains(w.Body.String(), "JSONB") {
 		t.Errorf("body = %s", w.Body.String())
 	}
-	w = h.bitbucket(t, "checkout", checkoutBitbucket, "pr:merged", fixture(t, "bitbucket_pr_merged.json"), map[string]string{"X-Request-Id": "nul-1"})
+	bb := strings.Replace(string(jsonBytes(t, fixture(t, "bitbucket_pr_merged.json"))), `"MERGED"`, `"MER\ud800GED"`, 1)
+	w = h.bitbucket(t, "checkout", checkoutBitbucket, "pr:merged", bb, map[string]string{"X-Request-Id": "nul-1"})
 	expectStatus(t, w, http.StatusAccepted)
 	expectBody(t, w, `{"status":"ignored","reason":"payload not storable as JSONB"}`)
 	ev := h.processed(t)
 	if len(ev) != 1 || ev[0]["outcome"] != "skipped" || ev[0]["delivery_id"] != "nul-1" {
 		t.Errorf("lines = %v", ev)
 	}
-	if !strings.Contains(h.logs.String(), `"msg":"webhook_payload_unstorable"`) || strings.Contains(h.logs.String(), "webhook_persist_failed") {
-		t.Errorf("logs = %s", h.logs.String())
+	if len(h.mem.rows) != 0 {
+		t.Errorf("rows = %d", len(h.mem.rows))
 	}
 }
 

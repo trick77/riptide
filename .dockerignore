@@ -4,6 +4,8 @@
 archive
 docs
 hack
+ci
+exports
 scripts
 *.md
 *.png

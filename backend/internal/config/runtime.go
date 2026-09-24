@@ -3,9 +3,7 @@ package config
 import (
 	"context"
 	"crypto/sha256"
-	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"os"
 	"sync"
@@ -23,12 +21,17 @@ type Runtime struct {
 	cfg  atomic.Pointer[Config]
 	keys atomic.Pointer[Keys]
 
-	mu              sync.Mutex // serialises Reload, guards the fields below
-	cfgSum, keysSum [sha256.Size]byte
-	// lastFailure remembers the failure last reported per file, so one bad
-	// file version, or one config waiting for keys the kubelet has not
-	// mounted yet, is logged and counted once rather than on every tick.
-	lastFailure  map[string]string
+	mu              sync.Mutex        // serialises Reload, guards the fields below
+	cfgSum, keysSum [sha256.Size]byte // the versions that are live
+	// seenCfg and seenKeys are the file states the last Reload acted on (a
+	// content hash, or the read error). While both are unchanged a tick does
+	// nothing, so a bad file is parsed, logged and counted once, not every
+	// 30 seconds.
+	seenCfg, seenKeys string
+	// lastCross is the config+keys pair whose cross-validation last failed,
+	// so a config waiting for keys the kubelet has not mounted yet is
+	// reported once.
+	lastCross    string
 	cfgFailures  atomic.Int64
 	keysFailures atomic.Int64
 }
@@ -36,7 +39,7 @@ type Runtime struct {
 // Load reads and cross-validates both files. Any fault is fatal: a
 // collector that starts without its teams would reject every sender.
 func Load(configPath, keysPath string, log *slog.Logger) (*Runtime, error) {
-	r := &Runtime{configPath: configPath, keysPath: keysPath, log: log, lastFailure: map[string]string{}}
+	r := &Runtime{configPath: configPath, keysPath: keysPath, log: log}
 	cfgData, err := os.ReadFile(configPath) //nolint:gosec // operator-controlled path
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
@@ -64,6 +67,7 @@ func Load(configPath, keysPath string, log *slog.Logger) (*Runtime, error) {
 	r.keys.Store(keys)
 	r.cfgSum = sha256.Sum256(cfgData)
 	r.keysSum = sha256.Sum256(keysData)
+	r.seenCfg, r.seenKeys = fileState(cfgData, nil), fileState(keysData, nil)
 	return r, nil
 }
 
@@ -73,10 +77,12 @@ func (r *Runtime) Config() *Config { return r.cfg.Load() }
 // Keys is the current team-keys snapshot.
 func (r *Runtime) Keys() *Keys { return r.keys.Load() }
 
-// ConfigReloadFailures counts failed config reload attempts since start.
+// ConfigReloadFailures counts the distinct config versions rejected since
+// start: a bad file is counted once, however long it stays mounted.
 func (r *Runtime) ConfigReloadFailures() int64 { return r.cfgFailures.Load() }
 
-// KeysReloadFailures counts failed team-keys reload attempts since start.
+// KeysReloadFailures counts the distinct team-keys versions rejected since
+// start.
 func (r *Runtime) KeysReloadFailures() int64 { return r.keysFailures.Load() }
 
 // Run reloads every interval until ctx is done. Polling on a timer rather
@@ -99,39 +105,51 @@ func (r *Runtime) Run(ctx context.Context, interval time.Duration) {
 // is by content hash, so a same-second rewrite is not missed and a
 // Kubernetes symlink swap that leaves the content alone is a no-op. A file
 // that fails to read, parse or cross-validate against the other keeps the
-// previous version live and is retried on the next tick; each distinct
-// failure is logged and counted once.
+// previous version live. Each failure is logged and counted once: the next
+// ticks see the same file state and do nothing until a file changes.
 func (r *Runtime) Reload() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	cfg, keys := r.cfg.Load(), r.keys.Load()
-	var newCfgSum, newKeysSum [sha256.Size]byte
-	cfgChanged, keysChanged := false, false
-
-	if data, err := os.ReadFile(r.configPath); err != nil {
-		r.fail("config", r.configPath, "", err, &r.cfgFailures)
-	} else if sum := sha256.Sum256(data); sum != r.cfgSum {
-		newCfgSum = sum
-		if parsed, err := Parse(data); err != nil {
-			r.fail("config", r.configPath, short(sum), err, &r.cfgFailures)
-		} else {
-			cfg, cfgChanged = parsed, true
-		}
-	} else {
-		delete(r.lastFailure, "config")
+	cfgData, cfgErr := os.ReadFile(r.configPath)
+	keysData, keysErr := os.ReadFile(r.keysPath)
+	cfgState, keysState := fileState(cfgData, cfgErr), fileState(keysData, keysErr)
+	if cfgState == r.seenCfg && keysState == r.seenKeys {
+		return
 	}
-	if data, err := os.ReadFile(r.keysPath); err != nil {
-		r.fail("team_keys", r.keysPath, "", err, &r.keysFailures)
-	} else if sum := sha256.Sum256(data); sum != r.keysSum {
-		newKeysSum = sum
-		if parsed, err := ParseKeys(data); err != nil {
-			r.fail("team_keys", r.keysPath, short(sum), err, &r.keysFailures)
-		} else {
-			keys, keysChanged = parsed, true
+	cfgNew, keysNew := cfgState != r.seenCfg, keysState != r.seenKeys
+	r.seenCfg, r.seenKeys = cfgState, keysState
+
+	cfg, keys := r.cfg.Load(), r.keys.Load()
+	cfgSum, keysSum := r.cfgSum, r.keysSum
+	cfgChanged, keysChanged := false, false
+	switch {
+	case cfgErr != nil:
+		if cfgNew {
+			r.fail("config_stat_failed", r.configPath, cfgErr, &r.cfgFailures)
 		}
-	} else {
-		delete(r.lastFailure, "team_keys")
+	case sha256.Sum256(cfgData) != r.cfgSum:
+		if parsed, err := Parse(cfgData); err != nil {
+			if cfgNew {
+				r.fail("config_reload_failed", r.configPath, err, &r.cfgFailures)
+			}
+		} else {
+			cfg, cfgSum, cfgChanged = parsed, sha256.Sum256(cfgData), true
+		}
+	}
+	switch {
+	case keysErr != nil:
+		if keysNew {
+			r.fail("team_keys_stat_failed", r.keysPath, keysErr, &r.keysFailures)
+		}
+	case sha256.Sum256(keysData) != r.keysSum:
+		if parsed, err := ParseKeys(keysData); err != nil {
+			if keysNew {
+				r.fail("team_keys_reload_failed", r.keysPath, err, &r.keysFailures)
+			}
+		} else {
+			keys, keysSum, keysChanged = parsed, sha256.Sum256(keysData), true
+		}
 	}
 	if !cfgChanged && !keysChanged {
 		return
@@ -139,27 +157,27 @@ func (r *Runtime) Reload() {
 
 	extra, err := CrossValidate(cfg, keys)
 	if err != nil {
-		// The pair is what failed, so both versions are in the key: the
-		// missing keys arriving changes it, and the retry is reported.
-		pair := short(newCfgSum) + "+" + short(newKeysSum)
-		if cfgChanged {
-			r.fail("config", r.configPath, pair, err, &r.cfgFailures)
-		}
-		if keysChanged {
-			r.fail("team_keys", r.keysPath, pair, err, &r.keysFailures)
+		pair := fmt.Sprintf("%x+%x", cfgSum[:8], keysSum[:8])
+		if pair != r.lastCross {
+			r.lastCross = pair
+			if cfgChanged {
+				r.fail("config_reload_failed", r.configPath, err, &r.cfgFailures)
+			}
+			if keysChanged {
+				r.fail("team_keys_reload_failed", r.keysPath, err, &r.keysFailures)
+			}
 		}
 		return
 	}
+	r.lastCross = ""
 	if cfgChanged {
 		r.cfg.Store(cfg)
-		r.cfgSum = newCfgSum
-		delete(r.lastFailure, "config")
+		r.cfgSum = cfgSum
 		r.log.Info("config_reloaded", "teams", len(cfg.Teams))
 	}
 	if keysChanged {
 		r.keys.Store(keys)
-		r.keysSum = newKeysSum
-		delete(r.lastFailure, "team_keys")
+		r.keysSum = keysSum
 		r.log.Info("team_keys_reloaded", "teams", len(keys.TeamNames()))
 	}
 	if len(extra) > 0 {
@@ -167,22 +185,16 @@ func (r *Runtime) Reload() {
 	}
 }
 
-func short(sum [sha256.Size]byte) string { return fmt.Sprintf("%x", sum[:8]) }
+// fileState is what a read returned: the content hash, or the error.
+func fileState(data []byte, err error) string {
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(data))
+}
 
-// fail logs `<what>_stat_failed` when the file could not be read and
-// `<what>_reload_failed` when its content was rejected, and counts it,
-// unless this same failure of this same version was already reported.
-func (r *Runtime) fail(what, path, version string, err error, counter *atomic.Int64) {
-	key := version + "|" + err.Error()
-	if r.lastFailure[what] == key {
-		return
-	}
-	r.lastFailure[what] = key
+// fail logs msg and counts it.
+func (r *Runtime) fail(msg, path string, err error, counter *atomic.Int64) {
 	counter.Add(1)
-	msg := what + "_reload_failed"
-	var pathErr *fs.PathError
-	if errors.As(err, &pathErr) {
-		msg = what + "_stat_failed"
-	}
 	r.log.Error(msg, "path", path, "error", err.Error())
 }

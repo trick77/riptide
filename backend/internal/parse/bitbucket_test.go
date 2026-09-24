@@ -409,6 +409,8 @@ func TestUnusableBodiesAreSkipped(t *testing.T) {
 		{"trailing brace", `{"a": 1}}`, "non-json payload"},
 		{"array", `["not", "an", "object"]`, "non-object payload"},
 		{"invalid UTF-8", "{\"a\": \"\xff\"}", "non-json payload"},
+		{"NUL escape", `{"a": "\u0000"}`, "payload not storable as JSONB"},
+		{"lone surrogate", `{"a": "\udfff"}`, "payload not storable as JSONB"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			d, s := Bitbucket([]byte(c.body), BitbucketHeaders{EventKey: "pr:merged", RequestID: "rid"}, fixedNow)

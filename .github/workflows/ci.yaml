@@ -18,7 +18,7 @@ jobs:
   test:
     name: Build + test
     runs-on: ubuntu-latest
-    # The Go module lives in backend/; hack/ and coverage/ stay at the root, so
+    # The Go module lives in backend/; ci/ and coverage/ stay at the root, so
     # the gate steps below override this back to the repo root.
     defaults:
       run:
@@ -37,7 +37,7 @@ jobs:
           --health-timeout 3s
           --health-retries 10
     steps:
-      # fetch-depth: 0 - hack/patch-coverage.sh diffs the branch against the PR
+      # fetch-depth: 0 - ci/patch-coverage.sh diffs the branch against the PR
       # base, which needs real history.
       - uses: actions/checkout@v7
         with:
@@ -49,13 +49,7 @@ jobs:
           go-version-file: backend/go.mod
           cache: true
           cache-dependency-path: backend/go.sum
-      # hack/patch-coverage.sh drives diff-cover.
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      - run: pip install diff-cover==10.3.0
-        working-directory: .
-      # From the repo root, so hack/*.go is covered too: it is outside the
+      # From the repo root, so ci/*.go is covered too: it is outside the
       # module, so `go vet ./...` in backend/ never sees it.
       - name: gofmt
         run: |
@@ -88,14 +82,14 @@ jobs:
           node-version: "20"
       # The gate scripts are load-bearing, so they are tested BEFORE they are
       # trusted.
-      - run: ./hack/coverage-gate.test.sh
+      - run: ./ci/coverage-gate.test.sh
         working-directory: .
-      - run: ./hack/strip-comment-lines.test.sh
+      - run: ./ci/strip-comment-lines.test.sh
         working-directory: .
-      - run: ./hack/coverage-gate.sh backend
+      - run: ./ci/coverage-gate.sh backend
         working-directory: .
       - name: Backend patch coverage
-        run: ./hack/patch-coverage.sh "origin/${{ github.base_ref || 'master' }}"
+        run: ./ci/patch-coverage.sh "origin/${{ github.base_ref || 'master' }}"
         working-directory: .
 
   lint:

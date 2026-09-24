@@ -5,8 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Events where `actor` is who did the thing (the reviewer, the commenter)
@@ -84,14 +87,19 @@ func Bitbucket(raw []byte, h BitbucketHeaders, now time.Time) (*BitbucketDraft, 
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return skip("empty payload", nil)
 	}
-	if !wellFormed(raw) {
-		return skip("non-json payload", nil)
-	}
 	var decoded any
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
-	if err := dec.Decode(&decoded); err != nil {
+	if !utf8.Valid(raw) || dec.Decode(&decoded) != nil {
 		return skip("non-json payload", nil)
+	}
+	// The decoder stops after one value; anything after it, a stray `}`
+	// included, makes the body invalid JSON that Postgres would refuse.
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return skip("non-json payload", nil)
+	}
+	if !jsonbSafe(raw) {
+		return skip("payload not storable as JSONB", nil)
 	}
 	body, ok := decoded.(map[string]any)
 	if !ok {

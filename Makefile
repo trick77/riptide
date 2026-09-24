@@ -1,4 +1,4 @@
-# The Go module lives in backend/; hack/ and docs/ are at the root.
+# The Go module lives in backend/; ci/, scripts/ and docs/ are at the root.
 .PHONY: build test lint backend-coverage coverage
 
 build:
@@ -20,6 +20,6 @@ backend-coverage:
 		-coverprofile=../coverage/backend.out -count=1 ./...
 	cd backend && go run github.com/boumenot/gocover-cobertura@v1.5.0 \
 		< ../coverage/backend.out > ../coverage/backend.xml
-	./hack/coverage-gate.sh backend
+	./ci/coverage-gate.sh backend
 
 coverage: backend-coverage

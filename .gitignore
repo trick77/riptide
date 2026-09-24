@@ -37,14 +37,9 @@ openshift/overlays/
 # Local scratch / operator-only files (real .env, ad-hoc configs, …)
 hack/*
 !hack/.gitkeep
-!hack/export-tables.sh
-!hack/truncate-tables.sh
-!hack/coverage-floors
-!hack/coverage-gate.sh
-!hack/coverage-gate.test.sh
-!hack/patch-coverage.sh
-!hack/strip-comment-lines.go
-!hack/strip-comment-lines.test.sh
+
+# Table exports from scripts/export-tables.sh: event data, never commit
+exports/
 
 # IDE
 .idea/

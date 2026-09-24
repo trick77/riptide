@@ -3,6 +3,7 @@ package parse
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -35,13 +36,58 @@ func (e *ValidationError) Error() string {
 	return "validation failed: " + strings.Join(parts, "; ")
 }
 
-// wellFormed reports whether raw is exactly one valid JSON value in valid
-// UTF-8. json.Decoder alone is too lenient: it stops after the first value
-// and so accepts `{"a":1}}`, which Postgres then refuses at the JSONB cast.
-// What JSON allows but JSONB still refuses (a \u0000 escape, a lone surrogate)
-// is caught at insert time instead; see store.IsDataError.
-func wellFormed(raw []byte) bool {
-	return utf8.Valid(raw) && json.Valid(raw)
+// jsonbSafe reports whether Postgres JSONB accepts every string escape in
+// raw, which must already be valid JSON. JSON allows two escapes JSONB
+// refuses: \u0000, and a UTF-16 surrogate that is not half of a pair. Go's
+// decoder accepts both (it substitutes U+FFFD), so without this check the
+// body would parse and then fail at insert, as a 500 on every retry.
+func jsonbSafe(raw []byte) bool {
+	inString := false
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		if !inString {
+			inString = c == '"'
+			continue
+		}
+		switch c {
+		case '"':
+			inString = false
+		case '\\':
+			i++
+			if i >= len(raw) || raw[i] != 'u' {
+				continue
+			}
+			v, ok := hex4(raw, i+1)
+			if !ok {
+				return false
+			}
+			i += 4
+			switch {
+			case v == 0:
+				return false
+			case v >= 0xDC00 && v <= 0xDFFF:
+				return false // a low surrogate with no high one before it
+			case v >= 0xD800 && v <= 0xDBFF:
+				if i+2 >= len(raw) || raw[i+1] != '\\' || raw[i+2] != 'u' {
+					return false
+				}
+				low, ok := hex4(raw, i+3)
+				if !ok || low < 0xDC00 || low > 0xDFFF {
+					return false
+				}
+				i += 6
+			}
+		}
+	}
+	return true
+}
+
+func hex4(raw []byte, at int) (int, bool) {
+	if at+4 > len(raw) {
+		return 0, false
+	}
+	v, err := strconv.ParseUint(string(raw[at:at+4]), 16, 32)
+	return int(v), err == nil
 }
 
 // object is a decoded JSON body plus the errors found reading it.
@@ -52,12 +98,27 @@ type object struct {
 
 // decodeObject reads a body that must be one JSON object.
 func decodeObject(raw []byte) (*object, error) {
-	if !wellFormed(raw) {
-		return nil, &ValidationError{Errors: []FieldError{{Type: "json_invalid", Loc: []string{"body"}, Msg: "JSON decode error"}}}
+	invalid := func(msg string) error {
+		return &ValidationError{Errors: []FieldError{{Type: "json_invalid", Loc: []string{"body"}, Msg: msg}}}
 	}
+	notObject := &ValidationError{Errors: []FieldError{{Type: "model_attributes_type", Loc: []string{"body"}, Msg: "Input should be a valid dictionary or object"}}}
+	if !utf8.Valid(raw) {
+		return nil, invalid("JSON decode error")
+	}
+	// json.Unmarshal checks the whole input, trailing bytes included.
 	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
-		return nil, &ValidationError{Errors: []FieldError{{Type: "model_attributes_type", Loc: []string{"body"}, Msg: "Input should be a valid dictionary or object"}}}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		var typeErr *json.UnmarshalTypeError
+		if errors.As(err, &typeErr) {
+			return nil, notObject
+		}
+		return nil, invalid("JSON decode error")
+	}
+	if fields == nil {
+		return nil, notObject
+	}
+	if !jsonbSafe(raw) {
+		return nil, invalid("JSON contains \\u0000 or an unpaired surrogate escape, which Postgres JSONB cannot store")
 	}
 	return &object{fields: fields}, nil
 }
