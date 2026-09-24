@@ -3,7 +3,6 @@
 .env
 archive
 docs
-hack
 ci
 exports
 scripts

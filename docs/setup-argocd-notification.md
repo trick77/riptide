@@ -223,7 +223,7 @@ LIMIT 5;
 `team` should equal the team whose bearer was used. `environment` is the
 lowercased suffix of `destination_namespace` (after the last `-`); which
 suffix counts as "production" is configured in
-`openshift/collector/riptide.json` (`environments.production_stage`,
+`config/riptide.json` (`environments.production_stage`,
 default `prod`). To keep the database small, list non-prod stage suffixes
 in `environments.ignored_stages` (e.g. `["dev", "entw", "syst", "stage"]`)
 — matching events return `202 {"status":"ignored"}` and are dropped before

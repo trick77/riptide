@@ -37,11 +37,11 @@ services:
       RIPTIDE_TEAM_KEYS_PATH: /etc/riptide-collector/team-keys.json
       RIPTIDE_LOG_LEVEL: INFO
     volumes:
-      - ./openshift/collector/riptide.json:/etc/riptide-collector/riptide.json:ro
+      - ./config/riptide.json:/etc/riptide-collector/riptide.json:ro
       # Dev-only raw keys, one per team and source (team-keys.json stores the
       # raw tokens, not hashes). Production mounts its own file from a Secret.
       # Use them as `Authorization: Bearer <key>`, e.g. the checkout jenkins
       # key against /webhooks/pipeline.
-      - ./openshift/collector/team-keys.json:/etc/riptide-collector/team-keys.json:ro
+      - ./config/team-keys.json:/etc/riptide-collector/team-keys.json:ro
     ports:
       - "8000:8000"

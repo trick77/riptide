@@ -77,7 +77,7 @@ the data captured in v1.
 > `argocd_events.environment` is the lowercased suffix of the destination
 > namespace (after the last `-`) — e.g. `payments-prod` → `prod`,
 > `checkout-intg` → `intg`. Which suffix counts as "production" is configured
-> in `openshift/collector/riptide.json` (`environments.production_stage`,
+> in `config/riptide.json` (`environments.production_stage`,
 > default `prod`). The literal `'prod'` in the example queries below is a
 > placeholder — substitute whatever your `production_stage` is set to. Rows
 > ingested before this column existed have `environment = NULL`.
@@ -203,7 +203,7 @@ events arrive pre-priced in USD.
 What riptide does **not** provide today, and the natural seam for it:
 
 - **Currency.** Add a `unit_cost` config (per-runner $/sec) in
-  `openshift/collector/riptide.json`, or pull real per-namespace cost from
+  `config/riptide.json`, or pull real per-namespace cost from
   **OpenCost / Kubecost** if it already runs in the cluster, and join on the
   per-source identifier (`pipeline_name`, `app_name`). Either is a follow-up
   component, not a v1 collector concern.
@@ -241,7 +241,7 @@ The collector is one Go binary, `riptide`, in [`backend/`](backend/):
 | Command | Does |
 | --- | --- |
 | `riptide serve` (default) | the collector |
-| `riptide migrate` | applies pending schema migrations and exits (the init container) |
+| `riptide migrate` | applies pending schema migrations and exits; run it before `serve` |
 | `riptide onboard-bitbucket` | creates, updates or removes the riptide webhook on Bitbucket repos |
 | `riptide check-onboarding` | lists which repos, pipelines and apps reported recently |
 | `riptide version` | prints the version |
@@ -255,9 +255,7 @@ The previous Python implementation is kept for reference in
 
 **Postgres is provisioned externally — riptide-collector is not responsible for
 the database lifecycle.** Connection URL (with credentials) is supplied at
-runtime via the `RIPTIDE_DB_URL` env var, which on OpenShift is sourced from
-the `riptide-collector-secrets` Secret created from
-`openshift/secret.env.example`.
+runtime via the `RIPTIDE_DB_URL` env var.
 
 The local `compose.yaml` runs a throwaway Postgres for development only —
 production deployments connect to the cluster's existing Postgres.
@@ -330,4 +328,3 @@ See [`docs/`](docs/) for setup and onboarding guides:
 - [Change notes](docs/change-notes.md) — what to do on the operator side after a deploy
 - [Lead time for changes (DORA)](docs/dora-lead-time.md)
 - [Correlating deploys back to commits](docs/correlating-deploys-to-commits.md)
-- [OpenShift manifests](openshift/README.md)

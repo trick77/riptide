@@ -25,18 +25,9 @@ coverage.xml
 node_modules/
 
 # Local secrets — never commit
-openshift/**/secret.env
-!openshift/**/secret.env.example
-
-# Local OpenShift overlays — never commit
-openshift/overlays/
 .env
 .env.*
 !.env.example
-
-# Local scratch / operator-only files (real .env, ad-hoc configs, …)
-hack/*
-!hack/.gitkeep
 
 # Table exports from scripts/export-tables.sh: event data, never commit
 exports/
