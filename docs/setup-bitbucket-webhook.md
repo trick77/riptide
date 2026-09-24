@@ -5,14 +5,14 @@ riptide-collector. Authentication is **HMAC-SHA256** via BBS's native
 `configuration.secret`; the team's secret is the `bitbucket` entry in
 `team-keys.json`.
 
-The canonical path is `scripts/bitbucket_onboarding.py` — manual UI
-configuration is the fallback only. The script provisions the webhook
+The canonical path is `riptide onboard-bitbucket` — manual UI
+configuration is the fallback only. The command provisions the webhook
 with HMAC, the correct event set, and the correct per-team URL
 (`/webhooks/bitbucket/{team}`).
 
 ## Prerequisites
 
-- Repo admin access to the Bitbucket repository (or use the script with a
+- Repo admin access to the Bitbucket repository (or use the command with a
   REPO_ADMIN token).
 - The riptide-collector base URL for your environment (ask the platform
   team).
@@ -22,15 +22,20 @@ with HMAC, the correct event set, and the correct per-team URL
   This secret authenticates Bitbucket webhooks **only** — the team's
   ArgoCD / Jenkins bearers are separate values.
 
-## Path A: onboarding script (recommended)
+## Path A: `riptide onboard-bitbucket` (recommended)
+
+Get the binary with `make build` (writes `bin/riptide`), `go run
+./backend/cmd/riptide` from a checkout, or run the collector image, whose
+entrypoint is the same binary:
+`docker run --rm -v "$PWD:/work" -w /work -e BITBUCKET_TOKEN -e RIPTIDE_TEAM_KEY ghcr.io/trick77/riptide-collector onboard-bitbucket team-config.json`.
 
 ```bash
 export BITBUCKET_TOKEN=...     # repo-admin REST token
 export RIPTIDE_TEAM_KEY=...    # team's `bitbucket` HMAC secret
-uv run python scripts/bitbucket_onboarding.py path/to/team-config.json
+riptide onboard-bitbucket path/to/team-config.json
 ```
 
-The script is idempotent (rerun after edits), supports `--dry-run` and
+The command is idempotent (rerun after edits), supports `--dry-run` and
 `--remove`, and surfaces every diff before applying. See
 `scripts/bitbucket-onboarding.example.json` for the input shape.
 

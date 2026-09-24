@@ -1,3 +1,8 @@
+# Go build output and coverage reports
+bin/
+coverage/
+
+# Python bytecode (archive/)
 __pycache__/
 *.py[cod]
 *$py.class
@@ -32,8 +37,9 @@ openshift/overlays/
 # Local scratch / operator-only files (real .env, ad-hoc configs, …)
 hack/*
 !hack/.gitkeep
-!hack/export-tables.sh
-!hack/truncate-tables.sh
+
+# Table exports from scripts/export-tables.sh: event data, never commit
+exports/
 
 # IDE
 .idea/

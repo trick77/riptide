@@ -1,0 +1,42 @@
+{
+  "eventKey": "pr:declined",
+  "date": "2026-04-28T10:00:00+0000",
+  "actor": {
+    "name": "alice",
+    "displayName": "Alice Example",
+    "slug": "alice"
+  },
+  "pullRequest": {
+    "id": 42,
+    "title": "ABC-123: Add payment retry",
+    "description": "Fixes ABC-123 and PROJ-9",
+    "state": "DECLINED",
+    "closed": true,
+    "closedDate": 1777370400000,
+    "fromRef": {
+      "id": "refs/heads/feature/ABC-123-retries",
+      "displayId": "feature/ABC-123-retries",
+      "latestCommit": "abc1234567890abc1234567890abc1234567890a",
+      "repository": {
+        "slug": "payments-api",
+        "project": {"key": "ACME"}
+      }
+    },
+    "toRef": {
+      "id": "refs/heads/master",
+      "displayId": "master",
+      "latestCommit": "0000000000000000000000000000000000000000",
+      "repository": {
+        "slug": "payments-api",
+        "project": {"key": "ACME"}
+      }
+    },
+    "author": {
+      "user": {
+        "name": "alice",
+        "displayName": "Alice Example",
+        "slug": "alice"
+      }
+    }
+  }
+}
