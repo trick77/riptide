@@ -28,7 +28,7 @@ ALL_TABLES=(
   pipeline_events
   argocd_events
   noergler_events
-  alembic_version
+  schema_migrations
 )
 
 OUTDIR="$REPO_ROOT/hack"
@@ -141,7 +141,7 @@ One CSV per table: header row, UTF-8, RFC4180 quoting ("" for a literal quote).
 No binary dump format, so any Postgres version reads it back, as do pandas,
 DuckDB and Excel.
 
-Reload into an empty, migrated riptide DB (schema from `alembic upgrade head`
+Reload into an empty, migrated riptide DB (schema from `riptide migrate`
 or from schema.sql), one table at a time:
 
   psql "$RIPTIDE_DB_URL" -c "\copy bitbucket_events from 'bitbucket_events.csv' with (format csv, header true)"

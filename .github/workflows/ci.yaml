@@ -1,66 +1,127 @@
-name: ci
+name: CI
 
+# Tests run on pull requests. Master does not run tests: it builds and pushes
+# the image (see release.yaml).
 on:
-  push:
-    branches: [master]
   pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-      - name: Install deps
-        run: uv sync --frozen
-      - name: ruff lint
-        run: uv run ruff check .
-      - name: ruff format
-        run: uv run ruff format --check .
-      - name: basedpyright
-        run: uv run basedpyright
-
   test:
+    name: Build + test
     runs-on: ubuntu-latest
+    # The Go module lives in backend/; hack/ and coverage/ stay at the root, so
+    # the gate steps below override this back to the repo root.
+    defaults:
+      run:
+        working-directory: backend
     services:
       postgres:
         image: postgres:17-alpine
         env:
           POSTGRES_USER: riptide
           POSTGRES_PASSWORD: riptide
-          POSTGRES_DB: riptide
-        ports:
-          - 5432:5432
+          POSTGRES_DB: riptide_test
+        ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U riptide"
-          --health-interval 2s
-          --health-timeout 2s
-          --health-retries 20
-    env:
-      # Bypass testcontainers and run tests against the service Postgres above.
-      RIPTIDE_TEST_DB_URL: postgresql+asyncpg://riptide:riptide@localhost:5432/riptide
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      # fetch-depth: 0 - hack/patch-coverage.sh diffs the branch against the PR
+      # base, which needs real history.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # go-version-file rather than a pinned version, so the toolchain cannot
+      # drift from what the module itself declares.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+          cache-dependency-path: backend/go.sum
+      # hack/patch-coverage.sh drives diff-cover.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install diff-cover==10.3.0
+        working-directory: .
+      # From the repo root, so hack/*.go is covered too: it is outside the
+      # module, so `go vet ./...` in backend/ never sees it.
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::These files are not gofmt'd. Run: gofmt -w ."
+            echo "$unformatted"
+            exit 1
+          fi
+        working-directory: .
+      - run: go vet ./...
+      - run: go build ./...
+      - run: mkdir -p ../coverage
+      # The race detector needs cgo; this is independent of the image's
+      # CGO_ENABLED=0 build. -coverpkg=./... attributes coverage across
+      # package boundaries: the api tests drive parse, config and store.
+      - run: go test -race -covermode=atomic -coverpkg=./... -coverprofile=../coverage/backend.out ./...
+        env:
+          CGO_ENABLED: "1"
+          RIPTIDE_TEST_DSN: postgres://riptide:riptide@localhost:5432/riptide_test?sslmode=disable
+      # Go exposes no line metric, so the line percentage comes from a
+      # Cobertura conversion of the profile, which also merges the duplicate
+      # blocks -coverpkg emits.
+      - run: go run github.com/boumenot/gocover-cobertura@v1.5.0 < ../coverage/backend.out > ../coverage/backend.xml
+      # coverage-gate.test.sh also exercises the gate's ui branch, which parses
+      # a vitest summary with node. The gate scripts are kept identical across
+      # the repo family, so node has to be on PATH for the self-test.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+      # The gate scripts are load-bearing, so they are tested BEFORE they are
+      # trusted.
+      - run: ./hack/coverage-gate.test.sh
+        working-directory: .
+      - run: ./hack/strip-comment-lines.test.sh
+        working-directory: .
+      - run: ./hack/coverage-gate.sh backend
+        working-directory: .
+      - name: Backend patch coverage
+        run: ./hack/patch-coverage.sh "origin/${{ github.base_ref || 'master' }}"
+        working-directory: .
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/setup-go@v7
         with:
-          enable-cache: true
-      - name: Install deps
-        run: uv sync --frozen
-      - name: pytest --cov
-        run: uv run pytest --cov --cov-report=xml --cov-report=term
-      - name: Upload coverage
-        if: always()
-        uses: actions/upload-artifact@v7
+          go-version-file: backend/go.mod
+          cache: false
+      - uses: golangci/golangci-lint-action@v9
         with:
-          name: coverage-xml
-          path: coverage.xml
-          if-no-files-found: ignore
+          version: v2.13
+          working-directory: backend
+
+  openapi-lint:
+    name: OpenAPI lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      # Pinned: an upstream release must not be able to fail CI on a spec
+      # nobody touched.
+      - name: Lint the API contract
+        run: npx --yes @stoplight/spectral-cli@6.15.0 lint backend/api/openapi.yaml --ruleset .spectral.yaml

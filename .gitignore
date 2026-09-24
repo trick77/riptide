@@ -1,3 +1,8 @@
+# Go build output and coverage reports
+bin/
+coverage/
+
+# Python bytecode (archive/)
 __pycache__/
 *.py[cod]
 *$py.class
@@ -34,6 +39,12 @@ hack/*
 !hack/.gitkeep
 !hack/export-tables.sh
 !hack/truncate-tables.sh
+!hack/coverage-floors
+!hack/coverage-gate.sh
+!hack/coverage-gate.test.sh
+!hack/patch-coverage.sh
+!hack/strip-comment-lines.go
+!hack/strip-comment-lines.test.sh
 
 # IDE
 .idea/

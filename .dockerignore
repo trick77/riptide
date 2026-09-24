@@ -1,0 +1,10 @@
+.git
+.claude
+.env
+archive
+docs
+hack
+scripts
+*.md
+*.png
+coverage

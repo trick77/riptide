@@ -1,8 +1,25 @@
 name: Release
 
 on:
-  push:
-    branches: [master]
+  # Held for the Go cutover, as noergler did: the merge must not auto-cut a
+  # patch release and move :latest onto the first Go image. The first Go
+  # release is dispatched by hand as a minor bump; restore the trigger below
+  # afterwards.
+  #
+  # push:
+  #   branches: [master]
+  #   # Only cut a release when something that ships changed. workflow_dispatch
+  #   # is unfiltered, so a release can always be forced by hand.
+  #   paths-ignore:
+  #     - "docs/**"
+  #     - "archive/**"
+  #     - ".github/**"
+  #     - "**/*.md"
+  #     - ".gitignore"
+  #     - "compose.yaml"
+  #     - "hack/**"
+  #     - "scripts/**"
+  #     - "openshift/**"
   workflow_dispatch:
     inputs:
       bump:
@@ -33,8 +50,7 @@ jobs:
           BUMP="${{ github.event.inputs.bump || 'patch' }}"
           LATEST=$(git tag --list '[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)
           if [ -z "$LATEST" ]; then
-            # First release starts at 0.1.0 (skip 0.0.x) — matches the
-            # version stamped in pyproject.toml.
+            # First release starts at 0.1.0 (skip 0.0.x).
             NEXT="0.1.0"; MA=0; MI=1; PA=0
             FROM="<none>"
           else
@@ -72,10 +88,11 @@ jobs:
       - uses: docker/build-push-action@v7
         with:
           context: .
-          file: ./Containerfile
+          file: ./backend/Containerfile
           push: true
           build-args: |
             RIPTIDE_VERSION=${{ steps.ver.outputs.version }}
+            RIPTIDE_COMMIT=${{ steps.ver.outputs.short }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/riptide-collector:${{ steps.ver.outputs.version }}
             ghcr.io/${{ github.repository_owner }}/riptide-collector:${{ steps.ver.outputs.major }}.${{ steps.ver.outputs.minor }}
