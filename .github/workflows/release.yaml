@@ -1,26 +1,21 @@
 name: Release
 
 on:
-  # Held for the Go cutover, as noergler did: the merge must not auto-cut a
-  # patch release and move :latest onto the first Go image. The first Go
-  # release is dispatched by hand as a minor bump; restore the trigger below
-  # afterwards.
-  #
-  # push:
-  #   branches: [master]
-  #   # Only cut a release when something that ships changed. workflow_dispatch
-  #   # is unfiltered, so a release can always be forced by hand.
-  #   paths-ignore:
-  #     - "docs/**"
-  #     - "archive/**"
-  #     - ".github/**"
-  #     - "**/*.md"
-  #     - ".gitignore"
-  #     - "compose.yaml"
-  #     - "hack/**"
-  #     - "ci/**"
-  #     - "scripts/**"
-  #     - "openshift/**"
+  push:
+    branches: [master]
+    # Only cut a release when something that ships changed. workflow_dispatch
+    # is unfiltered, so a release can always be forced by hand.
+    paths-ignore:
+      - "docs/**"
+      - "archive/**"
+      - ".github/**"
+      - "**/*.md"
+      - ".gitignore"
+      - "compose.yaml"
+      - "hack/**"
+      - "ci/**"
+      - "scripts/**"
+      - "openshift/**"
   workflow_dispatch:
     inputs:
       bump:
