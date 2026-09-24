@@ -15,7 +15,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
     -ldflags "-s -w -X github.com/trick77/riptide/internal/buildinfo.version=${RIPTIDE_VERSION} -X github.com/trick77/riptide/internal/buildinfo.commit=${RIPTIDE_COMMIT}" \
     -o /out/riptide ./cmd/riptide
 
-FROM alpine:3.23
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates \
     && mkdir -p /etc/riptide-collector
 COPY --from=builder /out/riptide /riptide
