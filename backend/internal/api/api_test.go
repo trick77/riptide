@@ -427,3 +427,67 @@ func TestPersistFailureIs500AndLogged(t *testing.T) {
 		t.Errorf("persist_failed = %d, processed = %d", n, len(h.processed(t)))
 	}
 }
+
+// JSON that JSONB refuses (a \u0000 escape) is the body's fault: a 422 on the
+// owned contracts, a skip for Bitbucket, never a 500 that retries forever.
+func TestUnstorablePayload(t *testing.T) {
+	h := newHarness(t, nil)
+	h.mem.fail = errUnstorable
+	w := h.bearer(t, "/webhooks/pipeline", checkoutJenkins, fixture(t, "pipeline_jenkins_completed.json"))
+	expectStatus(t, w, http.StatusUnprocessableEntity)
+	if !strings.Contains(w.Body.String(), `"loc":["body"]`) || !strings.Contains(w.Body.String(), "unsupported Unicode escape sequence") {
+		t.Errorf("body = %s", w.Body.String())
+	}
+	w = h.bitbucket(t, "checkout", checkoutBitbucket, "pr:merged", fixture(t, "bitbucket_pr_merged.json"), map[string]string{"X-Request-Id": "nul-1"})
+	expectStatus(t, w, http.StatusAccepted)
+	expectBody(t, w, `{"status":"ignored","reason":"payload not storable as JSONB"}`)
+	ev := h.processed(t)
+	if len(ev) != 1 || ev[0]["outcome"] != "skipped" || ev[0]["delivery_id"] != "nul-1" {
+		t.Errorf("lines = %v", ev)
+	}
+	if !strings.Contains(h.logs.String(), `"msg":"webhook_payload_unstorable"`) || strings.Contains(h.logs.String(), "webhook_persist_failed") {
+		t.Errorf("logs = %s", h.logs.String())
+	}
+}
+
+// The Splunk wire contract, over every source: each webhook_processed line
+// carries the fixed keys and none of the Splunk-reserved ones, and every
+// line of any kind starts with the timestamp.
+func TestWebhookProcessedSchema(t *testing.T) {
+	h := newHarness(t, nil)
+	h.bearer(t, "/webhooks/pipeline", checkoutJenkins, fixture(t, "pipeline_jenkins_completed.json"))
+	h.bearer(t, "/webhooks/argocd", checkoutArgoCD, fixture(t, "argocd_synced.json"))
+	h.bearer(t, "/webhooks/noergler", checkoutNoergler, fixture(t, "noergler_pr_completed_merged.json"))
+	h.bitbucket(t, "checkout", checkoutBitbucket, "pr:merged", fixture(t, "bitbucket_pr_merged.json"), nil)
+	h.bitbucket(t, "checkout", checkoutBitbucket, "diagnostics:ping", `{}`, nil)
+	ignored := fixture(t, "argocd_synced.json")
+	ignored["destination_namespace"] = "payments-api-syst"
+	h.bearer(t, "/webhooks/argocd", checkoutArgoCD, ignored)
+
+	events := h.processed(t)
+	if len(events) != 6 {
+		t.Fatalf("webhook_processed lines = %d", len(events))
+	}
+	sources := map[any]bool{}
+	for _, ev := range events {
+		sources[ev["webhook_source"]] = true
+		for _, k := range []string{"msg", "log_level", "timestamp", "service", "version", "env", "webhook_source", "outcome", "delivery_id", "team"} {
+			if v, ok := ev[k]; !ok || v == nil || v == "" {
+				t.Errorf("missing %s in %v", k, ev)
+			}
+		}
+		for _, k := range []string{"source", "event", "level", "host", "index", "sourcetype", "noergler_event_type"} {
+			if _, ok := ev[k]; ok {
+				t.Errorf("reserved %s leaked in %v", k, ev)
+			}
+		}
+	}
+	if len(sources) != 4 {
+		t.Errorf("sources = %v", sources)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(h.logs.String()), "\n") {
+		if !strings.HasPrefix(line, `{"timestamp":"`) {
+			t.Errorf("line does not start with timestamp: %s", line)
+		}
+	}
+}

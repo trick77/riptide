@@ -81,11 +81,17 @@ func (p *probeWriter) Write(b []byte) (int, error) {
 }
 
 // WriteJSON renders a JSON body with the status. Bodies are structs, not
-// maps, so the key order is stable.
+// maps, so the key order is stable; no trailing newline, byte for byte what
+// the Python collector sent.
 func WriteJSON(w http.ResponseWriter, status int, body any) {
+	b, err := json.Marshal(body)
+	if err != nil {
+		b = []byte(`{"detail":"Internal Server Error"}`)
+		status = http.StatusInternalServerError
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	_, _ = w.Write(b)
 }
 
 // Detail is FastAPI's error shape.

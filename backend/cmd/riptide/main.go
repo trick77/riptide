@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -48,8 +49,11 @@ func main() {
 		os.Exit(onboarding.Main(args, os.Stdout, os.Stderr))
 	case "check-onboarding":
 		err = withSettings(func(s settings.Settings, log *slog.Logger) error {
-			return checkOnboarding(s, log, os.Stdout)
+			return checkOnboarding(s, log, args, os.Stdout)
 		})
+		if errors.Is(err, errSourcesMissing) {
+			os.Exit(1)
+		}
 	case "-h", "--help", "help":
 		fmt.Fprintln(os.Stderr, usage)
 	default:

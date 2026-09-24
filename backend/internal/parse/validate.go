@@ -35,11 +35,13 @@ func (e *ValidationError) Error() string {
 	return "validation failed: " + strings.Join(parts, "; ")
 }
 
-// Storable reports whether Postgres can keep raw in a JSONB column: it must
-// be valid UTF-8 and must not escape the NUL character. Anything else would
-// fail at insert time as a 500.
-func Storable(raw []byte) bool {
-	return utf8.Valid(raw) && !bytes.Contains(raw, []byte(`\u0000`))
+// wellFormed reports whether raw is exactly one valid JSON value in valid
+// UTF-8. json.Decoder alone is too lenient: it stops after the first value
+// and so accepts `{"a":1}}`, which Postgres then refuses at the JSONB cast.
+// What JSON allows but JSONB still refuses (a \u0000 escape, a lone surrogate)
+// is caught at insert time instead; see store.IsDataError.
+func wellFormed(raw []byte) bool {
+	return utf8.Valid(raw) && json.Valid(raw)
 }
 
 // object is a decoded JSON body plus the errors found reading it.
@@ -50,16 +52,11 @@ type object struct {
 
 // decodeObject reads a body that must be one JSON object.
 func decodeObject(raw []byte) (*object, error) {
-	if !Storable(raw) {
-		return nil, &ValidationError{Errors: []FieldError{{Type: "json_invalid", Loc: []string{"body"}, Msg: "Body must be UTF-8 and free of \\u0000, which Postgres JSONB cannot store"}}}
-	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	var v json.RawMessage
-	if err := dec.Decode(&v); err != nil || dec.More() {
+	if !wellFormed(raw) {
 		return nil, &ValidationError{Errors: []FieldError{{Type: "json_invalid", Loc: []string{"body"}, Msg: "JSON decode error"}}}
 	}
 	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(v, &fields); err != nil || fields == nil {
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
 		return nil, &ValidationError{Errors: []FieldError{{Type: "model_attributes_type", Loc: []string{"body"}, Msg: "Input should be a valid dictionary or object"}}}
 	}
 	return &object{fields: fields}, nil
@@ -180,7 +177,7 @@ func (o *object) literal(field, def string, choices ...string) string {
 	if !typed {
 		return ""
 	}
-	if !ok || (s == "" && def != "") {
+	if !ok || (strings.TrimSpace(s) == "" && def != "") {
 		if def == "" {
 			o.missing(field)
 		}

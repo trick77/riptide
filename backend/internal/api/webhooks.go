@@ -6,6 +6,7 @@ import (
 	"github.com/trick77/riptide/internal/config"
 	"github.com/trick77/riptide/internal/httpapi"
 	"github.com/trick77/riptide/internal/parse"
+	"github.com/trick77/riptide/internal/store"
 )
 
 // Every webhook request that authenticates and parses emits exactly one
@@ -54,6 +55,16 @@ func (d Deps) bitbucket(w http.ResponseWriter, r *http.Request) {
 	automation := cfg.DetectAutomationSource(deref(draft.Author), deref(draft.AuthorDisplayName),
 		deref(draft.BranchName), draft.AuthorIsServiceAccount)
 	inserted, err := d.Store.InsertBitbucket(r.Context(), draft, automation, team)
+	if err != nil && store.IsDataError(err) {
+		// Bitbucket's shapes are not ours to reject: acknowledge and skip, so
+		// it does not redeliver a body that can never be stored.
+		const reason = "payload not storable as JSONB"
+		d.Log.InfoContext(r.Context(), "webhook_processed",
+			"webhook_source", "bitbucket", "outcome", "skipped", "reason", reason, "error", err.Error(),
+			"delivery_id", draft.DeliveryID, "event_type", draft.EventType, "repo", draft.RepoFullName, "team", team)
+		httpapi.WriteJSON(w, http.StatusAccepted, statusReasonBody{Status: "ignored", Reason: reason})
+		return
+	}
 	if err != nil {
 		d.persistFailed(w, r, "bitbucket", draft.DeliveryID, team, err)
 		return

@@ -67,6 +67,15 @@ func TestPipelineFields(t *testing.T) {
 			t.Errorf("draft = %+v", d)
 		}
 	})
+	t.Run("whitespace kind is the default", func(t *testing.T) {
+		b := base()
+		b["actor_handle"] = "ci"
+		b["actor_account_kind"] = "  "
+		d, err := Pipeline(encode(t, b))
+		if err != nil || str(d.ActorAccountKind) != "service" {
+			t.Errorf("kind = %s, %v", str(d.ActorAccountKind), err)
+		}
+	})
 	t.Run("declared kind kept", func(t *testing.T) {
 		b := base()
 		b["actor_handle"] = "renovate"
@@ -158,7 +167,9 @@ func TestPipelineFields(t *testing.T) {
 		expectInvalid(t, err, "body", "model_attributes_type")
 		_, err = Pipeline([]byte(`{bad`))
 		expectInvalid(t, err, "body", "json_invalid")
-		_, err = Pipeline([]byte(`{"a":"\u0000"}`))
+		_, err = Pipeline([]byte(`{"source":"x"}}`))
+		expectInvalid(t, err, "body", "json_invalid")
+		_, err = Pipeline([]byte("{\"source\":\"\xff\"}"))
 		expectInvalid(t, err, "body", "json_invalid")
 	})
 }

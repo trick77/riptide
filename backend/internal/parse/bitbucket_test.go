@@ -405,9 +405,10 @@ func TestUnusableBodiesAreSkipped(t *testing.T) {
 		{"whitespace", "  \n", "empty payload"},
 		{"not json", "{nope", "non-json payload"},
 		{"trailing garbage", `{} {}`, "non-json payload"},
+		// json.Decoder alone accepts this; Postgres would not.
+		{"trailing brace", `{"a": 1}}`, "non-json payload"},
 		{"array", `["not", "an", "object"]`, "non-object payload"},
-		{"NUL escape", `{"a": "\u0000"}`, "payload not storable as JSONB"},
-		{"invalid UTF-8", "{\"a\": \"\xff\"}", "payload not storable as JSONB"},
+		{"invalid UTF-8", "{\"a\": \"\xff\"}", "non-json payload"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			d, s := Bitbucket([]byte(c.body), BitbucketHeaders{EventKey: "pr:merged", RequestID: "rid"}, fixedNow)

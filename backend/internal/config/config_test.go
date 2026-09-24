@@ -391,3 +391,49 @@ func TestReloadExtraKeysWarn(t *testing.T) {
 		t.Errorf("logs = %s", logs.String())
 	}
 }
+
+// A config waiting for keys the kubelet has not mounted yet is the normal
+// rollout order: it is reported once, not on every tick, and applies as soon
+// as the keys arrive.
+func TestReloadReportsEachFailureOnce(t *testing.T) {
+	rt, cfgPath, keysPath, logs := newRuntime(t)
+	write(t, cfgPath, strings.Replace(validConfig, `"teams": [`, `"teams": [{"name": "team-y", "group_email": "y@example.com"},`, 1))
+	for i := 0; i < 3; i++ {
+		rt.Reload()
+	}
+	if rt.ConfigReloadFailures() != 1 || strings.Count(logs.String(), "config_reload_failed") != 1 {
+		t.Fatalf("failures = %d, logs = %s", rt.ConfigReloadFailures(), logs.String())
+	}
+	write(t, keysPath, `{"checkout": {"argocd": "a"}, "platform": {"argocd": "p"}, "team-y": {"argocd": "y"}}`)
+	rt.Reload()
+	if _, ok := rt.Config().Teams["team-y"]; !ok {
+		t.Fatal("config not applied once its keys arrived")
+	}
+	// A broken file, then a different broken file: two reports.
+	write(t, keysPath, `nope`)
+	rt.Reload()
+	rt.Reload()
+	write(t, keysPath, `still nope`)
+	rt.Reload()
+	if rt.KeysReloadFailures() != 2 {
+		t.Errorf("keys failures = %d", rt.KeysReloadFailures())
+	}
+	// Reverting to the live version clears it, so the same breakage later is
+	// reported again.
+	write(t, keysPath, `{"checkout": {"argocd": "a"}, "platform": {"argocd": "p"}, "team-y": {"argocd": "y"}}`)
+	rt.Reload()
+	write(t, keysPath, `still nope`)
+	rt.Reload()
+	if rt.KeysReloadFailures() != 3 {
+		t.Errorf("keys failures after revert = %d", rt.KeysReloadFailures())
+	}
+	// A missing file is a stat failure, also reported once.
+	if err := os.Remove(cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	rt.Reload()
+	rt.Reload()
+	if strings.Count(logs.String(), "config_stat_failed") != 1 {
+		t.Errorf("logs = %s", logs.String())
+	}
+}

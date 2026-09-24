@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/trick77/riptide/internal/config"
 	"github.com/trick77/riptide/internal/httpapi"
@@ -268,3 +271,6 @@ func expectBody(t *testing.T, w *httptest.ResponseRecorder, want string) {
 }
 
 var errBoom = errors.New("boom")
+
+// errUnstorable is what Postgres answers for a JSONB value it refuses.
+var errUnstorable = fmt.Errorf("insert: %w", &pgconn.PgError{Code: "22P05", Message: "unsupported Unicode escape sequence"})
