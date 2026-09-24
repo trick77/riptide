@@ -18,9 +18,8 @@ database, before switching) and reload them with the `\copy` commands in the
 archive's README.txt. The counter columns are `BIGINT` now; the CSVs load
 unchanged.
 
-**The init container runs `riptide migrate`.** `openshift/collector/deployment.yaml`
-does this; an overlay that patches the old `alembic` init container needs the
-same change. The app refuses to start while a migration is pending.
+**Run `riptide migrate` before `serve`.** A deployment whose init container
+still runs the old `alembic` migration needs this change. The app refuses to start while a migration is pending.
 
 **`RIPTIDE_DB_URL` may stay as it is.** The `postgresql+asyncpg://` form is
 still accepted (the driver suffix is stripped); plain `postgres://` is the form

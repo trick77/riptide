@@ -7,7 +7,7 @@ already present on each event, and cross-source joins use `commit_sha`.
 
 ## 1. Add the team to the config
 
-Open a PR editing [`openshift/collector/riptide.json`](../openshift/collector/riptide.json):
+Open a PR editing [`config/riptide.json`](../config/riptide.json):
 
 ```json
 {
@@ -17,12 +17,8 @@ Open a PR editing [`openshift/collector/riptide.json`](../openshift/collector/ri
 ```
 
 CI validates the file (uniqueness, email shape) — fix any errors before
-merging. After merge the running collector pod re-reads the file within
-~30 seconds (or restart for instant pickup):
-
-```bash
-oc -n $NS rollout restart deployment/riptide-collector
-```
+merging. After merge the running collector re-reads the file within
+~30 seconds (or restart it for instant pickup).
 
 ## 2. Generate the team's per-source secrets
 
@@ -52,25 +48,14 @@ echo "  jenkins=$JK"
 }
 ```
 
-Push it to the cluster and roll the Secret:
-
-```bash
-# fetch current, edit, push back
-oc -n $NS get secret riptide-collector-team-keys \
-   -o jsonpath='{.data.team-keys\.json}' | base64 -d > /tmp/team-keys.json
-# edit /tmp/team-keys.json — add the team's nested entry
-oc -n $NS create secret generic riptide-collector-team-keys \
-   --from-file=team-keys.json=/tmp/team-keys.json \
-   --dry-run=client -o yaml | oc apply -f -
-shred -u /tmp/team-keys.json
-oc -n $NS rollout restart deployment/riptide-collector
-```
+Add the entry to the production `team-keys.json` (the file at
+`RIPTIDE_TEAM_KEYS_PATH`, never committed).
 
 Every team in the config must have an entry in `team-keys.json` (with at
-least one source) or the pod fails to start. Source names outside the
+least one source) or the collector fails to start. Source names outside the
 allowed set (`bitbucket`, `argocd`, `jenkins`, `noergler`) are rejected
-at load time. The hot-reloader picks up edits automatically; the restart
-above is just to surface validation errors immediately.
+at load time. The hot-reloader picks up edits automatically; a rejected
+reload is logged and the previous keys stay in force.
 
 ## 3. Wire the team's webhooks
 

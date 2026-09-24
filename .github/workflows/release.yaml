@@ -12,10 +12,8 @@ on:
       - "**/*.md"
       - ".gitignore"
       - "compose.yaml"
-      - "hack/**"
       - "ci/**"
       - "scripts/**"
-      - "openshift/**"
   workflow_dispatch:
     inputs:
       bump:
