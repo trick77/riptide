@@ -27,9 +27,11 @@ spec:
       securityContext:
         runAsNonRoot: true
       initContainers:
-        - name: alembic
+        # Applies pending schema migrations and exits. `serve` never migrates;
+        # it refuses to start while a migration is pending.
+        - name: migrate
           image: riptide-collector:latest
-          command: ["alembic", "upgrade", "head"]
+          args: ["migrate"]
           envFrom:
             - configMapRef:
                 name: riptide-collector-app

@@ -2,7 +2,7 @@
 # Empty the riptide event tables. Destructive and not undoable.
 #
 # Truncates the append-only event tables and restarts their id sequences.
-# `alembic_version` is never touched — wiping it would strand the schema
+# `schema_migrations` is never touched — wiping it would strand the schema
 # between migrations. The schema itself is left in place, so the collector
 # keeps ingesting into empty tables; no migration re-run is needed.
 #
@@ -26,7 +26,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# alembic_version is deliberately absent: it is schema state, not event data.
+# schema_migrations is deliberately absent: it is schema state, not event data.
 ALL_TABLES=(
   bitbucket_events
   pipeline_events
@@ -132,4 +132,4 @@ echo "truncated: ${PRESENT[*]}"
 for t in "${PRESENT[@]}"; do
   printf '  %-20s %10s rows\n' "$t" "$("${PSQL[@]}" -Atc "select count(*) from public.$t")"
 done
-echo "alembic_version left untouched ($("${PSQL[@]}" -Atc 'select version_num from alembic_version'))"
+echo "schema_migrations left untouched (latest: $("${PSQL[@]}" -Atc 'select max(name) from schema_migrations'))"

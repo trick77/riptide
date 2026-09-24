@@ -7,6 +7,53 @@ repository.
 Real account handles, hostnames and tokens belong in the mounted
 `riptide.json` / team-keys Secret, never in this file: the repository is public.
 
+## 2026-09-24 — the collector is now Go
+
+**Point the collector at a new, empty database.** The Go collector keeps its
+own migration history (`schema_migrations`) and does not read the Alembic one;
+its first migration creates the whole schema and fails on a database that
+already has the tables. History restarts, as it did for noergler. To keep the
+old rows, export them first with `hack/export-tables.sh` (against the old
+database, before switching) and reload them with the `\copy` commands in the
+archive's README.txt. The counter columns are `BIGINT` now; the CSVs load
+unchanged.
+
+**The init container runs `riptide migrate`.** `openshift/collector/deployment.yaml`
+does this; an overlay that patches the old `alembic` init container needs the
+same change. The app refuses to start while a migration is pending.
+
+**`RIPTIDE_DB_URL` may stay as it is.** The `postgresql+asyncpg://` form is
+still accepted (the driver suffix is stripped); plain `postgres://` is the form
+to use going forward. Add `?sslmode=disable` only where the database has no TLS.
+
+**Release by hand once.** The push trigger in `release.yaml` is commented out
+so the merge does not cut a patch release onto `:latest`. Dispatch the Release
+workflow with `minor`, check the image, then restore the trigger.
+
+Behaviour that changed on the wire, all of it fixes:
+
+- Bitbucket deliveries use `X-Request-Id` (what Bitbucket Data Center sends)
+  as the delivery id. Without it the id is derived from the body, so two
+  different events no longer collapse into one. `X-Hook-UUID`, which names the
+  webhook rather than the delivery, is no longer used.
+- Bitbucket's "Test connection" ping, empty bodies and non-JSON bodies are
+  answered `202 ignored` and logged as `outcome=skipped`, not stored.
+- Jira keys in branch names (`feature/ABC-123-...`) are found. They were
+  missed because the branch was lowercased first.
+- Argo CD's `finished_at: ""` for a running sync is accepted as absent instead
+  of a 422 that dropped the event. `""` counts as absent for every optional
+  field of the owned contracts, `status` included.
+- `payload` holds the request body as received for every source; for
+  pipeline, Argo CD and noergler it used to be the validated model.
+- Config and team keys reload every `RIPTIDE_CONFIG_RELOAD_SECONDS` (30),
+  whichever endpoint is busy; before, Argo CD only saw a changed
+  `ignored_stages` after a Bitbucket delivery. A reload that leaves a
+  configured team without keys, or gives two teams the same key, is rejected
+  and logged.
+- Bodies over 1 MiB (10 MiB for Bitbucket) get a 413; numbers too large for
+  their column get a 422 instead of a 500; `/ready`'s 503 no longer echoes the
+  database error.
+
 ## 2026-09-08 — bot and service-account detection
 
 **Add the accounts nobody declares to the production `riptide.json`.**

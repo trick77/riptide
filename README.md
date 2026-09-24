@@ -230,11 +230,26 @@ against `argocd_events.payload->'images'` — as described in
 ## Quickstart (local)
 
 ```bash
-uv sync
-podman-compose up   # boots Postgres + runs migrations + starts the app on :8000
+docker compose up   # boots Postgres + runs `riptide migrate` + starts the app on :8000
 ```
 
-Open http://localhost:8000/docs for Swagger UI.
+Open http://localhost:8000/docs for Swagger UI; the contract itself is
+`/openapi.yaml` ([`backend/api/openapi.yaml`](backend/api/openapi.yaml)).
+
+The collector is one Go binary, `riptide`, in [`backend/`](backend/):
+
+| Command | Does |
+| --- | --- |
+| `riptide serve` (default) | the collector |
+| `riptide migrate` | applies pending schema migrations and exits (the init container) |
+| `riptide onboard-bitbucket` | creates, updates or removes the riptide webhook on Bitbucket repos |
+| `riptide check-onboarding` | lists which repos, pipelines and apps reported recently |
+| `riptide version` | prints the version |
+
+Tests need a Postgres: `docker compose up -d db`, then
+`RIPTIDE_TEST_DSN='postgres://riptide:riptide@localhost:5432/riptide?sslmode=disable' make test`.
+The previous Python implementation is kept for reference in
+[`archive/`](archive/).
 
 ## Database
 
@@ -284,8 +299,8 @@ owns both keys.
 **Bitbucket is HMAC-only.** BBS DC's REST API silently drops
 `credentials.password` on POST/PUT (verified empirically — UI Save works,
 REST doesn't), so Basic auth via REST is unusable. HMAC via
-`configuration.secret` round-trips fine. The `scripts/bitbucket_onboarding.py`
-script provisions HMAC; team identity comes from the URL path.
+`configuration.secret` round-trips fine. The `riptide onboard-bitbucket`
+command provisions HMAC; team identity comes from the URL path.
 
 **Gotcha — Kubernetes Secret reads are base64-wrapped**. `oc get secret X
 -o jsonpath='{.data.Y}'` returns the wrapped form. Always pipe through
