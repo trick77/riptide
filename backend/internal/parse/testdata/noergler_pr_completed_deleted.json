@@ -1,0 +1,19 @@
+{
+  "event_type": "pr_completed",
+  "outcome": "deleted",
+  "pr_key": "PROJ/payments-api#44",
+  "repo": "acme/payments-api",
+  "source_commit_sha": "deadbeef1234567890abc1234567890abc123456",
+  "lines_added": 0,
+  "lines_removed": 0,
+  "files_changed": 0,
+  "total_runs": 1,
+  "total_prompt_tokens": 1500,
+  "total_completion_tokens": 60,
+  "total_elapsed_ms": 1700,
+  "total_findings_count": 0,
+  "total_cost_usd": "0.015000",
+  "models_used": ["gpt-4o-2024-08-06"],
+  "first_review_at": "2026-05-01T08:00:00Z",
+  "closed_at": "2026-05-01T08:05:00Z"
+}

@@ -1,0 +1,34 @@
+# Built with the REPO ROOT as context, not backend/, the same as noergler:
+# `docker build -f backend/Containerfile .`. Hence the backend/ prefix on
+# every source path here.
+
+FROM golang:1.26-alpine AS builder
+WORKDIR /build
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+COPY backend/ ./
+ARG RIPTIDE_VERSION=dev
+ARG RIPTIDE_COMMIT=
+# Static binary, no cgo: the runtime image needs nothing besides it and the
+# CA bundle.
+RUN CGO_ENABLED=0 go build -trimpath \
+    -ldflags "-s -w -X github.com/trick77/riptide/internal/buildinfo.version=${RIPTIDE_VERSION} -X github.com/trick77/riptide/internal/buildinfo.commit=${RIPTIDE_COMMIT}" \
+    -o /out/riptide ./cmd/riptide
+
+FROM alpine:3.23
+RUN apk add --no-cache ca-certificates \
+    && mkdir -p /etc/riptide-collector
+COPY --from=builder /out/riptide /riptide
+# OpenShift runs the pod under a random UID in group 0; the manifests never
+# pin one. 1001 is only the default for a plain `docker run`.
+USER 1001
+ARG RIPTIDE_VERSION=dev
+ENV RIPTIDE_VERSION=${RIPTIDE_VERSION}
+# Soft heap ceiling under the pod's 512Mi limit: the runtime collects harder
+# as it approaches this. Raise it together with the limit.
+ENV GOMEMLIMIT=400MiB
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -qO- "http://localhost:8000/health" >/dev/null || exit 1
+ENTRYPOINT ["/riptide"]
+CMD ["serve"]

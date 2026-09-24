@@ -1,0 +1,501 @@
+openapi: 3.1.0
+
+info:
+  title: riptide-collector webhook API
+  # The CONTRACT's version, not the binary's. The two move independently:
+  # a release that changes no route leaves this alone.
+  version: 1.0.0
+  description: |
+    DevOps delivery-metrics ingestion. Senders post raw events from Bitbucket
+    Data Center, CI pipelines (Jenkins, Tekton, ...), Argo CD and noergler;
+    riptide stores them append-only in Postgres. Metrics are computed on read.
+
+    ## Authentication
+
+    Every sender authenticates as its team, and the team on every stored row
+    is the caller's team, never a field of the payload.
+
+    - `/webhooks/pipeline`, `/webhooks/argocd`, `/webhooks/noergler` and
+      `/auth/ping` take the team's source-specific key as a bearer token. A key
+      authenticates only its own source: an `argocd` key cannot post to
+      `/webhooks/pipeline`. `/auth/ping` accepts any of the team's keys.
+    - `/webhooks/bitbucket/{team}` is HMAC-signed by Bitbucket with the team's
+      `bitbucket` key (`X-Hub-Signature: sha256=<hex>`).
+
+    ## Idempotency
+
+    Every event has a delivery id, and a redelivery of the same id is
+    acknowledged with `202 accepted` and not stored twice.
+
+    ## Validation
+
+    The pipeline, Argo CD and noergler contracts are strict: an invalid body is
+    a `422`. An optional field sent as `""` is treated as absent. Bitbucket
+    bodies are read permissively; a delivery riptide does not store is
+    answered `202 ignored` with the reason.
+
+servers:
+  - url: /
+    description: This riptide-collector instance.
+
+tags:
+  - name: webhooks
+    description: Event sinks.
+  - name: health
+    description: Probes and sender self-checks.
+
+paths:
+  /webhooks/bitbucket/{team}:
+    post:
+      tags: [webhooks]
+      operationId: bitbucketWebhook
+      summary: Bitbucket Data Center webhook sink (HMAC-authenticated)
+      description: |
+        Bitbucket signs each delivery with the team's `bitbucket` key; the team
+        is the path segment. The body is read permissively and stored as
+        received, with the join identifiers extracted and lowercased.
+      security: [{ bitbucketSignature: [] }]
+      parameters:
+        - name: team
+          in: path
+          required: true
+          description: The team whose `bitbucket` key signs the delivery.
+          schema: { type: string, minLength: 1 }
+        - name: X-Event-Key
+          in: header
+          required: false
+          description: Bitbucket's event key, e.g. `pr:merged`, `repo:refs_changed`.
+          schema: { type: string }
+        - name: X-Request-Id
+          in: header
+          required: false
+          description: |
+            Bitbucket's per-delivery id, used as the delivery id.
+            `X-Request-UUID` is accepted as well. Without either, the delivery
+            id is derived from the event key and the body.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: The Bitbucket Data Center webhook body, stored as received.
+      responses:
+        "202":
+          description: |
+            Accepted (stored, or a redelivery of a stored event), or ignored:
+            not a JSON object, the "Test connection" ping, a `pr:modified`
+            that is not a draft-to-ready flip, or a push with no branch change.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /webhooks/pipeline:
+    post:
+      tags: [webhooks]
+      operationId: pipelineWebhook
+      summary: CI pipeline webhook sink (Jenkins, Tekton, ...)
+      description: |
+        Every CI lands here, told apart by `source`. Authenticated with the
+        team's `jenkins` key. The delivery id is
+        `source#pipeline_name#run_id#phase`.
+      security: [{ teamKey: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PipelineEvent" }
+      responses:
+        "202":
+          description: Accepted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /webhooks/argocd:
+    post:
+      tags: [webhooks]
+      operationId: argocdWebhook
+      summary: Argo CD notification sink
+      description: |
+        Authenticated with the team's `argocd` key. A deploy to a stage listed
+        in the config's `environments.ignored_stages` is answered
+        `202 ignored` and not stored.
+      security: [{ teamKey: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ArgoCDEvent" }
+      responses:
+        "202":
+          description: Accepted, or ignored for an ignored stage.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /webhooks/noergler:
+    post:
+      tags: [webhooks]
+      operationId: noerglerWebhook
+      summary: Noergler PR-review sink (per-PR rollup and reviewer precision)
+      description: |
+        Authenticated with the team's `noergler` key. Unknown fields are a
+        `422`. Delivery ids: `pr_completed#<pr_key>#<outcome>` and
+        `feedback#<finding_id>#<verdict>`.
+      security: [{ teamKey: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/NoerglerPrCompleted"
+                - $ref: "#/components/schemas/NoerglerFeedback"
+              discriminator:
+                propertyName: event_type
+                mapping:
+                  pr_completed: "#/components/schemas/NoerglerPrCompleted"
+                  feedback: "#/components/schemas/NoerglerFeedback"
+      responses:
+        "202":
+          description: Accepted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /auth/ping:
+    get:
+      tags: [health]
+      operationId: authPing
+      summary: Authenticated reachability check for senders
+      description: |
+        Senders call it at startup so a wrong key fails fast. Any of the
+        team's keys authenticates; the answer names the team.
+      security: [{ teamKey: [] }]
+      responses:
+        "200":
+          description: The key is valid.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, team]
+                additionalProperties: false
+                properties:
+                  status: { type: string, const: ok }
+                  team: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /health:
+    get:
+      tags: [health]
+      operationId: health
+      summary: Liveness probe
+      description: 200 while the process is up. Unauthenticated; not for senders.
+      security: []
+      responses:
+        "200":
+          description: The process is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                additionalProperties: false
+                properties:
+                  status: { type: string, const: ok }
+
+  /ready:
+    get:
+      tags: [health]
+      operationId: ready
+      summary: Readiness probe
+      description: 503 while the database is unreachable.
+      security: []
+      responses:
+        "200":
+          description: Ready.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, teams, team_keys, config_reload_failures, team_keys_reload_failures]
+                additionalProperties: false
+                properties:
+                  status: { type: string, const: ok }
+                  teams: { type: integer, description: Teams in the live config. }
+                  team_keys: { type: integer, description: Teams in the live key file. }
+                  config_reload_failures: { type: integer }
+                  team_keys_reload_failures: { type: integer }
+        "503":
+          description: The database is unreachable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /openapi.yaml:
+    get:
+      tags: [health]
+      operationId: openapiSpec
+      summary: This document
+      description: The contract as embedded in the running binary.
+      security: []
+      responses:
+        "200":
+          description: The OpenAPI document.
+          content:
+            application/yaml:
+              schema: { type: string }
+        "304":
+          description: Not modified since the ETag sent in If-None-Match.
+
+  /docs:
+    get:
+      tags: [health]
+      operationId: docs
+      summary: Swagger UI for this document
+      description: Loads Swagger UI from a CDN and points it at /openapi.yaml.
+      security: []
+      responses:
+        "200":
+          description: The page.
+          content:
+            text/html:
+              schema: { type: string }
+
+components:
+  securitySchemes:
+    teamKey:
+      type: http
+      scheme: bearer
+      description: The team's key for this source, from team-keys.json.
+    bitbucketSignature:
+      type: apiKey
+      in: header
+      name: X-Hub-Signature
+      description: "`sha256=<hex>` HMAC of the body with the team's `bitbucket` key."
+
+  responses:
+    Unauthorized:
+      description: Missing, malformed or invalid credentials.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    PayloadTooLarge:
+      description: The body exceeds the limit (1 MiB; 10 MiB for Bitbucket).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ServerError:
+      description: The event could not be stored. Retry; the retry dedupes.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unprocessable:
+      description: The body failed validation. Every failing field is listed.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ValidationError" }
+
+  schemas:
+    Error:
+      type: object
+      required: [detail]
+      additionalProperties: false
+      properties:
+        detail: { type: string }
+
+    ValidationError:
+      type: object
+      required: [detail]
+      additionalProperties: false
+      properties:
+        detail:
+          type: array
+          items:
+            type: object
+            required: [type, loc, msg]
+            additionalProperties: false
+            properties:
+              type: { type: string, description: "e.g. missing, string_too_short, extra_forbidden" }
+              loc:
+                type: array
+                items: { type: string }
+                description: '`["body"]` or `["body", "<field>"]`.'
+              msg: { type: string }
+
+    WebhookResult:
+      type: object
+      required: [status]
+      additionalProperties: false
+      properties:
+        status: { type: string, enum: [accepted, ignored] }
+        reason: { type: string, description: Why a Bitbucket delivery was not stored. }
+
+    Timestamp:
+      description: |
+        ISO 8601; without an offset it is taken as UTC. Unix epoch seconds
+        (milliseconds above 2e10) are accepted as well.
+      oneOf:
+        - type: string
+        - type: number
+
+    AccountKind:
+      type: string
+      enum: [bot, service, human]
+      description: |
+        What the reported account is: `bot` acts on its own (a review bot,
+        Renovate), `service` is a technical account a system acts through (a
+        CI user pushing merges), `human` is a person and is counted as one.
+
+    PipelineEvent:
+      type: object
+      description: Unknown fields are allowed and kept in the stored payload.
+      required: [source, pipeline_name, run_id, phase, commit_sha, started_at]
+      properties:
+        source: { type: string, minLength: 1, description: "CI system: jenkins, tekton, ..." }
+        pipeline_name: { type: string, minLength: 1, description: Jenkins job / Tekton pipeline name. }
+        run_id: { type: string, minLength: 1, description: Jenkins build number / Tekton PipelineRun name. }
+        phase: { type: string, minLength: 1, description: STARTED / COMPLETED / FINALIZED. }
+        status: { type: [string, "null"], description: SUCCESS / FAILURE / ... }
+        commit_sha: { type: string, minLength: 7, description: The App-repo commit being built. }
+        image_ref:
+          type: [string, "null"]
+          description: |
+            Full image reference the run published (`registry/path:tag`). Argo
+            CD reports the same strings, which makes deploy -> build -> commit an
+            exact join. Omit it (or send "") for runs that publish no image.
+        actor_handle:
+          type: [string, "null"]
+          description: The git-host account this CI acts through.
+        actor_account_kind:
+          $ref: "#/components/schemas/AccountKind"
+          default: service
+        started_at: { $ref: "#/components/schemas/Timestamp" }
+        finished_at:
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
+
+    ArgoCDEvent:
+      type: object
+      description: Unknown fields are allowed and kept in the stored payload.
+      required: [app_name, revision, images]
+      properties:
+        app_name: { type: string, minLength: 1 }
+        revision: { type: string, minLength: 7, description: The GitOps-repo SHA being deployed. }
+        sync_status: { type: [string, "null"] }
+        operation_phase: { type: [string, "null"], description: Succeeded / Failed / Running. }
+        started_at:
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
+        finished_at:
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
+        destination_namespace:
+          type: [string, "null"]
+          description: The namespace deployed into; its suffix after the last `-` is the environment.
+        images:
+          type: array
+          items: { type: string }
+          description: |
+            Rendered images of the synced manifests
+            (`.app.status.summary.images`), possibly empty. They match
+            `pipeline_events.image_ref` verbatim. Tags are versions: never
+            parse a commit SHA out of one.
+
+    NoerglerPrCompleted:
+      type: object
+      additionalProperties: false
+      required:
+        - event_type
+        - outcome
+        - pr_key
+        - repo
+        - source_commit_sha
+        - lines_added
+        - lines_removed
+        - files_changed
+        - total_runs
+        - total_prompt_tokens
+        - total_completion_tokens
+        - total_elapsed_ms
+        - total_findings_count
+        - models_used
+        - first_review_at
+        - closed_at
+      properties:
+        event_type: { type: string, const: pr_completed }
+        outcome:
+          type: string
+          enum: [merged, declined, deleted]
+          description: Only merged PRs reach production.
+        pr_key: { type: string, minLength: 1, description: "Bitbucket PR key, e.g. PROJ/repo#42." }
+        repo: { type: string, minLength: 1 }
+        reviewer_handle:
+          type: [string, "null"]
+          description: The git-host account the reviewer posts its comments under.
+        reviewer_account_kind:
+          $ref: "#/components/schemas/AccountKind"
+          default: bot
+        source_commit_sha: { type: string, minLength: 7 }
+        merge_commit_sha:
+          type: [string, "null"]
+          minLength: 7
+          description: Required when outcome is merged, null otherwise.
+        lines_added: { type: integer, minimum: 0 }
+        lines_removed: { type: integer, minimum: 0 }
+        files_changed: { type: integer, minimum: 0 }
+        total_runs: { type: integer, minimum: 1 }
+        total_prompt_tokens: { type: integer, minimum: 0 }
+        total_completion_tokens: { type: integer, minimum: 0 }
+        total_elapsed_ms: { type: integer, minimum: 0 }
+        total_findings_count: { type: integer, minimum: 0 }
+        total_cost_usd:
+          type: [number, string, "null"]
+          description: |
+            Aggregated review cost, below 1000000 with up to six decimals kept.
+            Omit it when the run cannot be priced; never send 0, which would
+            understate FinOps.
+        models_used:
+          type: array
+          minItems: 1
+          items: { type: string, minLength: 1 }
+        first_review_at: { $ref: "#/components/schemas/Timestamp" }
+        closed_at: { $ref: "#/components/schemas/Timestamp" }
+
+    NoerglerFeedback:
+      type: object
+      additionalProperties: false
+      required: [event_type, pr_key, finding_id, verdict, actor, occurred_at]
+      properties:
+        event_type: { type: string, const: feedback }
+        pr_key: { type: string, minLength: 1 }
+        finding_id:
+          type: string
+          minLength: 1
+          description: Stable opaque id of the finding; not normalised.
+        verdict: { type: string, enum: [disagreed, acknowledged] }
+        actor: { type: string, minLength: 1 }
+        repo: { type: [string, "null"], minLength: 1 }
+        commit_sha: { type: [string, "null"], minLength: 7 }
+        occurred_at: { $ref: "#/components/schemas/Timestamp" }
