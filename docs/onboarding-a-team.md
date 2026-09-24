@@ -78,7 +78,7 @@ Each source uses the team's source-specific secret:
 
 - **Bitbucket** → `POST /webhooks/bitbucket/{team}`, HMAC via
   `X-Hub-Signature` (BBS handles signing, secret is the team's
-  `bitbucket` key). The canonical path is the onboarder script:
+  `bitbucket` key). The canonical path is `riptide onboard-bitbucket`:
   [setup-bitbucket-webhook.md](setup-bitbucket-webhook.md).
 - **ArgoCD** → `POST /webhooks/argocd`, `Authorization: Bearer <argocd>`.
   See [setup-argocd-notification.md](setup-argocd-notification.md).
@@ -93,9 +93,10 @@ Each source uses the team's source-specific secret:
 Open a throwaway PR, merge it, let CI run, deploy to prod, then run:
 
 ```bash
-uv run python scripts/check_onboarding.py <repo-name-or-app-name-or-pipeline-name>
+RIPTIDE_DB_URL=... riptide check-onboarding --team <team> [--since 1h]
 ```
 
-The script reports whether each of the three sources has produced events for
-that identifier in the last hour. If any is missing, jump to the
+It lists every repo, pipeline and app of the team that reported in the window,
+with event counts, and exits non-zero when Bitbucket, the pipelines or Argo CD
+sent nothing at all. If any is missing, jump to the
 troubleshooting sections of the relevant setup doc.

@@ -16,11 +16,12 @@ openshift/
     ├── route.yaml
     ├── configmap-app.yaml      # non-secret env (log level, config path, team-keys path)
     ├── riptide.json    # in-repo sample config (teams + automation)
-    └── team-keys.json          # in-repo dev sample (sha256 hashes); prod replaces via Secret
+    └── team-keys.json          # in-repo dev sample (raw keys); prod replaces via Secret
 ```
 
-The Deployment runs `alembic upgrade head` as an init container, so
-migrations execute before the app starts on every rollout.
+The Deployment runs `riptide migrate` as an init container, so migrations
+execute before the app starts on every rollout. The app container itself
+never migrates, and refuses to start while a migration is pending.
 
 ## Database
 
@@ -98,8 +99,8 @@ oc apply -k openshift/overlays/<your-overlay>/
 ```
 
 This applies the collector ConfigMap, Deployment, Service, and Route.
-On every rollout, the Deployment's `alembic` init container runs
-`alembic upgrade head` before the app container starts.
+On every rollout, the Deployment's `migrate` init container runs
+`riptide migrate` before the app container starts.
 
 Apply only the collector base: `oc apply -k openshift/collector/`.
 
@@ -113,7 +114,7 @@ app.
 | Container | requests cpu / mem | limits cpu / mem |
 |---|---|---|
 | `app` (Deployment) | 100m / 128Mi | 500m / 512Mi |
-| `alembic` (initContainer) | 50m / 128Mi | 300m / 256Mi |
+| `migrate` (initContainer) | 50m / 128Mi | 300m / 256Mi |
 
 ## Editing the config
 

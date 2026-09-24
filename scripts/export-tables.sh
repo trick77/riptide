@@ -5,13 +5,13 @@
 # read by any Postgres version, by pandas/DuckDB/Excel, or by hand.
 #
 # Usage:
-#   hack/export-tables.sh [-o OUTDIR] [-t TABLE]... [-k] [-n] [DB_URL]
+#   scripts/export-tables.sh [-o OUTDIR] [-t TABLE]... [-k] [-n] [DB_URL]
 #
 #   DB_URL      postgresql://user:pass@host:5432/riptide
 #               SQLAlchemy form works too, the +asyncpg / +psycopg driver
 #               suffix is stripped. Falls back to $RIPTIDE_DB_URL, then to
 #               RIPTIDE_DB_URL= in the repo .env, then to the compose default.
-#   -o OUTDIR   where the archive lands (default: hack/)
+#   -o OUTDIR   where the archive lands (default: exports/, gitignored)
 #   -t TABLE    export only this table (repeatable; default: all riptide tables)
 #   -k          keep the unpacked staging directory next to the archive
 #   -n          no compression, plain .tar
@@ -28,10 +28,10 @@ ALL_TABLES=(
   pipeline_events
   argocd_events
   noergler_events
-  alembic_version
+  schema_migrations
 )
 
-OUTDIR="$REPO_ROOT/hack"
+OUTDIR="$REPO_ROOT/exports"
 TABLES=()
 KEEP=0
 COMPRESS=1
@@ -141,7 +141,7 @@ One CSV per table: header row, UTF-8, RFC4180 quoting ("" for a literal quote).
 No binary dump format, so any Postgres version reads it back, as do pandas,
 DuckDB and Excel.
 
-Reload into an empty, migrated riptide DB (schema from `alembic upgrade head`
+Reload into an empty, migrated riptide DB (schema from `riptide migrate`
 or from schema.sql), one table at a time:
 
   psql "$RIPTIDE_DB_URL" -c "\copy bitbucket_events from 'bitbucket_events.csv' with (format csv, header true)"

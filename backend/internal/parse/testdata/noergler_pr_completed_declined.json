@@ -1,0 +1,19 @@
+{
+  "event_type": "pr_completed",
+  "outcome": "declined",
+  "pr_key": "PROJ/payments-api#43",
+  "repo": "acme/payments-api",
+  "source_commit_sha": "f00ba1234567890abc1234567890abc123456789",
+  "lines_added": 40,
+  "lines_removed": 5,
+  "files_changed": 2,
+  "total_runs": 1,
+  "total_prompt_tokens": 4200,
+  "total_completion_tokens": 180,
+  "total_elapsed_ms": 3100,
+  "total_findings_count": 2,
+  "total_cost_usd": "0.042000",
+  "models_used": ["gpt-4o-2024-08-06"],
+  "first_review_at": "2026-04-30T09:10:00Z",
+  "closed_at": "2026-04-30T09:25:00Z"
+}
