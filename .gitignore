@@ -40,3 +40,6 @@ exports/
 
 # Claude Code worktrees
 .claude/
+
+# Local git worktrees
+.agents/worktrees/
