@@ -55,8 +55,9 @@ func TestMigrateIsIdempotentAndSchemaCurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n int
-	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 1 {
-		t.Fatalf("schema_migrations rows = %d, %v", n, err)
+	files, _ := migrationFS.ReadDir("migrations")
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != len(files) {
+		t.Fatalf("schema_migrations rows = %d, want %d, %v", n, len(files), err)
 	}
 	if _, err := s.pool.Exec(ctx, `DELETE FROM schema_migrations`); err != nil {
 		t.Fatal(err)
@@ -80,6 +81,8 @@ func TestCountersAreBigint(t *testing.T) {
 	rows, err := pool.Query(context.Background(), `
 		SELECT table_name || '.' || column_name, data_type FROM information_schema.columns
 		WHERE table_schema = current_schema()
+		  AND table_name IN (SELECT table_name FROM information_schema.tables
+		                      WHERE table_schema = current_schema() AND table_type = 'BASE TABLE')
 		  AND column_name IN ('pr_id','lines_added','lines_removed','files_changed','total_runs',
 		                      'prompt_tokens','completion_tokens','elapsed_ms','findings_count')`)
 	if err != nil {
@@ -103,6 +106,38 @@ func TestCountersAreBigint(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// A reopened PR emits again at its next terminal outcome, and each rollup is
+// cumulative. Summed over noergler_events, declined-then-merged counted the
+// declined spend twice; the view keeps only the newest row per PR.
+func TestNoerglerPRRollupsKeepTheNewestPerPR(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	t0 := time.Date(2026, 4, 28, 10, 0, 0, 0, time.UTC)
+	rollup := func(key, outcome, cost string, at time.Time) {
+		t.Helper()
+		d := &parse.NoerglerDraft{
+			DeliveryID: "pr_completed#" + key + "#" + outcome, EventType: "pr_completed", PRKey: key,
+			Outcome: ptr(outcome), CostUSD: ptr(cost), OccurredAt: at, Payload: []byte(`{}`),
+		}
+		if _, err := s.InsertNoergler(ctx, d, "checkout"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rollup("a#1", "declined", "1.000000", t0)
+	rollup("a#1", "merged", "1.500000", t0.Add(time.Hour))
+	rollup("b#2", "merged", "2.000000", t0)
+
+	var rows int
+	var outcome, total string
+	if err := pool.QueryRow(ctx, `SELECT count(*), sum(cost_usd)::text,
+		max(outcome) FILTER (WHERE pr_key = 'a#1') FROM noergler_pr_rollups`).Scan(&rows, &total, &outcome); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 2 || total != "3.500000" || outcome != "merged" {
+		t.Errorf("rows = %d, total = %s, a#1 outcome = %s; want 2, 3.500000, merged", rows, total, outcome)
+	}
+}
 
 func TestInsertsDedupeOnDeliveryID(t *testing.T) {
 	s, pool := testStore(t)
