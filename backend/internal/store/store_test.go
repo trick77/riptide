@@ -110,7 +110,7 @@ func TestCountersAreBigint(t *testing.T) {
 
 func ptr[T any](v T) *T { return &v }
 
-// A reopened PR emits again at its next terminal outcome, and each rollup is
+// A declined PR reopened and merged emits again, and each rollup is
 // cumulative. Summed over noergler_events, declined-then-merged counted the
 // declined spend twice; the view keeps only the newest row per PR.
 func TestNoerglerPRRollupsKeepTheNewestPerPR(t *testing.T) {

@@ -1,15 +1,14 @@
 -- noergler_pr_rollups: the newest pr_completed row per pr_key. A rollup is
--- cumulative over the PR's life, and a reopened PR emits again at its next
--- terminal outcome (declined, reopened, merged lands two rows). Summed over
+-- cumulative over the PR's life, and a declined PR that is reopened and
+-- merged emits again (two rows: declined, then merged). Summed over
 -- noergler_events, the earlier row's spend counted twice. Plain view: the
 -- raw rows stay append-only and nothing needs refreshing.
 --
 -- Newest by occurred_at (the sender's emit time), then by id for a tie, so a
 -- delayed older rollup cannot win by arriving last. Per pr_key, not per team:
 -- the newest rollup already carries the PR's whole spend.
--- Known gap: declined, reopened, declined again repeats the delivery id
--- (pr_completed#<pr_key>#declined), so the second rollup is deduped and the
--- spend between the two declines is missing here.
+-- Known gap: a PR declined (or deleted) again after a reopen sends no second
+-- rollup, so the spend after the first decline is missing here.
 --
 -- Columns are listed, not *: a column added to noergler_events later is a
 -- deliberate CREATE OR REPLACE here, not a silent omission.

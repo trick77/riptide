@@ -263,8 +263,8 @@ func parsePRCompleted(o *object, raw []byte) (*NoerglerDraft, error) {
 	}
 	d.OccurredAt = closed
 	// One rollup per terminal outcome, redelivered on retries. The key
-	// includes the outcome so a PR reopened after a decline lands its merged
-	// (or deleted) rollup as a second row; noergler_pr_rollups reads the
+	// includes the outcome so a PR reopened after a decline and merged lands
+	// its merged rollup as a second row; noergler_pr_rollups reads the
 	// newest. pr_key is lowercased so a casing-flipped redelivery still
 	// dedupes.
 	d.DeliveryID = NoerglerPRCompleted + "#" + d.PRKey + "#" + outcome

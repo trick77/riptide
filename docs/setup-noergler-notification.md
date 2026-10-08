@@ -8,7 +8,7 @@ lifecycle — PR open/merge/close already comes in via Bitbucket):
 
 | Event | When | Carries |
 |---|---|---|
-| `pr_completed` | When a PR reaches a terminal outcome (merged / declined / deleted); a reopened PR emits again at its next one | outcome, final diff size, aggregated token counts, elapsed time, cost, models used (finops) |
+| `pr_completed` | When a PR reaches a terminal outcome (merged / declined / deleted); a declined PR that is reopened and merged emits again | outcome, final diff size, aggregated token counts, elapsed time, cost, models used (finops) |
 | `feedback` | When a reviewer disagrees with or acknowledges a finding | finding id, verdict, actor (reviewer-precision) |
 
 Lead-time, activity, and other PR-lifecycle metrics are **not** emitted by
@@ -76,11 +76,10 @@ noergler verifies reachability and bearer validity at startup via
 
 `(pr_key, outcome)` is the idempotency key, so noergler may safely retry. A
 rollup is cumulative over the PR's life, and a declined PR that is reopened
-emits again when it closes, so one PR can have two rows (declined, then
-merged). Read spend through the `noergler_pr_rollups` view, the newest row per
-PR; summing `noergler_events` counts the earlier row twice. Declined, reopened
-and declined again repeats the key, so the second rollup is deduped and the
-spend between the two declines is missing. `total_cost_usd` may be omitted when the sender cannot price the
+and merged emits again, so one PR can have two rows (declined, then merged). Read spend through the `noergler_pr_rollups` view, the newest row per
+PR; summing `noergler_events` counts the earlier row twice. A PR declined again
+(or deleted) after a reopen sends no second rollup, so the spend after the
+first decline is missing. `total_cost_usd` may be omitted when the sender cannot price the
 run (unpriced model, gateway not reporting a cost header) — send no cost rather
 than a `0`, and never drop the whole rollup: outcome, diff size, tokens and runs
 still feed the delivery metrics, and a NULL cost makes the pricing gap visible
