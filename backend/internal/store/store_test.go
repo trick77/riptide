@@ -55,7 +55,10 @@ func TestMigrateIsIdempotentAndSchemaCurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n int
-	files, _ := migrationFS.ReadDir("migrations")
+	files, err := migrationFS.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != len(files) {
 		t.Fatalf("schema_migrations rows = %d, want %d, %v", n, len(files), err)
 	}
@@ -126,16 +129,22 @@ func TestNoerglerPRRollupsKeepTheNewestPerPR(t *testing.T) {
 	}
 	rollup("a#1", "declined", "1.000000", t0)
 	rollup("a#1", "merged", "1.500000", t0.Add(time.Hour))
+	// c#3's older, costlier rollup arrives last: newest is by emit time,
+	// not arrival order, cost or outcome name.
+	rollup("c#3", "merged", "0.500000", t0.Add(time.Hour))
+	rollup("c#3", "declined", "0.900000", t0)
 	rollup("b#2", "merged", "2.000000", t0)
 
 	var rows int
-	var outcome, total string
+	var total, outcomeA, outcomeC string
 	if err := pool.QueryRow(ctx, `SELECT count(*), sum(cost_usd)::text,
-		max(outcome) FILTER (WHERE pr_key = 'a#1') FROM noergler_pr_rollups`).Scan(&rows, &total, &outcome); err != nil {
+		min(outcome) FILTER (WHERE pr_key = 'a#1'), min(outcome) FILTER (WHERE pr_key = 'c#3')
+		FROM noergler_pr_rollups`).Scan(&rows, &total, &outcomeA, &outcomeC); err != nil {
 		t.Fatal(err)
 	}
-	if rows != 2 || total != "3.500000" || outcome != "merged" {
-		t.Errorf("rows = %d, total = %s, a#1 outcome = %s; want 2, 3.500000, merged", rows, total, outcome)
+	if rows != 3 || total != "4.000000" || outcomeA != "merged" || outcomeC != "merged" {
+		t.Errorf("rows = %d, total = %s, a#1 = %s, c#3 = %s; want 3, 4.000000, merged, merged",
+			rows, total, outcomeA, outcomeC)
 	}
 }
 
