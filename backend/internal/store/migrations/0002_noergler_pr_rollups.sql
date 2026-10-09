@@ -5,15 +5,18 @@
 -- raw rows stay append-only and nothing needs refreshing.
 --
 -- Newest by occurred_at (the sender's emit time), then by id for a tie, so a
--- delayed older rollup cannot win by arriving last. Per pr_key, not per team:
--- the newest rollup already carries the PR's whole spend.
+-- delayed older rollup cannot win by arriving last. A deleted rollup ranks
+-- below any other: a declined PR deleted later (older senders emitted both)
+-- carries 0 lines and 0 files, and would wipe the declined row's diff size.
+-- Per pr_key, not per team: the newest rollup already carries the PR's whole
+-- spend. It also moves a reopened PR's whole spend into its merge week.
 -- Known gap: a PR declined (or deleted) again after a reopen sends no second
 -- rollup, so the spend after the first decline is missing here.
 --
 -- Columns are listed, not *: a column added to noergler_events later is a
 -- deliberate CREATE OR REPLACE here, not a silent omission.
 CREATE INDEX ix_noergler_events_pr_completed_newest
-    ON noergler_events (pr_key, occurred_at DESC, id DESC)
+    ON noergler_events (pr_key, (outcome = 'deleted'), occurred_at DESC, id DESC)
     WHERE event_type = 'pr_completed';
 
 CREATE VIEW noergler_pr_rollups AS
@@ -25,4 +28,4 @@ SELECT DISTINCT ON (pr_key)
        first_review_at, reviewer_handle, reviewer_account_kind
   FROM noergler_events
  WHERE event_type = 'pr_completed'
- ORDER BY pr_key, occurred_at DESC, id DESC;
+ ORDER BY pr_key, (outcome = 'deleted'), occurred_at DESC, id DESC;

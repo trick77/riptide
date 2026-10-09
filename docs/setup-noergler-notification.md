@@ -152,7 +152,8 @@ GROUP BY 1;
 
 -- reviewer precision: 1 - disagreed findings / reported findings, last 7 days.
 -- Both sides count findings: a PR can collect several disagreements, so a
--- per-PR denominator can drive the estimate below zero.
+-- per-PR denominator can drive the estimate below zero. A reopened PR's
+-- findings count in the window of its newest rollup, so short windows wobble.
 SELECT 1.0 - (
     (SELECT COUNT(*) FROM noergler_events
       WHERE event_type = 'feedback' AND verdict = 'disagreed'

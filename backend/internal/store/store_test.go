@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -84,8 +85,6 @@ func TestCountersAreBigint(t *testing.T) {
 	rows, err := pool.Query(context.Background(), `
 		SELECT table_name || '.' || column_name, data_type FROM information_schema.columns
 		WHERE table_schema = current_schema()
-		  AND table_name IN (SELECT table_name FROM information_schema.tables
-		                      WHERE table_schema = current_schema() AND table_type = 'BASE TABLE')
 		  AND column_name IN ('pr_id','lines_added','lines_removed','files_changed','total_runs',
 		                      'prompt_tokens','completion_tokens','elapsed_ms','findings_count')`)
 	if err != nil {
@@ -103,8 +102,9 @@ func TestCountersAreBigint(t *testing.T) {
 			t.Errorf("%s is %s", col, typ)
 		}
 	}
-	if n != 12 {
-		t.Errorf("found %d counter columns, want 12", n)
+	// 12 on the tables, 8 passed through noergler_pr_rollups.
+	if n != 20 {
+		t.Errorf("found %d counter columns, want 20", n)
 	}
 }
 
@@ -119,9 +119,13 @@ func TestNoerglerPRRollupsKeepTheNewestPerPR(t *testing.T) {
 	t0 := time.Date(2026, 4, 28, 10, 0, 0, 0, time.UTC)
 	rollup := func(key, outcome, cost string, at time.Time) {
 		t.Helper()
+		lines := int64(100)
+		if outcome == "deleted" {
+			lines = 0
+		}
 		d := &parse.NoerglerDraft{
 			DeliveryID: "pr_completed#" + key + "#" + outcome, EventType: "pr_completed", PRKey: key,
-			Outcome: ptr(outcome), CostUSD: ptr(cost), OccurredAt: at, Payload: []byte(`{}`),
+			Outcome: ptr(outcome), CostUSD: ptr(cost), LinesAdded: ptr(lines), OccurredAt: at, Payload: []byte(`{}`),
 		}
 		if _, err := s.InsertNoergler(ctx, d, "checkout"); err != nil {
 			t.Fatal(err)
@@ -134,17 +138,35 @@ func TestNoerglerPRRollupsKeepTheNewestPerPR(t *testing.T) {
 	rollup("c#3", "merged", "0.500000", t0.Add(time.Hour))
 	rollup("c#3", "declined", "0.900000", t0)
 	rollup("b#2", "merged", "2.000000", t0)
+	// Same emit time: the later arrival wins.
+	rollup("d#4", "declined", "0.100000", t0)
+	rollup("d#4", "merged", "0.200000", t0)
+	// Deleted after declined carries 0 lines: the declined row keeps its size.
+	rollup("e#5", "declined", "0.300000", t0)
+	rollup("e#5", "deleted", "0.300000", t0.Add(time.Hour))
 
-	var rows int
-	var total, outcomeA, outcomeC string
-	if err := pool.QueryRow(ctx, `SELECT count(*), sum(cost_usd)::text,
-		min(outcome) FILTER (WHERE pr_key = 'a#1'), min(outcome) FILTER (WHERE pr_key = 'c#3')
-		FROM noergler_pr_rollups`).Scan(&rows, &total, &outcomeA, &outcomeC); err != nil {
+	got := map[string]string{}
+	rs, err := pool.Query(ctx, `SELECT pr_key, outcome || ' ' || cost_usd::text || ' ' || lines_added
+		FROM noergler_pr_rollups`)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if rows != 3 || total != "4.000000" || outcomeA != "merged" || outcomeC != "merged" {
-		t.Errorf("rows = %d, total = %s, a#1 = %s, c#3 = %s; want 3, 4.000000, merged, merged",
-			rows, total, outcomeA, outcomeC)
+	for rs.Next() {
+		var k, v string
+		if err := rs.Scan(&k, &v); err != nil {
+			t.Fatal(err)
+		}
+		got[k] = v
+	}
+	if err := rs.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"a#1": "merged 1.500000 100", "b#2": "merged 2.000000 100", "c#3": "merged 0.500000 100",
+		"d#4": "merged 0.200000 100", "e#5": "declined 0.300000 100",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("rollups = %v, want %v", got, want)
 	}
 }
 
