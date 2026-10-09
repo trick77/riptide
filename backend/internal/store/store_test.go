@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -55,8 +56,12 @@ func TestMigrateIsIdempotentAndSchemaCurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n int
-	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 1 {
-		t.Fatalf("schema_migrations rows = %d, %v", n, err)
+	files, err := migrationFS.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != len(files) {
+		t.Fatalf("schema_migrations rows = %d, want %d, %v", n, len(files), err)
 	}
 	if _, err := s.pool.Exec(ctx, `DELETE FROM schema_migrations`); err != nil {
 		t.Fatal(err)
@@ -97,12 +102,73 @@ func TestCountersAreBigint(t *testing.T) {
 			t.Errorf("%s is %s", col, typ)
 		}
 	}
-	if n != 12 {
-		t.Errorf("found %d counter columns, want 12", n)
+	// 12 on the tables, 8 passed through noergler_pr_rollups.
+	if n != 20 {
+		t.Errorf("found %d counter columns, want 20", n)
 	}
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// A declined PR reopened and merged emits again, and each rollup is
+// cumulative. Summed over noergler_events, declined-then-merged counted the
+// declined spend twice; the view keeps only the newest row per PR.
+func TestNoerglerPRRollupsKeepTheNewestPerPR(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	t0 := time.Date(2026, 4, 28, 10, 0, 0, 0, time.UTC)
+	rollup := func(key, outcome, cost string, at time.Time) {
+		t.Helper()
+		lines := int64(100)
+		if outcome == "deleted" {
+			lines = 0
+		}
+		d := &parse.NoerglerDraft{
+			DeliveryID: "pr_completed#" + key + "#" + outcome, EventType: "pr_completed", PRKey: key,
+			Outcome: ptr(outcome), CostUSD: ptr(cost), LinesAdded: ptr(lines), OccurredAt: at, Payload: []byte(`{}`),
+		}
+		if _, err := s.InsertNoergler(ctx, d, "checkout"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rollup("a#1", "declined", "1.000000", t0)
+	rollup("a#1", "merged", "1.500000", t0.Add(time.Hour))
+	// c#3's older, costlier rollup arrives last: newest is by emit time,
+	// not arrival order, cost or outcome name.
+	rollup("c#3", "merged", "0.500000", t0.Add(time.Hour))
+	rollup("c#3", "declined", "0.900000", t0)
+	rollup("b#2", "merged", "2.000000", t0)
+	// Same emit time: the later arrival wins.
+	rollup("d#4", "declined", "0.100000", t0)
+	rollup("d#4", "merged", "0.200000", t0)
+	// Deleted after declined carries 0 lines: the declined row keeps its size.
+	rollup("e#5", "declined", "0.300000", t0)
+	rollup("e#5", "deleted", "0.300000", t0.Add(time.Hour))
+
+	got := map[string]string{}
+	rs, err := pool.Query(ctx, `SELECT pr_key, outcome || ' ' || cost_usd::text || ' ' || lines_added
+		FROM noergler_pr_rollups`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rs.Next() {
+		var k, v string
+		if err := rs.Scan(&k, &v); err != nil {
+			t.Fatal(err)
+		}
+		got[k] = v
+	}
+	if err := rs.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"a#1": "merged 1.500000 100", "b#2": "merged 2.000000 100", "c#3": "merged 0.500000 100",
+		"d#4": "merged 0.200000 100", "e#5": "declined 0.300000 100",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("rollups = %v, want %v", got, want)
+	}
+}
 
 func TestInsertsDedupeOnDeliveryID(t *testing.T) {
 	s, pool := testStore(t)
