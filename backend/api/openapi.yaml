@@ -154,7 +154,8 @@ paths:
       description: |
         Authenticated with the team's `noergler` key. Unknown fields are a
         `422`. Delivery ids: `pr_completed#<pr_key>#<outcome>` and
-        `feedback#<finding_id>#<verdict>`.
+        `feedback#<finding_id>#<verdict>`. A declined PR that is reopened and
+        merged sends a second, cumulative `pr_completed`.
       security: [{ teamKey: [] }]
       requestBody:
         required: true

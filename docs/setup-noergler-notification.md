@@ -8,7 +8,7 @@ lifecycle — PR open/merge/close already comes in via Bitbucket):
 
 | Event | When | Carries |
 |---|---|---|
-| `pr_completed` | Once per PR, when it reaches a terminal outcome (merged / declined / deleted) | outcome, final diff size, aggregated token counts, elapsed time, cost, models used (finops) |
+| `pr_completed` | When a PR reaches a terminal outcome (merged / declined / deleted); a declined PR that is reopened and merged emits again | outcome, final diff size, aggregated token counts, elapsed time, cost, models used (finops) |
 | `feedback` | When a reviewer disagrees with or acknowledges a finding | finding id, verdict, actor (reviewer-precision) |
 
 Lead-time, activity, and other PR-lifecycle metrics are **not** emitted by
@@ -74,8 +74,12 @@ noergler verifies reachability and bearer validity at startup via
 }
 ```
 
-One rollup per PR: `(pr_key, outcome)` is the idempotency key, so noergler may
-safely retry. `total_cost_usd` may be omitted when the sender cannot price the
+`(pr_key, outcome)` is the idempotency key, so noergler may safely retry. A
+rollup is cumulative over the PR's life, and a declined PR that is reopened
+and merged emits again, so one PR can have two rows (declined, then merged). Read spend through the `noergler_pr_rollups` view, the newest row per
+PR; summing `noergler_events` counts the earlier row twice. A PR declined again
+(or deleted) after a reopen sends no second rollup, so the spend after the
+first decline is missing. `total_cost_usd` may be omitted when the sender cannot price the
 run (unpriced model, gateway not reporting a cost header) — send no cost rather
 than a `0`, and never drop the whole rollup: outcome, diff size, tokens and runs
 still feed the delivery metrics, and a NULL cost makes the pricing gap visible
@@ -127,8 +131,8 @@ Idempotency key is `(finding_id, verdict)`.
 -- per model, so cost cannot be split across a multi-model PR — this counts
 -- PRs a model took part in, not spend attributable to it.
 SELECT m AS model, COUNT(*) AS prs_involved
-FROM noergler_events, unnest(models_used) AS m
-WHERE event_type = 'pr_completed' AND created_at > now() - interval '7 days'
+FROM noergler_pr_rollups, unnest(models_used) AS m
+WHERE created_at > now() - interval '7 days'
 GROUP BY 1
 ORDER BY prs_involved DESC;
 
@@ -137,24 +141,26 @@ SELECT SUM(cost_usd) AS spend,
        SUM(prompt_tokens + completion_tokens) AS tokens,
        COUNT(*) AS prs,
        COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_prs
-FROM noergler_events
-WHERE event_type = 'pr_completed' AND created_at > now() - interval '7 days';
+FROM noergler_pr_rollups
+WHERE created_at > now() - interval '7 days';
 
 -- review spend that never shipped, last 7 days
 SELECT outcome, COUNT(*) AS prs, SUM(cost_usd) AS spend
-FROM noergler_events
-WHERE event_type = 'pr_completed' AND created_at > now() - interval '7 days'
+FROM noergler_pr_rollups
+WHERE created_at > now() - interval '7 days'
 GROUP BY 1;
 
 -- reviewer precision: 1 - disagreed findings / reported findings, last 7 days.
 -- Both sides count findings: a PR can collect several disagreements, so a
--- per-PR denominator can drive the estimate below zero.
+-- per-PR denominator can drive the estimate below zero. A reopened PR's
+-- findings count in the window of its newest rollup, so short windows wobble.
 SELECT 1.0 - (
-    COUNT(*) FILTER (WHERE event_type = 'feedback' AND verdict = 'disagreed')::numeric
-    / NULLIF(SUM(findings_count) FILTER (WHERE event_type = 'pr_completed'), 0)
-) AS precision_estimate
-FROM noergler_events
-WHERE created_at > now() - interval '7 days';
+    (SELECT COUNT(*) FROM noergler_events
+      WHERE event_type = 'feedback' AND verdict = 'disagreed'
+        AND created_at > now() - interval '7 days')::numeric
+    / NULLIF((SELECT SUM(findings_count) FROM noergler_pr_rollups
+               WHERE created_at > now() - interval '7 days'), 0)
+) AS precision_estimate;
 ```
 
 ## Troubleshooting
