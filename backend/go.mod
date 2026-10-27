@@ -3,7 +3,7 @@ module github.com/trick77/riptide
 go 1.26
 
 require (
-	github.com/getkin/kin-openapi v0.151.0
+	github.com/getkin/kin-openapi v0.152.0
 	github.com/jackc/pgx/v5 v5.11.0
 )
 
