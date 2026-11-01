@@ -2,26 +2,6 @@
 bin/
 coverage/
 
-# Python bytecode (archive/)
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-.venv/
-venv/
-env/
-build/
-dist/
-*.egg-info/
-.coverage
-.coverage.*
-htmlcov/
-coverage.xml
-.pytest_cache/
-.ruff_cache/
-.pyright/
-.uv/
 node_modules/
 
 # Local secrets — never commit
