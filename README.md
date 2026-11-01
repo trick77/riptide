@@ -248,8 +248,6 @@ The collector is one Go binary, `riptide`, in [`backend/`](backend/):
 
 Tests need a Postgres: `docker compose up -d db`, then
 `RIPTIDE_TEST_DSN='postgres://riptide:riptide@localhost:5432/riptide?sslmode=disable' make test`.
-The previous Python implementation is kept for reference in
-[`archive/`](archive/).
 
 ## Database
 

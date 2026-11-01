@@ -1,7 +1,6 @@
 .git
 .claude
 .env
-archive
 docs
 ci
 exports

@@ -2,7 +2,7 @@
 
 ## Commands
 
-The Go module is in `backend/`; `ci/` (coverage gates), `scripts/` (operator scripts: table export/truncate, onboarding examples), `config/` (sample `riptide.json` and dev `team-keys.json`), `docs/` and `archive/` are at the root. Go commands run from `backend/`, scripts and `make` from the root.
+The Go module is in `backend/`; `ci/` (coverage gates), `scripts/` (operator scripts: table export/truncate, onboarding examples), `config/` (sample `riptide.json` and dev `team-keys.json`), and `docs/` are at the root. Go commands run from `backend/`, scripts and `make` from the root.
 
 ```bash
 docker compose up -d db              # Postgres 17 on :5432 for the store/api tests
