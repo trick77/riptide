@@ -41,8 +41,8 @@ components or ad-hoc SQL.
 
 ## Reading the event tables
 
-Before writing a query, know what an event means. Two readings look obvious
-and are wrong, both measured on 3.5 months of production data:
+Before writing a query, know what an event means. Three readings look obvious
+and are wrong, all measured on production data:
 
 **`repo:refs_changed` is a ref-movement log, not developer activity.** It says
 master now points at a different commit — it does not say a person pushed. In
@@ -59,6 +59,26 @@ parsed from `branch_name`, so a push to `master` has nothing to classify and
 falls to `other`. Computed over all events it read 83 % `other`, which says
 nothing about the work: restrict it to `pr:opened` / `pr:merged` rows, where
 the source branch carries the prefix.
+
+**A PR into a GitOps repo is a release, not work.** Where stages are promoted
+by PR (a branch like `<product>_PROD_<versions>` bumping image versions in the
+infra repo), those PRs are opened and merged within minutes, mostly without an
+approval, and carry no branch prefix. In one month's data they were 146 of 265
+human PRs: blended in, PR cycle time read 10 min instead of 45, 136 PRs seemed
+merged unreviewed where the app repos had none, and the change mix was half
+`other`. They already count on the deploy side. Leave them out of every PR
+metric; the GitOps repos are the ones whose commits Argo CD deploys, so no list
+of names is needed:
+
+```sql
+-- GitOps repos: their commits are what argocd_events.revision points at.
+gitops_repos AS (
+  SELECT DISTINCT b.repo_full_name
+  FROM argocd_events a
+  JOIN bitbucket_events b ON b.commit_sha = a.revision
+)
+-- ... WHERE repo_full_name NOT IN (SELECT repo_full_name FROM gitops_repos)
+```
 
 The general rule: an event's name describes what the git host did, not who did
 it or why. Check `author` and the commit message before reading intent into a
@@ -88,7 +108,7 @@ the data captured in v1.
 |---|---|
 | **Deployment frequency** | Releases per `team` / time window in prod. A release is a successful deploy whose images differ from the same App's previous successful deploy, counted once per GitOps `revision` — see the query below. Not every sync is a release: a config change or a manual re-sync redeploys the same images (measured: a third of all intg syncs, and 7 of 8 syncs of one monitoring App), and one release reconciles every App sharing the revision (intranet + extranet), so `COUNT(*)` overcounts twice over. Report the release count next to the syncs and the first-seen deploys it was derived from, so a reader can see where the number comes from. Group by `app_name` for the per-App drill-down; drop infrastructure Apps (monitoring, bots) by name in your own report. |
 | **Lead time for changes** | Per commit, not per release: `SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY lead_time) FROM lead_time_changes WHERE environment='prod' AND NOT is_merge AND NOT author_is_service_account`. The `lead_time_changes` view maps every commit that shipped to the **first** deploy that carried it, so a release rolled out to four Apps counts each change once. Exclude merge commits and release tooling, and report bots on their own line — see [Lead time for changes (DORA)](docs/dora-lead-time.md) for why, and for the coverage limits. Group by `team` or `repo_full_name`; `change_type` is not available here, since these commits come from master pushes, which carry no branch prefix. Do **not** substitute the newest commit per release: it answers "how stale was the freshest change" and reads ~7× too fast. |
-| **PR cycle time** | `pr:merged.occurred_at − pr:opened.occurred_at` per PR, keyed by `(repo_full_name, pr_id)`: PR ids are numbered per repository, so `pr_id` alone joins unrelated PRs. A PR opened before ingestion started has no `pr:opened` and drops out. |
+| **PR cycle time** | `pr:merged.occurred_at − pr:opened.occurred_at` per PR, keyed by `(repo_full_name, pr_id)`: PR ids are numbered per repository, so `pr_id` alone joins unrelated PRs. A PR opened before ingestion started has no `pr:opened` and drops out. Exclude GitOps repos: their PRs are stage promotions (see [Reading the event tables](#reading-the-event-tables)). |
 | **Time to first review** *(DX Core 4 "code review pickup time")* | Two-part computation per PR — see the SQL block below the table. Clock-start = `COALESCE(pr:ready_for_review, pr:opened)`: PRs opened ready start at `pr:opened`; PRs opened as drafts start at the synthetic `pr:ready_for_review` (emitted by the parser when a `pr:modified` payload carries `previousDraft=true, draft=false`). Engagement = first reviewer touch (`pr:comment:added`, `pr:reviewer:approved`, `pr:reviewer:unapproved`, `pr:reviewer:needs_work`, `pr:reviewer:updated`) where `author != pr_opener AND NOT is_automated AND occurred_at >= clock-start`. The five-event reviewer union covers every touch Bitbucket DC emits (silent approvals, retracted approvals, "needs work" flips, bare reviewer-status changes); the `occurred_at >= clock-start` guard drops early-feedback comments solicited during the draft phase, which would otherwise produce negative pickup times. `NOT is_automated` strips bot comments (noergler / Renovate / etc.) — every review-time bot must be recognisable, otherwise its instant comment drives the metric toward zero. Detection matches the `automation` config block against **both** the login handle (`author`) and the display name (`author_display_name`), because a bot is often provisioned as an ordinary user account whose login says nothing. `is_automated` is decided at ingest, so rows written before a bot was recognised stay marked human: the `non_human_identities` CTE in the query below filters those at read time from the accounts senders declare (`reviewer_handle` + `reviewer_account_kind` on noergler rollups, `actor_handle` + `actor_account_kind` on pipeline events) — riptide stores the declaration, it carries no account names of its own. |
 | **Build success rate** | `pipeline_events` with `phase = 'COMPLETED'` grouped by `status`. Slice by `source` to compare Jenkins vs Tekton, by `pipeline_name` / `team` for ownership. |
 | **Build duration** | `pipeline_events.duration_seconds` (a Postgres `GENERATED ALWAYS AS (finished_at − started_at)` column). |
@@ -155,6 +175,12 @@ WITH non_human_identities AS (
   FROM pipeline_events
   WHERE actor_handle IS NOT NULL AND actor_account_kind IN ('bot', 'service')
 ),
+gitops_repos AS (
+  -- Stage-promotion PRs are releases, not work: see "Reading the event tables".
+  SELECT DISTINCT b.repo_full_name
+  FROM argocd_events a
+  JOIN bitbucket_events b ON b.commit_sha = a.revision
+),
 pickup_start AS (
   SELECT
     repo_full_name,
@@ -168,6 +194,7 @@ pickup_start AS (
     ) AS clock_start,
     MAX(author) FILTER (WHERE event_type = 'pr:opened') AS pr_opener
   FROM bitbucket_events
+  WHERE repo_full_name NOT IN (SELECT repo_full_name FROM gitops_repos)
   GROUP BY repo_full_name, pr_id
 )
 SELECT
@@ -213,9 +240,9 @@ because there's no clock-start to subtract from in the first place.
 | **PR size** | `lines_added`, `lines_removed`, `files_changed` on `noergler_pr_rollups` (one row per PR; a reopened PR has two `pr_completed` rows in `noergler_events`), joined to Bitbucket PRs on `pr_key` = `'<repo_full_name>#<pr_id>'`. The same columns exist on `bitbucket_events` but are always NULL: Bitbucket DC webhooks carry no diff stats, and fetching them would put an outbound REST call in the ingest path. Covers the repos noergler reviews. |
 | **Revert rate** | `COUNT(*) WHERE is_revert = true` over total commits — a free, weak Change-Failure-Rate proxy. |
 | **Hotfix rate** | `COUNT(*) WHERE change_type = 'hotfix'` over total deploys per window — operational-pain signal. |
-| **Change mix** | Distribution of `change_type` (feature / bugfix / hotfix / chore / refactor / docs / other) per team per week, over `pr:opened` / `pr:merged` rows only — a push to `master` has no prefix to classify and would swamp the distribution with `other`. |
+| **Change mix** | Distribution of `change_type` (feature / bugfix / hotfix / chore / refactor / docs / other) per team per week, over `pr:opened` / `pr:merged` rows only — a push to `master` has no prefix to classify and would swamp the distribution with `other`. Exclude GitOps repos: stage-promotion PRs carry no prefix either. |
 | **Tickets per deploy** | `COUNT(DISTINCT unnest(jira_keys))` per deploy — small-batch indicator. Jira keys are extracted at write time from PR title, description, branch name, and commit messages via regex `[A-Z][A-Z0-9]+-\d+`, deduplicated, GIN-indexed. |
-| **Untracked-work rate** | `COUNT(*) WHERE jira_keys = '{}'` over merged PRs — process-compliance signal. |
+| **Untracked-work rate** | `COUNT(*) WHERE jira_keys = '{}'` over merged PRs outside GitOps repos — process-compliance signal. |
 | **Per-ticket flow** | `WHERE 'ABC-1234' = ANY(jira_keys)` returns every event for a ticket across Bitbucket / pipeline / Argo (joined via commit_sha). |
 | **Human vs automated split** | `WHERE NOT is_automated` (Renovate / Dependabot / Snyk / Mend / generic-bot detection runs at write time and tags `automation_source`; an account the git host itself marks as a service account — Bitbucket DC's built-in system user, which files the default PR tasks — is tagged `service-account` with no config entry), plus the `non_human_identities` filter for accounts a sender declared. Keep `bot` and `service` apart when reading: a **bot** authors work of its own and its velocity is worth its own view, while a **service** account (a CI user pushing merges) authors nothing and should simply not appear in human activity. Default dashboards exclude both. |
 | **AI reviewer precision** *(noergler)* | `1 - count(noergler_events WHERE event_type='feedback' AND verdict='disagreed') / sum(noergler_pr_rollups.findings_count)` per repo × week — findings on both sides, since one PR can collect several disagreements. Higher = the AI review is more useful. Filter on `outcome='merged'` to score precision only on PRs that shipped. |
