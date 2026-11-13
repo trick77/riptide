@@ -5,28 +5,43 @@
 //	riptide version            print the version and exit
 //	riptide onboard-bitbucket  create, update or remove the riptide webhook on Bitbucket repos
 //	riptide check-onboarding   list which repos, pipelines and apps reported in the last hour
+//	riptide -healthcheck       probe /healthz, exit 0 on a 2xx (liveness: the container healthcheck)
+//	riptide -readycheck        probe /readyz, exit 0 on a 2xx (readiness: the database answers)
+//
+// Both probes run inside the container: kit's /healthz and /readyz answer a
+// loopback caller only and 404 anyone else, so an orchestrator's HTTP probe
+// from the node never passes. Deploy them as exec probes.
 package main
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
+	"net/http"
+	"net/netip"
 	"os"
-	"os/signal"
-	"syscall"
+	"time"
+
+	"github.com/trick77/ship/kit/httpx"
+	"github.com/trick77/ship/kit/logging"
+	"github.com/trick77/ship/kit/run"
+	"github.com/trick77/ship/kit/version"
 
 	"github.com/trick77/riptide/internal/api"
-	"github.com/trick77/riptide/internal/buildinfo"
 	"github.com/trick77/riptide/internal/config"
 	"github.com/trick77/riptide/internal/httpapi"
-	"github.com/trick77/riptide/internal/logging"
 	"github.com/trick77/riptide/internal/onboarding"
 	"github.com/trick77/riptide/internal/settings"
 	"github.com/trick77/riptide/internal/store"
 )
 
-const usage = "usage: riptide [serve|migrate|version|onboard-bitbucket|check-onboarding]"
+const usage = "usage: riptide [serve|migrate|version|onboard-bitbucket|check-onboarding|-healthcheck|-readycheck]"
+
+// serviceName is stamped on every log line: the image name, not the repo.
+const serviceName = "riptide-collector"
 
 func main() {
 	cmd := "serve"
@@ -44,7 +59,7 @@ func main() {
 	case "migrate":
 		err = withSettings(migrate)
 	case "version":
-		fmt.Println(buildinfo.Version())
+		fmt.Println(version.String())
 	case "onboard-bitbucket":
 		os.Exit(onboarding.Main(args, os.Stdout, os.Stderr))
 	case "check-onboarding":
@@ -54,6 +69,10 @@ func main() {
 		if errors.Is(err, errSourcesMissing) {
 			os.Exit(1)
 		}
+	case "-healthcheck":
+		os.Exit(probe("/healthz", os.Stderr))
+	case "-readycheck":
+		os.Exit(probe("/readyz", os.Stderr))
 	case "-h", "--help", "help":
 		fmt.Fprintln(os.Stderr, usage)
 	default:
@@ -61,7 +80,7 @@ func main() {
 		os.Exit(2)
 	}
 	if err != nil {
-		slog.Error("startup_aborted", "error", err.Error())
+		slog.Error("startup_aborted", logging.Err(err))
 		os.Exit(1)
 	}
 }
@@ -69,24 +88,93 @@ func main() {
 // withSettings loads the environment (plus ./.env) and sets up logging
 // before running fn: settings decide the log level and env.
 func withSettings(fn func(settings.Settings, *slog.Logger) error) error {
+	s, err := loadSettings()
+	if err != nil {
+		setupLog(os.Stdout, settings.Settings{Env: "dev"})
+		return err
+	}
+	return fn(s, setupLog(os.Stdout, s))
+}
+
+func loadSettings() (settings.Settings, error) {
 	lookup, err := settings.EnvLookup(".env")
 	if err != nil {
-		logging.Setup("INFO", "dev")
-		return err
+		return settings.Settings{}, err
 	}
-	s, err := settings.Load(lookup)
+	return settings.Load(lookup)
+}
+
+// setupLog installs kit's Splunk logger as slog's default, the build's
+// version on every line.
+func setupLog(w io.Writer, s settings.Settings) *slog.Logger {
+	log, err := logging.Setup(logging.Options{Level: s.SlogLevel(), Format: logging.Splunk, Writer: w, Service: serviceName, Env: s.Env})
 	if err != nil {
-		logging.Setup("INFO", "dev")
-		return err
+		panic(err) // SlogLevel returns only levels kit knows
 	}
-	return fn(s, logging.Setup(s.LogLevel, s.Env))
+	log = log.With("version", version.String())
+	slog.SetDefault(log)
+	return log
+}
+
+// probe asks one of kit's probes on the address serve binds and returns
+// the exit code: the container's exec probe in a distroless image.
+func probe(path string, stderr io.Writer) int {
+	s, err := loadSettings()
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "riptide:", err)
+		return 1
+	}
+	return healthcheck(probeURL(s.ListenAddr, path), stderr)
+}
+
+// probeTimeout outlasts /readyz's own check budget: kit's Healthcheck gives
+// up after 3s while a slow database check may take httpx.CheckTimeout (5s),
+// which would fail the probe on a 503 that never got to be sent.
+const probeTimeout = httpx.CheckTimeout + 2*time.Second
+
+// healthcheck GETs url and returns the exit code: 0 on a 2xx, 1 otherwise,
+// the reason on stderr (the runtime's health log keeps it). Redirects are
+// not followed: a probe that redirects is misrouted.
+func healthcheck(url string, stderr io.Writer) int {
+	c := http.Client{
+		Timeout:       probeTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	resp, err := c.Get(url) //nolint:gosec // the process's own listener, from its own config
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "riptide: probe:", err)
+		return 1
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		_, _ = fmt.Fprintln(stderr, "riptide: probe:", resp.Status)
+		return 1
+	}
+	return 0
+}
+
+// probeURL is the loopback URL of serve's listener. kit's probes answer a
+// loopback peer only, and httpx.LocalURL rewrites only a wildcard host: a
+// concrete BACKEND_LISTEN_ADDR IP would make the probe a remote caller and
+// get a 404. A loopback bind ([::1], localhost) is dialled as is, since it
+// does not listen on 127.0.0.1. A concrete non-loopback bind has no loopback
+// listener at all; settings.Load refuses one.
+func probeURL(listenAddr, path string) string {
+	host, port, err := net.SplitHostPort(listenAddr)
+	if err != nil {
+		return httpx.LocalURL(listenAddr, path)
+	}
+	if ip, err := netip.ParseAddr(host); (err == nil && ip.Unmap().IsLoopback()) || host == "localhost" {
+		return httpx.LocalURL(listenAddr, path)
+	}
+	return httpx.LocalURL(":"+port, path)
 }
 
 // migrate applies pending migrations and exits; it runs before serve.
 // Only the database URL is needed; the config files are not read.
 func migrate(s settings.Settings, log *slog.Logger) error {
-	log.Info("riptide-collector version: " + buildinfo.Version())
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	log.Info("riptide-collector version: " + version.String())
+	ctx, stop := run.Context(context.Background())
 	defer stop()
 	db, err := store.Open(ctx, s.DBURL, log)
 	if err != nil {
@@ -101,13 +189,13 @@ func migrate(s settings.Settings, log *slog.Logger) error {
 }
 
 func serve(s settings.Settings, log *slog.Logger) error {
-	log.Info("riptide-collector version: " + buildinfo.Version())
+	log.Info("riptide-collector version: " + version.String())
 	rt, err := config.Load(s.ConfigPath, s.TeamKeysPath, log)
 	if err != nil {
 		return err
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := run.Context(context.Background())
 	defer stop()
 
 	db, err := store.Open(ctx, s.DBURL, log)
@@ -121,7 +209,7 @@ func serve(s settings.Settings, log *slog.Logger) error {
 
 	go rt.Run(ctx, s.ReloadInterval)
 
-	srv := httpapi.New(log)
+	srv := httpapi.New(log, db.ReadyChecks()...)
 	api.Register(srv, api.Deps{Store: db, Runtime: rt, Log: log})
 
 	cfg := rt.Config()
@@ -129,7 +217,12 @@ func serve(s settings.Settings, log *slog.Logger) error {
 		"teams", len(cfg.Teams),
 		"keys", len(rt.Keys().TeamNames()),
 		"production_stage", cfg.Environments.ProductionStage)
-	if err := httpapi.Run(ctx, s.ListenAddr, srv.Handler(), log); err != nil {
+	hs := httpx.NewServer(s.ListenAddr, srv.Handler())
+	// Webhook bodies are small and arrive whole: a sender trickling one is
+	// cut off, as before kit. No SSE or downloads here for it to cut.
+	hs.ReadTimeout = 60 * time.Second
+	log.Info("listening", "addr", s.ListenAddr)
+	if err := httpx.Serve(ctx, hs, 15*time.Second); err != nil {
 		return err
 	}
 	log.Info("riptide_collector_stopped")

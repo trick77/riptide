@@ -1,4 +1,4 @@
-// Package settings reads the RIPTIDE_* environment. A `.env` file in the
+// Package settings reads the BACKEND_* environment. A `.env` file in the
 // working directory fills in variables the environment leaves unset, so
 // `go run` from a checkout works without exporting anything.
 package settings
@@ -7,10 +7,14 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"net"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/trick77/ship/kit/logging"
 )
 
 // Settings is the resolved process configuration.
@@ -41,8 +45,36 @@ const (
 	defaultTeamKeysPath = "config/team-keys.json"
 )
 
-// Load resolves the settings from lookup.
+// legacyNames are the variables riptide read before the BACKEND_* rename.
+// Senders' own RIPTIDE_* variables (RIPTIDE_TOKEN, RIPTIDE_URL, ...) were
+// never read here and are not listed.
+var legacyNames = []string{
+	"RIPTIDE_DB_URL", "RIPTIDE_CONFIG_PATH", "RIPTIDE_TEAM_KEYS_PATH", "RIPTIDE_LOG_LEVEL",
+	"RIPTIDE_ENV", "RIPTIDE_LISTEN_ADDR", "RIPTIDE_CONFIG_RELOAD_SECONDS",
+}
+
+// CheckLegacy fails when any of names is set (blank counts as unset): a
+// deployment still on the old names would otherwise start on the defaults,
+// the dev database URL among them.
+func CheckLegacy(lookup Lookup, names ...string) error {
+	var set []string
+	for _, n := range names {
+		if v, ok := lookup(n); ok && strings.TrimSpace(v) != "" {
+			set = append(set, n)
+		}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s set: riptide's RIPTIDE_* variables were renamed to BACKEND_*, suffix unchanged (see docs/change-notes.md)",
+		strings.Join(set, ", "))
+}
+
+// Load resolves the settings from lookup. A legacy RIPTIDE_* name is an error.
 func Load(lookup Lookup) (Settings, error) {
+	if err := CheckLegacy(lookup, legacyNames...); err != nil {
+		return Settings{}, err
+	}
 	get := func(key, def string) string {
 		if v, ok := lookup(key); ok && strings.TrimSpace(v) != "" {
 			return strings.TrimSpace(v)
@@ -50,20 +82,54 @@ func Load(lookup Lookup) (Settings, error) {
 		return def
 	}
 	s := Settings{
-		DBURL:        NormalizeDBURL(get("RIPTIDE_DB_URL", defaultDBURL)),
-		ConfigPath:   get("RIPTIDE_CONFIG_PATH", defaultConfigPath),
-		TeamKeysPath: get("RIPTIDE_TEAM_KEYS_PATH", defaultTeamKeysPath),
-		LogLevel:     get("RIPTIDE_LOG_LEVEL", "INFO"),
-		Env:          get("RIPTIDE_ENV", "dev"),
-		ListenAddr:   get("RIPTIDE_LISTEN_ADDR", ":8000"),
+		DBURL:        NormalizeDBURL(get("BACKEND_DB_URL", defaultDBURL)),
+		ConfigPath:   get("BACKEND_CONFIG_PATH", defaultConfigPath),
+		TeamKeysPath: get("BACKEND_TEAM_KEYS_PATH", defaultTeamKeysPath),
+		LogLevel:     get("BACKEND_LOG_LEVEL", "INFO"),
+		Env:          get("BACKEND_ENV", "dev"),
+		ListenAddr:   get("BACKEND_LISTEN_ADDR", ":8000"),
 	}
-	raw := get("RIPTIDE_CONFIG_RELOAD_SECONDS", "30")
+	if err := checkListenAddr(s.ListenAddr); err != nil {
+		return Settings{}, err
+	}
+	raw := get("BACKEND_CONFIG_RELOAD_SECONDS", "30")
 	secs, err := strconv.ParseFloat(raw, 64)
 	if err != nil || secs <= 0 || secs > 86400 {
-		return Settings{}, fmt.Errorf("RIPTIDE_CONFIG_RELOAD_SECONDS must be a number of seconds in (0, 86400], got %q", raw)
+		return Settings{}, fmt.Errorf("BACKEND_CONFIG_RELOAD_SECONDS must be a number of seconds in (0, 86400], got %q", raw)
 	}
 	s.ReloadInterval = time.Duration(secs * float64(time.Second))
 	return s, nil
+}
+
+// checkListenAddr refuses a bind with no loopback listener: the exec probes
+// (-healthcheck, -readycheck) dial loopback, the only peer kit's probes
+// answer, so on a concrete non-loopback address they could never pass.
+func checkListenAddr(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("BACKEND_LISTEN_ADDR %q: %w", addr, err)
+	}
+	if host == "" || host == "localhost" {
+		return nil
+	}
+	if ip, err := netip.ParseAddr(host); err == nil && (ip.IsUnspecified() || ip.Unmap().IsLoopback()) {
+		return nil
+	}
+	return fmt.Errorf("BACKEND_LISTEN_ADDR %q: bind a wildcard (:8000, 0.0.0.0:8000) or a loopback address; the probes dial loopback", addr)
+}
+
+// SlogLevel is LogLevel as kit/logging reads it. The Python collector's
+// CRITICAL is error, and an unknown value stays info, as it always has: kit
+// refuses one at startup, which would turn a typo in a deployed manifest
+// into a crash loop.
+func (s Settings) SlogLevel() string {
+	if strings.EqualFold(strings.TrimSpace(s.LogLevel), "critical") {
+		return "error"
+	}
+	if _, err := logging.ParseLevel(s.LogLevel); err != nil {
+		return "info"
+	}
+	return s.LogLevel
 }
 
 // NormalizeDBURL drops a SQLAlchemy `+driver` suffix from the scheme.

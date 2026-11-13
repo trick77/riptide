@@ -9,8 +9,8 @@
 #
 #   DB_URL      postgresql://user:pass@host:5432/riptide
 #               SQLAlchemy form works too, the +asyncpg / +psycopg driver
-#               suffix is stripped. Falls back to $RIPTIDE_DB_URL, then to
-#               RIPTIDE_DB_URL= in the repo .env, then to the compose default.
+#               suffix is stripped. Falls back to $BACKEND_DB_URL, then to
+#               BACKEND_DB_URL= in the repo .env, then to the compose default.
 #   -o OUTDIR   where the archive lands (default: exports/, gitignored)
 #   -t TABLE    export only this table (repeatable; default: all riptide tables)
 #   -k          keep the unpacked staging directory next to the archive
@@ -55,10 +55,22 @@ shift $(( OPTIND - 1 ))
 command -v psql >/dev/null || { echo "error: psql not found in PATH" >&2; exit 1; }
 
 # --- connection string -------------------------------------------------------
-# precedence: positional DB_URL > $RIPTIDE_DB_URL > .env > compose default
-DB_URL="${1:-${RIPTIDE_DB_URL:-}}"
+# The pre-rename name, if still set, would be ignored and the compose default
+# used instead: refuse rather than export the wrong database.
+LEGACY_DB_URL="${RIPTIDE_DB_URL:-}"
+if [ -z "$LEGACY_DB_URL" ] && [ -f "$REPO_ROOT/.env" ]; then
+  LEGACY_DB_URL="$({ grep -E '^[[:space:]]*(export[[:space:]]+)?RIPTIDE_DB_URL=' "$REPO_ROOT/.env" || true; } | tail -1 | cut -d= -f2- | sed 's/^["'"'"']//; s/["'"'"']$//')"
+fi
+if [ -n "$LEGACY_DB_URL" ]; then
+  echo "error: RIPTIDE_DB_URL is set (environment or .env): it was renamed to BACKEND_DB_URL" >&2
+  exit 1
+fi
+# precedence: positional DB_URL > $BACKEND_DB_URL > .env > compose default
+DB_URL="${1:-${BACKEND_DB_URL:-}}"
 if [ -z "$DB_URL" ] && [ -f "$REPO_ROOT/.env" ]; then
-  DB_URL="$(grep -E '^[[:space:]]*RIPTIDE_DB_URL=' "$REPO_ROOT/.env" | tail -1 | cut -d= -f2- | sed 's/^["'"'"']//; s/["'"'"']$//')"
+  # `|| true`: a .env without the line must fall through to the default, not
+  # end the script silently under set -e + pipefail.
+  DB_URL="$({ grep -E '^[[:space:]]*(export[[:space:]]+)?BACKEND_DB_URL=' "$REPO_ROOT/.env" || true; } | tail -1 | cut -d= -f2- | sed 's/^["'"'"']//; s/["'"'"']$//')"
 fi
 DB_URL="${DB_URL:-postgresql://riptide:riptide@localhost:5432/riptide}"
 # postgresql+asyncpg:// -> postgresql://   (libpq does not know the driver suffix)
@@ -67,7 +79,7 @@ DB_URL="$(printf '%s' "$DB_URL" | sed -E 's#^(postgres(ql)?)\+[a-z0-9_]+://#\1:/
 PSQL=(psql "$DB_URL" -v ON_ERROR_STOP=1 --no-psqlrc -q)
 
 "${PSQL[@]}" -Atc 'select 1' >/dev/null || {
-  echo "error: cannot connect with RIPTIDE_DB_URL" >&2; exit 1; }
+  echo "error: cannot connect with BACKEND_DB_URL" >&2; exit 1; }
 
 # --- staging dir -------------------------------------------------------------
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -75,6 +87,7 @@ NAME="riptide-export-$STAMP"
 STAGE="$OUTDIR/$NAME"
 mkdir -p "$STAGE"
 
+# shellcheck disable=SC2329 # run by the EXIT trap below, which shellcheck does not follow
 cleanup() { [ "$KEEP" -eq 1 ] || rm -rf "$STAGE"; }
 trap cleanup EXIT
 
@@ -144,13 +157,13 @@ DuckDB and Excel.
 Reload into an empty, migrated riptide DB (schema from `riptide migrate`
 or from schema.sql), one table at a time:
 
-  psql "$RIPTIDE_DB_URL" -c "\copy bitbucket_events from 'bitbucket_events.csv' with (format csv, header true)"
+  psql "$BACKEND_DB_URL" -c "\copy bitbucket_events from 'bitbucket_events.csv' with (format csv, header true)"
 
 Generated columns (bitbucket_events.is_automated) are not in the CSV; Postgres
 recomputes them. Load with the header's column list if the target table has a
 different column order:
 
-  psql "$RIPTIDE_DB_URL" -c "\copy bitbucket_events (id,delivery_id,...) from 'bitbucket_events.csv' with (format csv, header true)"
+  psql "$BACKEND_DB_URL" -c "\copy bitbucket_events (id,delivery_id,...) from 'bitbucket_events.csv' with (format csv, header true)"
 
 Fix sequences after loading explicit ids:
 

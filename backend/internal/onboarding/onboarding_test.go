@@ -311,7 +311,7 @@ func TestMainOnboardsAndRemoves(t *testing.T) {
 	f := newFake()
 	dir := t.TempDir()
 	t.Chdir(dir)
-	env := writeFile(t, dir, "secrets.env", "BITBUCKET_TOKEN=bb-token\nRIPTIDE_TEAM_KEY=\"hmac-secret\"\n")
+	env := writeFile(t, dir, "secrets.env", "BITBUCKET_TOKEN=bb-token\nBACKEND_TEAM_KEY=\"hmac-secret\"\n")
 	// The config insists on https, so the fake runs behind TLS.
 	tls := httptest.NewTLSServer(f)
 	defer tls.Close()
@@ -360,7 +360,7 @@ func TestMainUsageErrors(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	t.Setenv("BITBUCKET_TOKEN", "")
-	t.Setenv("RIPTIDE_TEAM_KEY", "")
+	t.Setenv("BACKEND_TEAM_KEY", "")
 	for _, c := range []struct {
 		args []string
 		code int
@@ -369,7 +369,7 @@ func TestMainUsageErrors(t *testing.T) {
 		{nil, 2, "config path is required"},
 		{[]string{"--bogus"}, 2, "flag provided but not defined"},
 		{[]string{"a.json", "b.json"}, 2, ""},
-		{[]string{"cfg.json"}, 2, "missing required environment variable(s): BITBUCKET_TOKEN, RIPTIDE_TEAM_KEY"},
+		{[]string{"cfg.json"}, 2, "missing required environment variable(s): BITBUCKET_TOKEN, BACKEND_TEAM_KEY"},
 		{[]string{"cfg.json", "--env-file", "nope.env"}, 2, "nope.env"},
 		{[]string{"--discover"}, 2, "--discover requires --bitbucket-url"},
 		{[]string{"--discover", "--bitbucket-url", "http://bb"}, 2, "must be an https URL"},
@@ -382,7 +382,7 @@ func TestMainUsageErrors(t *testing.T) {
 		}
 	}
 	// Secrets resolved, but the config is bad.
-	writeFile(t, dir, ".env", "BITBUCKET_TOKEN=x\nRIPTIDE_TEAM_KEY=y\n")
+	writeFile(t, dir, ".env", "BITBUCKET_TOKEN=x\nBACKEND_TEAM_KEY=y\n")
 	writeFile(t, dir, "cfg.json", `[]`)
 	if code, _, errOut := runMain("cfg.json"); code != 2 || !strings.Contains(errOut, "JSON object") {
 		t.Errorf("bad config: %d %s", code, errOut)
@@ -397,11 +397,11 @@ func TestResolveEnvPrecedence(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	t.Setenv("BITBUCKET_TOKEN", "from-env")
-	t.Setenv("RIPTIDE_TEAM_KEY", "key-from-env")
+	t.Setenv("BACKEND_TEAM_KEY", "key-from-env")
 	writeFile(t, dir, ".env", "# c\nBITBUCKET_TOKEN=from-dotenv\nnot a pair\n=x\n")
 	explicit := writeFile(t, dir, "x.env", "BITBUCKET_TOKEN='from-file'\n")
-	got, err := resolveEnv(explicit, "BITBUCKET_TOKEN", "RIPTIDE_TEAM_KEY")
-	if err != nil || got["BITBUCKET_TOKEN"] != "from-file" || got["RIPTIDE_TEAM_KEY"] != "key-from-env" {
+	got, err := resolveEnv(explicit, "BITBUCKET_TOKEN", "BACKEND_TEAM_KEY")
+	if err != nil || got["BITBUCKET_TOKEN"] != "from-file" || got["BACKEND_TEAM_KEY"] != "key-from-env" {
 		t.Errorf("explicit file: %v %v", got, err)
 	}
 	got, _ = resolveEnv("", "BITBUCKET_TOKEN")
@@ -410,5 +410,21 @@ func TestResolveEnvPrecedence(t *testing.T) {
 	}
 	if mask("abc") != "****" || mask("abcdef") != "abcd-****" {
 		t.Error("mask")
+	}
+}
+
+// The pre-rename team key name is refused, even from ./.env, while a run
+// that does not need the key (discover) is not blocked by it.
+func TestResolveEnvRefusesTheOldTeamKeyName(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("BITBUCKET_TOKEN", "tok")
+	t.Setenv("BACKEND_TEAM_KEY", "")
+	writeFile(t, dir, ".env", "RIPTIDE_TEAM_KEY=old\n")
+	if _, err := resolveEnv("", "BITBUCKET_TOKEN", "BACKEND_TEAM_KEY"); err == nil || !strings.Contains(err.Error(), "RIPTIDE_TEAM_KEY") {
+		t.Errorf("err = %v", err)
+	}
+	if _, err := resolveEnv("", "BITBUCKET_TOKEN"); err != nil {
+		t.Errorf("discover blocked: %v", err)
 	}
 }
