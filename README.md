@@ -86,7 +86,7 @@ the data captured in v1.
 
 | Metric | How it's computed |
 |---|---|
-| **Deployment frequency** | `COUNT(DISTINCT revision)` of `argocd_events` per `team` / time window where `operation_phase = 'Succeeded' AND environment = 'prod'`. Count revisions, not rows: one release reconciles every Argo App that shares the GitOps revision, so `COUNT(*)` per `app_name` overcounts releases. Group by `app_name` for the per-App drill-down. |
+| **Deployment frequency** | Releases per `team` / time window in prod. A release is a successful deploy whose images differ from the same App's previous successful deploy, counted once per GitOps `revision` — see the query below. Not every sync is a release: a config change or a manual re-sync redeploys the same images (measured: a third of all intg syncs, and 7 of 8 syncs of one monitoring App), and one release reconciles every App sharing the revision (intranet + extranet), so `COUNT(*)` overcounts twice over. Report the release count next to the syncs and the first-seen deploys it was derived from, so a reader can see where the number comes from. Group by `app_name` for the per-App drill-down; drop infrastructure Apps (monitoring, bots) by name in your own report. |
 | **Lead time for changes** | Per commit, not per release: `SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY lead_time) FROM lead_time_changes WHERE environment='prod' AND NOT is_merge AND NOT author_is_service_account`. The `lead_time_changes` view maps every commit that shipped to the **first** deploy that carried it, so a release rolled out to four Apps counts each change once. Exclude merge commits and release tooling, and report bots on their own line — see [Lead time for changes (DORA)](docs/dora-lead-time.md) for why, and for the coverage limits. Group by `team` or `repo_full_name`; `change_type` is not available here, since these commits come from master pushes, which carry no branch prefix. Do **not** substitute the newest commit per release: it answers "how stale was the freshest change" and reads ~7× too fast. |
 | **PR cycle time** | `pr:merged.occurred_at − pr:opened.occurred_at` per PR, keyed by `(repo_full_name, pr_id)`: PR ids are numbered per repository, so `pr_id` alone joins unrelated PRs. A PR opened before ingestion started has no `pr:opened` and drops out. |
 | **Time to first review** *(DX Core 4 "code review pickup time")* | Two-part computation per PR — see the SQL block below the table. Clock-start = `COALESCE(pr:ready_for_review, pr:opened)`: PRs opened ready start at `pr:opened`; PRs opened as drafts start at the synthetic `pr:ready_for_review` (emitted by the parser when a `pr:modified` payload carries `previousDraft=true, draft=false`). Engagement = first reviewer touch (`pr:comment:added`, `pr:reviewer:approved`, `pr:reviewer:unapproved`, `pr:reviewer:needs_work`, `pr:reviewer:updated`) where `author != pr_opener AND NOT is_automated AND occurred_at >= clock-start`. The five-event reviewer union covers every touch Bitbucket DC emits (silent approvals, retracted approvals, "needs work" flips, bare reviewer-status changes); the `occurred_at >= clock-start` guard drops early-feedback comments solicited during the draft phase, which would otherwise produce negative pickup times. `NOT is_automated` strips bot comments (noergler / Renovate / etc.) — every review-time bot must be recognisable, otherwise its instant comment drives the metric toward zero. Detection matches the `automation` config block against **both** the login handle (`author`) and the display name (`author_display_name`), because a bot is often provisioned as an ordinary user account whose login says nothing. `is_automated` is decided at ingest, so rows written before a bot was recognised stay marked human: the `non_human_identities` CTE in the query below filters those at read time from the accounts senders declare (`reviewer_handle` + `reviewer_account_kind` on noergler rollups, `actor_handle` + `actor_account_kind` on pipeline events) — riptide stores the declaration, it carries no account names of its own. |
@@ -94,6 +94,44 @@ the data captured in v1.
 | **Build duration** | `pipeline_events.duration_seconds` (a Postgres `GENERATED ALWAYS AS (finished_at − started_at)` column). |
 | **Deploy success rate** | `argocd_events` with `operation_phase IN ('Succeeded', 'Failed')` aggregated, filtered to `environment = 'prod'` for the prod-only view. |
 | **Deploy duration** | `argocd_events.duration_seconds` (generated column). Filter by `environment = 'prod'` for production-only timing. |
+
+#### Deployment-frequency query
+
+One row per team and week, with the three numbers a report should show side
+by side: the releases, plus the two counts they were filtered from.
+
+```sql
+WITH deploys AS (
+  SELECT team, app_name, revision, occurred_at,
+         -- Sorted: the same images in another order are not a change.
+         (SELECT array_agg(i ORDER BY i)
+            FROM jsonb_array_elements_text(payload->'images') i) AS images
+  FROM argocd_events
+  WHERE operation_phase = 'Succeeded' AND environment = 'prod'
+),
+compared AS (
+  SELECT *,
+         lag(images) OVER (PARTITION BY app_name ORDER BY occurred_at) AS previous_images,
+         row_number() OVER (PARTITION BY app_name ORDER BY occurred_at) = 1 AS first_seen
+  FROM deploys
+)
+SELECT team,
+       date_trunc('week', occurred_at) AS week,
+       -- new images against the App's previous deploy: the release count
+       count(DISTINCT revision) FILTER (WHERE NOT first_seen
+                                          AND images IS DISTINCT FROM previous_images) AS releases,
+       -- an App's first deploy in the data has nothing to compare against:
+       -- a release or a re-sync, unknown. Shown apart, never added in.
+       count(DISTINCT revision) FILTER (WHERE first_seen) AS first_seen,
+       -- every successful sync, releases or not
+       count(DISTINCT revision) AS syncs
+FROM compared
+GROUP BY team, week
+ORDER BY week;
+```
+
+`first_seen` is large only in the weeks after an App is onboarded and falls to
+zero once every App has deployed twice.
 
 #### Pickup-time query
 
