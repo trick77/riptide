@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -12,38 +13,25 @@ import (
 
 // --- probes and ping ---------------------------------------------------------
 
-func TestHealth(t *testing.T) {
+// The probes are kit's, mounted on the same mux: loopback callers only.
+func TestProbes(t *testing.T) {
 	h := newHarness(t, nil)
-	w := h.serve(newRequest(http.MethodGet, "/health", nil))
+	probe := func(path string) *httptest.ResponseRecorder {
+		r := newRequest(http.MethodGet, path, nil)
+		r.RemoteAddr = "127.0.0.1:40000"
+		return h.serve(r)
+	}
+	expectStatus(t, probe("/healthz"), http.StatusOK)
+	w := probe("/readyz")
 	expectStatus(t, w, http.StatusOK)
 	expectBody(t, w, `{"status":"ok"}`)
-}
-
-func TestReady(t *testing.T) {
-	h := newHarness(t, nil)
-	w := h.serve(newRequest(http.MethodGet, "/ready", nil))
-	expectStatus(t, w, http.StatusOK)
-	expectBody(t, w, `{"status":"ok","teams":2,"team_keys":2,"config_reload_failures":0,"team_keys_reload_failures":0}`)
 
 	h.mem.pingErr = errBoom
-	w = h.serve(newRequest(http.MethodGet, "/ready", nil))
-	expectStatus(t, w, http.StatusServiceUnavailable)
-	expectBody(t, w, `{"detail":"db unreachable"}`)
-	if !strings.Contains(h.logs.String(), `"msg":"readiness_db_unreachable"`) || !strings.Contains(h.logs.String(), "boom") {
+	expectStatus(t, probe("/readyz"), http.StatusServiceUnavailable)
+	if !strings.Contains(h.logs.String(), `"msg":"Readiness check failed"`) || !strings.Contains(h.logs.String(), "boom") {
 		t.Errorf("cause not logged: %s", h.logs.String())
 	}
-}
-
-func TestReadyCountsReloadFailures(t *testing.T) {
-	h := newHarness(t, nil)
-	if err := os.WriteFile(h.cfgPath, []byte(`[]`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	h.runtime.Reload()
-	w := h.serve(newRequest(http.MethodGet, "/ready", nil))
-	if !strings.Contains(w.Body.String(), `"config_reload_failures":1`) {
-		t.Errorf("body = %s", w.Body.String())
-	}
+	expectStatus(t, h.serve(newRequest(http.MethodGet, "/healthz", nil)), http.StatusNotFound)
 }
 
 func ping(h *harness, auth string) (int, string) {
@@ -418,7 +406,7 @@ func TestPersistFailureIs500AndLogged(t *testing.T) {
 	for _, l := range h.lines(t) {
 		if l["msg"] == "webhook_persist_failed" {
 			n++
-			if l["log_level"] != "error" || l["error"] != "boom" || l["delivery_id"] == nil || l["team"] != "checkout" {
+			if l["log_level"] != "error" || l["err"] != "boom" || l["delivery_id"] == nil || l["team"] != "checkout" {
 				t.Errorf("line = %v", l)
 			}
 		}

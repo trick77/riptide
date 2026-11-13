@@ -6,15 +6,19 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"embed"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
-	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/trick77/ship/kit/httpx"
+	"github.com/trick77/ship/kit/migrate"
 
 	"github.com/trick77/riptide/internal/parse"
 )
@@ -23,7 +27,8 @@ import (
 var migrationFS embed.FS
 
 // migrateLockID is the advisory-lock key held for the whole of Migrate. From
-// "ript".
+// "ript". Unchanged since before kit/migrate: an old and a new binary
+// migrating at once must still serialise on the same key.
 const migrateLockID int64 = 0x72697074
 
 // migrateLockTimeout bounds how long one migrate waits for another's.
@@ -32,14 +37,17 @@ var migrateLockTimeout = 5 * time.Minute
 // Store owns the pool.
 type Store struct {
 	pool *pgxpool.Pool
-	log  *slog.Logger
+	// sqlDB is database/sql over the pool, for kit's migrate.Pending and
+	// schemadoc; it holds no connections of its own.
+	sqlDB *sql.DB
+	log   *slog.Logger
 }
 
 // Open connects and checks the connection, logging the server version.
 func Open(ctx context.Context, dsn string, log *slog.Logger) (*Store, error) {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		return nil, fmt.Errorf("parse RIPTIDE_DB_URL: %w", err)
+		return nil, fmt.Errorf("parse BACKEND_DB_URL: %w", err)
 	}
 	cfg.MaxConns = 10
 	return openConfig(ctx, cfg, log)
@@ -56,95 +64,87 @@ func openConfig(ctx context.Context, cfg *pgxpool.Config, log *slog.Logger) (*St
 		return nil, fmt.Errorf("connect: %w", err)
 	}
 	log.Info("postgres_connected", "server_version", version)
-	return &Store{pool: pool, log: log}, nil
+	return &Store{pool: pool, sqlDB: stdlib.OpenDBFromPool(pool), log: log}, nil
 }
 
 // Close releases the pool.
-func (s *Store) Close() { s.pool.Close() }
+func (s *Store) Close() {
+	_ = s.sqlDB.Close()
+	s.pool.Close()
+}
 
-// Ping is the readiness check.
+// Ping asks the database for a round trip.
 func (s *Store) Ping(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, `SELECT 1`)
 	return err
 }
 
-func migrationNames() ([]string, error) {
-	entries, err := migrationFS.ReadDir("migrations")
+// ReadyChecks are /readyz's: the database answers. Not the schema: serve
+// refuses to start on one that is behind, and nothing un-applies a migration
+// under a running binary.
+func (s *Store) ReadyChecks() []httpx.Check {
+	return []httpx.Check{{Name: "database", Run: s.Ping}}
+}
+
+// migrations is the embedded migrations directory as kit/migrate reads it.
+func migrations() fs.FS {
+	sub, err := fs.Sub(migrationFS, "migrations")
 	if err != nil {
-		return nil, fmt.Errorf("read migrations: %w", err)
+		panic(err) // a constant, valid path into an embedded FS
 	}
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		names = append(names, e.Name())
+	return sub
+}
+
+// migrateOptions logs kit's per-file line as it commits, under riptide's
+// name for it (migrationLog).
+func (s *Store) migrateOptions() migrate.Options {
+	return migrate.Options{Dialect: migrate.Postgres(migrateLockID), Log: slog.New(migrationLog{s.log.Handler()}), LockTimeout: migrateLockTimeout}
+}
+
+// migrationLog renames kit/migrate's "Migration applied" file=<name> to the
+// migration_applied migration=<name> operators search for. Every other
+// record passes through unchanged.
+type migrationLog struct{ slog.Handler }
+
+func (h migrationLog) Handle(ctx context.Context, r slog.Record) error {
+	if r.Message != "Migration applied" {
+		return h.Handler.Handle(ctx, r)
 	}
-	sort.Strings(names)
-	return names, nil
+	out := slog.NewRecord(r.Time, r.Level, "migration_applied", r.PC)
+	r.Attrs(func(a slog.Attr) bool {
+		if a.Key == "file" {
+			a.Key = "migration"
+		}
+		out.AddAttrs(a)
+		return true
+	})
+	return h.Handler.Handle(ctx, out)
+}
+
+func (h migrationLog) WithAttrs(as []slog.Attr) slog.Handler {
+	return migrationLog{h.Handler.WithAttrs(as)}
+}
+
+func (h migrationLog) WithGroup(name string) slog.Handler {
+	return migrationLog{h.Handler.WithGroup(name)}
 }
 
 // Migrate applies every pending migration in filename order, exactly once,
-// each in its own transaction, serialised by a session advisory lock on a
-// dedicated connection. A second run applies nothing.
+// each in its own transaction, serialised by a session advisory lock. A
+// second run applies nothing. Each file is logged as it commits, so a run
+// killed midway still says how far it got. It runs on connections of its
+// own, never the app's pool: the lock is session state.
 func (s *Store) Migrate(ctx context.Context) error {
-	conn, err := s.pool.Acquire(ctx)
-	if err != nil {
-		return fmt.Errorf("acquire migration connection: %w", err)
+	db := stdlib.OpenDB(*s.pool.Config().ConnConfig)
+	defer func() { _ = db.Close() }()
+	_, err := migrate.Up(ctx, db, migrations(), s.migrateOptions())
+	// kit's lock-wait timeout wraps the context's deadline (%w) and already
+	// says it timed out: add only which lock to look for. pg_locks shows a
+	// bigint advisory key's low half as objid, in decimal.
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("migration lock key %#x (objid %d in pg_locks): %w", migrateLockID, migrateLockID, err)
 	}
-	defer conn.Release()
-
-	lockCtx, cancelLock := context.WithTimeout(ctx, migrateLockTimeout)
-	defer cancelLock()
-	if _, err := conn.Exec(lockCtx, `SELECT pg_advisory_lock($1)`, migrateLockID); err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return fmt.Errorf("timed out after %s waiting for the migration lock (key %d in pg_locks): %w",
-				migrateLockTimeout, migrateLockID, err)
-		}
-		return fmt.Errorf("acquire migration lock: %w", err)
-	}
-	defer func() {
-		_, _ = conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, migrateLockID)
-	}()
-
-	if _, err := conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
-		name TEXT PRIMARY KEY,
-		applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-	)`); err != nil {
-		return fmt.Errorf("create schema_migrations: %w", err)
-	}
-
-	names, err := migrationNames()
-	if err != nil {
-		return err
-	}
-	for _, name := range names {
-		var applied bool
-		if err := conn.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE name = $1)`, name).Scan(&applied); err != nil {
-			return fmt.Errorf("check %s: %w", name, err)
-		}
-		if applied {
-			continue
-		}
-		body, err := migrationFS.ReadFile("migrations/" + name)
-		if err != nil {
-			return fmt.Errorf("read %s: %w", name, err)
-		}
-		tx, err := conn.Begin(ctx)
-		if err != nil {
-			return fmt.Errorf("begin %s: %w", name, err)
-		}
-		if _, err := tx.Exec(ctx, string(body)); err != nil {
-			_ = tx.Rollback(ctx)
-			return fmt.Errorf("apply %s: %w", name, err)
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations (name) VALUES ($1)`, name); err != nil {
-			_ = tx.Rollback(ctx)
-			return fmt.Errorf("record %s: %w", name, err)
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return fmt.Errorf("commit %s: %w", name, err)
-		}
-		s.log.Info("migration_applied", "migration", name)
-	}
-	return nil
+	return err
 }
 
 // SchemaCurrent reports whether every embedded migration has been applied.
@@ -158,22 +158,12 @@ func (s *Store) SchemaCurrent(ctx context.Context) error {
 	if !exists {
 		return errors.New("database schema is empty: run `riptide migrate` first")
 	}
-	names, err := migrationNames()
+	pending, err := migrate.Pending(ctx, s.sqlDB, migrations(), s.migrateOptions())
 	if err != nil {
 		return err
 	}
-	var missing []string
-	for _, name := range names {
-		var applied bool
-		if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE name = $1)`, name).Scan(&applied); err != nil {
-			return err
-		}
-		if !applied {
-			missing = append(missing, name)
-		}
-	}
-	if len(missing) > 0 {
-		return fmt.Errorf("database schema is behind, pending %v: run `riptide migrate` first", missing)
+	if len(pending) > 0 {
+		return fmt.Errorf("database schema is behind, pending %v: run `riptide migrate` first", pending)
 	}
 	return nil
 }
@@ -253,14 +243,6 @@ func nullable(s string) *string {
 		return nil
 	}
 	return &s
-}
-
-// Activity is how many events one sender identifier produced.
-type Activity struct {
-	Source     string // bitbucket | pipeline | argocd | noergler
-	Identifier string // repo_full_name / pipeline_name / app_name / repo
-	Team       string
-	Events     int64
 }
 
 // RecentActivity counts events received since `since`, per source and per

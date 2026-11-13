@@ -1,7 +1,7 @@
 // Package testdb gives a test its own Postgres schema. Gated on
-// RIPTIDE_TEST_DSN: CI provides a Postgres service container; locally
-// `docker compose up -d db` and
-// RIPTIDE_TEST_DSN=postgres://riptide:riptide@localhost:5432/riptide?sslmode=disable.
+// SHIP_TEST_DSN: `ship check` starts the compose db image and sets it; by
+// hand, `docker compose up -d db` and
+// SHIP_TEST_DSN=postgres://riptide:riptide@localhost:5432/riptide?sslmode=disable.
 package testdb
 
 import (
@@ -19,12 +19,16 @@ import (
 var seq atomic.Int64
 
 // DSN creates a fresh schema, drops it at cleanup, and returns a DSN whose
-// search_path points at it. Skips the test when RIPTIDE_TEST_DSN is unset.
+// search_path points at it. Skips the test when SHIP_TEST_DSN is unset.
 func DSN(t testing.TB) string {
 	t.Helper()
-	base := os.Getenv("RIPTIDE_TEST_DSN")
+	base := os.Getenv("SHIP_TEST_DSN")
+	if base == "" && os.Getenv("RIPTIDE_TEST_DSN") != "" {
+		// Skipping would pass every DB test without running one.
+		t.Fatalf("RIPTIDE_TEST_DSN was renamed to SHIP_TEST_DSN: set that instead")
+	}
 	if base == "" {
-		t.Skip("RIPTIDE_TEST_DSN not set")
+		t.Skip("SHIP_TEST_DSN not set")
 	}
 	ctx := context.Background()
 	schema := fmt.Sprintf("t_%d_%d_%d", time.Now().UnixNano(), os.Getpid(), seq.Add(1))
