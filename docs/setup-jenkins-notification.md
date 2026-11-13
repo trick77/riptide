@@ -18,6 +18,7 @@ mandatory** — without them the metrics break.
   "status": "<SUCCESS|FAILURE|UNSTABLE|...>",
   "commit_sha": "<env.GIT_COMMIT>",
   "image_ref": "<registry/path/app:tag, optional>",
+  "image_refs": ["<registry/path/app:tag, optional>", "<...>"],
   "actor_handle": "<git account Jenkins acts through, optional>",
   "actor_account_kind": "service",
   "started_at": "<ISO 8601 UTC>",
@@ -35,12 +36,23 @@ human-activity metrics — a CI account can easily author a third of all
 repository events, and counted as a person it distorts every per-author view.
 riptide stores the declaration instead of guessing from the name.
 
-`image_ref` is optional but send it whenever the run publishes an image: it is
+`image_ref` / `image_refs` are optional but send them whenever the run publishes an image: they are
 the only reliable link from an Argo CD deploy back to the commit, because
 `argocd_events.revision` is the GitOps-repo SHA and image tags are versions
 rather than SHAs. Send the **full** reference, exactly as pushed
 (`registry.example.com/team/app:2.0.41`), so it matches the strings Argo CD
 reports. See [Correlating deploys back to commits](correlating-deploys-to-commits.md).
+
+A run that pushes several images (a monorepo building three apps, a
+multi-module service) sends them all in `image_refs`, in the same event. Never
+one event per image: riptide counts runs, so each extra event would count as
+another build and add its duration to CI time again. Both fields may be sent;
+riptide merges them.
+
+Report an image once it is pushed, whatever the run's final status: an
+UNSTABLE run, or one that fails in a later step, still published what Argo CD
+may deploy. Report it on `COMPLETED` only, never on `STARTED`, when nothing is
+pushed yet.
 
 ## Per-team token
 
@@ -98,9 +110,13 @@ def riptideNotify(String phase) {
         phase: phase,
         status: currentBuild.currentResult ?: 'SUCCESS',
         commit_sha: env.GIT_COMMIT,
-        // Full reference of the image this run pushed, or null. Links the
-        // deploy back to this build — Argo CD reports the same string.
-        image_ref: env.RIPTIDE_IMAGE_REF ?: null,
+        // Full references of the images this run pushed, COMPLETED only: on
+        // STARTED nothing is pushed yet. RIPTIDE_IMAGE_REFS holds several,
+        // whitespace-separated; RIPTIDE_IMAGE_REF (one) still works. Links
+        // the deploy back to this build — Argo CD reports the same strings.
+        image_refs: phase == 'COMPLETED'
+            ? "${env.RIPTIDE_IMAGE_REFS ?: ''} ${env.RIPTIDE_IMAGE_REF ?: ''}".tokenize().unique()
+            : [],
         // The git account Jenkins acts through, so its pushes and merges
         // don't count as human activity.
         actor_handle: env.RIPTIDE_ACTOR_HANDLE ?: null,

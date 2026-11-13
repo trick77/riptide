@@ -45,7 +45,7 @@ func TestPipelineJenkins(t *testing.T) {
 	if !d.OccurredAt.Equal(*d.FinishedAt) || d.FinishedAt.Sub(d.StartedAt) != 210*time.Second {
 		t.Errorf("times = %v %v %v", d.StartedAt, d.FinishedAt, d.OccurredAt)
 	}
-	if d.ActorHandle != nil || d.ActorAccountKind != nil || d.ImageRef != nil {
+	if d.ActorHandle != nil || d.ActorAccountKind != nil || d.ImageRefs == nil || len(d.ImageRefs) != 0 {
 		t.Errorf("optional fields = %+v", d)
 	}
 	if string(d.Payload) != string(raw) {
@@ -63,8 +63,28 @@ func TestPipelineFields(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if str(d.ImageRef) != "registry.example.com/acme/payments-api:2.0.41" || str(d.ActorHandle) != "ci-service" || str(d.ActorAccountKind) != "service" {
+		if strings.Join(d.ImageRefs, ",") != "registry.example.com/acme/payments-api:2.0.41" || str(d.ActorHandle) != "ci-service" || str(d.ActorAccountKind) != "service" {
 			t.Errorf("draft = %+v", d)
+		}
+	})
+	t.Run("image refs merged with image ref, trimmed, deduplicated", func(t *testing.T) {
+		b := base()
+		b["image_ref"] = "reg/acme/ui:1.0"
+		b["image_refs"] = []any{" reg/acme/admin-ui:1.0 ", "reg/acme/ui:1.0", "", "  ", "reg/acme/portal-ui:1.0", "reg/acme/admin-ui:1.0"}
+		d, err := Pipeline(encode(t, b))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(d.ImageRefs, ","); got != "reg/acme/ui:1.0,reg/acme/admin-ui:1.0,reg/acme/portal-ui:1.0" {
+			t.Errorf("image refs = %s", got)
+		}
+	})
+	t.Run("null image refs is absent", func(t *testing.T) {
+		b := base()
+		b["image_refs"] = nil
+		d, err := Pipeline(encode(t, b))
+		if err != nil || len(d.ImageRefs) != 0 {
+			t.Errorf("image refs = %v, %v", d, err)
 		}
 	})
 	t.Run("whitespace kind is the default", func(t *testing.T) {
@@ -88,6 +108,7 @@ func TestPipelineFields(t *testing.T) {
 	t.Run("empty strings are absent", func(t *testing.T) {
 		b := base()
 		b["image_ref"] = ""
+		b["image_refs"] = []any{}
 		b["actor_handle"] = "   "
 		b["actor_account_kind"] = ""
 		b["status"] = ""
@@ -96,7 +117,7 @@ func TestPipelineFields(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if d.ImageRef != nil || d.ActorHandle != nil || d.ActorAccountKind != nil || d.Status != nil || d.FinishedAt != nil {
+		if len(d.ImageRefs) != 0 || d.ActorHandle != nil || d.ActorAccountKind != nil || d.Status != nil || d.FinishedAt != nil {
 			t.Errorf("draft = %+v", d)
 		}
 		if !d.OccurredAt.Equal(d.StartedAt) {
@@ -145,6 +166,8 @@ func TestPipelineFields(t *testing.T) {
 		{"short commit sha", "body.commit_sha", "string_too_short", func(b map[string]any) { b["commit_sha"] = "abc" }},
 		{"numeric phase", "body.phase", "string_type", func(b map[string]any) { b["phase"] = 3 }},
 		{"bad kind", "body.actor_account_kind", "literal_error", func(b map[string]any) { b["actor_account_kind"] = "robot" }},
+		{"image refs not a list", "body.image_refs", "list_type", func(b map[string]any) { b["image_refs"] = "reg/acme/ui:1.0" }},
+		{"image refs entry not a string", "body.image_refs.1", "string_type", func(b map[string]any) { b["image_refs"] = []any{"reg/acme/ui:1.0", 3} }},
 		{"missing started_at", "body.started_at", "missing", func(b map[string]any) { delete(b, "started_at") }},
 		{"bad started_at", "body.started_at", "datetime_from_date_parsing", func(b map[string]any) { b["started_at"] = "yesterday" }},
 		{"bool started_at", "body.started_at", "datetime_type", func(b map[string]any) { b["started_at"] = true }},
