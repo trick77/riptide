@@ -108,6 +108,7 @@ the data captured in v1.
 |---|---|
 | **Deployment frequency** | Releases per `team` / time window in prod. A release is a successful deploy whose images differ from the same App's previous successful deploy, counted once per GitOps `revision` — see the query below. Not every sync is a release: a config change or a manual re-sync redeploys the same images (measured: a third of all intg syncs, and 7 of 8 syncs of one monitoring App), and one release reconciles every App sharing the revision (intranet + extranet), so `COUNT(*)` overcounts twice over. Report the release count next to the syncs and the first-seen deploys it was derived from, so a reader can see where the number comes from. Group by `app_name` for the per-App drill-down; drop infrastructure Apps (monitoring, bots) by name in your own report. |
 | **Lead time for changes** | Per commit, not per release: `SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY lead_time) FROM lead_time_changes WHERE environment='prod' AND NOT is_merge AND NOT author_is_service_account`. The `lead_time_changes` view maps every commit that shipped to the **first** deploy that carried it, so a release rolled out to four Apps counts each change once. Exclude merge commits and release tooling, and report bots on their own line — see [Lead time for changes (DORA)](docs/dora-lead-time.md) for why, and for the coverage limits. Group by `team` or `repo_full_name`; `change_type` is not available here, since these commits come from master pushes, which carry no branch prefix. Do **not** substitute the newest commit per release: it answers "how stale was the freshest change" and reads ~7× too fast. |
+| **Lead time breakdown** | Where the lead time is spent, per human PR in app repos, as five stages: coding (oldest commit on the branch → PR ready), review (ready → approval), merge (approval → merged), to intg (merged → the merge commit's first intg deploy), to prod (intg → prod). One stage for review, not pickup + review: measured, 95 of 115 approvals were the reviewer's first and only touch, so "first review → approval" is zero by construction; the count is reported as a review-depth signal. Stages 4–5 reach only PRs whose merge commit `lead_time_changes` resolves, so they cover fewer PRs than 1–3 — report the count per stage. See the query below. |
 | **PR cycle time** | `pr:merged.occurred_at − pr:opened.occurred_at` per PR, keyed by `(repo_full_name, pr_id)`: PR ids are numbered per repository, so `pr_id` alone joins unrelated PRs. A PR opened before ingestion started has no `pr:opened` and drops out. Exclude GitOps repos: their PRs are stage promotions (see [Reading the event tables](#reading-the-event-tables)). |
 | **Time to first review** *(DX Core 4 "code review pickup time")* | Two-part computation per PR — see the SQL block below the table. Clock-start = `COALESCE(pr:ready_for_review, pr:opened)`: PRs opened ready start at `pr:opened`; PRs opened as drafts start at the synthetic `pr:ready_for_review` (emitted by the parser when a `pr:modified` payload carries `previousDraft=true, draft=false`). Engagement = first reviewer touch (`pr:comment:added`, `pr:reviewer:approved`, `pr:reviewer:unapproved`, `pr:reviewer:needs_work`, `pr:reviewer:updated`) where `author != pr_opener AND NOT is_automated AND occurred_at >= clock-start`. The five-event reviewer union covers every touch Bitbucket DC emits (silent approvals, retracted approvals, "needs work" flips, bare reviewer-status changes); the `occurred_at >= clock-start` guard drops early-feedback comments solicited during the draft phase, which would otherwise produce negative pickup times. `NOT is_automated` strips bot comments (noergler / Renovate / etc.) — every review-time bot must be recognisable, otherwise its instant comment drives the metric toward zero. Detection matches the `automation` config block against **both** the login handle (`author`) and the display name (`author_display_name`), because a bot is often provisioned as an ordinary user account whose login says nothing. `is_automated` is decided at ingest, so rows written before a bot was recognised stay marked human: the `non_human_identities` CTE in the query below filters those at read time from the accounts senders declare (`reviewer_handle` + `reviewer_account_kind` on noergler rollups, `actor_handle` + `actor_account_kind` on pipeline events) — riptide stores the declaration, it carries no account names of its own. |
 | **Build success rate** | `pipeline_events` with `phase = 'COMPLETED'` grouped by `status`. Slice by `source` to compare Jenkins vs Tekton, by `pipeline_name` / `team` for ownership. |
@@ -152,6 +153,106 @@ ORDER BY week;
 
 `first_seen` is large only in the weeks after an App is onboarded and falls to
 zero once every App has deployed twice.
+
+#### Lead-time breakdown query
+
+One row per stage with its PR count, p50 and p90. In the data it was measured
+on, the delivery side took about a day from first commit to intg and then
+waited close to two weeks for production, which a single lead-time number
+hides. Coding time starts at the oldest commit pushed to the branch, which a
+rebase resets.
+
+```sql
+WITH non_human_identities AS (
+  SELECT DISTINCT lower(reviewer_handle) AS handle
+  FROM noergler_events
+  WHERE reviewer_handle IS NOT NULL AND reviewer_account_kind IN ('bot', 'service')
+  UNION
+  SELECT DISTINCT lower(actor_handle)
+  FROM pipeline_events
+  WHERE actor_handle IS NOT NULL AND actor_account_kind IN ('bot', 'service')
+),
+gitops_repos AS (
+  SELECT DISTINCT b.repo_full_name
+  FROM argocd_events a
+  JOIN bitbucket_events b ON b.commit_sha = a.revision
+),
+prs AS (
+  SELECT repo_full_name, pr_id,
+         -- branch_name is stored lowercased; the payload keeps the original
+         MAX(lower(payload->'pullRequest'->'fromRef'->>'displayId'))
+             FILTER (WHERE event_type = 'pr:opened') AS source_branch,
+         MAX(author) FILTER (WHERE event_type = 'pr:opened') AS pr_opener,
+         BOOL_OR(is_automated) FILTER (WHERE event_type = 'pr:opened') AS bot_pr,
+         COALESCE(MIN(occurred_at) FILTER (WHERE event_type = 'pr:ready_for_review'),
+                  MIN(occurred_at) FILTER (WHERE event_type = 'pr:opened')) AS ready_at,
+         MIN(occurred_at) FILTER (WHERE event_type = 'pr:reviewer:approved') AS approved_at,
+         MIN(occurred_at) FILTER (WHERE event_type = 'pr:merged') AS merged_at,
+         MAX(payload->'pullRequest'->'properties'->'mergeCommit'->>'id')
+             FILTER (WHERE event_type = 'pr:merged') AS merge_commit
+  FROM bitbucket_events
+  WHERE pr_id IS NOT NULL
+    AND repo_full_name NOT IN (SELECT repo_full_name FROM gitops_repos)
+  GROUP BY repo_full_name, pr_id
+),
+chain AS (
+  SELECT p.*,
+         -- oldest commit pushed to the PR's branch; a rebase resets it
+         (SELECT to_timestamp(MIN((c->>'authorTimestamp')::bigint) / 1000.0)
+            FROM bitbucket_events e
+            CROSS JOIN LATERAL jsonb_array_elements(e.payload->'commits') c
+           WHERE e.event_type = 'repo:refs_changed'
+             AND e.repo_full_name = p.repo_full_name
+             AND e.branch_name = p.source_branch) AS first_commit_at,
+         -- same reviewer touch as the pickup-time query
+         (SELECT MIN(e.occurred_at)
+            FROM bitbucket_events e
+           WHERE e.repo_full_name = p.repo_full_name AND e.pr_id = p.pr_id
+             AND e.event_type IN ('pr:comment:added', 'pr:reviewer:approved',
+                                  'pr:reviewer:unapproved', 'pr:reviewer:needs_work',
+                                  'pr:reviewer:updated')
+             AND e.author IS DISTINCT FROM p.pr_opener
+             AND NOT e.is_automated
+             AND NOT EXISTS (SELECT 1 FROM non_human_identities n WHERE n.handle = lower(e.author))
+             AND e.occurred_at >= p.ready_at) AS first_review_at,
+         -- the merge commit's first deploy per stage
+         (SELECT first_deployed_at FROM lead_time_changes l
+           WHERE l.commit_sha = p.merge_commit AND l.environment = 'intg') AS intg_at,
+         (SELECT first_deployed_at FROM lead_time_changes l
+           WHERE l.commit_sha = p.merge_commit AND l.environment = 'prod') AS prod_at
+  FROM prs p
+  WHERE NOT COALESCE(p.bot_pr, false) AND p.merged_at IS NOT NULL AND p.ready_at IS NOT NULL
+),
+stages AS (
+  SELECT 1 AS step, 'coding: first commit -> PR ready' AS stage, ready_at - first_commit_at AS wait
+    FROM chain WHERE first_commit_at <= ready_at
+  UNION ALL
+  -- One stage, not pickup + review: most approvals are the reviewer's first
+  -- and only touch, so "first review -> approval" is zero by construction.
+  SELECT 2, 'review: PR ready -> approval', approved_at - ready_at
+    FROM chain WHERE approved_at >= ready_at
+  UNION ALL
+  SELECT 3, 'merge: approval -> merged', merged_at - approved_at
+    FROM chain WHERE merged_at >= approved_at
+  UNION ALL
+  SELECT 4, 'to intg: merged -> on intg', intg_at - merged_at
+    FROM chain WHERE intg_at >= merged_at
+  UNION ALL
+  SELECT 5, 'to prod: on intg -> on prod', prod_at - intg_at
+    FROM chain WHERE prod_at >= intg_at
+)
+SELECT step, stage,
+       count(*) AS prs,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY wait) AS p50,
+       percentile_cont(0.9) WITHIN GROUP (ORDER BY wait) AS p90,
+       -- review depth: approved with no reviewer touch before the approval
+       CASE WHEN step = 2 THEN
+         (SELECT count(*) FROM chain WHERE approved_at IS NOT NULL AND first_review_at = approved_at)
+       END AS approved_on_first_touch
+FROM stages
+GROUP BY step, stage
+ORDER BY step;
+```
 
 #### Pickup-time query
 
