@@ -223,7 +223,7 @@ What riptide does **not** provide today, and the natural seam for it:
 Bitbucket and pipeline events join on the **commit SHA**
 (`bitbucket_events.commit_sha` = `pipeline_events.commit_sha`, App-repo SHA on
 both sides). Argo CD does not: `argocd_events.revision` is the GitOps-repo SHA.
-Deploys reach the commit through the image reference — `pipeline_events.image_ref`
+Deploys reach the commit through the image reference — `pipeline_events.image_refs`
 against `argocd_events.payload->'images'` — as described in
 [Correlating deploys back to commits](docs/correlating-deploys-to-commits.md).
 
