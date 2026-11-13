@@ -10,11 +10,13 @@ import (
 	"io"
 	"net/url"
 	"os"
-	"os/signal"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
+
+	"github.com/trick77/ship/kit/run"
+
+	"github.com/trick77/riptide/internal/settings"
 )
 
 const usageText = `usage: riptide onboard-bitbucket CONFIG.json [--name riptide] [--dry-run] [--remove] [--env-file PATH] [-v]
@@ -24,7 +26,7 @@ Creates or updates the riptide webhook on every repo in CONFIG.json
 (idempotent). --remove deletes it instead. --discover lists, as JSON on
 stdout, every repo the token's user administers, grouped by project.
 
-Secrets BITBUCKET_TOKEN and RIPTIDE_TEAM_KEY (the team's bitbucket key from
+Secrets BITBUCKET_TOKEN and BACKEND_TEAM_KEY (the team's bitbucket key from
 team-keys.json) come from --env-file, then ./.env, then the environment; the
 first match wins. Write permission is checked implicitly: without it the
 webhook write fails with a 403.
@@ -91,7 +93,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	errf := func(format string, a ...any) {
 		_, _ = fmt.Fprintf(stderr, "%s ERROR %s\n", time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf(format, a...))
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := run.Context(context.Background())
 	defer stop()
 
 	if o.discover {
@@ -101,7 +103,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		_, _ = io.WriteString(stderr, "ERROR: config path is required (or pass --discover)\n")
 		return 2
 	}
-	secrets, err := resolveEnv(o.envFile, "BITBUCKET_TOKEN", "RIPTIDE_TEAM_KEY")
+	secrets, err := resolveEnv(o.envFile, "BITBUCKET_TOKEN", "BACKEND_TEAM_KEY")
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 2
@@ -111,7 +113,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 2
 	}
-	token, teamKey := secrets["BITBUCKET_TOKEN"], secrets["RIPTIDE_TEAM_KEY"]
+	token, teamKey := secrets["BITBUCKET_TOKEN"], secrets["BACKEND_TEAM_KEY"]
 
 	logf("Bitbucket URL: %s", in.BitbucketURL)
 	logf("Webhook URL:   %s", in.WebhookURL)
@@ -238,6 +240,11 @@ func mask(secret string) string {
 	return secret[:4] + "-****"
 }
 
+// legacyEnv maps a required variable to its pre-rename name. A set old name
+// is an error, wherever it comes from, instead of a bare "missing" for the
+// new one.
+var legacyEnv = map[string]string{"BACKEND_TEAM_KEY": "RIPTIDE_TEAM_KEY"}
+
 // resolveEnv reads the required variables. Precedence, first match wins:
 // --env-file, then ./.env, then the process environment. An explicit file
 // beats the environment so a stale exported value in the operator's shell
@@ -261,6 +268,22 @@ func resolveEnv(envFile string, required ...string) (map[string]string, error) {
 		for k, v := range vals {
 			merged[k] = v
 		}
+	}
+	var legacy []string
+	for _, k := range required {
+		if old, ok := legacyEnv[k]; ok {
+			legacy = append(legacy, old)
+		}
+	}
+	err := settings.CheckLegacy(func(k string) (string, bool) {
+		if v := os.Getenv(k); v != "" {
+			return v, true
+		}
+		v, ok := merged[k]
+		return v, ok
+	}, legacy...)
+	if err != nil {
+		return nil, err
 	}
 	var missing []string
 	for _, k := range required {

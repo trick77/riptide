@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -38,6 +39,24 @@ func count(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) int {
 		t.Fatal(err)
 	}
 	return n
+}
+
+// /readyz over the real store's checks: ready while the database answers,
+// 503 naming the database check once it does not.
+func TestE2EReadiness(t *testing.T) {
+	h, _ := dbHarness(t)
+	probe := func() *httptest.ResponseRecorder {
+		r := newRequest(http.MethodGet, "/readyz", nil)
+		r.RemoteAddr = "127.0.0.1:40000"
+		return h.serve(r)
+	}
+	expectStatus(t, probe(), http.StatusOK)
+	h.store.(*store.Store).Close()
+	w := probe()
+	expectStatus(t, w, http.StatusServiceUnavailable)
+	if !strings.Contains(w.Body.String(), `"check":"database"`) {
+		t.Errorf("body = %s", w.Body)
+	}
 }
 
 func TestE2EBitbucket(t *testing.T) {

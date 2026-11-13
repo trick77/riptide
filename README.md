@@ -411,15 +411,26 @@ The collector is one Go binary, `riptide`, in [`backend/`](backend/):
 | `riptide onboard-bitbucket` | creates, updates or removes the riptide webhook on Bitbucket repos |
 | `riptide check-onboarding` | lists which repos, pipelines and apps reported recently |
 | `riptide version` | prints the version |
+| `riptide -healthcheck` | probes `/healthz`, exit 0 when live: the container's liveness probe |
+| `riptide -readycheck` | probes `/readyz`, exit 0 when the database answers (a schema that is behind stops `serve` at startup) |
 
-Tests need a Postgres: `docker compose up -d db`, then
-`RIPTIDE_TEST_DSN='postgres://riptide:riptide@localhost:5432/riptide?sslmode=disable' make test`.
+The probes `/healthz` and `/readyz` answer only a caller on the same host
+(loopback, no forwarding header) and 404 anyone else, so deploy them as exec
+probes (`/riptide -healthcheck`, `/riptide -readycheck`), not HTTP probes. The
+image is distroless: no shell, no wget.
+
+The gate is [ship](https://github.com/trick77/ship): `make check` runs what CI
+runs (lint, vuln scan, tests with a Postgres it starts from `compose.yaml`'s
+`db` image, coverage). Tests by hand: `docker compose up -d db`, then
+`SHIP_TEST_DSN='postgres://riptide:riptide@localhost:5432/riptide?sslmode=disable' go -C backend test ./...`.
+The database schema is in [docs/schema.md](docs/schema.md), generated from the
+migrations. Releases are cut by hand with the Release workflow.
 
 ## Database
 
 **Postgres is provisioned externally — riptide-collector is not responsible for
 the database lifecycle.** Connection URL (with credentials) is supplied at
-runtime via the `RIPTIDE_DB_URL` env var.
+runtime via the `BACKEND_DB_URL` env var.
 
 The local `compose.yaml` runs a throwaway Postgres for development only —
 production deployments connect to the cluster's existing Postgres.

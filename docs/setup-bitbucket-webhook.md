@@ -27,11 +27,11 @@ with HMAC, the correct event set, and the correct per-team URL
 Get the binary with `make build` (writes `bin/riptide`), `go run
 ./backend/cmd/riptide` from a checkout, or run the collector image, whose
 entrypoint is the same binary:
-`docker run --rm -v "$PWD:/work" -w /work -e BITBUCKET_TOKEN -e RIPTIDE_TEAM_KEY ghcr.io/trick77/riptide-collector onboard-bitbucket team-config.json`.
+`docker run --rm -v "$PWD:/work" -w /work -e BITBUCKET_TOKEN -e BACKEND_TEAM_KEY ghcr.io/trick77/riptide-collector onboard-bitbucket team-config.json`.
 
 ```bash
 export BITBUCKET_TOKEN=...     # repo-admin REST token
-export RIPTIDE_TEAM_KEY=...    # team's `bitbucket` HMAC secret
+export BACKEND_TEAM_KEY=...    # team's `bitbucket` HMAC secret
 riptide onboard-bitbucket path/to/team-config.json
 ```
 
@@ -48,7 +48,7 @@ The command is idempotent (rerun after edits), supports `--dry-run` and
    path.
 4. **Status**: Active.
 5. **Skip certificate verification**: leave **off**.
-6. **Secret**: paste the team's `bitbucket` HMAC secret (the `RIPTIDE_TEAM_KEY`
+6. **Secret**: paste the team's `bitbucket` HMAC secret (the `BACKEND_TEAM_KEY`
    value). BBS uses this to sign each delivery.
 7. **Triggers** — select:
    - Repository: **Push**

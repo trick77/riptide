@@ -248,6 +248,26 @@ func (l *logCapture) messages() []string {
 	return out
 }
 
+// count is how many lines carry one of msgs: one per structured line, so a
+// message name inside another field never counts twice.
+func (l *logCapture) count(msgs ...string) int {
+	n := 0
+	for _, m := range l.messages() {
+		for _, want := range msgs {
+			if m == want {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// cfgFailures and keysFailures are the rejected versions reported so far.
+func (l *logCapture) cfgFailures() int { return l.count("config_stat_failed", "config_reload_failed") }
+func (l *logCapture) keysFailures() int {
+	return l.count("team_keys_stat_failed", "team_keys_reload_failed")
+}
+
 func write(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
@@ -330,8 +350,8 @@ func TestReloadKeepsOldOnFailure(t *testing.T) {
 	write(t, cfgPath, `{"teams": [{"name": "x"}]}`)
 	write(t, keysPath, `not json`)
 	rt.Reload()
-	if rt.ConfigReloadFailures() != 1 || rt.KeysReloadFailures() != 1 {
-		t.Errorf("failures = %d/%d", rt.ConfigReloadFailures(), rt.KeysReloadFailures())
+	if logs.cfgFailures() != 1 || logs.keysFailures() != 1 {
+		t.Errorf("failures = %d/%d", logs.cfgFailures(), logs.keysFailures())
 	}
 	if _, ok := rt.Config().Teams["checkout"]; !ok {
 		t.Error("old config dropped")
@@ -349,13 +369,13 @@ func TestReloadRejectsInconsistentPair(t *testing.T) {
 	// A config team without keys: rejected, the old config stays.
 	write(t, cfgPath, strings.Replace(validConfig, `"teams": [`, `"teams": [{"name": "team-y", "group_email": "y@example.com"},`, 1))
 	rt.Reload()
-	if _, ok := rt.Config().Teams["team-y"]; ok || rt.ConfigReloadFailures() != 1 {
+	if _, ok := rt.Config().Teams["team-y"]; ok || logs.cfgFailures() != 1 {
 		t.Fatal("inconsistent config applied")
 	}
 	// Removing a configured team's keys: rejected too.
 	write(t, keysPath, `{"checkout": {"argocd": "a"}}`)
 	rt.Reload()
-	if !rt.Keys().Has("platform") || rt.KeysReloadFailures() != 1 {
+	if !rt.Keys().Has("platform") || logs.keysFailures() != 1 {
 		t.Fatal("keys for a configured team were dropped")
 	}
 	// The keys arrive: both files now agree and both apply.
@@ -375,8 +395,8 @@ func TestReloadStatFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt.Reload()
-	if rt.ConfigReloadFailures() != 1 || !strings.Contains(logs.String(), "config_stat_failed") {
-		t.Errorf("failures = %d, logs = %s", rt.ConfigReloadFailures(), logs.String())
+	if logs.cfgFailures() != 1 || logs.count("config_stat_failed") != 1 {
+		t.Errorf("failures = %d, logs = %s", logs.cfgFailures(), logs.String())
 	}
 	if _, ok := rt.Config().Teams["checkout"]; !ok {
 		t.Error("config dropped")
@@ -401,8 +421,8 @@ func TestReloadReportsEachFailureOnce(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		rt.Reload()
 	}
-	if rt.ConfigReloadFailures() != 1 || strings.Count(logs.String(), "config_reload_failed") != 1 {
-		t.Fatalf("failures = %d, logs = %s", rt.ConfigReloadFailures(), logs.String())
+	if logs.cfgFailures() != 1 || logs.count("config_reload_failed") != 1 {
+		t.Fatalf("failures = %d, logs = %s", logs.cfgFailures(), logs.String())
 	}
 	write(t, keysPath, `{"checkout": {"argocd": "a"}, "platform": {"argocd": "p"}, "team-y": {"argocd": "y"}}`)
 	rt.Reload()
@@ -415,8 +435,8 @@ func TestReloadReportsEachFailureOnce(t *testing.T) {
 	rt.Reload()
 	write(t, keysPath, `still nope`)
 	rt.Reload()
-	if rt.KeysReloadFailures() != 2 {
-		t.Errorf("keys failures = %d", rt.KeysReloadFailures())
+	if logs.keysFailures() != 2 {
+		t.Errorf("keys failures = %d", logs.keysFailures())
 	}
 	// Reverting to the live version clears it, so the same breakage later is
 	// reported again.
@@ -424,8 +444,8 @@ func TestReloadReportsEachFailureOnce(t *testing.T) {
 	rt.Reload()
 	write(t, keysPath, `still nope`)
 	rt.Reload()
-	if rt.KeysReloadFailures() != 3 {
-		t.Errorf("keys failures after revert = %d", rt.KeysReloadFailures())
+	if logs.keysFailures() != 3 {
+		t.Errorf("keys failures after revert = %d", logs.keysFailures())
 	}
 	// A missing file is a stat failure, also reported once.
 	if err := os.Remove(cfgPath); err != nil {
@@ -433,7 +453,7 @@ func TestReloadReportsEachFailureOnce(t *testing.T) {
 	}
 	rt.Reload()
 	rt.Reload()
-	if strings.Count(logs.String(), "config_stat_failed") != 1 {
+	if logs.count("config_stat_failed") != 1 {
 		t.Errorf("logs = %s", logs.String())
 	}
 }
@@ -442,30 +462,30 @@ func TestReloadReportsEachFailureOnce(t *testing.T) {
 // checked (live config + new keys) did not change, so nothing is reported
 // twice.
 func TestReloadRevertDoesNotRecount(t *testing.T) {
-	rt, cfgPath, keysPath, _ := newRuntime(t)
+	rt, cfgPath, keysPath, logs := newRuntime(t)
 	write(t, cfgPath, `not json`)
 	write(t, keysPath, `{"checkout": {"argocd": "a"}}`) // drops platform: inconsistent
 	rt.Reload()
-	if rt.ConfigReloadFailures() != 1 || rt.KeysReloadFailures() != 1 {
-		t.Fatalf("failures = %d/%d", rt.ConfigReloadFailures(), rt.KeysReloadFailures())
+	if logs.cfgFailures() != 1 || logs.keysFailures() != 1 {
+		t.Fatalf("failures = %d/%d", logs.cfgFailures(), logs.keysFailures())
 	}
 	write(t, cfgPath, validConfig)
 	rt.Reload()
 	rt.Reload()
-	if rt.ConfigReloadFailures() != 1 || rt.KeysReloadFailures() != 1 {
-		t.Errorf("recounted: %d/%d", rt.ConfigReloadFailures(), rt.KeysReloadFailures())
+	if logs.cfgFailures() != 1 || logs.keysFailures() != 1 {
+		t.Errorf("reported again: %d/%d", logs.cfgFailures(), logs.keysFailures())
 	}
 }
 
-// A config waiting for its keys is counted once, even when a keys file that
+// A config waiting for its keys is reported once, even when a keys file that
 // still lacks the team arrives in between.
-func TestConfigWaitingForKeysCountsOnce(t *testing.T) {
-	rt, cfgPath, keysPath, _ := newRuntime(t)
+func TestConfigWaitingForKeysReportsOnce(t *testing.T) {
+	rt, cfgPath, keysPath, logs := newRuntime(t)
 	write(t, cfgPath, strings.Replace(validConfig, `"teams": [`, `"teams": [{"name": "team-y", "group_email": "y@example.com"},`, 1))
 	rt.Reload()
 	write(t, keysPath, `{"checkout": {"argocd": "a"}, "platform": {"argocd": "p"}, "other": {"argocd": "o"}}`)
 	rt.Reload()
-	if rt.ConfigReloadFailures() != 1 {
-		t.Errorf("config failures = %d", rt.ConfigReloadFailures())
+	if logs.cfgFailures() != 1 {
+		t.Errorf("config failures = %d", logs.cfgFailures())
 	}
 }

@@ -16,26 +16,26 @@ services:
   migrate:
     build:
       context: .
-      dockerfile: backend/Containerfile
+      dockerfile: Containerfile
     depends_on:
       db:
         condition: service_healthy
     environment:
-      RIPTIDE_DB_URL: postgres://riptide:riptide@db:5432/riptide?sslmode=disable
+      BACKEND_DB_URL: postgres://riptide:riptide@db:5432/riptide?sslmode=disable
     command: ["migrate"]
 
   app:
     build:
       context: .
-      dockerfile: backend/Containerfile
+      dockerfile: Containerfile
     depends_on:
       migrate:
         condition: service_completed_successfully
     environment:
-      RIPTIDE_DB_URL: postgres://riptide:riptide@db:5432/riptide?sslmode=disable
-      RIPTIDE_CONFIG_PATH: /etc/riptide-collector/riptide.json
-      RIPTIDE_TEAM_KEYS_PATH: /etc/riptide-collector/team-keys.json
-      RIPTIDE_LOG_LEVEL: INFO
+      BACKEND_DB_URL: postgres://riptide:riptide@db:5432/riptide?sslmode=disable
+      BACKEND_CONFIG_PATH: /etc/riptide-collector/riptide.json
+      BACKEND_TEAM_KEYS_PATH: /etc/riptide-collector/team-keys.json
+      BACKEND_LOG_LEVEL: INFO
     volumes:
       - ./config/riptide.json:/etc/riptide-collector/riptide.json:ro
       # Dev-only raw keys, one per team and source (team-keys.json stores the

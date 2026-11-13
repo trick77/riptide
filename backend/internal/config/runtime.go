@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/trick77/ship/kit/logging"
 )
 
 // Runtime holds the live config and team keys and hot-reloads both. Readers
@@ -25,15 +27,13 @@ type Runtime struct {
 	cfgSum, keysSum [sha256.Size]byte // the versions that are live
 	// seenCfg and seenKeys are the file states the last Reload acted on (a
 	// content hash, or the read error). While both are unchanged a tick does
-	// nothing, so a bad file is parsed, logged and counted once, not every
+	// nothing, so a bad file is parsed and logged once, not every
 	// 30 seconds.
 	seenCfg, seenKeys string
 	// crossCfg and crossKeys are the versions whose cross-validation failure
 	// was last reported, per file, so a config waiting for keys the kubelet
 	// has not mounted yet is reported once, whatever keys arrive meanwhile.
 	crossCfg, crossKeys [sha256.Size]byte
-	cfgFailures         atomic.Int64
-	keysFailures        atomic.Int64
 }
 
 // Load reads and cross-validates both files. Any fault is fatal: a
@@ -77,14 +77,6 @@ func (r *Runtime) Config() *Config { return r.cfg.Load() }
 // Keys is the current team-keys snapshot.
 func (r *Runtime) Keys() *Keys { return r.keys.Load() }
 
-// ConfigReloadFailures counts the distinct config versions rejected since
-// start: a bad file is counted once, however long it stays mounted.
-func (r *Runtime) ConfigReloadFailures() int64 { return r.cfgFailures.Load() }
-
-// KeysReloadFailures counts the distinct team-keys versions rejected since
-// start.
-func (r *Runtime) KeysReloadFailures() int64 { return r.keysFailures.Load() }
-
 // Run reloads every interval until ctx is done. Polling on a timer rather
 // than per request means every route sees a change, whichever route
 // happens to be called, and no request pays for the file reads.
@@ -105,7 +97,7 @@ func (r *Runtime) Run(ctx context.Context, interval time.Duration) {
 // is by content hash, so a same-second rewrite is not missed and a
 // Kubernetes symlink swap that leaves the content alone is a no-op. A file
 // that fails to read, parse or cross-validate against the other keeps the
-// previous version live. Each failure is logged and counted once: the next
+// previous version live. Each failure is logged once: the next
 // ticks see the same file state and do nothing until a file changes.
 func (r *Runtime) Reload() {
 	r.mu.Lock()
@@ -126,12 +118,12 @@ func (r *Runtime) Reload() {
 	switch {
 	case cfgErr != nil:
 		if cfgNew {
-			r.fail("config_stat_failed", r.configPath, cfgErr, &r.cfgFailures)
+			r.fail("config_stat_failed", r.configPath, cfgErr)
 		}
 	case sha256.Sum256(cfgData) != r.cfgSum:
 		if parsed, err := Parse(cfgData); err != nil {
 			if cfgNew {
-				r.fail("config_reload_failed", r.configPath, err, &r.cfgFailures)
+				r.fail("config_reload_failed", r.configPath, err)
 			}
 		} else {
 			cfg, cfgSum, cfgChanged = parsed, sha256.Sum256(cfgData), true
@@ -140,12 +132,12 @@ func (r *Runtime) Reload() {
 	switch {
 	case keysErr != nil:
 		if keysNew {
-			r.fail("team_keys_stat_failed", r.keysPath, keysErr, &r.keysFailures)
+			r.fail("team_keys_stat_failed", r.keysPath, keysErr)
 		}
 	case sha256.Sum256(keysData) != r.keysSum:
 		if parsed, err := ParseKeys(keysData); err != nil {
 			if keysNew {
-				r.fail("team_keys_reload_failed", r.keysPath, err, &r.keysFailures)
+				r.fail("team_keys_reload_failed", r.keysPath, err)
 			}
 		} else {
 			keys, keysSum, keysChanged = parsed, sha256.Sum256(keysData), true
@@ -159,11 +151,11 @@ func (r *Runtime) Reload() {
 	if err != nil {
 		if cfgChanged && cfgSum != r.crossCfg {
 			r.crossCfg = cfgSum
-			r.fail("config_reload_failed", r.configPath, err, &r.cfgFailures)
+			r.fail("config_reload_failed", r.configPath, err)
 		}
 		if keysChanged && keysSum != r.crossKeys {
 			r.crossKeys = keysSum
-			r.fail("team_keys_reload_failed", r.keysPath, err, &r.keysFailures)
+			r.fail("team_keys_reload_failed", r.keysPath, err)
 		}
 		return
 	}
@@ -190,8 +182,7 @@ func fileState(data []byte, err error) string {
 	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 
-// fail logs msg and counts it.
-func (r *Runtime) fail(msg, path string, err error, counter *atomic.Int64) {
-	counter.Add(1)
-	r.log.Error(msg, "path", path, "error", err.Error())
+// fail logs a rejected file.
+func (r *Runtime) fail(msg, path string, err error) {
+	r.log.Error(msg, "path", path, logging.Err(err))
 }

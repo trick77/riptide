@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/trick77/riptide/internal/parse"
@@ -69,8 +71,118 @@ func TestMigrateIsIdempotentAndSchemaCurrent(t *testing.T) {
 	if err := s.SchemaCurrent(ctx); err == nil || !strings.Contains(err.Error(), "behind") {
 		t.Fatalf("behind schema reported current: %v", err)
 	}
-	if err := s.Ping(ctx); err != nil {
+	// Readiness is the database only: serve refuses a behind schema at boot.
+	checks := s.ReadyChecks()
+	if len(checks) != 1 || checks[0].Name != "database" || checks[0].Run(ctx) != nil {
+		t.Fatalf("ready checks: %+v", checks)
+	}
+}
+
+// A database the hand-rolled migrator left: kit/migrate keeps its
+// schema_migrations table, so the switch applies nothing.
+func TestMigrateAdoptsTheExistingBookkeeping(t *testing.T) {
+	dsn := testdb.DSN(t)
+	ctx := context.Background()
+	pool := testdb.Pool(t, dsn)
+	if _, err := pool.Exec(ctx, `CREATE TABLE schema_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`); err != nil {
 		t.Fatal(err)
+	}
+	files, err := migrationFS.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		body, err := migrationFS.ReadFile("migrations/" + f.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, string(body)); err != nil {
+			t.Fatalf("%s: %v", f.Name(), err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO schema_migrations (name) VALUES ($1)`, f.Name()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var logs strings.Builder
+	s, err := Open(ctx, dsn, slog.New(slog.NewTextHandler(&logs, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(logs.String(), "migration_applied") {
+		t.Errorf("an applied migration ran again: %s", logs.String())
+	}
+	if err := s.SchemaCurrent(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMigrateLogsWhatItApplies(t *testing.T) {
+	var logs strings.Builder
+	s, err := Open(context.Background(), testdb.DSN(t), slog.New(slog.NewTextHandler(&logs, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	files, err := migrationFS.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(logs.String(), "msg=migration_applied migration="); n != len(files) {
+		t.Errorf("migration_applied lines = %d, want %d: %s", n, len(files), logs.String())
+	}
+}
+
+// kit's per-file line goes out under riptide's name as it commits; every
+// other record passes through as kit wrote it.
+func TestMigrationLogRenamesKitsLine(t *testing.T) {
+	var logs strings.Builder
+	log := slog.New(migrationLog{slog.NewTextHandler(&logs, nil)}).With("run", 1).WithGroup("g")
+	log.Info("Migration applied", "file", "0001_init.sql", "took", "1ms")
+	log.Info("Adopted goose migrations", "file", "kept")
+	got := logs.String()
+	if !strings.Contains(got, "msg=migration_applied run=1 g.migration=0001_init.sql g.took=1ms") {
+		t.Errorf("renamed line: %s", got)
+	}
+	if !strings.Contains(got, `msg="Adopted goose migrations" run=1 g.file=kept`) {
+		t.Errorf("passthrough line: %s", got)
+	}
+}
+
+// A wait past LockTimeout names the advisory key to look for in pg_locks.
+func TestMigrateLockTimeoutNamesTheKey(t *testing.T) {
+	dsn := testdb.DSN(t)
+	ctx := context.Background()
+	// Advisory locks are database-wide: hold it on a connection of its own,
+	// as another replica's migrate would.
+	holder, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Close(ctx) }()
+	if _, err := holder.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrateLockID); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = holder.Exec(ctx, `SELECT pg_advisory_unlock($1)`, migrateLockID) }()
+	s, err := Open(ctx, dsn, quiet())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	prev := migrateLockTimeout
+	migrateLockTimeout = 100 * time.Millisecond
+	defer func() { migrateLockTimeout = prev }()
+	err = s.Migrate(ctx)
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) ||
+		!strings.HasPrefix(err.Error(), "migration lock key 0x72697074 (objid 1919512692 in pg_locks): timed out after 100ms") ||
+		strings.Count(err.Error(), "timed out") != 1 {
+		t.Fatalf("err = %v", err)
 	}
 }
 

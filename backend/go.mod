@@ -1,10 +1,11 @@
 module github.com/trick77/riptide
 
-go 1.26
+go 1.27.0
 
 require (
 	github.com/getkin/kin-openapi v0.152.0
 	github.com/jackc/pgx/v5 v5.12.0
+	github.com/trick77/ship/kit v0.22.0
 )
 
 require (

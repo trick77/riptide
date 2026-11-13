@@ -42,7 +42,7 @@ tags:
   - name: webhooks
     description: Event sinks.
   - name: health
-    description: Probes and sender self-checks.
+    description: Sender self-checks and this document. The liveness and readiness probes (/healthz, /readyz) answer loopback callers only and are not part of this contract.
 
 paths:
   /webhooks/bitbucket/{team}:
@@ -203,57 +203,6 @@ paths:
                   status: { type: string, const: ok }
                   team: { type: string }
         "401": { $ref: "#/components/responses/Unauthorized" }
-
-  /health:
-    get:
-      tags: [health]
-      operationId: health
-      summary: Liveness probe
-      description: 200 while the process is up. Unauthenticated; not for senders.
-      security: []
-      responses:
-        "200":
-          description: The process is up.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [status]
-                additionalProperties: false
-                properties:
-                  status: { type: string, const: ok }
-
-  /ready:
-    get:
-      tags: [health]
-      operationId: ready
-      summary: Readiness probe
-      description: 503 while the database is unreachable.
-      security: []
-      responses:
-        "200":
-          description: Ready.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [status, teams, team_keys, config_reload_failures, team_keys_reload_failures]
-                additionalProperties: false
-                properties:
-                  status: { type: string, const: ok }
-                  teams: { type: integer, description: Teams in the live config. }
-                  team_keys: { type: integer, description: Teams in the live key file. }
-                  config_reload_failures:
-                    type: integer
-                    description: Distinct config versions rejected since start; a bad file counts once however long it stays.
-                  team_keys_reload_failures:
-                    type: integer
-                    description: Distinct team-keys versions rejected since start.
-        "503":
-          description: The database is unreachable.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
 
   /openapi.yaml:
     get:

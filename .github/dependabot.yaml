@@ -1,29 +1,108 @@
 version: 2
 updates:
   - package-ecosystem: gomod
-    cooldown:
-      default-days: 7
     directory: /backend
+    commit-message: { prefix: deps }   # Go style: "deps: bump …"
     schedule:
       interval: weekly
+      day: sunday
+      time: "07:00"
+      timezone: Europe/Zurich
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    # `// indirect` too: by default Dependabot bumps only direct requirements,
+    # and an indirect one stays at whatever floor a dependency set (a
+    # vulnerable go-jose behind go-oidc reached the images that way).
+    allow:
+      - dependency-type: all
     groups:
-      go-minor-and-patch:
-        patterns: ["*"]
-        update-types: ["minor", "patch"]
+      # kit is v0.x: a minor may break. Its own PR, never inside the
+      # catch-all (first matching group wins).
+      kit:
+        patterns: ["github.com/trick77/ship/kit", "github.com/trick77/ship/kit/*"]
+      gomod-non-major:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+          - minor
+      gomod-major:
+        patterns:
+          - "*"
+        update-types:
+          - major
+
+  # Base images in the Containerfile.
+  - package-ecosystem: docker
+    directory: /
+    commit-message: { prefix: deps }   # Go style: "deps: bump …"
+    schedule:
+      interval: weekly
+      day: sunday
+      time: "07:00"
+      timezone: Europe/Zurich
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      docker-non-major:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+          - minor
+      docker-major:
+        patterns:
+          - "*"
+        update-types:
+          - major
+
+  # Images the compose files pin by tag.
+  - package-ecosystem: docker-compose
+    directory: /
+    commit-message: { prefix: deps }   # Go style: "deps: bump …"
+    schedule:
+      interval: weekly
+      day: sunday
+      time: "07:00"
+      timezone: Europe/Zurich
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      compose-non-major:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+          - minor
+      compose-major:
+        patterns:
+          - "*"
+        update-types:
+          - major
 
   - package-ecosystem: github-actions
-    cooldown:
-      default-days: 7
     directory: /
+    commit-message: { prefix: deps }   # Go style: "deps: bump …"
     schedule:
       interval: weekly
-    groups:
-      actions:
-        patterns: ["*"]
-
-  - package-ecosystem: docker
+      day: sunday
+      time: "07:00"
+      timezone: Europe/Zurich
     cooldown:
       default-days: 7
-    directory: /backend
-    schedule:
-      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      actions-non-major:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+          - minor
+      actions-major:
+        patterns:
+          - "*"
+        update-types:
+          - major

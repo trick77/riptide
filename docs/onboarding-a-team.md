@@ -49,7 +49,7 @@ echo "  jenkins=$JK"
 ```
 
 Add the entry to the production `team-keys.json` (the file at
-`RIPTIDE_TEAM_KEYS_PATH`, never committed).
+`BACKEND_TEAM_KEYS_PATH`, never committed).
 
 Every team in the config must have an entry in `team-keys.json` (with at
 least one source) or the collector fails to start. Source names outside the
@@ -78,7 +78,7 @@ Each source uses the team's source-specific secret:
 Open a throwaway PR, merge it, let CI run, deploy to prod, then run:
 
 ```bash
-RIPTIDE_DB_URL=... riptide check-onboarding --team <team> [--since 1h]
+BACKEND_DB_URL=... riptide check-onboarding --team <team> [--since 1h]
 ```
 
 It lists every repo, pipeline and app of the team that reported in the window,

@@ -18,9 +18,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/trick77/ship/kit/httpx"
+	"github.com/trick77/ship/kit/logging"
+	"github.com/trick77/ship/kit/version"
+
 	"github.com/trick77/riptide/internal/config"
 	"github.com/trick77/riptide/internal/httpapi"
-	"github.com/trick77/riptide/internal/logging"
 	"github.com/trick77/riptide/internal/parse"
 )
 
@@ -69,7 +72,10 @@ type memStore struct {
 
 func newMemStore() *memStore { return &memStore{seen: map[string]bool{}} }
 
-func (m *memStore) Ping(context.Context) error { return m.pingErr }
+// ReadyChecks mirrors store.Store's: the database answers (pingErr).
+func (m *memStore) ReadyChecks() []httpx.Check {
+	return []httpx.Check{{Name: "database", Run: func(context.Context) error { return m.pingErr }}}
+}
 
 func (m *memStore) add(id, team string, row any) (bool, error) {
 	m.mu.Lock()
@@ -127,7 +133,8 @@ func newHarness(t *testing.T, st Store) *harness {
 		t.Fatal(err)
 	}
 	logs := &bytes.Buffer{}
-	log := slog.New(logging.NewHandler(&lockedWriter{w: logs}, slog.LevelDebug, "test"))
+	log := slog.New(logging.NewSplunkHandler(&lockedWriter{w: logs}, slog.LevelDebug, "riptide-collector", "test")).
+		With("version", version.String())
 	rt, err := config.Load(cfgPath, keysPath, log)
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +145,13 @@ func newHarness(t *testing.T, st Store) *harness {
 		st = h.mem
 	}
 	h.store = st
-	h.srv = httpapi.New(log)
+	// The store's own readiness checks, as serve wires them: over the real
+	// store a wrong Store.ReadyChecks fails these tests.
+	rc, ok := st.(interface{ ReadyChecks() []httpx.Check })
+	if !ok {
+		t.Fatalf("%T has no ReadyChecks", st)
+	}
+	h.srv = httpapi.New(log, rc.ReadyChecks()...)
 	Register(h.srv, Deps{Store: st, Runtime: rt, Log: log, Now: func() time.Time { return fixedNow }})
 	return h
 }

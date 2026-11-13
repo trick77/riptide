@@ -7,6 +7,52 @@ repository.
 Real account handles, hostnames and tokens belong in the mounted
 `riptide.json` / team-keys Secret, never in this file: the repository is public.
 
+## 2026-11-13 — distroless image, new probes, log field renames
+
+**Every `RIPTIDE_*` variable is now `BACKEND_*`**, suffix unchanged, no
+fallback to the old names: `BACKEND_DB_URL`, `BACKEND_CONFIG_PATH`,
+`BACKEND_TEAM_KEYS_PATH`, `BACKEND_LOG_LEVEL`, `BACKEND_ENV`,
+`BACKEND_LISTEN_ADDR`, `BACKEND_CONFIG_RELOAD_SECONDS`, and
+`onboard-bitbucket`'s `BACKEND_TEAM_KEY`. riptide refuses to start while any
+old name is still set (environment or `./.env`), naming it.
+Senders' own variables (noergler's `RIPTIDE_URL` / `RIPTIDE_TOKEN`, the Jenkins
+`RIPTIDE_TOKEN` credential) are theirs and unchanged.
+
+**Switch the probes, the variables and the image in one rollout**: one
+Deployment spec change carrying the new tag, the `BACKEND_*` rename and the
+probes, never one without the others. The old binary has no `-healthcheck` /
+`-readycheck`, the new one no `/health` / `/ready` (404). The new `/healthz`
+(liveness) and `/readyz` (readiness: the database answers) answer only a
+caller on the pod itself and 404 anyone else, so an HTTP probe from the node
+fails. Use exec probes: `/riptide -healthcheck` and `/riptide -readycheck`.
+A schema that is behind still stops `serve` at startup. `/readyz` answers
+`{"status":"ok"}` only; the team, key and reload-failure counts `/ready`
+returned are gone (reload failures stay in the log as `config_reload_failed` /
+`team_keys_reload_failed`). A failing readiness check logs
+`Readiness check failed` once when it starts failing, not
+`readiness_db_unreachable` per probe.
+
+**The image is distroless** (`gcr.io/distroless/static`): no shell, no wget,
+no `apk`. It runs as `65532:65532` (was `1001`); OpenShift's random uid still
+works, the binary writes nothing to disk.
+
+**Log fields** (Splunk searches and dashboards): the error field is `err`, not
+`error`; the access line `http_request` carries `status`, not `status_code`,
+plus `ip`, `proto` and `user_agent`, and logs a 4xx (but 401/404) at `warning`
+and a 5xx at `error` instead of everything at `info`. `msg`, `service`,
+`version` and `env` keep their names; the key order after `timestamp` changed.
+Every `msg` name riptide emitted before (`webhook_processed`,
+`webhook_persist_failed`, `migration_applied`, ...) is unchanged.
+
+**Releases are by hand**: the Release workflow (`workflow_dispatch`, bump
+patch/minor/major/auto); a master push no longer releases. Images keep the
+name `ghcr.io/trick77/riptide-collector`, now signed (cosign) and scanned.
+Dependabot PRs are no longer auto-merged: merge them by hand.
+
+**`RIPTIDE_VERSION` and `OPENSHIFT_BUILD_COMMIT` are no longer read**: the
+version is stamped at build time only (`riptide version`, the `version` log
+field).
+
 ## 2026-11-13 — several images per CI run
 
 **`pipeline_events.image_refs` replaces `image_ref` for reading.** One release

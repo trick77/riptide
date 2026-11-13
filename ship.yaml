@@ -1,0 +1,11 @@
+# The gate (ship check, and ship pre-push in the hook) and the release, see github.com/trick77/ship.
+go:
+  dir: backend
+  # Carried over from the old ci/ coverage gate: the floor the Python collector had.
+  floor: 85
+postgres: compose:db
+steps:
+  - { name: openapi lint, run: npx --yes @stoplight/spectral-cli@6.15.0 lint backend/api/openapi.yaml --ruleset .spectral.yaml }
+images:
+  # Keeps the image name the deployment pulls: ghcr.io/trick77/riptide-collector.
+  - { suffix: -collector }

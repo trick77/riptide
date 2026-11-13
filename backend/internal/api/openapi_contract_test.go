@@ -79,8 +79,6 @@ func TestResponsesMatchOpenAPISpec(t *testing.T) {
 	}
 	post := http.MethodPost
 
-	check(http.MethodGet, "/health", h.serve(newRequest(http.MethodGet, "/health", nil)))
-	check(http.MethodGet, "/ready", h.serve(newRequest(http.MethodGet, "/ready", nil)))
 	r := newRequest(http.MethodGet, "/auth/ping", nil)
 	r.Header.Set("Authorization", "Bearer "+checkoutArgoCD)
 	check(http.MethodGet, "/auth/ping", h.serve(r))
@@ -102,8 +100,6 @@ func TestResponsesMatchOpenAPISpec(t *testing.T) {
 
 	h.mem.fail = errBoom
 	check(post, "/webhooks/pipeline", h.bearer(t, "/webhooks/pipeline", checkoutJenkins, fixture(t, "pipeline_jenkins_completed.json")))
-	h.mem.pingErr = errBoom
-	check(http.MethodGet, "/ready", h.serve(newRequest(http.MethodGet, "/ready", nil)))
 }
 
 // Every fixture the handlers accept must also be a valid request under the

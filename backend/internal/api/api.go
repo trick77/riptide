@@ -1,6 +1,7 @@
 // Package api is the collector's HTTP surface: the four webhook sinks,
-// /auth/ping and the probes. Handlers do HTTP, auth, dispatch to the pure
-// extractors in package parse, config-derived fields, and persistence.
+// /auth/ping and the API docs; the probes are kit's (package httpapi).
+// Handlers do HTTP, auth, dispatch to the pure extractors in package parse,
+// config-derived fields, and persistence.
 package api
 
 import (
@@ -15,6 +16,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/trick77/ship/kit/logging"
 
 	"github.com/trick77/riptide/internal/config"
 	"github.com/trick77/riptide/internal/httpapi"
@@ -31,7 +34,6 @@ const (
 
 // Store is the persistence the handlers need.
 type Store interface {
-	Ping(ctx context.Context) error
 	InsertBitbucket(ctx context.Context, d *parse.BitbucketDraft, automationSource, team string) (bool, error)
 	InsertPipeline(ctx context.Context, d *parse.PipelineDraft, team string) (bool, error)
 	InsertArgoCD(ctx context.Context, d *parse.ArgoCDDraft, team string) (bool, error)
@@ -56,8 +58,6 @@ func (d Deps) now() time.Time {
 
 // Register adds every route to srv.
 func Register(srv *httpapi.Server, d Deps) {
-	srv.HandleFunc("GET /health", d.health)
-	srv.HandleFunc("GET /ready", d.ready)
 	srv.HandleFunc("GET /auth/ping", d.authPing)
 	srv.HandleFunc("POST /webhooks/bitbucket/{team}", d.bitbucket)
 	srv.HandleFunc("POST /webhooks/pipeline", d.pipeline)
@@ -79,38 +79,6 @@ type statusReasonBody struct {
 type pingBody struct {
 	Status string `json:"status"`
 	Team   string `json:"team"`
-}
-
-type readyBody struct {
-	Status                 string `json:"status"`
-	Teams                  int    `json:"teams"`
-	TeamKeys               int    `json:"team_keys"`
-	ConfigReloadFailures   int64  `json:"config_reload_failures"`
-	TeamKeysReloadFailures int64  `json:"team_keys_reload_failures"`
-}
-
-// health is liveness: 200 while the process is up.
-func (d Deps) health(w http.ResponseWriter, _ *http.Request) {
-	httpapi.WriteJSON(w, http.StatusOK, statusBody{Status: "ok"})
-}
-
-// ready is readiness: 503 while the database is unreachable. The cause goes
-// to the log, not to the unauthenticated response.
-func (d Deps) ready(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-	if err := d.Store.Ping(ctx); err != nil {
-		d.Log.ErrorContext(r.Context(), "readiness_db_unreachable", "error", err.Error())
-		httpapi.WriteDetail(w, http.StatusServiceUnavailable, "db unreachable")
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, readyBody{
-		Status:                 "ok",
-		Teams:                  len(d.Runtime.Config().Teams),
-		TeamKeys:               len(d.Runtime.Keys().TeamNames()),
-		ConfigReloadFailures:   d.Runtime.ConfigReloadFailures(),
-		TeamKeysReloadFailures: d.Runtime.KeysReloadFailures(),
-	})
 }
 
 // authPing lets a sender verify its token at startup: any of the team's
@@ -196,7 +164,7 @@ func writeValidation(w http.ResponseWriter, err error) {
 // could never store are rejected by the parser before this point.
 func (d Deps) persistFailed(w http.ResponseWriter, r *http.Request, source, deliveryID, team string, err error) {
 	d.Log.ErrorContext(r.Context(), "webhook_persist_failed",
-		"webhook_source", source, "delivery_id", deliveryID, "team", team, "error", err.Error())
+		"webhook_source", source, "delivery_id", deliveryID, "team", team, logging.Err(err))
 	httpapi.WriteDetail(w, http.StatusInternalServerError, "Internal Server Error")
 }
 
