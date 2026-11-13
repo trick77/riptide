@@ -206,12 +206,18 @@ func (s *Store) InsertBitbucket(ctx context.Context, d *parse.BitbucketDraft, au
 
 // InsertPipeline stores a CI event.
 func (s *Store) InsertPipeline(ctx context.Context, d *parse.PipelineDraft, team string) (bool, error) {
+	// A nil slice encodes as NULL, which image_refs (NOT NULL) rejects: a draft
+	// that published nothing stores the empty list.
+	images := d.ImageRefs
+	if images == nil {
+		images = []string{}
+	}
 	return s.insert(ctx, `INSERT INTO pipeline_events (
-		delivery_id, source, pipeline_name, run_id, phase, status, commit_sha, image_ref,
+		delivery_id, source, pipeline_name, run_id, phase, status, commit_sha, image_refs,
 		actor_handle, actor_account_kind, started_at, finished_at, occurred_at, team, payload
 	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb)
 	ON CONFLICT (delivery_id) DO NOTHING RETURNING delivery_id`,
-		d.DeliveryID, d.Source, d.PipelineName, d.RunID, d.Phase, d.Status, d.CommitSHA, d.ImageRef,
+		d.DeliveryID, d.Source, d.PipelineName, d.RunID, d.Phase, d.Status, d.CommitSHA, images,
 		d.ActorHandle, d.ActorAccountKind, d.StartedAt, d.FinishedAt, d.OccurredAt, team, string(d.Payload))
 }
 

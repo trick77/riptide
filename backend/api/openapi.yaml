@@ -386,7 +386,18 @@ components:
           description: |
             Full image reference the run published (`registry/path:tag`). Argo
             CD reports the same strings, which makes deploy -> build -> commit an
-            exact join. Omit it (or send "") for runs that publish no image.
+            exact join. Omit it (or send "") for runs that publish no image. A
+            run that publishes several sends `image_refs`; both may be sent and
+            are merged.
+        image_refs:
+          type: [array, "null"]
+          items: { type: string }
+          description: |
+            Every image the run published, for a run that pushes more than
+            one (a monorepo building several apps, a multi-module service).
+            Stays one event per run, so build counts and CI time are not
+            multiplied. Merged with `image_ref`, trimmed and deduplicated;
+            empty entries are ignored.
         actor_handle:
           type: [string, "null"]
           description: The git-host account this CI acts through.
@@ -425,7 +436,7 @@ components:
           description: |
             Rendered images of the synced manifests
             (`.app.status.summary.images`), possibly empty. They match
-            `pipeline_events.image_ref` verbatim. Tags are versions: never
+            entries of `pipeline_events.image_refs` verbatim. Tags are versions: never
             parse a commit SHA out of one.
 
     NoerglerPrCompleted:

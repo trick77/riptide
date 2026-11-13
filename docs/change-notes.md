@@ -7,6 +7,28 @@ repository.
 Real account handles, hostnames and tokens belong in the mounted
 `riptide.json` / team-keys Secret, never in this file: the repository is public.
 
+## 2026-11-13 — several images per CI run
+
+**`pipeline_events.image_refs` replaces `image_ref` for reading.** One release
+can push several images (a monorepo UI building three apps, a multi-module
+service), and a run must stay one row: an event per image would count as extra
+builds and add its duration to CI time again. Migration
+`0003_pipeline_image_refs` adds the list and fills it from `image_ref` and from
+an `image_refs` an older collector kept only in the payload; `riptide migrate`
+applies it, no manual step. Switch saved queries to the join in
+[Correlating deploys back to commits](correlating-deploys-to-commits.md).
+
+**`image_ref` stays as a column for one release,** no longer written, so old
+pods mid-rollout and a rollback keep inserting. An insert trigger fills
+`image_refs` for the rows they write, from `image_ref` or the payload. A later
+migration drops the column and the trigger.
+
+**Senders that publish several images send `image_refs`** in the same
+`COMPLETED` event. `image_ref` stays accepted on the wire and is merged in, so
+single-image senders need no change. Order does not matter: rows written before
+the collector is updated are picked up by the backfill, rows an old pod writes
+during or after the rollout by the trigger.
+
 ## 2026-09-24 — the collector is now Go
 
 **Point the collector at a new, empty database.** The Go collector keeps its

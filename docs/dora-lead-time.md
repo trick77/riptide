@@ -99,11 +99,11 @@ change" and reads 26.7 h on the same data — 7× too flattering.
   attributed to the neighbouring release. Likewise the GitOps release commit
   must be a push tip to be found at all — a release split across two pushes
   where Argo reports only the second revision leaves the first unresolvable.
-  Both go away with `image_ref`-based ranges.
+  Both go away with image-reference-based ranges.
 - **Ranges come from release notes today.** `deploy_commit_ranges` reads the
   compare links a release-note generator writes into the GitOps commit, so a
   release landed as a direct version bump is invisible to it. That is the view to
-  replace once CI senders report `pipeline_events.image_ref`: the range then
+  replace once CI senders report `pipeline_events.image_refs`: the range then
   becomes "between the previous and the current successful deploy of this app",
   which needs no release notes at all. See
   [Correlating deploys back to commits](correlating-deploys-to-commits.md).

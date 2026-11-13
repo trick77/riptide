@@ -182,7 +182,8 @@ func TestInsertsDedupeOnDeliveryID(t *testing.T) {
 	}
 	pl := &parse.PipelineDraft{
 		DeliveryID: "jenkins#p#1#COMPLETED", Source: "jenkins", PipelineName: "p", RunID: "1", Phase: "COMPLETED",
-		CommitSHA: "abc1234", StartedAt: now, FinishedAt: ptr(now.Add(210 * time.Second)), OccurredAt: now, Payload: []byte(`{}`),
+		CommitSHA: "abc1234", ImageRefs: []string{"reg/acme/p:1.0"}, StartedAt: now, FinishedAt: ptr(now.Add(210 * time.Second)),
+		OccurredAt: now, Payload: []byte(`{}`),
 	}
 	ar := &parse.ArgoCDDraft{
 		DeliveryID: "app#rev", AppName: "app", Revision: "abc1234", StartedAt: ptr(now), FinishedAt: ptr(now.Add(45 * time.Second)),
@@ -243,11 +244,78 @@ func TestInsertsDedupeOnDeliveryID(t *testing.T) {
 	}
 }
 
+// 0003 folds image_ref and an image_refs a pre-0003 collector kept only in the
+// payload into the new column, without touching modified_at, and leaves
+// image_ref in place for old pods mid-rollout and for a rollback.
+func TestMigrationImageRefsBackfill(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.Pool(t, testdb.DSN(t))
+	apply := func(name string) {
+		t.Helper()
+		body, err := migrationFS.ReadFile("migrations/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, string(body)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	apply("0001_initial.sql")
+	apply("0002_noergler_pr_rollups.sql")
+	if _, err := pool.Exec(ctx, `INSERT INTO pipeline_events
+		(delivery_id, source, pipeline_name, run_id, phase, occurred_at, modified_at, image_ref, payload) VALUES
+		('scalar', 'jenkins', 'p', '1', 'COMPLETED', now(), '2000-01-01', ' reg/a:1 ', '{}'),
+		('both',   'jenkins', 'p', '2', 'COMPLETED', now(), '2000-01-01', 'reg/a:1',
+		 '{"image_refs": ["reg/b:1", " reg/a:1", "", 3, "reg/c:1", "reg/b:1"]}'),
+		('none',   'jenkins', 'p', '3', 'COMPLETED', now(), '2000-01-01', NULL, '{"image_refs": "reg/x:1"}')`); err != nil {
+		t.Fatal(err)
+	}
+	apply("0003_pipeline_image_refs.sql")
+
+	for id, want := range map[string]string{"scalar": "reg/a:1", "both": "reg/a:1,reg/b:1,reg/c:1", "none": ""} {
+		var refs []string
+		var untouched bool
+		if err := pool.QueryRow(ctx, `SELECT image_refs, modified_at = '2000-01-01' FROM pipeline_events WHERE delivery_id = $1`, id).
+			Scan(&refs, &untouched); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(refs, ","); got != want || !untouched {
+			t.Errorf("%s: image_refs = %q (want %q), modified_at untouched = %v", id, got, want, untouched)
+		}
+	}
+	// Old pods mid-rollout (or after a rollback) still write image_ref, or keep
+	// a sent image_refs only in the payload: the insert trigger fills the
+	// column for them. A row that already carries image_refs is left alone.
+	if _, err := pool.Exec(ctx, `INSERT INTO pipeline_events (delivery_id, source, pipeline_name, run_id, phase, occurred_at, image_ref, payload) VALUES
+		('old-scalar',  'jenkins', 'p', '4', 'COMPLETED', now(), 'reg/d:1', '{}'),
+		('old-payload', 'jenkins', 'p', '5', 'COMPLETED', now(), NULL, '{"image_refs": ["reg/e:1", "reg/f:1"]}')`); err != nil {
+		t.Fatalf("old-pod insert: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO pipeline_events (delivery_id, source, pipeline_name, run_id, phase, occurred_at, image_refs, payload)
+		VALUES ('new-pod', 'jenkins', 'p', '6', 'COMPLETED', now(), '{reg/g:1}', '{"image_refs": ["reg/other:1"]}')`); err != nil {
+		t.Fatalf("new-pod insert: %v", err)
+	}
+	for id, want := range map[string]string{"old-scalar": "reg/d:1", "old-payload": "reg/e:1,reg/f:1", "new-pod": "reg/g:1"} {
+		var refs []string
+		if err := pool.QueryRow(ctx, `SELECT image_refs FROM pipeline_events WHERE delivery_id = $1`, id).Scan(&refs); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(refs, ","); got != want {
+			t.Errorf("%s: image_refs = %q, want %q", id, got, want)
+		}
+	}
+	var enabled string
+	if err := pool.QueryRow(ctx, `SELECT tgenabled FROM pg_trigger
+		WHERE tgname = 'trg_pipeline_events_modified_at' AND tgrelid = 'pipeline_events'::regclass`).Scan(&enabled); err != nil || enabled != "O" {
+		t.Errorf("modified_at trigger state = %q, %v", enabled, err)
+	}
+}
+
 func TestModifiedAtTrigger(t *testing.T) {
 	s, pool := testStore(t)
 	ctx := context.Background()
 	d := &parse.PipelineDraft{DeliveryID: "x", Source: "jenkins", PipelineName: "p", RunID: "1", Phase: "S",
-		CommitSHA: "abc1234", StartedAt: time.Now(), OccurredAt: time.Now(), Payload: []byte(`{}`)}
+		CommitSHA: "abc1234", StartedAt: time.Now(), OccurredAt: time.Now(), Payload: []byte(`{}`)} // nil ImageRefs: stored as '{}'
 	if _, err := s.InsertPipeline(ctx, d, "t"); err != nil {
 		t.Fatal(err)
 	}
@@ -265,9 +333,9 @@ func TestRecentActivity(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 	_, _ = s.InsertPipeline(ctx, &parse.PipelineDraft{DeliveryID: "1", Source: "jenkins", PipelineName: "build",
-		RunID: "1", Phase: "S", CommitSHA: "abc1234", StartedAt: now, OccurredAt: now, Payload: []byte(`{}`)}, "checkout")
+		RunID: "1", Phase: "S", CommitSHA: "abc1234", ImageRefs: []string{}, StartedAt: now, OccurredAt: now, Payload: []byte(`{}`)}, "checkout")
 	_, _ = s.InsertPipeline(ctx, &parse.PipelineDraft{DeliveryID: "2", Source: "jenkins", PipelineName: "build",
-		RunID: "2", Phase: "S", CommitSHA: "abc1234", StartedAt: now, OccurredAt: now, Payload: []byte(`{}`)}, "checkout")
+		RunID: "2", Phase: "S", CommitSHA: "abc1234", ImageRefs: []string{}, StartedAt: now, OccurredAt: now, Payload: []byte(`{}`)}, "checkout")
 	_, _ = s.InsertArgoCD(ctx, &parse.ArgoCDDraft{DeliveryID: "a", AppName: "app-prod", Revision: "abc1234",
 		OccurredAt: now, Payload: []byte(`{}`)}, "platform")
 

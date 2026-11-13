@@ -18,8 +18,11 @@ type PipelineDraft struct {
 	Phase        string
 	Status       *string
 	CommitSHA    string // lowercased
-	ImageRef     *string
-	ActorHandle  *string
+	// ImageRefs is every image the run published, trimmed and deduplicated
+	// in arrival order; empty when it published none. A run is one event
+	// however many images it pushes.
+	ImageRefs   []string
+	ActorHandle *string
 	// ActorAccountKind is nil without a handle: the kind describes the
 	// handle, and there is nothing for it to describe.
 	ActorAccountKind *string
@@ -43,7 +46,7 @@ func Pipeline(raw []byte) (*PipelineDraft, error) {
 		Phase:        o.requiredString("phase", 1),
 		Status:       o.optionalString("status", 0),
 		CommitSHA:    strings.ToLower(o.requiredString("commit_sha", 7)),
-		ImageRef:     o.optionalTrimmed("image_ref"),
+		ImageRefs:    imageRefs(o),
 		ActorHandle:  o.optionalTrimmed("actor_handle"),
 		StartedAt:    o.requiredTime("started_at"),
 		FinishedAt:   o.optionalTime("finished_at", false),
@@ -65,6 +68,30 @@ func Pipeline(raw []byte) (*PipelineDraft, error) {
 		d.OccurredAt = *d.FinishedAt
 	}
 	return d, nil
+}
+
+// imageRefs merges `image_ref` (one image) and `image_refs` (several) into
+// one list: senders that publish a single image keep sending the scalar.
+// An empty or blank entry counts as absent, like an empty `image_ref`.
+func imageRefs(o *object) []string {
+	refs := []string{}
+	seen := map[string]bool{}
+	add := func(r string) {
+		r = strings.TrimSpace(r)
+		if r != "" && !seen[r] {
+			seen[r] = true
+			refs = append(refs, r)
+		}
+	}
+	if one := o.optionalString("image_ref", 0); one != nil {
+		add(*one)
+	}
+	if many, ok := o.stringList("image_refs", false); ok {
+		for _, r := range many {
+			add(r)
+		}
+	}
+	return refs
 }
 
 // ArgoCDDraft is a sync notification from POST /webhooks/argocd.

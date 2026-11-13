@@ -22,6 +22,13 @@
 //   commit_sha     required, >=7 chars
 //   started_at     required, ISO 8601 UTC
 //   finished_at    optional, ISO 8601 UTC
+//   image_refs     optional, every image the run published, full references
+//                  (registry/path/name:tag) exactly as Argo CD reports them.
+//                  One event per run however many images: an event per image
+//                  would count as extra builds. (`image_ref`, one string, is
+//                  accepted too and merged.)
+//   actor_handle   optional, git account Jenkins commits and pushes as
+//   actor_account_kind optional, "service" (default when actor_handle is set)
 //
 // The team is derived from the bearer token, never from the payload.
 // Notifications are best-effort: a slow or unavailable collector must
@@ -89,13 +96,22 @@ void notifyStarted(final Map args) {
             commit_sha   : commitSha,
             started_at   : startedAt,
     ]
+    addActor(body, args)
 
     postEventBestEffort(collectorUrl, credentialsId, body, timeoutSeconds, httpTimeoutSeconds)
 }
 
 // ---------------------------------------------------------------------------
-// Notify COMPLETED — call from `post.always { ... }`.
+// Notify COMPLETED — call from `post.always { ... }` ONLY.
 // Best-effort: never fails the build.
+//
+// Never from a scripted `finally` without passing `status:`: there the
+// exception has not propagated yet, `currentBuild.currentResult` still reads
+// SUCCESS, and every failed build is reported as a success. Scripted
+// pipelines use `runWithEvents`, which decides the status from the exception.
+//
+// Images: `imageRefs:` (a list) and/or `imageRef:` (one string). Add an image
+// once it is pushed; it is reported whatever the final status.
 //
 // Belt-and-suspenders: snapshot currentBuild.result before and restore it
 // after, so a hiccup in the notify path can never demote a SUCCESS build.
@@ -133,6 +149,18 @@ void notifyCompleted(final Map args) {
             started_at   : startedAt,
             finished_at  : finishedAt,
     ]
+    // Whatever the status: callers add an image once it is pushed, and an
+    // UNSTABLE run, or one failing in a later step, still published it.
+    // flatten() takes a single String passed as imageRefs as one image
+    // (String + List would concatenate, and collect would walk characters).
+    def images = [args.imageRefs, args.imageRef].flatten()
+            .collect { it?.toString()?.trim() }
+            .findAll { it }
+            .unique()
+    if (images) {
+        body.image_refs = images
+    }
+    addActor(body, args)
 
     def preResult = currentBuild.result
     postEventBestEffort(collectorUrl, credentialsId, body, timeoutSeconds, httpTimeoutSeconds)
@@ -157,11 +185,24 @@ void notifyCompleted(final Map args) {
 //   // ...or pin to test:
 //   riptide.runWithEvents(stage: 'test') { sh './build.sh' }
 //
-// IMPORTANT: this wrapper runs in-band, so it determines the COMPLETED
-// status from whether the body threw — NOT from `currentBuild.currentResult`,
-// which Jenkins only updates AFTER the script block has propagated the
-// exception. Reading currentResult here would falsely report SUCCESS for a
-// build that is about to be marked FAILURE.
+//   // Images known only once the body has run: set them on the same map,
+//   // it is read again when COMPLETED is sent.
+//   def riptideArgs = [imageRefs: []]
+//   riptide.runWithEvents(riptideArgs) {
+//       apps.each { app -> /* push */ riptideArgs.imageRefs << "${app.image}:${app.version}" }
+//   }
+//
+// IMPORTANT: this wrapper runs in-band, so when the body throws it determines
+// the COMPLETED status from the exception — NOT from
+// `currentBuild.currentResult`, which Jenkins only updates AFTER the script
+// block has propagated the exception. Reading currentResult there would
+// falsely report SUCCESS for a build that is about to be marked FAILURE. On
+// the normal path nothing is propagating, so currentResult is read and
+// carries UNSTABLE set by `unstable(...)` or junit.
+//
+// The event describes the run, so its status is the build's result, not the
+// wrapped body's: an earlier stage left FAILURE by `catchError` reports
+// FAILURE even if the body passes. Wrap the whole build, not one stage.
 //
 // For maximum fidelity (UNSTABLE / ABORTED / etc.) prefer calling
 // `notifyCompleted` from `post.always { script { ... } }` instead — by then
@@ -171,9 +212,10 @@ void runWithEvents(final Map args, Closure body) {
 
     notifyStarted(args)
     def preResult = currentBuild.result
-    String resolvedStatus = 'SUCCESS'
+    String resolvedStatus = 'FAILURE'
     try {
         body()
+        resolvedStatus = currentBuild.currentResult ?: 'SUCCESS'
     } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException t) {
         // User-aborted (or upstream timeout): distinguish from a code
         // FAILURE so dashboards can split "broken build" from "operator
@@ -243,6 +285,18 @@ private void postEventBestEffort(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Declare the git account Jenkins commits and pushes as (`actorHandle:`), so
+ * riptide keeps its pushes and merges out of human activity. Omitted when
+ * unset.
+ */
+private void addActor(Map body, final Map args) {
+    if (args.actorHandle) {
+        body.actor_handle = args.actorHandle as String
+        body.actor_account_kind = (args.actorAccountKind ?: 'service') as String
+    }
+}
 
 /**
  * Resolve the commit SHA from the workspace if not supplied explicitly.
