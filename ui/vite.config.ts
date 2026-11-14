@@ -22,8 +22,8 @@ export default defineConfig({
     // afterEach hook; without globals each render stacks on the previous
     // test's DOM and every findByText hits duplicates.
     globals: true,
-    // Weeks are local calendar weeks: pinned, so a test's buckets do not
-    // move with the machine's zone.
+    // The viewer's zone goes to the backend as tz and formats the dates:
+    // pinned, so a test does not move with the machine's zone.
     env: { TZ: "Europe/Zurich" },
     setupFiles: ["./src/test/setup.ts"],
     coverage: {

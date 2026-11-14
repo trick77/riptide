@@ -1,9 +1,9 @@
-// Package dataset reads the per-team facts the UI computes its metrics from:
-// one row per PR, deploy, shipped commit, CI run and noergler review in a
-// window, never an aggregate (percentiles are the UI's). The rules are the
-// README's metric queries, one embedded .sql file per section; product,
-// GitOps and bot derivations come from the data, never from name lists.
-// HTTP, parameters and config belong to package api.
+// Package dataset reads the per-team facts package metrics computes every
+// number from: one row per PR, deploy, shipped commit, CI run and noergler
+// review in a window, never an aggregate. The rules are the README's metric
+// queries, one embedded .sql file per section; product, GitOps and bot
+// derivations come from the data, never from name lists. HTTP, parameters
+// and config belong to package api.
 package dataset
 
 import (
@@ -50,9 +50,13 @@ type Params struct {
 	Automated func(author, displayName string) bool
 	// Now stamps meta.generated_at.
 	Now time.Time
+	// FactsOnly skips the lead times and the reviews: the facts tables read
+	// none, and a search reads the dataset again on every pause. Products
+	// then miss what only those two show.
+	FactsOnly bool
 }
 
-// Dataset is the /api/dataset body.
+// Dataset is one team's facts for a window.
 type Dataset struct {
 	Meta      Meta       `json:"meta"`
 	Products  []Product  `json:"products"`
@@ -253,14 +257,17 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 	if d.Deploys, err = all[Deploy](ctx, tx, "deploys", deploysSQL, p.Team, p.From, p.To); err != nil {
 		return nil, err
 	}
-	if d.LeadTimes, err = all[LeadTime](ctx, tx, "lead_times", leadTimesSQL, p.Team, p.From, p.To); err != nil {
-		return nil, err
-	}
 	if d.Runs, err = all[Run](ctx, tx, "runs", runsSQL, p.Team, p.From, p.To); err != nil {
 		return nil, err
 	}
-	if d.Reviews, err = all[Review](ctx, tx, "reviews", reviewsSQL, p.Team, p.From, p.To); err != nil {
-		return nil, err
+	d.LeadTimes, d.Reviews = []LeadTime{}, []Review{}
+	if !p.FactsOnly {
+		if d.LeadTimes, err = all[LeadTime](ctx, tx, "lead_times", leadTimesSQL, p.Team, p.From, p.To); err != nil {
+			return nil, err
+		}
+		if d.Reviews, err = all[Review](ctx, tx, "reviews", reviewsSQL, p.Team, p.From, p.To); err != nil {
+			return nil, err
+		}
 	}
 
 	automated := func(login, displayName string) bool {

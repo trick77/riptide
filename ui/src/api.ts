@@ -1,5 +1,6 @@
 // The read API's wire types, as backend/api/openapi.yaml describes them.
-// Timestamps stay ISO strings here; the metrics parse what they use.
+// Every number is computed by the backend; the UI renders and formats.
+// Timestamps are ISO strings, durations seconds.
 
 export type SourceTimes = {
   bitbucket: string | null;
@@ -22,94 +23,219 @@ export type Meta = {
 
 export type Product = { key: string; repos: string[]; apps: string[] };
 
-export type PR = {
-  repo: string;
-  project: string;
-  pr_id: number;
-  title: string | null;
-  gitops: boolean;
-  bot: boolean;
-  change_type: string | null;
-  jira_keys: string[];
-  state: "open" | "merged" | "declined" | "deleted";
-  opened_at: string | null;
-  ready_at: string | null;
-  first_review_at: string | null;
-  approved_at: string | null;
-  approved_on_first_touch: boolean;
-  merged_at: string | null;
-  first_commit_at: string | null;
-  merge_commit: string | null;
-  environments: { environment: string; first_deployed_at: string }[];
+export type Week = { start: string; end: string; kw: number };
+
+export type Period = { from: string; to: string; weeks: Week[] };
+
+export type Spread = { n: number; p50: number | null; p90: number | null };
+
+export type DeployWeek = { release: number; sync: number; first_seen: number };
+
+export type DeployFrequency = {
+  releases: number;
+  syncs: number;
+  first_seen: number;
+  resyncs: number;
+  per_week: number;
+  since: string | null;
+  weeks: DeployWeek[];
+  succeeded: number;
+  failed: number;
+  finished: number;
+  success_rate: number | null;
+  argo_reporting: boolean;
 };
 
-export type DeployKind = "release" | "sync" | "first_seen";
-
-export type Deploy = {
-  app: string;
-  project: string | null;
-  environment: string | null;
-  revision: string;
-  at: string;
-  phase: string;
-  duration_s: number | null;
-  images: string[];
-  kind: DeployKind | null;
-  new_images: string[];
-};
-
-export type LeadTime = {
-  repo: string;
-  project: string;
+export type LeadTimes = {
   environment: string;
-  commit_sha: string;
-  authored_at: string;
-  first_deployed_at: string;
-  lead_time_s: number;
-  is_merge: boolean;
-  service_account: boolean;
-  bot: boolean;
+  human: Spread;
+  bot: Spread;
+  low_sample: boolean;
 };
 
-export type Run = {
-  source: string;
-  pipeline_name: string;
-  branch: string;
-  branch_kind: "main" | "release" | "feature" | "pr" | "other";
-  build_type: string | null;
-  run_id: string;
-  commit_sha: string | null;
-  status: string | null;
-  started_at: string | null;
-  finished_at: string | null;
-  duration_s: number | null;
-  repo: string | null;
-  project: string | null;
-  image_refs: string[];
+export type Delivery = {
+  production_stage: string;
+  pre_environment: string | null;
+  frequency: DeployFrequency;
+  lead_time: LeadTimes;
+  lead_time_pre: LeadTimes | null;
+};
+
+export type StageKey = "coding" | "review" | "merge" | "to_pre" | "to_prod";
+
+export type Stage = Spread & {
+  key: StageKey;
+  low_sample: boolean;
+  share: number | null;
+  hot: boolean;
+};
+
+export type LeadChain = {
+  stages: Stage[];
+  pre_environment: string | null;
+  sum_p50: number | null;
+  before_prod: number;
+};
+
+export type MixWeek = {
+  feature: number;
+  bugfix: number;
+  hotfix: number;
+  other: number;
 };
 
 export type Review = {
-  pr_key: string;
-  repo: string | null;
-  project: string | null;
-  outcome: string | null;
-  cost_usd: string | null;
-  lines_added: number | null;
-  lines_removed: number | null;
-  files_changed: number | null;
-  findings_count: number | null;
-  total_runs: number | null;
-  closed_at: string;
+  cycle: Spread;
+  review: Spread;
+  approved: number;
+  approved_on_first_touch: number;
+  first_touch_rate: number | null;
+  merged: number;
+  untracked: number;
+  untracked_rate: number | null;
+  cycle_histogram: {
+    upper_bounds_s: number[];
+    human: number[];
+    bot: number[];
+  };
+  change_mix: MixWeek[];
 };
 
-export type Dataset = {
+export type RunKind = "release" | "main" | "feature" | "other" | "unknown";
+
+export type BuildStats = {
+  kind: RunKind;
+  runs: number;
+  succeeded: number;
+  failed: number;
+  success_rate: number | null;
+  duration: Spread;
+  ci_seconds: number;
+  wasted_seconds: number;
+  weekly: (number | null)[];
+};
+
+export type RepoDuration = {
+  repo: string;
+  runs: number;
+  duration: Spread;
+  factor: number | null;
+  slow: boolean;
+};
+
+export type RepoFailures = {
+  repo: string;
+  runs: number;
+  failures: number;
+  failure_rate: number | null;
+  wasted_seconds: number;
+  flaky: boolean;
+};
+
+export type KindHotspots = {
+  kind: RunKind;
+  duration: Spread;
+  failure_rate: number | null;
+  durations: RepoDuration[];
+  failing: RepoFailures[];
+  outlier_threshold_s: number | null;
+};
+
+export type Outlier = {
+  kind: RunKind;
+  pipeline_name: string;
+  repo: string;
+  run_id: string;
+  started_at: string | null;
+  duration_s: number;
+  status: string | null;
+  factor: number;
+};
+
+export type Hotspots = {
+  min_runs: number;
+  slow_factor: number;
+  flaky_factor: number;
+  outlier_factor: number;
+  kinds: KindHotspots[];
+  outliers: Outlier[];
+};
+
+export type Build = {
+  data_from: string | null;
+  starts_inside: boolean;
+  gap_weeks: number;
+  kinds: BuildStats[];
+  hotspots: Hotspots;
+};
+
+export type Costs = {
+  total: number;
+  merged: number;
+  merged_reviews: number;
+  per_kloc: number | null;
+  wasted: number;
+  rows: { label: string; value: number }[];
+  reviewed_repos: number;
+};
+
+export type Metrics = {
   meta: Meta;
+  period: Period;
   products: Product[];
-  prs: PR[];
-  deploys: Deploy[];
-  lead_times: LeadTime[];
-  runs: Run[];
-  reviews: Review[];
+  product: string | null;
+  bots: boolean;
+  delivery: Delivery;
+  lead_chain: LeadChain;
+  review: Review;
+  build: Build;
+  costs: Costs;
+};
+
+export type PRFact = {
+  repo: string;
+  pr_id: number;
+  title: string | null;
+  jira_prefix: string;
+  gitops: boolean;
+  bot: boolean;
+  change_type: string | null;
+  state: "open" | "merged" | "declined" | "deleted";
+  review_s: number | null;
+  cycle_s: number | null;
+  merged_at: string | null;
+  prod_at: string | null;
+  to_prod_s: number | null;
+};
+
+export type DeployFact = {
+  at: string;
+  app: string;
+  environment: string | null;
+  revision: string;
+  new_images: string[];
+  class: "failed" | "release" | "first_seen" | "sync";
+  phase: string;
+};
+
+export type RunFact = {
+  pipeline_name: string;
+  run_id: string;
+  kind: RunKind;
+  commit_sha: string | null;
+  duration_s: number | null;
+  image_refs: string[];
+  status: string | null;
+};
+
+export type Table<T> = { count: number; rows: T[] };
+
+export type Facts = {
+  production_stage: string;
+  limit: number;
+  prs: Table<PRFact>;
+  deploys: Table<DeployFact>;
+  runs: Table<RunFact>;
 };
 
 // ApiError carries the server's {"detail": ...} message.
@@ -145,16 +271,41 @@ export function fetchTeams(signal?: AbortSignal): Promise<string[]> {
   );
 }
 
-export function fetchDataset(
-  team: string,
-  from: Date,
-  to: Date,
-  signal?: AbortSignal,
-): Promise<Dataset> {
+// What the page shows: whose data, how many calendar weeks, which product,
+// bots or not.
+export type Query = {
+  team: string;
+  weeks: number;
+  product: string | null;
+  bots: boolean;
+};
+
+// The viewer's time zone: the backend cuts weeks at Monday 00:00 there.
+export function viewerZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
+function params(v: Query): URLSearchParams {
   const q = new URLSearchParams({
-    team,
-    from: from.toISOString(),
-    to: to.toISOString(),
+    team: v.team,
+    weeks: String(v.weeks),
+    tz: viewerZone(),
   });
-  return getJSON<Dataset>(`/api/dataset?${q}`, signal);
+  if (v.product) q.set("product", v.product);
+  if (v.bots) q.set("bots", "1");
+  return q;
+}
+
+export function fetchMetrics(v: Query, signal?: AbortSignal): Promise<Metrics> {
+  return getJSON<Metrics>(`/api/metrics?${params(v)}`, signal);
+}
+
+export function fetchFacts(
+  v: Query,
+  search: string,
+  signal?: AbortSignal,
+): Promise<Facts> {
+  const q = params(v);
+  if (search.trim()) q.set("q", search.trim());
+  return getJSON<Facts>(`/api/facts?${q}`, signal);
 }
