@@ -122,6 +122,9 @@ type DeployFrequency struct {
 	// PerWeek is releases per week over the period, or over the part of it
 	// since Argo CD started reporting.
 	PerWeek float64 `json:"per_week"`
+	// LowSample: the rate rests on less than a week of Argo CD data, so one
+	// release reads as many per week.
+	LowSample bool `json:"low_sample"`
 	// Since is when Argo CD's data starts inside the period; null when it
 	// covers it.
 	Since       *time.Time   `json:"since"`
@@ -193,6 +196,7 @@ func deployFrequency(ds *dataset.Dataset, p Period, f filter, env string) Deploy
 	if span > 0 {
 		out.PerWeek = float64(out.Releases) / span
 	}
+	out.LowSample = span < 1
 	out.Succeeded = len(ok)
 	out.Failed = failed
 	out.Finished = out.Succeeded + out.Failed

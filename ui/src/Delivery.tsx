@@ -44,7 +44,9 @@ export function Delivery({ m, why, onWhy }: Props) {
   const lt = m.delivery.lead_time;
   const ltPre = m.delivery.lead_time_pre;
   const sinceNote = freq.since
-    ? `Argo CD meldet erst seit ${fullDate(new Date(freq.since))}: die Wochen davor sind leer, die Rate gilt ab dann.`
+    ? `Argo CD meldet erst seit ${fullDate(new Date(freq.since))}: die Wochen davor sind leer, die Rate gilt ab dann.${
+        freq.low_sample ? " Weniger als eine Woche Daten: wenig belastbar." : ""
+      }`
     : null;
 
   const whys: Record<string, Why> = {

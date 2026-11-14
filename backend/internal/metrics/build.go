@@ -55,14 +55,31 @@ func RunKind(r dataset.Run, buildTypeFrom *time.Time) string {
 	return KindOther
 }
 
-func status(r dataset.Run) string {
-	if r.Status == nil {
-		return ""
-	}
-	return strings.ToUpper(*r.Status)
-}
+// Verdicts: what a run's status says about the build, across CIs.
+const (
+	VerdictSuccess = "success"
+	VerdictFailure = "failure"
+	// VerdictNone: the run ended without saying whether the build works:
+	// ABORTED (a superseded build is cancelled, not broken), NOT_BUILT,
+	// Tekton's None. Neither a failure nor a run; only its CI time counts.
+	VerdictNone = "none"
+)
 
-func succeeded(r dataset.Run) bool { return status(r) == "SUCCESS" }
+// verdict reads Jenkins' SUCCESS / FAILURE / UNSTABLE and Tekton's
+// Succeeded / Completed (succeeded, some tasks skipped) / Failed, as
+// docs/setup-*-notification.md have them send it; anything else is none.
+func verdict(r dataset.Run) string {
+	if r.Status == nil {
+		return VerdictNone
+	}
+	switch strings.ToUpper(*r.Status) {
+	case "SUCCESS", "SUCCEEDED", "COMPLETED":
+		return VerdictSuccess
+	case "FAILURE", "UNSTABLE", "FAILED":
+		return VerdictFailure
+	}
+	return VerdictNone
+}
 
 func seconds(r dataset.Run) float64 {
 	if r.DurationS == nil {
@@ -106,20 +123,45 @@ func newRepoNamer(runs []dataset.Run) repoNamer {
 	}
 }
 
-// BuildStats is one kind of run over the period.
+// BuildStats is one kind of run over the period. A run without a verdict
+// (ABORTED, NOT_BUILT, ...) is neither a failure nor a run, as in the
+// hotspots: it counts only in NoVerdict and the CI time it took, so Runs is
+// always Succeeded plus Failed.
 type BuildStats struct {
 	Kind      string `json:"kind"`
 	Runs      int    `json:"runs"`
 	Succeeded int    `json:"succeeded"`
-	// Failed are the runs without SUCCESS: FAILURE, UNSTABLE, ABORTED,
-	// whatever else came.
-	Failed        int      `json:"failed"`
-	SuccessRate   *float64 `json:"success_rate"`
-	Duration      Spread   `json:"duration"`
-	CISeconds     float64  `json:"ci_seconds"`
-	WastedSeconds float64  `json:"wasted_seconds"`
+	Failed    int    `json:"failed"`
+	NoVerdict int    `json:"no_verdict"`
+	// SuccessRate is Succeeded over Runs.
+	SuccessRate *float64 `json:"success_rate"`
+	// Duration is over Runs: an aborted run's is no build time.
+	Duration Spread `json:"duration"`
+	// CISeconds is every run's time, those without a verdict included.
+	CISeconds float64 `json:"ci_seconds"`
+	// WastedSeconds is the time of the failed runs.
+	WastedSeconds float64 `json:"wasted_seconds"`
 	// Weekly is the success rate per week, null for a week without runs.
 	Weekly []*float64 `json:"weekly"`
+}
+
+// tally counts runs by verdict; runs are those with one.
+type tally struct{ runs, succeeded, failed, none int }
+
+// add counts r and returns its verdict.
+func (t *tally) add(r dataset.Run) string {
+	v := verdict(r)
+	switch v {
+	case VerdictSuccess:
+		t.runs++
+		t.succeeded++
+	case VerdictFailure:
+		t.runs++
+		t.failed++
+	default:
+		t.none++
+	}
+	return v
 }
 
 // Build is the CI section.
@@ -167,30 +209,30 @@ func build(ds *dataset.Dataset, p Period, f filter) Build {
 		if len(rs) == 0 {
 			continue
 		}
-		b := BuildStats{Kind: kind, Runs: len(rs)}
+		b := BuildStats{Kind: kind}
+		var t tally
 		var durations []float64
 		for _, r := range rs {
-			if succeeded(r) {
-				b.Succeeded++
-			} else {
-				b.Failed++
+			b.CISeconds += seconds(r)
+			switch t.add(r) {
+			case VerdictNone:
+				continue
+			case VerdictFailure:
 				b.WastedSeconds += seconds(r)
 			}
-			b.CISeconds += seconds(r)
 			if r.DurationS != nil {
 				durations = append(durations, float64(*r.DurationS))
 			}
 		}
+		b.Runs, b.Succeeded, b.Failed, b.NoVerdict = t.runs, t.succeeded, t.failed, t.none
 		b.SuccessRate = ratio(b.Succeeded, b.Runs)
 		b.Duration = spread(durations)
 		for _, w := range bucket(p, rs, runAt) {
-			ok := 0
+			var wt tally
 			for _, r := range w {
-				if succeeded(r) {
-					ok++
-				}
+				wt.add(r)
 			}
-			b.Weekly = append(b.Weekly, ratio(ok, len(w)))
+			b.Weekly = append(b.Weekly, ratio(wt.succeeded, wt.runs))
 		}
 		out.Kinds = append(out.Kinds, b)
 	}
@@ -220,13 +262,6 @@ const (
 	outlierTop    = 10
 )
 
-// failure: a run that broke. ABORTED is neither failure nor success (a
-// superseded build is cancelled, not broken), so it leaves the hotspot
-// rates' denominator too.
-func failure(r dataset.Run) bool { s := status(r); return s == "FAILURE" || s == "UNSTABLE" }
-
-func aborted(r dataset.Run) bool { return status(r) == "ABORTED" }
-
 // RepoDuration is one repo's run durations against its kind's team median.
 type RepoDuration struct {
 	Repo     string `json:"repo"`
@@ -243,7 +278,7 @@ type RepoDuration struct {
 // RepoFailures is one repo's broken runs.
 type RepoFailures struct {
 	Repo string `json:"repo"`
-	// Runs are those counted for the rate: ABORTED left out.
+	// Runs are those with a verdict.
 	Runs        int      `json:"runs"`
 	Failures    int      `json:"failures"`
 	FailureRate *float64 `json:"failure_rate"`
@@ -267,7 +302,7 @@ type KindHotspots struct {
 	// and every flaky one.
 	Failing []RepoFailures `json:"failing"`
 	// OutlierThresholdS is OutlierFactor times the team's p90; null below
-	// HotspotMinRuns runs with a duration.
+	// HotspotMinRuns runs with a verdict and a duration.
 	OutlierThresholdS *float64 `json:"outlier_threshold_s"`
 }
 
@@ -354,16 +389,18 @@ func kindHotspots(kind string, rs []dataset.Run, repoKey repoNamer) (KindHotspot
 			rr = &repoRuns{}
 			repos[key] = rr
 		}
+		// A run without a verdict is no run here either, nor its duration.
+		v := verdict(r)
+		if v == VerdictNone {
+			continue
+		}
 		if r.DurationS != nil {
 			durations = append(durations, float64(*r.DurationS))
 			rr.durations = append(rr.durations, float64(*r.DurationS))
 		}
-		if aborted(r) {
-			continue
-		}
 		counted++
 		rr.counted++
-		if failure(r) {
+		if v == VerdictFailure {
 			failures++
 			rr.failures++
 			rr.wasted += seconds(r)
@@ -407,6 +444,8 @@ func kindHotspots(kind string, rs []dataset.Run, repoKey repoNamer) (KindHotspot
 	if len(durations) >= HotspotMinRuns && k.Duration.P90 != nil && *k.Duration.P90 > 0 {
 		p90 := *k.Duration.P90
 		k.OutlierThresholdS = ptr(OutlierFactor * p90)
+		// Runs without a verdict too: a run stuck for a day and then
+		// cancelled is what an outlier is there to show.
 		for _, r := range rs {
 			if r.DurationS == nil || float64(*r.DurationS) <= *k.OutlierThresholdS {
 				continue

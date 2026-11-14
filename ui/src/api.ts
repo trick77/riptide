@@ -37,6 +37,7 @@ export type DeployFrequency = {
   first_seen: number;
   resyncs: number;
   per_week: number;
+  low_sample: boolean;
   since: string | null;
   weeks: DeployWeek[];
   succeeded: number;
@@ -108,6 +109,7 @@ export type BuildStats = {
   runs: number;
   succeeded: number;
   failed: number;
+  no_verdict: number;
   success_rate: number | null;
   duration: Spread;
   ci_seconds: number;
@@ -226,6 +228,7 @@ export type RunFact = {
   duration_s: number | null;
   image_refs: string[];
   status: string | null;
+  verdict: "success" | "failure" | "none";
 };
 
 export type Table<T> = { count: number; rows: T[] };
