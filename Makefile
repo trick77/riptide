@@ -1,9 +1,21 @@
-# The Go module lives in backend/; scripts/ and docs/ are at the root.
+# The Go module lives in backend/, the UI in ui/; scripts/ and docs/ are at the root.
 VERSION ?= dev
 
-.PHONY: build
+.PHONY: build fe-build fe-test
 
-build:
+# The find, rather than emptyOutDir: vite runs with emptyOutDir false so the
+# tracked dist/.gitkeep survives (//go:embed all:dist needs a non-empty
+# directory in a fresh clone), so stale hashed assets of an earlier build
+# would otherwise pile up in the binary.
+fe-build:
+	find backend/web/dist -mindepth 1 ! -name '.gitkeep' -delete
+	cd ui && npm ci && npm run build
+
+# npm test does not typecheck; npm run build (tsc -b && vite build) does.
+fe-test:
+	cd ui && npx tsc -b && npm run test
+
+build: fe-build
 	cd backend && CGO_ENABLED=0 go build -trimpath \
 		-ldflags="-s -w -X github.com/trick77/ship/kit/version.Version=$(VERSION)" \
 		-o ../bin/riptide ./cmd/riptide

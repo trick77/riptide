@@ -4,7 +4,7 @@ info:
   title: riptide-collector webhook API
   # The CONTRACT's version, not the binary's. The two move independently:
   # a release that changes no route leaves this alone.
-  version: 1.1.0
+  version: 1.2.0
   description: |
     DevOps delivery-metrics ingestion. Senders post raw events from Bitbucket
     Data Center, CI pipelines (Jenkins, Tekton, ...), Argo CD and noergler;
@@ -239,6 +239,25 @@ paths:
           content:
             text/html:
               schema: { type: string }
+
+  /api/teams:
+    get:
+      tags: [read]
+      operationId: teams
+      summary: The configured teams
+      description: The teams in the config, sorted, for the UI's team picker. Served on the UI listener only.
+      security: []
+      responses:
+        "200":
+          description: The team names.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [teams]
+                properties:
+                  teams: { type: array, items: { type: string } }
 
   /api/dataset:
     get:
@@ -572,7 +591,8 @@ components:
     DatasetMeta:
       type: object
       additionalProperties: false
-      required: [team, from, to, generated_at, production_stage, data_start, build_data_from, build_type_from]
+      required: [team, from, to, generated_at, production_stage, data_start, data_end, build_data_from,
+                 build_type_from]
       properties:
         team: { type: string }
         from: { $ref: "#/components/schemas/Instant" }
@@ -582,15 +602,11 @@ components:
           type: string
           description: The config's production environment; the other `environment` values are earlier stages.
         data_start:
-          type: object
-          description: The team's first event per source over all history; null when the source never reported.
-          additionalProperties: false
-          required: [bitbucket, pipeline, argocd, noergler]
-          properties:
-            bitbucket: { $ref: "#/components/schemas/NullableInstant" }
-            pipeline: { $ref: "#/components/schemas/NullableInstant" }
-            argocd: { $ref: "#/components/schemas/NullableInstant" }
-            noergler: { $ref: "#/components/schemas/NullableInstant" }
+          $ref: "#/components/schemas/SourceTimes"
+          description: The team's first event per source over all history.
+        data_end:
+          $ref: "#/components/schemas/SourceTimes"
+          description: The team's latest event per source over all history, how fresh it is.
         build_data_from:
           $ref: "#/components/schemas/NullableInstant"
           description: When riptide first received a pipeline event for the team.
@@ -601,6 +617,17 @@ components:
             a build_type; null if none ever did. Before it, a run's null
             build_type means not collected yet; after it, the sender said
             nothing.
+
+    SourceTimes:
+      type: object
+      description: One instant per source; null when the source never reported for the team.
+      additionalProperties: false
+      required: [bitbucket, pipeline, argocd, noergler]
+      properties:
+        bitbucket: { $ref: "#/components/schemas/NullableInstant" }
+        pipeline: { $ref: "#/components/schemas/NullableInstant" }
+        argocd: { $ref: "#/components/schemas/NullableInstant" }
+        noergler: { $ref: "#/components/schemas/NullableInstant" }
 
     DatasetProduct:
       type: object
@@ -618,13 +645,14 @@ components:
         timestamps come from its whole history. Bots and GitOps PRs are
         flagged, not dropped. No author names.
       additionalProperties: false
-      required: [repo, project, pr_id, gitops, bot, change_type, jira_keys, state, opened_at, ready_at,
+      required: [repo, project, pr_id, title, gitops, bot, change_type, jira_keys, state, opened_at, ready_at,
                  first_review_at, approved_at, approved_on_first_touch, merged_at, first_commit_at,
                  merge_commit, environments]
       properties:
         repo: { type: string }
         project: { type: string }
         pr_id: { type: integer }
+        title: { type: [string, "null"], description: The title as last seen. }
         gitops:
           type: boolean
           description: The repo is a GitOps repo (Argo CD deploys its commits); its PRs are stage promotions, leave them out of PR metrics.
@@ -672,7 +700,7 @@ components:
       type: object
       description: A finished Argo CD sync (Succeeded or Failed) in the window.
       additionalProperties: false
-      required: [app, project, environment, revision, at, phase, duration_s, images, kind]
+      required: [app, project, environment, revision, at, phase, duration_s, images, kind, new_images]
       properties:
         app: { type: string }
         project:
@@ -692,6 +720,10 @@ components:
             deploy (over all history); `sync`: the same images again;
             `first_seen`: the App's first deploy in the data; null on a failed
             sync. Count releases as distinct revisions.
+        new_images:
+          type: array
+          items: { type: string }
+          description: The images a release brought, those the App's previous successful deploy did not run; empty for anything but a release.
 
     DatasetLeadTime:
       type: object
@@ -719,8 +751,8 @@ components:
       type: object
       description: A finished CI run (phase COMPLETED) in the window.
       additionalProperties: false
-      required: [source, pipeline_name, branch, branch_kind, build_type, run_id, status, started_at, finished_at,
-                 duration_s, repo, project, image_refs]
+      required: [source, pipeline_name, branch, branch_kind, build_type, run_id, commit_sha, status, started_at,
+                 finished_at, duration_s, repo, project, image_refs]
       properties:
         source: { type: string }
         pipeline_name: { type: string }
@@ -730,6 +762,7 @@ components:
         branch_kind: { type: string, enum: [main, release, feature, pr, other] }
         build_type: { type: [string, "null"] }
         run_id: { type: string }
+        commit_sha: { type: [string, "null"] }
         status: { type: [string, "null"] }
         started_at: { $ref: "#/components/schemas/NullableInstant" }
         finished_at: { $ref: "#/components/schemas/NullableInstant" }

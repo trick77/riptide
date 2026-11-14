@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/trick77/riptide/internal/dataset"
 	"github.com/trick77/riptide/internal/httpapi"
+	"github.com/trick77/riptide/web"
 )
 
 // Reader is what the read API needs from the database.
@@ -17,10 +19,35 @@ type Reader interface {
 	Dataset(ctx context.Context, p dataset.Params) (*dataset.Dataset, error)
 }
 
-// RegisterUI adds the read API to the UI listener's server. Never to the
-// collector's: see serve in cmd/riptide.
+// RegisterUI adds the read API and the UI itself to the UI listener's
+// server. Never to the collector's: see serve in cmd/riptide.
 func RegisterUI(srv *httpapi.Server, d Deps) {
+	srv.HandleFunc("GET /api/teams", d.teams)
 	srv.HandleFunc("GET /api/dataset", d.dataset)
+	// Under /api nothing else exists. Explicit, because the SPA's catch-all
+	// on "GET /" would otherwise answer an unknown /api path with the
+	// shell's 404 instead of {"detail": ...}.
+	// GET only: a method-less pattern would conflict with "GET /".
+	srv.HandleFunc("GET /api/", func(w http.ResponseWriter, _ *http.Request) {
+		httpapi.WriteDetail(w, http.StatusNotFound, http.StatusText(http.StatusNotFound))
+	})
+	srv.Handle("GET /", web.Handler())
+}
+
+// Teams is the body of GET /api/teams.
+type Teams struct {
+	Teams []string `json:"teams"`
+}
+
+// teams lists the configured teams, sorted, for the UI's team picker.
+func (d Deps) teams(w http.ResponseWriter, _ *http.Request) {
+	cfg := d.Runtime.Config()
+	names := make([]string, 0, len(cfg.Teams))
+	for name := range cfg.Teams {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	httpapi.WriteJSON(w, http.StatusOK, Teams{Teams: names})
 }
 
 // The window the dataset covers when the caller names none, and the widest
