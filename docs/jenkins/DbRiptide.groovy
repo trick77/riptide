@@ -1,13 +1,13 @@
 // DbRiptide.groovy
 //
-// Jenkins shared-library helper for posting build events to riptide-collector.
+// Jenkins shared-library helper for posting build events to riptide.
 // Loaded via `def riptide = load 'DbRiptide.groovy'` and called from a
 // Jenkinsfile. Mirrors the style of the existing `Argument.getRequiredValue`
 // / `Argument.getOptionalValue` helpers used elsewhere in the library.
 //
 // THIS FILE IS A TEMPLATE. Before deploying it into a Jenkins shared
 // library, edit COLLECTOR_URLS below to point at your real test/prod
-// riptide-collector hostnames. The placeholder values use
+// riptide hostnames. The placeholder values use
 // `example.invalid` (RFC 6761 reserved, DNS-guaranteed not to resolve)
 // so a forgotten swap fails loudly via the best-effort `unreachable`
 // warning instead of silently 200-ing some unrelated host.
@@ -46,7 +46,7 @@
 
 import groovy.transform.Field
 
-// REPLACE these URLs with the actual riptide-collector endpoints in your
+// REPLACE these URLs with the actual riptide endpoints in your
 // environment. `example.invalid` is RFC 6761 reserved and is guaranteed
 // not to resolve, so a forgotten swap fails loudly via the best-effort
 // `unreachable` warning instead of silently 200-ing some unrelated host.
@@ -378,7 +378,7 @@ private void warnRiptide(String reason, String detail) {
     // can't pad to a trailing `!!`; fixed-content lines keep both ends.
     echo([
             '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
-            "  WARNING: RIPTIDE-COLLECTOR ${reason.toUpperCase()}",
+            "  WARNING: RIPTIDE ${reason.toUpperCase()}",
             "  ${detail}",
             '  build result is UNAFFECTED — this is best-effort',
             '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',

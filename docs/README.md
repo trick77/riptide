@@ -1,6 +1,6 @@
-# riptide-collector docs
+# riptide docs
 
-Operator-facing guides for wiring riptide-collector into your delivery pipeline.
+Operator-facing guides for wiring riptide into your delivery pipeline.
 
 | Doc | Audience | Purpose |
 |---|---|---|

@@ -17,7 +17,7 @@ import (
 
 func newServer(checks ...httpx.Check) (*Server, *bytes.Buffer) {
 	buf := &bytes.Buffer{}
-	log := slog.New(logging.NewSplunkHandler(buf, slog.LevelInfo, "riptide-collector", "test"))
+	log := slog.New(logging.NewSplunkHandler(buf, slog.LevelInfo, "riptide", "test"))
 	s := New(log, checks...)
 	s.HandleFunc("POST /things", func(w http.ResponseWriter, r *http.Request) {
 		log.InfoContext(r.Context(), "inside")

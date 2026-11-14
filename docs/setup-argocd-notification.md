@@ -1,6 +1,6 @@
 # Setup: ArgoCD notification
 
-Have ArgoCD push sync events to riptide-collector via the
+Have ArgoCD push sync events to riptide via the
 **argocd-notifications** controller. Each team uses **its own bearer
 token**: configure one `NotificationService` per team and route teams to
 the right one via `AppProject` defaults so you don't annotate every app.
@@ -22,7 +22,7 @@ Edit `argocd-notifications-cm` (in the `argocd` namespace). One
 ```yaml
 data:
   service.webhook.riptide-checkout: |
-    url: https://riptide-collector.example.com/webhooks/argocd
+    url: https://riptide.example.com/webhooks/argocd
     timeout: 5s
     retryWaitMin: 1s
     retryWaitMax: 5s
@@ -34,7 +34,7 @@ data:
         value: application/json
 
   service.webhook.riptide-platform: |
-    url: https://riptide-collector.example.com/webhooks/argocd
+    url: https://riptide.example.com/webhooks/argocd
     timeout: 5s
     retryWaitMin: 1s
     retryWaitMax: 5s
@@ -48,7 +48,7 @@ data:
 
 > **Why the explicit timeout / retry caps.** The notifications controller
 > runs in its own pod (separate from `argocd-application-controller`), so a
-> down or slow riptide-collector cannot block syncs or reconciliation —
+> down or slow riptide cannot block syncs or reconciliation —
 > only notification dispatch is affected. The caps above bound the worst
 > case per event to roughly 5s + (1s + 5s) + (5s + 5s) + 5s ≈ 25s instead
 > of inheriting the library's generous defaults. Tune to taste.

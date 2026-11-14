@@ -1,6 +1,6 @@
 # Setup: Tekton (OpenShift Pipelines) notification
 
-Have a Tekton `Pipeline` POST a small JSON payload to riptide-collector at the
+Have a Tekton `Pipeline` POST a small JSON payload to riptide at the
 end of each `PipelineRun`. The endpoint is shared with Jenkins and any other
 CI (`POST /webhooks/pipeline`) — Tekton callers identify themselves via
 `"source": "tekton"`.
@@ -44,7 +44,7 @@ spec:
     - name: finished-at
       description: PipelineRun status.completionTime (ISO 8601 UTC)
     - name: riptide-url
-      default: https://riptide-collector.example.com/webhooks/pipeline
+      default: https://riptide.example.com/webhooks/pipeline
   steps:
     - name: post
       image: registry.access.redhat.com/ubi9/ubi-minimal:latest
@@ -56,7 +56,7 @@ spec:
               key: token
       script: |
         #!/bin/sh
-        # Notification is best-effort: a slow or unavailable riptide-collector
+        # Notification is best-effort: a slow or unavailable riptide
         # must NEVER fail the PipelineRun. We deliberately do not `set -e` and
         # exit 0 at the end regardless of the curl outcome.
         set -u
@@ -90,9 +90,9 @@ spec:
         case "$HTTP_CODE" in
           2*) echo "riptide-notify: OK (http=${HTTP_CODE})" ;;
           000)
-              # Connect/timeout/DNS — we never reached riptide-collector.
+              # Connect/timeout/DNS — we never reached riptide.
               echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-              echo "!! WARNING: RIPTIDE-COLLECTOR UNREACHABLE                   !!"
+              echo "!! WARNING: RIPTIDE UNREACHABLE                             !!"
               echo "!! url=$(params.riptide-url)"
               echo "!! reason=connect/timeout/DNS (curl exit non-zero, http=000)!!"
               echo "!! pipeline result is UNAFFECTED — this is best-effort      !!"
@@ -101,7 +101,7 @@ spec:
           *)
               # Reached the server but it returned an error status.
               echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-              echo "!! WARNING: RIPTIDE-COLLECTOR REJECTED THE EVENT            !!"
+              echo "!! WARNING: RIPTIDE REJECTED THE EVENT                      !!"
               echo "!! http=${HTTP_CODE}  url=$(params.riptide-url)"
               echo "!! body (first 500 bytes):"
               head -c 500 /tmp/riptide.out 2>/dev/null || true; echo

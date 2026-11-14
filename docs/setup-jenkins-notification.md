@@ -1,12 +1,12 @@
 # Setup: Jenkins notification
 
-Have a Jenkins pipeline POST a small JSON payload to riptide-collector at the
+Have a Jenkins pipeline POST a small JSON payload to riptide at the
 end of each build. The endpoint is shared with Tekton and any other CI
 (`POST /webhooks/pipeline`) — distinguish your CI via the `source` field.
 
 ## Pipeline contract
 
-riptide-collector accepts the following JSON. **All required fields are
+riptide accepts the following JSON. **All required fields are
 mandatory** — without them the metrics break.
 
 ```json
@@ -75,7 +75,7 @@ identifies the team; do not share across teams.
 
 If your team already runs a Jenkins shared library, drop
 `docs/jenkins/DbRiptide.groovy` into it (after editing `COLLECTOR_URLS`
-to point at your real test/prod riptide-collector hostnames) and call
+to point at your real test/prod riptide hostnames) and call
 `notifyCompleted` from `post.always`:
 
 ```groovy
@@ -102,7 +102,7 @@ Requires the **HTTP Request** plugin and a `Secret text` credential named
 `RIPTIDE_TOKEN` containing **your team's** raw bearer token.
 
 ```groovy
-// Notification is best-effort: a slow or unavailable riptide-collector must
+// Notification is best-effort: a slow or unavailable riptide must
 // NEVER fail the build. We bound the call with `timeout`, swallow exceptions,
 // and accept any HTTP status (we just log it).
 def riptideNotify(String phase) {
@@ -135,7 +135,7 @@ def riptideNotify(String phase) {
         // Hard wall-clock ceiling so a hung connection can't drag the build.
         timeout(time: 15, unit: 'SECONDS') {
             withCredentials([string(credentialsId: 'RIPTIDE_TOKEN', variable: 'TOKEN')]) {
-                def url = 'https://riptide-collector.example.com/webhooks/pipeline'
+                def url = 'https://riptide.example.com/webhooks/pipeline'
                 def resp = httpRequest(
                     httpMode: 'POST',
                     url: url,
@@ -155,7 +155,7 @@ def riptideNotify(String phase) {
                     // appears once, not five times.
                     echo([
                         '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
-                        '!! WARNING: RIPTIDE-COLLECTOR REJECTED THE EVENT            !!',
+                        '!! WARNING: RIPTIDE REJECTED THE EVENT                      !!',
                         "http=${resp.status}  url=${url}",
                         '!! build result is UNAFFECTED — this is best-effort         !!',
                         '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
@@ -164,11 +164,11 @@ def riptideNotify(String phase) {
             }
         }
     } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
-        // timeout() aborted us — riptide-collector did not respond in time.
+        // timeout() aborted us — riptide did not respond in time.
         // Do NOT rethrow: that would propagate the abort and fail the build.
         echo([
             '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
-            '!! WARNING: RIPTIDE-COLLECTOR UNREACHABLE                   !!',
+            '!! WARNING: RIPTIDE UNREACHABLE                             !!',
             '!! reason=wall-clock timeout (no response in 15s)           !!',
             '!! build result is UNAFFECTED — this is best-effort         !!',
             '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
@@ -177,7 +177,7 @@ def riptideNotify(String phase) {
         // Connection refused, DNS failure, TLS error, plugin error, etc.
         echo([
             '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
-            '!! WARNING: RIPTIDE-COLLECTOR UNREACHABLE                   !!',
+            '!! WARNING: RIPTIDE UNREACHABLE                             !!',
             "reason=${t.class.simpleName}: ${t.message}",
             '!! build result is UNAFFECTED — this is best-effort         !!',
             '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',

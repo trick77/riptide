@@ -1,7 +1,7 @@
 # Setup: Bitbucket webhook
 
 Wire a Bitbucket Data Center repository to send PR + push events to
-riptide-collector. Authentication is **HMAC-SHA256** via BBS's native
+riptide. Authentication is **HMAC-SHA256** via BBS's native
 `configuration.secret`; the team's secret is the `bitbucket` entry in
 `team-keys.json`.
 
@@ -14,7 +14,7 @@ with HMAC, the correct event set, and the correct per-team URL
 
 - Repo admin access to the Bitbucket repository (or use the command with a
   REPO_ADMIN token).
-- The riptide-collector base URL for your environment (ask the platform
+- The riptide base URL for your environment (ask the platform
   team).
 - **Your team's Bitbucket HMAC secret** — the value stored under
   `<team>.bitbucket` in `team-keys.json`. The platform team hands it out
@@ -27,7 +27,7 @@ with HMAC, the correct event set, and the correct per-team URL
 Get the binary with `make build` (writes `bin/riptide`), `go run
 ./backend/cmd/riptide` from a checkout, or run the collector image, whose
 entrypoint is the same binary:
-`docker run --rm -v "$PWD:/work" -w /work -e BITBUCKET_TOKEN -e BACKEND_TEAM_KEY ghcr.io/trick77/riptide-collector onboard-bitbucket team-config.json`.
+`docker run --rm -v "$PWD:/work" -w /work -e BITBUCKET_TOKEN -e BACKEND_TEAM_KEY ghcr.io/trick77/riptide onboard-bitbucket team-config.json`.
 
 ```bash
 export BITBUCKET_TOKEN=...     # repo-admin REST token
@@ -43,7 +43,7 @@ The command is idempotent (rerun after edits), supports `--dry-run` and
 
 1. **Repository settings → Webhooks → Add webhook**.
 2. **Title**: `riptide`.
-3. **URL**: `https://riptide-collector.<env>.example.com/webhooks/bitbucket/<team>`
+3. **URL**: `https://riptide.<env>.example.com/webhooks/bitbucket/<team>`
    — note the trailing `/<team>` segment; team identity is read from the
    path.
 4. **Status**: Active.
@@ -73,9 +73,9 @@ the top-level `credentials` block via REST — BBS DC silently drops
 ## Verify
 
 1. Trigger a small event (e.g., push a commit to a PR).
-2. Check the collector logs:
+2. Check riptide's log for the `msg=webhook_processed` line of the delivery:
    ```bash
-   oc logs -n riptide deployment/riptide-collector --tail=50 | grep bitbucket_event_received
+   oc logs -n <namespace> deployment/riptide -c app --tail=50 | grep '"webhook_source":"bitbucket"'
    ```
 3. You should see a line with the `delivery_id`, `event_type`, `repo`, and
    `team` matching what you triggered. `team` is the segment from the
