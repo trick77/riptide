@@ -1,5 +1,6 @@
-// Package api is the collector's HTTP surface: the four webhook sinks,
-// /auth/ping and the API docs; the probes are kit's (package httpapi).
+// Package api is riptide's HTTP surface: on the collector listener the four
+// webhook sinks, /auth/ping and the API docs (the probes are kit's, package
+// httpapi); on the UI listener the read API under /api.
 // Handlers do HTTP, auth, dispatch to the pure extractors in package parse,
 // config-derived fields, and persistence.
 package api
@@ -42,7 +43,9 @@ type Store interface {
 
 // Deps is what the routes share.
 type Deps struct {
-	Store   Store
+	Store Store
+	// Reader serves the UI listener's read API.
+	Reader  Reader
 	Runtime *config.Runtime
 	Log     *slog.Logger
 	// Now is the clock for occurred_at fallbacks; time.Now when nil.

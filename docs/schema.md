@@ -30,6 +30,7 @@ Indexes:
 - `ix_argocd_events_app_name` (`app_name`)
 - `ix_argocd_events_environment` (`environment`)
 - `ix_argocd_events_revision` (`revision`)
+- `ix_argocd_events_team_occurred` (`team`, `occurred_at`)
 - `uq_argocd_events_delivery_id` (`delivery_id`) unique
 
 ## bitbucket_events
@@ -66,6 +67,8 @@ Indexes:
 - `ix_bitbucket_events_pr_id` (`pr_id`)
 - `ix_bitbucket_events_repo_branch_occurred` (`repo_full_name`, `branch_name`, `occurred_at`)
 - `ix_bitbucket_events_repo_full_name` (`repo_full_name`)
+- `ix_bitbucket_events_repo_pr` (`repo_full_name`, `pr_id`) where `pr_id IS NOT NULL`
+- `ix_bitbucket_events_team_occurred` (`team`, `occurred_at`)
 - `uq_bitbucket_events_delivery_id` (`delivery_id`) unique
 
 ## noergler_events
@@ -109,6 +112,7 @@ Indexes:
 - `ix_noergler_events_outcome` (`outcome`)
 - `ix_noergler_events_pr_completed_newest` (`pr_key`, `(outcome::text = 'deleted'::text)`, `occurred_at`, `id`) where `event_type::text = 'pr_completed'::text`
 - `ix_noergler_events_pr_key` (`pr_key`)
+- `ix_noergler_events_team_occurred` (`team`, `occurred_at`)
 - `uq_noergler_events_delivery_id` (`delivery_id`) unique
 
 ## pipeline_events
@@ -135,6 +139,7 @@ Indexes:
 | `actor_handle` | character varying | yes |  |  |
 | `actor_account_kind` | character varying | yes |  |  |
 | `image_refs` | character varying[] | no | `'{}'::character varying[]` |  |
+| `build_type` | character varying | yes |  |  |
 
 Indexes:
 
@@ -142,6 +147,7 @@ Indexes:
 - `ix_pipeline_events_image_refs_gin` (`image_refs`)
 - `ix_pipeline_events_pipeline_name` (`pipeline_name`)
 - `ix_pipeline_events_source` (`source`)
+- `ix_pipeline_events_team_occurred` (`team`, `occurred_at`)
 - `uq_pipeline_events_delivery_id` (`delivery_id`) unique
 
 ## Views
@@ -262,5 +268,6 @@ erDiagram
         character_varying actor_handle
         character_varying actor_account_kind
         character_varying[] image_refs
+        character_varying build_type
     }
 ```

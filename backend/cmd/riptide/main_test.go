@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -49,6 +51,48 @@ func TestHealthcheck(t *testing.T) {
 	stderr.Reset()
 	if code := healthcheck("http://127.0.0.1:1/readyz", &stderr); code != 1 || !strings.Contains(stderr.String(), "riptide: probe:") {
 		t.Errorf("unreachable: code %d, stderr %q", code, stderr.String())
+	}
+}
+
+// One listener failing stops the others: a UI listener that cannot bind must
+// not leave the collector running alone, nor the reverse.
+func TestServeAllStopsEveryServerWhenOneFails(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	free := httpx.NewServer("127.0.0.1:0", http.NotFoundHandler())
+	taken := httpx.NewServer(ln.Addr().String(), http.NotFoundHandler()) // already bound: fails at once
+	done := make(chan error, 1)
+	go func() { done <- serveAll(context.Background(), free, taken) }()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "address already in use") {
+			t.Errorf("err = %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serveAll kept running after a listener failed")
+	}
+}
+
+// A clean shutdown of the shared context stops every listener without error.
+func TestServeAllStopsOnContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- serveAll(ctx, httpx.NewServer("127.0.0.1:0", http.NotFoundHandler()),
+			httpx.NewServer("127.0.0.1:0", http.NotFoundHandler()))
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("err = %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serveAll did not stop")
 	}
 }
 

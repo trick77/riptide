@@ -23,7 +23,7 @@ func TestDefaults(t *testing.T) {
 	want := Settings{
 		DBURL: "postgres://riptide:riptide@localhost:5432/riptide", ConfigPath: "config/riptide.json",
 		TeamKeysPath: "config/team-keys.json", LogLevel: "INFO", Env: "dev",
-		ReloadInterval: 30 * time.Second, ListenAddr: ":8000",
+		ReloadInterval: 30 * time.Second, ListenAddr: ":8000", UIAddr: "127.0.0.1:8080",
 	}
 	if s != want {
 		t.Errorf("settings = %+v", s)
@@ -39,12 +39,15 @@ func TestOverrides(t *testing.T) {
 		"BACKEND_ENV":                   "prod",
 		"BACKEND_CONFIG_RELOAD_SECONDS": "2.5",
 		"BACKEND_LISTEN_ADDR":           ":9000",
+		"BACKEND_UI_ADDR":               "10.1.2.3:9090",
+		"BACKEND_UI_ALLOW_REMOTE":       "true",
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if s.DBURL != "postgresql://u:p@db:5432/r" || s.ConfigPath != "/etc/c.json" || s.TeamKeysPath != "/etc/k.json" ||
-		s.LogLevel != "DEBUG" || s.Env != "prod" || s.ReloadInterval != 2500*time.Millisecond || s.ListenAddr != ":9000" {
+		s.LogLevel != "DEBUG" || s.Env != "prod" || s.ReloadInterval != 2500*time.Millisecond || s.ListenAddr != ":9000" ||
+		s.UIAddr != "10.1.2.3:9090" {
 		t.Errorf("settings = %+v", s)
 	}
 	blank, _ := Load(lookup(map[string]string{"BACKEND_ENV": "  "}))
@@ -99,6 +102,49 @@ func TestListenAddrNeedsALoopbackListener(t *testing.T) {
 		if _, err := Load(lookup(map[string]string{"BACKEND_LISTEN_ADDR": bad})); err == nil || !strings.Contains(err.Error(), "BACKEND_LISTEN_ADDR") {
 			t.Errorf("%s: err = %v", bad, err)
 		}
+	}
+}
+
+// The UI address must be host:port on loopback: the read API has no
+// authentication of its own. BACKEND_UI_ALLOW_REMOTE opts out (compose).
+func TestUIAddr(t *testing.T) {
+	for _, ok := range []string{"127.0.0.1:8080", "[::1]:8080", "localhost:8080", "127.0.0.2:8000"} {
+		if _, err := Load(lookup(map[string]string{"BACKEND_UI_ADDR": ok, "BACKEND_LISTEN_ADDR": "127.0.0.1:8000"})); err != nil {
+			t.Errorf("%s refused: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"8080", "127.0.0.1", "[::1", ":8080", "0.0.0.0:8080", "10.1.2.3:8080", "myhost:8080"} {
+		if _, err := Load(lookup(map[string]string{"BACKEND_UI_ADDR": bad})); err == nil || !strings.Contains(err.Error(), "BACKEND_UI_ADDR") {
+			t.Errorf("%s: err = %v", bad, err)
+		}
+	}
+	for _, remote := range []string{":8080", "0.0.0.0:8080", "10.1.2.3:8080"} {
+		if _, err := Load(lookup(map[string]string{"BACKEND_UI_ADDR": remote, "BACKEND_UI_ALLOW_REMOTE": "true"})); err != nil {
+			t.Errorf("%s with the opt-in refused: %v", remote, err)
+		}
+	}
+	if _, err := Load(lookup(map[string]string{"BACKEND_UI_ALLOW_REMOTE": "maybe"})); err == nil ||
+		!strings.Contains(err.Error(), "BACKEND_UI_ALLOW_REMOTE") {
+		t.Errorf("bad opt-in: err = %v", err)
+	}
+}
+
+// The collector's port on an overlapping host is a clear error at load, not
+// a bind failure at startup.
+func TestUIAddrMustNotShareTheCollectorsPort(t *testing.T) {
+	for _, c := range []struct{ ui, listen string }{
+		{"127.0.0.1:8000", ":8000"},
+		{"localhost:8000", "127.0.0.1:8000"},
+		{"[::1]:9000", "[::]:9000"},
+		{":8000", "127.0.0.1:8000"},
+	} {
+		_, err := Load(lookup(map[string]string{"BACKEND_UI_ADDR": c.ui, "BACKEND_LISTEN_ADDR": c.listen, "BACKEND_UI_ALLOW_REMOTE": "true"}))
+		if err == nil || !strings.Contains(err.Error(), "same port") {
+			t.Errorf("%s vs %s: err = %v", c.ui, c.listen, err)
+		}
+	}
+	if _, err := Load(lookup(map[string]string{"BACKEND_UI_ADDR": "127.0.0.2:8000", "BACKEND_LISTEN_ADDR": "127.0.0.1:8000"})); err != nil {
+		t.Errorf("distinct hosts refused: %v", err)
 	}
 }
 

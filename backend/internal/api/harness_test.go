@@ -23,6 +23,7 @@ import (
 	"github.com/trick77/ship/kit/version"
 
 	"github.com/trick77/riptide/internal/config"
+	"github.com/trick77/riptide/internal/dataset"
 	"github.com/trick77/riptide/internal/httpapi"
 	"github.com/trick77/riptide/internal/parse"
 )
@@ -68,6 +69,8 @@ type memStore struct {
 	sources []string
 	fail    error
 	pingErr error
+	params  []dataset.Params
+	dataset *dataset.Dataset
 }
 
 func newMemStore() *memStore { return &memStore{seen: map[string]bool{}} }
@@ -111,8 +114,27 @@ func (m *memStore) InsertNoergler(_ context.Context, d *parse.NoerglerDraft, tea
 	return m.add(d.DeliveryID, team, d)
 }
 
+// Dataset records the parameters and answers an empty dataset, or fail.
+func (m *memStore) Dataset(_ context.Context, p dataset.Params) (*dataset.Dataset, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.params = append(m.params, p)
+	if m.fail != nil {
+		return nil, m.fail
+	}
+	if m.dataset != nil {
+		return m.dataset, nil
+	}
+	return &dataset.Dataset{
+		Meta:     dataset.Meta{Team: p.Team, From: p.From, To: p.To, GeneratedAt: p.Now, ProductionStage: p.ProductionStage},
+		Products: []dataset.Product{}, PRs: []dataset.PR{}, Deploys: []dataset.Deploy{},
+		LeadTimes: []dataset.LeadTime{}, Runs: []dataset.Run{}, Reviews: []dataset.Review{},
+	}, nil
+}
+
 type harness struct {
 	srv     *httpapi.Server
+	ui      *httpapi.Server
 	store   Store
 	mem     *memStore
 	logs    *bytes.Buffer
@@ -151,9 +173,23 @@ func newHarness(t *testing.T, st Store) *harness {
 	if !ok {
 		t.Fatalf("%T has no ReadyChecks", st)
 	}
+	reader, ok := st.(Reader)
+	if !ok {
+		t.Fatalf("%T has no Dataset", st)
+	}
+	deps := Deps{Store: st, Reader: reader, Runtime: rt, Log: log, Now: func() time.Time { return fixedNow }}
 	h.srv = httpapi.New(log, rc.ReadyChecks()...)
-	Register(h.srv, Deps{Store: st, Runtime: rt, Log: log, Now: func() time.Time { return fixedNow }})
+	Register(h.srv, deps)
+	h.ui = httpapi.NewUI(log)
+	RegisterUI(h.ui, deps)
 	return h
+}
+
+// serveUI sends r to the UI listener's server.
+func (h *harness) serveUI(r *http.Request) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	h.ui.Handler().ServeHTTP(w, r)
+	return w
 }
 
 type lockedWriter struct {

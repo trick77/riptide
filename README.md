@@ -11,6 +11,7 @@ Ingestion service for the **riptide** DevOps delivery-metrics suite.
 - [Reading the event tables](#reading-the-event-tables)
 - [Metrics](#metrics)
 - [Quickstart (local)](#quickstart-local)
+- [Read API (UI listener)](#read-api-ui-listener)
 - [Database](#database)
 - [Documentation](#documentation)
 
@@ -425,6 +426,35 @@ runs (lint, vuln scan, tests with a Postgres it starts from `compose.yaml`'s
 `SHIP_TEST_DSN='postgres://riptide:riptide@localhost:5432/riptide?sslmode=disable' go -C backend test ./...`.
 The database schema is in [docs/schema.md](docs/schema.md), generated from the
 migrations. Releases are cut by hand with the Release workflow.
+
+## Read API (UI listener)
+
+`riptide serve` runs two listeners. The collector (`BACKEND_LISTEN_ADDR`,
+`:8000`) takes the webhooks, `/auth/ping` and the probes. The UI listener
+(`BACKEND_UI_ADDR`, `127.0.0.1:8080`) serves only the read API under `/api`.
+In the pod only the auth proxy sidecar reaches it on loopback, so the route
+that carries webhooks cannot reach `/api`. The read API does no
+authentication of its own, so riptide refuses a non-loopback
+`BACKEND_UI_ADDR` unless `BACKEND_UI_ALLOW_REMOTE=true` (compose sets it: the
+container binds every interface, the host publishes the port on its own
+loopback), and a UI port the collector already binds. Access is decided by
+the auth proxy in front of the UI listener: every authenticated user can read
+every team, deliberately; per-team scoping would belong in the proxy.
+
+`GET /api/dataset?team=<team>&from=<date>&to=<date>` returns one team's facts
+for the window `[from, to)` (RFC 3339 or `YYYY-MM-DD`, where a date as `to`
+includes that day; the default is the last 28 days, the maximum 400 days):
+one row per PR, deploy, shipped commit, CI run and noergler review. It never
+returns aggregates: the UI filters by product and computes the percentiles.
+Each field follows the rules of the [Metrics](#metrics) queries, and a test
+checks it against them on the same data. `gitops`, `service_account` and
+deploy `kind` are set from the data, never from name lists; `bot` adds
+riptide's automation detection as it stands at read time, the same for a
+PR's opener, its reviewers and a commit's author. A PR's `environments` lists
+its merge commit's first deploy per environment, earliest first, including
+deploys after the window; `meta.production_stage` names the production one. `meta.build_type_from` tells a run's missing `build_type` before the
+team's pipelines sent any from one the sender left out. The shape is
+`Dataset` in [`backend/api/openapi.yaml`](backend/api/openapi.yaml).
 
 ## Database
 

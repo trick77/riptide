@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/trick77/ship/kit/migrate"
 
 	"github.com/trick77/riptide/internal/parse"
 	"github.com/trick77/riptide/internal/testdb"
@@ -420,6 +421,113 @@ func TestMigrationImageRefsBackfill(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT tgenabled FROM pg_trigger
 		WHERE tgname = 'trg_pipeline_events_modified_at' AND tgrelid = 'pipeline_events'::regclass`).Scan(&enabled); err != nil || enabled != "O" {
 		t.Errorf("modified_at trigger state = %q, %v", enabled, err)
+	}
+}
+
+// 0004 copies a build_type a pre-0004 collector kept only in the payload into
+// the new column by the parser's rules, without touching modified_at, and its
+// insert trigger fills it for old pods mid-rollout.
+func TestMigrationBuildTypeBackfill(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.Pool(t, testdb.DSN(t))
+	apply := func(name string) {
+		t.Helper()
+		body, err := migrationFS.ReadFile("migrations/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, string(body)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	apply("0001_initial.sql")
+	apply("0002_noergler_pr_rollups.sql")
+	apply("0003_pipeline_image_refs.sql")
+	if _, err := pool.Exec(ctx, `INSERT INTO pipeline_events
+		(delivery_id, source, pipeline_name, run_id, phase, occurred_at, modified_at, payload) VALUES
+		('release', 'jenkins', 'p', '1', 'COMPLETED', now(), '2000-01-01', '{"build_type": " Release "}'),
+		('blank',   'jenkins', 'p', '2', 'COMPLETED', now(), '2000-01-01', '{"build_type": "  "}'),
+		('number',  'jenkins', 'p', '3', 'COMPLETED', now(), '2000-01-01', '{"build_type": 3}'),
+		('none',    'jenkins', 'p', '4', 'COMPLETED', now(), '2000-01-01', '{}'),
+		('newline', 'jenkins', 'p', '7', 'COMPLETED', now(), '2000-01-01', '{"build_type": "release\n"}'),
+		('tab',     'jenkins', 'p', '8', 'COMPLETED', now(), '2000-01-01', '{"build_type": "\tHotfix"}'),
+		('ws-only', 'jenkins', 'p', '9', 'COMPLETED', now(), '2000-01-01', '{"build_type": "\n\t "}')`); err != nil {
+		t.Fatal(err)
+	}
+	apply("0004_pipeline_build_type.sql")
+
+	check := func(backfilled bool, want map[string]string) {
+		t.Helper()
+		for id, w := range want {
+			var got *string
+			var untouched bool
+			if err := pool.QueryRow(ctx, `SELECT build_type, modified_at = '2000-01-01' FROM pipeline_events WHERE delivery_id = $1`, id).
+				Scan(&got, &untouched); err != nil {
+				t.Fatal(err)
+			}
+			g := "<nil>"
+			if got != nil {
+				g = *got
+			}
+			if g != w {
+				t.Errorf("%s: build_type = %q, want %q", id, g, w)
+			}
+			if backfilled && !untouched {
+				t.Errorf("%s: modified_at bumped by the backfill", id)
+			}
+		}
+	}
+	// Trimmed like Go's strings.TrimSpace: tabs and newlines too, not only spaces.
+	check(true, map[string]string{"release": "release", "blank": "<nil>", "number": "<nil>", "none": "<nil>",
+		"newline": "release", "tab": "hotfix", "ws-only": "<nil>"})
+
+	if _, err := pool.Exec(ctx, `INSERT INTO pipeline_events (delivery_id, source, pipeline_name, run_id, phase, occurred_at, payload) VALUES
+		('old-pod', 'jenkins', 'p', '5', 'COMPLETED', now(), '{"build_type": "HOTFIX"}'),
+		('old-pod-tab', 'jenkins', 'p', '10', 'COMPLETED', now(), '{"build_type": "\tHotfix"}'),
+		('old-pod-newline', 'jenkins', 'p', '11', 'COMPLETED', now(), '{"build_type": "release\n"}')`); err != nil {
+		t.Fatalf("old-pod insert: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO pipeline_events (delivery_id, source, pipeline_name, run_id, phase, occurred_at, build_type, payload)
+		VALUES ('new-pod', 'jenkins', 'p', '6', 'COMPLETED', now(), 'build', '{"build_type": "other"}')`); err != nil {
+		t.Fatalf("new-pod insert: %v", err)
+	}
+	check(false, map[string]string{"old-pod": "hotfix", "new-pod": "build", "old-pod-tab": "hotfix", "old-pod-newline": "release"})
+}
+
+// 0005 builds the read API's indexes inside kit's transaction: CONCURRENTLY
+// deadlocks against a second migrator waiting for kit's advisory lock.
+func TestReadAPIIndexes(t *testing.T) {
+	_, pool := testStore(t)
+	body, err := migrationFS.ReadFile("migrations/0005_read_api_indexes.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.HasPrefix(string(body), migrate.NoTxMarker) || strings.Contains(string(body), "INDEX CONCURRENTLY") {
+		t.Error("0005 must build its indexes in a transaction")
+	}
+	var valid int
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM pg_index i
+		JOIN pg_class c ON c.oid = i.indexrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = current_schema()
+		WHERE c.relname IN ('ix_bitbucket_events_team_occurred', 'ix_pipeline_events_team_occurred',
+		  'ix_argocd_events_team_occurred', 'ix_noergler_events_team_occurred', 'ix_bitbucket_events_repo_pr')
+		  AND i.indisvalid`).Scan(&valid); err != nil || valid != 5 {
+		t.Errorf("valid read API indexes = %d, %v", valid, err)
+	}
+}
+
+func TestInsertPipelineBuildType(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	release := "release"
+	d := &parse.PipelineDraft{DeliveryID: "x", Source: "jenkins", PipelineName: "p", RunID: "1", Phase: "COMPLETED",
+		CommitSHA: "abc1234", BuildType: &release, StartedAt: time.Now(), OccurredAt: time.Now(), Payload: []byte(`{}`)}
+	if _, err := s.InsertPipeline(ctx, d, "t"); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := pool.QueryRow(ctx, `SELECT build_type FROM pipeline_events`).Scan(&got); err != nil || got != "release" {
+		t.Errorf("build_type = %q, %v", got, err)
 	}
 }
 

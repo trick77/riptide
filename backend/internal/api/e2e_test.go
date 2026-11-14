@@ -123,21 +123,22 @@ func TestE2EPipeline(t *testing.T) {
 	body["image_ref"] = "registry.example.com/acme/payments-api:2.0.41"
 	body["image_refs"] = []any{"registry.example.com/acme/payments-worker:2.0.41", "registry.example.com/acme/payments-api:2.0.41"}
 	body["actor_handle"] = "ci-service"
+	body["build_type"] = " Hotfix"
 	expectStatus(t, h.bearer(t, "/webhooks/pipeline", checkoutJenkins, body), http.StatusAccepted)
-	var team, commit, handle, kind, status string
+	var team, commit, handle, kind, status, buildType string
 	var images []string
 	var dur int
 	var extra *string
 	if err := pool.QueryRow(ctx, `SELECT team, commit_sha, image_refs, actor_handle, actor_account_kind, status,
-		duration_seconds, payload->>'commit_sha' FROM pipeline_events`).
-		Scan(&team, &commit, &images, &handle, &kind, &status, &dur, &extra); err != nil {
+		duration_seconds, build_type, payload->>'commit_sha' FROM pipeline_events`).
+		Scan(&team, &commit, &images, &handle, &kind, &status, &dur, &buildType, &extra); err != nil {
 		t.Fatal(err)
 	}
 	// One run, one row: both images on it, the scalar first, the duplicate dropped.
 	if team != "checkout" || commit != "abc1234567890abc1234567890abc1234567890a" ||
 		strings.Join(images, ",") != "registry.example.com/acme/payments-api:2.0.41,registry.example.com/acme/payments-worker:2.0.41" ||
-		handle != "ci-service" || kind != "service" || status != "SUCCESS" || dur != 210 {
-		t.Errorf("row = %s %s %v %s %s %s %d", team, commit, images, handle, kind, status, dur)
+		handle != "ci-service" || kind != "service" || status != "SUCCESS" || dur != 210 || buildType != "hotfix" {
+		t.Errorf("row = %s %s %v %s %s %s %d %s", team, commit, images, handle, kind, status, dur, buildType)
 	}
 	// The documented deploy join: a deploy carrying both images of the run
 	// matches it once, not once per image.
@@ -157,7 +158,8 @@ func TestE2EPipeline(t *testing.T) {
 	naive["image_ref"] = ""
 	expectStatus(t, h.bearer(t, "/webhooks/pipeline", checkoutJenkins, naive), http.StatusAccepted)
 	if n := count(t, pool, `SELECT count(*) FROM pipeline_events WHERE source = 'tekton' AND duration_seconds = 60
-		AND started_at = '2026-04-28T10:05:00Z' AND image_refs = '{}' AND actor_account_kind IS NULL`); n != 1 {
+		AND started_at = '2026-04-28T10:05:00Z' AND image_refs = '{}' AND actor_account_kind IS NULL
+		AND build_type IS NULL`); n != 1 {
 		t.Error("tekton row wrong")
 	}
 }

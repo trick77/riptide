@@ -56,4 +56,4 @@ cd backend && go test -race ./...    # DB tests skip without SHIP_TEST_DSN (comp
 Push back unless the user is explicit:
 - Change failure rate / recovery time: no reliable incident source (schema has room for a rollback proxy)
 - Backfill workers (ingestion is forward-only)
-- Aggregation API or metric endpoints (reads: SQL or a future sibling component)
+- Aggregates or metric endpoints: `/api` serves per-team facts, UI listener only (loopback); percentiles in the UI

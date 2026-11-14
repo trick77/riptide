@@ -31,8 +31,13 @@ type Settings struct {
 	// ReloadInterval is how often riptide.json and team-keys.json are
 	// re-read for hot reload.
 	ReloadInterval time.Duration
-	// ListenAddr is where serve binds.
+	// ListenAddr is where serve binds the collector: webhooks, /auth/ping
+	// and the probes.
 	ListenAddr string
+	// UIAddr is where serve binds the UI listener: the read API under /api.
+	// Loopback by default, so in the pod only the auth proxy sidecar
+	// reaches it.
+	UIAddr string
 }
 
 // Lookup reads one variable; os.LookupEnv in production, a map in tests.
@@ -88,8 +93,16 @@ func Load(lookup Lookup) (Settings, error) {
 		LogLevel:     get("BACKEND_LOG_LEVEL", "INFO"),
 		Env:          get("BACKEND_ENV", "dev"),
 		ListenAddr:   get("BACKEND_LISTEN_ADDR", ":8000"),
+		UIAddr:       get("BACKEND_UI_ADDR", "127.0.0.1:8080"),
 	}
 	if err := checkListenAddr(s.ListenAddr); err != nil {
+		return Settings{}, err
+	}
+	allowRemote, err := strconv.ParseBool(get("BACKEND_UI_ALLOW_REMOTE", "false"))
+	if err != nil {
+		return Settings{}, fmt.Errorf("BACKEND_UI_ALLOW_REMOTE must be true or false: %w", err)
+	}
+	if err := checkUIAddr(s.UIAddr, s.ListenAddr, allowRemote); err != nil {
 		return Settings{}, err
 	}
 	raw := get("BACKEND_CONFIG_RELOAD_SECONDS", "30")
@@ -116,6 +129,55 @@ func checkListenAddr(addr string) error {
 		return nil
 	}
 	return fmt.Errorf("BACKEND_LISTEN_ADDR %q: bind a wildcard (:8000, 0.0.0.0:8000) or a loopback address; the probes dial loopback", addr)
+}
+
+// checkUIAddr refuses a UI listener anyone but the pod could reach: the read
+// API does no authentication of its own, the auth proxy sidecar in front of
+// it on loopback does. allowRemote opts out for compose, where the
+// container binds every interface and the host publishes the port on its
+// own loopback. A port the collector already binds on an overlapping host is
+// refused here, with both names, rather than as a bind error at startup.
+func checkUIAddr(addr, listenAddr string, allowRemote bool) error {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("BACKEND_UI_ADDR %q: %w", addr, err)
+	}
+	if !allowRemote && !isLoopback(host) {
+		return fmt.Errorf("BACKEND_UI_ADDR %q: bind a loopback address (127.0.0.1:8080); the read API has no authentication "+
+			"of its own. Set BACKEND_UI_ALLOW_REMOTE=true only where something else keeps it private (compose)", addr)
+	}
+	lhost, lport, err := net.SplitHostPort(listenAddr)
+	if err == nil && port == lport && overlaps(host, lhost) {
+		return fmt.Errorf("BACKEND_UI_ADDR %q and BACKEND_LISTEN_ADDR %q bind the same port", addr, listenAddr)
+	}
+	return nil
+}
+
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip, err := netip.ParseAddr(host)
+	return err == nil && ip.Unmap().IsLoopback()
+}
+
+// overlaps reports whether two bind hosts can claim the same socket: equal,
+// or either one every interface. localhost counts as 127.0.0.1.
+func overlaps(a, b string) bool {
+	norm := func(h string) string {
+		if h == "localhost" {
+			return "127.0.0.1"
+		}
+		if ip, err := netip.ParseAddr(h); err == nil {
+			if ip.IsUnspecified() {
+				return ""
+			}
+			return ip.Unmap().String()
+		}
+		return h
+	}
+	a, b = norm(a), norm(b)
+	return a == "" || b == "" || a == b
 }
 
 // SlogLevel is LogLevel as kit/logging reads it. The Python collector's

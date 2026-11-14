@@ -21,6 +21,7 @@ mandatory** — without them the metrics break.
   "image_refs": ["<registry/path/app:tag, optional>", "<...>"],
   "actor_handle": "<git account Jenkins acts through, optional>",
   "actor_account_kind": "service",
+  "build_type": "<release|hotfix|build|..., optional>",
   "started_at": "<ISO 8601 UTC>",
   "finished_at": "<ISO 8601 UTC>"
 }
@@ -35,6 +36,10 @@ Declaring it (with `actor_account_kind: "service"`) keeps those events out of
 human-activity metrics — a CI account can easily author a third of all
 repository events, and counted as a person it distorts every per-author view.
 riptide stores the declaration instead of guessing from the name.
+
+`build_type` says what kind of build the run was, in the pipeline's own terms
+(`release`, `hotfix`, `build`, ...). Send it on `COMPLETED`; riptide stores it
+trimmed and lowercased and does not decide which values exist.
 
 `image_ref` / `image_refs` are optional but send them whenever the run publishes an image: they are
 the only reliable link from an Argo CD deploy back to the commit, because

@@ -29,6 +29,7 @@
 //                  accepted too and merged.)
 //   actor_handle   optional, git account Jenkins commits and pushes as
 //   actor_account_kind optional, "service" (default when actor_handle is set)
+//   build_type     optional, COMPLETED only: release / hotfix / build / ...
 //
 // The team is derived from the bearer token, never from the payload.
 // Notifications are best-effort: a slow or unavailable collector must
@@ -159,6 +160,11 @@ void notifyCompleted(final Map args) {
             .unique()
     if (images) {
         body.image_refs = images
+    }
+    // `buildType:` (release, hotfix, build, ...): the pipeline's own word.
+    def buildType = args.buildType?.toString()?.trim()
+    if (buildType) {
+        body.build_type = buildType
     }
     addActor(body, args)
 

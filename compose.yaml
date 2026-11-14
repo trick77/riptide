@@ -36,6 +36,11 @@ services:
       BACKEND_CONFIG_PATH: /etc/riptide-collector/riptide.json
       BACKEND_TEAM_KEYS_PATH: /etc/riptide-collector/team-keys.json
       BACKEND_LOG_LEVEL: INFO
+      # Dev only: the read API on all interfaces, published to the host's
+      # loopback below. riptide refuses a non-loopback UI address without the
+      # opt-in; in a pod it stays on 127.0.0.1 behind the auth proxy.
+      BACKEND_UI_ADDR: ":8080"
+      BACKEND_UI_ALLOW_REMOTE: "true"
     volumes:
       - ./config/riptide.json:/etc/riptide-collector/riptide.json:ro
       # Dev-only raw keys, one per team and source (team-keys.json stores the
@@ -45,3 +50,4 @@ services:
       - ./config/team-keys.json:/etc/riptide-collector/team-keys.json:ro
     ports:
       - "8000:8000"
+      - "127.0.0.1:8080:8080"
