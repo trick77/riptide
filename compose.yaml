@@ -33,8 +33,8 @@ services:
         condition: service_completed_successfully
     environment:
       BACKEND_DB_URL: postgres://riptide:riptide@db:5432/riptide?sslmode=disable
-      BACKEND_CONFIG_PATH: /etc/riptide-collector/riptide.json
-      BACKEND_TEAM_KEYS_PATH: /etc/riptide-collector/team-keys.json
+      BACKEND_CONFIG_PATH: /etc/riptide/riptide.json
+      BACKEND_TEAM_KEYS_PATH: /etc/riptide/team-keys.json
       BACKEND_LOG_LEVEL: INFO
       # Dev only: the read API on all interfaces, published to the host's
       # loopback below. riptide refuses a non-loopback UI address without the
@@ -42,12 +42,12 @@ services:
       BACKEND_UI_ADDR: ":8080"
       BACKEND_UI_ALLOW_REMOTE: "true"
     volumes:
-      - ./config/riptide.json:/etc/riptide-collector/riptide.json:ro
+      - ./config/riptide.json:/etc/riptide/riptide.json:ro
       # Dev-only raw keys, one per team and source (team-keys.json stores the
       # raw tokens, not hashes). Production mounts its own file from a Secret.
       # Use them as `Authorization: Bearer <key>`, e.g. the checkout jenkins
       # key against /webhooks/pipeline.
-      - ./config/team-keys.json:/etc/riptide-collector/team-keys.json:ro
+      - ./config/team-keys.json:/etc/riptide/team-keys.json:ro
     ports:
       - "8000:8000"
       - "127.0.0.1:8080:8080"

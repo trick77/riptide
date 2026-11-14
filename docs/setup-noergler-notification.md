@@ -1,7 +1,7 @@
 # Setup: Noergler notification
 
 Have a [noergler](https://github.com/trick77/noergler) instance forward
-PR-review events to riptide-collector. Endpoint: `POST /webhooks/noergler`.
+PR-review events to riptide. Endpoint: `POST /webhooks/noergler`.
 
 Noergler emits **two event types**, both keyed off review activity (not PR
 lifecycle — PR open/merge/close already comes in via Bitbucket):
@@ -32,7 +32,7 @@ operates it; every event from that instance is recorded in riptide with
 In noergler, set:
 
 ```
-RIPTIDE_URL=https://riptide-collector.example.com
+RIPTIDE_URL=https://riptide.example.com
 RIPTIDE_TOKEN=<your-team-raw-bearer>
 ```
 

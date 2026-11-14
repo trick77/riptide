@@ -10,5 +10,5 @@ postgres: compose:db
 steps:
   - { name: openapi lint, run: npx --yes @stoplight/spectral-cli@6.15.0 lint backend/api/openapi.yaml --ruleset .spectral.yaml }
 images:
-  # Keeps the image name the deployment pulls: ghcr.io/trick77/riptide-collector.
-  - { suffix: -collector }
+  # ghcr.io/trick77/riptide (until 0.5.0: riptide-collector).
+  - {}
