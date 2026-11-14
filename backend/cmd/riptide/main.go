@@ -1,6 +1,6 @@
-// Command riptide is the riptide collector.
+// Command riptide collects delivery events and serves the metrics UI.
 //
-//	riptide serve              run the collector (default)
+//	riptide serve              run the collector and the UI listener (default)
 //	riptide migrate            apply pending database migrations and exit
 //	riptide version            print the version and exit
 //	riptide onboard-bitbucket  create, update or remove the riptide webhook on Bitbucket repos
@@ -40,8 +40,8 @@ import (
 
 const usage = "usage: riptide [serve|migrate|version|onboard-bitbucket|check-onboarding|-healthcheck|-readycheck]"
 
-// serviceName is stamped on every log line: the image name, not the repo.
-const serviceName = "riptide-collector"
+// serviceName is stamped on every log line: the image name.
+const serviceName = "riptide"
 
 func main() {
 	cmd := "serve"
@@ -173,7 +173,7 @@ func probeURL(listenAddr, path string) string {
 // migrate applies pending migrations and exits; it runs before serve.
 // Only the database URL is needed; the config files are not read.
 func migrate(s settings.Settings, log *slog.Logger) error {
-	log.Info("riptide-collector version: " + version.String())
+	log.Info("riptide version: " + version.String())
 	ctx, stop := run.Context(context.Background())
 	defer stop()
 	db, err := store.Open(ctx, s.DBURL, log)
@@ -189,7 +189,7 @@ func migrate(s settings.Settings, log *slog.Logger) error {
 }
 
 func serve(s settings.Settings, log *slog.Logger) error {
-	log.Info("riptide-collector version: " + version.String())
+	log.Info("riptide version: " + version.String())
 	rt, err := config.Load(s.ConfigPath, s.TeamKeysPath, log)
 	if err != nil {
 		return err
@@ -220,7 +220,7 @@ func serve(s settings.Settings, log *slog.Logger) error {
 	api.RegisterUI(ui, deps)
 
 	cfg := rt.Config()
-	log.Info("riptide_collector_starting",
+	log.Info("riptide_starting",
 		"teams", len(cfg.Teams),
 		"keys", len(rt.Keys().TeamNames()),
 		"production_stage", cfg.Environments.ProductionStage)
@@ -233,7 +233,7 @@ func serve(s settings.Settings, log *slog.Logger) error {
 	if err := serveAll(ctx, hs, us); err != nil {
 		return err
 	}
-	log.Info("riptide_collector_stopped")
+	log.Info("riptide_stopped")
 	return nil
 }
 

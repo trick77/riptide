@@ -2,7 +2,8 @@
   <img src="logo-text.png" alt="riptide">
 </p>
 
-Ingestion service for the **riptide** DevOps delivery-metrics suite.
+**riptide** collects delivery events from your toolchain and shows the
+DevOps metrics computed from them.
 
 ## Table of contents
 
@@ -11,7 +12,7 @@ Ingestion service for the **riptide** DevOps delivery-metrics suite.
 - [Reading the event tables](#reading-the-event-tables)
 - [Metrics](#metrics)
 - [Quickstart (local)](#quickstart-local)
-- [Read API (UI listener)](#read-api-ui-listener)
+- [UI and read API (UI listener)](#ui-and-read-api-ui-listener)
 - [Database](#database)
 - [Documentation](#documentation)
 
@@ -87,7 +88,7 @@ row count.
 
 ## Metrics
 
-riptide-collector ingests; **metrics are computed on read** as SQL queries
+riptide ingests; **metrics are computed on read** as SQL queries
 (or, eventually, materialized views) over the raw event tables. The config
 and the schema have been designed so the following are all derivable from
 the data captured in v1.
@@ -397,17 +398,19 @@ against `argocd_events.payload->'images'` — as described in
 ## Quickstart (local)
 
 ```bash
-docker compose up   # boots Postgres + runs `riptide migrate` + starts the app on :8000
+docker compose up   # boots Postgres + runs `riptide migrate` + starts riptide
 ```
 
-Open http://localhost:8000/docs for Swagger UI; the contract itself is
+The UI is on http://127.0.0.1:8080, the webhooks on :8000. Open
+http://localhost:8000/docs for Swagger UI; the contract itself is
 `/openapi.yaml` ([`backend/api/openapi.yaml`](backend/api/openapi.yaml)).
 
-The collector is one Go binary, `riptide`, in [`backend/`](backend/):
+riptide is one Go binary, `riptide`, in [`backend/`](backend/), with the UI
+embedded:
 
 | Command | Does |
 | --- | --- |
-| `riptide serve` (default) | the collector |
+| `riptide serve` (default) | the collector (webhooks, `:8000`) and the UI listener (UI and `/api`, `127.0.0.1:8080`) |
 | `riptide migrate` | applies pending schema migrations and exits; run it before `serve` |
 | `riptide onboard-bitbucket` | creates, updates or removes the riptide webhook on Bitbucket repos |
 | `riptide check-onboarding` | lists which repos, pipelines and apps reported recently |
@@ -472,7 +475,7 @@ reload against a local `riptide serve` on 127.0.0.1:8080.
 
 ## Database
 
-**Postgres is provisioned externally — riptide-collector is not responsible for
+**Postgres is provisioned externally — riptide is not responsible for
 the database lifecycle.** Connection URL (with credentials) is supplied at
 runtime via the `BACKEND_DB_URL` env var.
 

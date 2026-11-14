@@ -155,7 +155,7 @@ func newHarness(t *testing.T, st Store) *harness {
 		t.Fatal(err)
 	}
 	logs := &bytes.Buffer{}
-	log := slog.New(logging.NewSplunkHandler(&lockedWriter{w: logs}, slog.LevelDebug, "riptide-collector", "test")).
+	log := slog.New(logging.NewSplunkHandler(&lockedWriter{w: logs}, slog.LevelDebug, "riptide", "test")).
 		With("version", version.String())
 	rt, err := config.Load(cfgPath, keysPath, log)
 	if err != nil {

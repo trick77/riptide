@@ -1,7 +1,7 @@
 openapi: 3.1.0
 
 info:
-  title: riptide-collector webhook API
+  title: riptide API
   # The CONTRACT's version, not the binary's. The two move independently:
   # a release that changes no route leaves this alone.
   version: 1.2.0
@@ -36,7 +36,10 @@ info:
 
 servers:
   - url: /
-    description: This riptide-collector instance.
+    description: |
+      This riptide instance. The webhooks and /auth/ping are on the collector
+      listener (this page's); /api is on the UI listener only, so try it
+      there, not here.
 
 tags:
   - name: webhooks

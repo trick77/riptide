@@ -7,6 +7,26 @@ repository.
 Real account handles, hostnames and tokens belong in the mounted
 `riptide.json` / team-keys Secret, never in this file: the repository is public.
 
+## 2026-11-14 — riptide-collector is now riptide
+
+**The image is `ghcr.io/trick77/riptide`**, no longer
+`ghcr.io/trick77/riptide-collector` (whose tags up to 0.5.0 stay). Point the
+mirror and the deployment at the new name; the deployment's own objects
+(Deployment, Service, Routes, Secrets) may follow, the commands in these
+docs assume `deployment/riptide`.
+
+**Splunk: `service=riptide`** on every log line instead of
+`riptide-collector`, the start and stop lines are `msg=riptide_starting` /
+`riptide_stopped`. The binary sets no sourcetype; the pod annotation
+`splunk.com/sourcetype` does. The reference stanza is now `riptide:json`
+(was `riptide:collector:json`, see [splunk-props.conf](splunk-props.conf)).
+Order matters: the platform team adds the `[riptide:json]` stanza first,
+keeping the old one, then the annotation changes with the deployment; the
+old stanza goes once nothing logs under it. Saved searches on the old names
+need the new ones.
+
+The binary, its commands, the env variables and the API are unchanged.
+
 ## 2026-11-14 — the UI
 
 **The UI listener now serves the UI on `/`** next to `/api`, from the same
