@@ -175,8 +175,14 @@ func TestDeployWeeksAndDataStart(t *testing.T) {
 		ds.Meta.DataStart.ArgoCD = agoP(7)
 	})
 	d = deployFrequency(one, p4(), filter{}, "prod")
-	if d.Since == nil || !d.Since.Equal(ago(7)) || !near(d.PerWeek, 1) {
-		t.Errorf("since %v, per week %v", d.Since, d.PerWeek)
+	if d.Since == nil || !d.Since.Equal(ago(7)) || !near(d.PerWeek, 1) || d.LowSample {
+		t.Errorf("since %v, per week %v, low sample %v", d.Since, d.PerWeek, d.LowSample)
+	}
+	// Under a week of data: one release reads as several a week, flagged.
+	one.Meta.DataStart.ArgoCD = agoP(2)
+	d = deployFrequency(one, p4(), filter{}, "prod")
+	if !near(d.PerWeek, 3.5) || !d.LowSample {
+		t.Errorf("two days: per week %v, low sample %v", d.PerWeek, d.LowSample)
 	}
 }
 

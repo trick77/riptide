@@ -14,9 +14,10 @@ import (
 // table, not of any number.
 const FactsLimit = 300
 
-// Search terms: the words the UI shows for a PR state or a deploy class,
-// so a search for what is on screen finds the row. Never sent: the UI owns
-// its wording, the API sends the codes.
+// Search terms: the words the UI shows for a PR state or a deploy class
+// (PR_STATE, DEPLOY_CLASS in ui/src/Facts.tsx), so a search for what is on
+// screen finds the row. Never sent: the UI owns its wording, the API sends
+// the codes. TestSearchTermsMatchTheUI keeps the two copies equal.
 var prStateTerm = map[string]string{
 	"merged":   "Gemergt",
 	"open":     "Offen",
@@ -32,18 +33,23 @@ const (
 	DeploySync      = "sync"
 )
 
-// deployClass is what a deploy counts as, with its search term; a failed
-// sync's is its phase.
+// deployTerm is a class's search term; a failed sync's is its phase.
+var deployTerm = map[string]string{
+	DeployRelease:   "Release",
+	DeployFirstSeen: "Erstdeploy",
+	DeploySync:      "Sync ohne neue Images",
+}
+
+// deployClass is what a deploy counts as, with its search term: the class
+// deployFrequency counts it in, or failed.
 func deployClass(d dataset.Deploy) (string, string) {
-	switch {
-	case d.Phase != "Succeeded":
+	if d.Phase != "Succeeded" {
 		return DeployFailed, d.Phase
-	case d.Kind != nil && *d.Kind == "release":
-		return DeployRelease, "Release"
-	case d.Kind != nil && *d.Kind == "first_seen":
-		return DeployFirstSeen, "Erstdeploy"
 	}
-	return DeploySync, "Sync ohne neue Images"
+	class := map[int]string{
+		classRelease: DeployRelease, classFirstSeen: DeployFirstSeen, classSync: DeploySync,
+	}[revisionClass(d)]
+	return class, deployTerm[class]
 }
 
 // jiraPrefix is the Jira keys a PR's title does not already show, three at
@@ -103,7 +109,9 @@ type RunFact struct {
 	CommitSHA    *string  `json:"commit_sha"`
 	DurationS    *int64   `json:"duration_s"`
 	ImageRefs    []string `json:"image_refs"`
-	Status       *string  `json:"status"`
+	// Status is as the CI sent it, Verdict what it says (see verdict).
+	Status  *string `json:"status"`
+	Verdict string  `json:"verdict"`
 }
 
 // Table is one facts table: how many rows match, the first FactsLimit.
@@ -235,6 +243,7 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 			return RunFact{
 				PipelineName: r.PipelineName, RunID: r.RunID, Kind: RunKind(r, ds.Meta.BuildTypeFrom),
 				CommitSHA: r.CommitSHA, DurationS: r.DurationS, ImageRefs: r.ImageRefs, Status: r.Status,
+				Verdict: verdict(r),
 			}
 		}),
 	}

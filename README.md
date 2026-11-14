@@ -468,9 +468,13 @@ median takes at least twice the team's is slow, one whose failure rate is at
 least twice the team's is flaky (at most halfway from the team's rate to
 100 %, or a team failing most runs could have none), both from 10 runs on.
 A run of a commit Bitbucket never saw counts with the repository its
-pipeline is named after. Failures are FAILURE
-and UNSTABLE; an ABORTED run is neither a failure nor a run (a superseded
-build is cancelled, not broken). Failing repos rank by the CI time their
+pipeline is named after. A run succeeded on SUCCESS (Jenkins), Succeeded
+or Completed (Tekton) and failed on FAILURE, UNSTABLE or Failed; anything
+else (ABORTED, NOT_BUILT, Tekton's None) is neither a failure nor a run (a
+superseded build is cancelled, not broken), in the hotspots as in the runs
+per kind, where only its CI time counts. A Jenkins `timeout()` ends
+ABORTED too, so a repo that keeps timing out shows as CI time, not as
+failures. Failing repos rank by the CI time their
 broken runs wasted. A run past three times its kind's p90 is an outlier:
 several repos stuck at the same time point at shared infrastructure, not at
 a repo. The thresholds are starting values, not measured. The shapes are in
