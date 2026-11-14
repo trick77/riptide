@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 
@@ -33,6 +34,45 @@ func TestReadAPIIsOnTheUIListenerOnly(t *testing.T) {
 	}
 	if got := h.serveUI(newRequest(http.MethodPost, "/api/dataset", nil)); got.Code != http.StatusMethodNotAllowed {
 		t.Errorf("POST /api/dataset = %d", got.Code)
+	}
+}
+
+// The team picker's list: the config's teams, sorted, per the spec.
+func TestTeams(t *testing.T) {
+	h := newHarness(t, nil)
+	w := h.serveUI(newRequest(http.MethodGet, "/api/teams", nil))
+	expectStatus(t, w, http.StatusOK)
+	var body Teams
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.IsSorted(body.Teams) || !slices.Contains(body.Teams, "checkout") {
+		t.Errorf("teams = %v", body.Teams)
+	}
+	validateResponse(t, specRouter(t), http.MethodGet, "/api/teams", w)
+}
+
+// The SPA's catch-all must not swallow /api: an unknown API path is the
+// JSON 404 every other error is, and a client route that does not exist is
+// a 404 too, never the shell.
+func TestUIListenerRoutes(t *testing.T) {
+	h := newHarness(t, nil)
+	w := h.serveUI(newRequest(http.MethodGet, "/api/nope", nil))
+	expectStatus(t, w, http.StatusNotFound)
+	expectBody(t, w, `{"detail":"Not Found"}`)
+	// A method the SPA's or the API's GET patterns do not take: the mux's
+	// 405, in the {"detail": ...} shape like every other error.
+	for _, path := range []string{"/api/teams", "/api/nope", "/anything"} {
+		w := h.serveUI(newRequest(http.MethodPost, path, nil))
+		expectStatus(t, w, http.StatusMethodNotAllowed)
+		expectBody(t, w, `{"detail":"Method Not Allowed"}`)
+	}
+	// Built or not (the placeholder answers 503), the shell's route is served.
+	if got := h.serveUI(newRequest(http.MethodGet, "/", nil)); got.Code != http.StatusOK && got.Code != http.StatusServiceUnavailable {
+		t.Errorf("GET / = %d", got.Code)
+	}
+	if got := h.serveUI(newRequest(http.MethodGet, "/nope", nil)); got.Code != http.StatusNotFound {
+		t.Errorf("GET /nope = %d", got.Code)
 	}
 }
 
@@ -102,18 +142,20 @@ func TestDatasetMatchesOpenAPISpec(t *testing.T) {
 	s, n := func(v string) *string { return &v }, func(v int64) *int64 { return &v }
 	h.mem.dataset = &dataset.Dataset{
 		Meta: dataset.Meta{Team: "checkout", From: at, To: at, GeneratedAt: at, ProductionStage: "prod",
-			DataStart: dataset.DataStart{Bitbucket: &at, Pipeline: &at, ArgoCD: &at, Noergler: &at}, BuildDataFrom: &at, BuildTypeFrom: &at},
+			DataStart: dataset.SourceTimes{Bitbucket: &at, Pipeline: &at, ArgoCD: &at, Noergler: &at},
+			DataEnd:   dataset.SourceTimes{Bitbucket: &at, Pipeline: &at, ArgoCD: &at, Noergler: &at}, BuildDataFrom: &at, BuildTypeFrom: &at},
 		Products: []dataset.Product{{Key: "kasse", Repos: []string{"kasse/kasse-api"}, Apps: []string{"kasse-prod"}}},
-		PRs: []dataset.PR{{Repo: "kasse/kasse-api", Project: "kasse", PRID: 7, ChangeType: s("feature"),
+		PRs: []dataset.PR{{Repo: "kasse/kasse-api", Project: "kasse", PRID: 7, Title: s("Rabattregeln"), ChangeType: s("feature"),
 			JiraKeys: []string{"KAS-7"}, State: "merged", OpenedAt: &at, ReadyAt: &at, FirstReviewAt: &at, ApprovedAt: &at,
 			ApprovedOnFirstTouch: true, MergedAt: &at, FirstCommitAt: &at, MergeCommit: s("abc1234"),
 			Environments: []dataset.EnvironmentDeploy{{Environment: "intg", FirstDeployedAt: at}, {Environment: "prod", FirstDeployedAt: at}}}},
 		Deploys: []dataset.Deploy{{App: "kasse-prod", Project: s("kasse"), Environment: s("prod"), Revision: "abc1234",
-			At: at, Phase: "Succeeded", DurationS: n(45), Images: []string{"reg/a:1"}, Kind: s("release")}},
+			At: at, Phase: "Succeeded", DurationS: n(45), Images: []string{"reg/a:1"}, Kind: s("release"),
+			NewImages: []string{"reg/a:1"}}},
 		LeadTimes: []dataset.LeadTime{{Repo: "kasse/kasse-api", Project: "kasse", Environment: "prod", CommitSHA: "abc1234",
 			AuthoredAt: at, FirstDeployedAt: at, LeadTimeS: 3600, IsMerge: true, ServiceAccount: true, Bot: true}},
 		Runs: []dataset.Run{{Source: "jenkins", PipelineName: "kasse-api/master", Branch: "master", BranchKind: "main",
-			BuildType: s("release"), RunID: "1", Status: s("SUCCESS"), StartedAt: &at, FinishedAt: &at, DurationS: n(600),
+			BuildType: s("release"), RunID: "1", CommitSHA: s("abc1234"), Status: s("SUCCESS"), StartedAt: &at, FinishedAt: &at, DurationS: n(600),
 			Repo: s("kasse/kasse-api"), Project: s("kasse"), ImageRefs: []string{"reg/a:1"}}},
 		Reviews: []dataset.Review{{PRKey: "kasse/kasse-api#7", Repo: s("kasse/kasse-api"), Project: s("kasse"),
 			Outcome: s("merged"), CostUSD: s("0.123456"), LinesAdded: n(1), LinesRemoved: n(1), FilesChanged: n(1),

@@ -22,3 +22,13 @@ exports/
 .claude/
 
 .agents/
+
+# ship:begin (owned by ship init; the repo's own lines go above the begin marker)
+# What the gate and the UI build write into the tree.
+coverage/ui/
+ui/node_modules/
+ui/*.tsbuildinfo
+# The UI build the Go binary embeds; .gitkeep stays tracked so go:embed's dir exists in a fresh clone.
+backend/web/dist/*
+!backend/web/dist/.gitkeep
+# ship:end

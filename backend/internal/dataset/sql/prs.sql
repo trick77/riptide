@@ -50,6 +50,10 @@ prs AS (
                   max(e.author) FILTER (WHERE e.event_type = 'pr:merged')) AS pr_opener,
          coalesce(max(e.author_display_name) FILTER (WHERE e.event_type = 'pr:opened'),
                   max(e.author_display_name) FILTER (WHERE e.event_type = 'pr:merged')) AS pr_opener_display_name,
+         -- The title as last seen: every PR event carries the PR, and the
+         -- author may have edited it since opening.
+         (array_agg(e.payload->'pullRequest'->>'title' ORDER BY e.occurred_at DESC, e.id DESC)
+             FILTER (WHERE e.payload->'pullRequest'->>'title' IS NOT NULL))[1] AS title,
          bool_or(e.is_automated) FILTER (WHERE e.event_type IN ('pr:opened', 'pr:merged')) AS automated,
          -- change_type means something only on these two (README).
          coalesce(max(e.change_type) FILTER (WHERE e.event_type = 'pr:opened'),
@@ -150,6 +154,7 @@ chain AS (
 SELECT c.repo_full_name AS repo,
        split_part(c.repo_full_name, '/', 1) AS project,
        c.pr_id,
+       c.title,
        c.repo_full_name IN (SELECT repo_full_name FROM gitops_repos) AS gitops,
        coalesce(c.automated, false)
          OR EXISTS (SELECT 1 FROM non_human_identities n WHERE n.handle = lower(c.pr_opener)) AS bot,

@@ -19,3 +19,4 @@ jobs:
     uses: trick77/ship/.github/workflows/check.yaml@master
     with:
       go-dir: backend
+      node-version: "26"
