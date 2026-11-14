@@ -2,6 +2,11 @@ package metrics
 
 import (
 	"fmt"
+	"maps"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/trick77/riptide/internal/dataset"
@@ -85,9 +90,9 @@ func TestFacts(t *testing.T) {
 
 	var runs []string
 	for _, r := range f.Runs.Rows {
-		runs = append(runs, r.RunID+":"+r.Kind)
+		runs = append(runs, r.RunID+":"+r.Kind+":"+r.Verdict)
 	}
-	if fmt.Sprint(runs) != "[3:main 2:main 1:main 4:main]" {
+	if fmt.Sprint(runs) != "[3:main:success 2:main:failure 1:main:success 4:main:success]" {
 		t.Errorf("runs = %v", runs)
 	}
 }
@@ -133,6 +138,49 @@ func TestFactsLimit(t *testing.T) {
 	f := ComputeFacts(ds, all(), "")
 	if f.Runs.Count != FactsLimit+5 || len(f.Runs.Rows) != FactsLimit {
 		t.Errorf("runs %d, rows %d", f.Runs.Count, len(f.Runs.Rows))
+	}
+}
+
+// uiEntry is one `key: ["Label", tone]` entry, the key bare or quoted, the
+// label in either quote, across lines as prettier may break it.
+var uiEntry = regexp.MustCompile(`(?m)^\s*["']?(\w+)["']?\s*:\s*\[\s*(?:"([^"]*)"|'([^']*)')`)
+
+// uiLabels reads one label map of ui/src/Facts.tsx, up to the line that
+// closes it; a null label, a failed sync's, is left out.
+func uiLabels(t *testing.T, src, name string) map[string]string {
+	t.Helper()
+	_, block, ok := strings.Cut(src, "const "+name)
+	if !ok {
+		t.Fatalf("Facts.tsx has no %s", name)
+	}
+	block, _, _ = strings.Cut(block, "\n};")
+	out := map[string]string{}
+	for _, m := range uiEntry.FindAllStringSubmatch(block, -1) {
+		out[m[1]] = m[2] + m[3]
+	}
+	return out
+}
+
+func TestUILabelsParse(t *testing.T) {
+	src := "const X: R = {\n  a: [\"Eins\", \"ok\"],\n  'b': [\n    'Zwei };',\n    \"none\",\n  ],\n  \"c\": [null, \"fail\"],\n};\n"
+	if got := uiLabels(t, src, "X"); !maps.Equal(got, map[string]string{"a": "Eins", "b": "Zwei };"}) {
+		t.Errorf("parsed %v", got)
+	}
+}
+
+// The backend searches the words the UI shows: a label reworded in one
+// place only would make a search for what is on screen find nothing.
+func TestSearchTermsMatchTheUI(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "ui", "src", "Facts.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(raw)
+	if got := uiLabels(t, src, "PR_STATE"); !maps.Equal(got, prStateTerm) {
+		t.Errorf("PR_STATE %v, prStateTerm %v", got, prStateTerm)
+	}
+	if got := uiLabels(t, src, "DEPLOY_CLASS"); !maps.Equal(got, deployTerm) {
+		t.Errorf("DEPLOY_CLASS %v, deployTerm %v", got, deployTerm)
 	}
 }
 

@@ -719,8 +719,8 @@ components:
       type: object
       description: Successful production syncs in the period, counted once per GitOps revision.
       additionalProperties: false
-      required: [releases, syncs, first_seen, resyncs, per_week, since, weeks, succeeded, failed, finished,
-                 success_rate, argo_reporting]
+      required: [releases, syncs, first_seen, resyncs, per_week, low_sample, since, weeks, succeeded, failed,
+                 finished, success_rate, argo_reporting]
       properties:
         releases: { type: integer, description: Revisions that brought new images. }
         syncs: { type: integer, description: All revisions. }
@@ -729,6 +729,9 @@ components:
         per_week:
           type: number
           description: Releases per week over the period, or since `since`.
+        low_sample:
+          type: boolean
+          description: "`per_week` rests on less than a week of Argo CD data."
         since:
           $ref: "#/components/schemas/NullableInstant"
           description: When Argo CD's data starts inside the period; null when it covers it.
@@ -855,18 +858,28 @@ components:
     BuildStats:
       type: object
       additionalProperties: false
-      required: [kind, runs, succeeded, failed, success_rate, duration, ci_seconds, wasted_seconds, weekly]
+      description: |
+        One kind of run. A run without a verdict (see RunVerdict) is neither
+        a failure nor a run, as in the hotspots: it counts in `no_verdict`
+        and `ci_seconds` only, so `runs` = `succeeded` + `failed`.
+      required: [kind, runs, succeeded, failed, no_verdict, success_rate, duration, ci_seconds, wasted_seconds,
+                 weekly]
       properties:
         kind: { $ref: "#/components/schemas/RunKind" }
-        runs: { type: integer }
+        runs: { type: integer, description: Runs with a verdict. }
         succeeded: { type: integer }
-        failed: { type: integer, description: "Runs without SUCCESS: FAILURE, UNSTABLE, ABORTED, anything else." }
+        failed: { type: integer }
+        no_verdict: { type: integer, description: "ABORTED, NOT_BUILT, Tekton's None, ..." }
         success_rate: { $ref: "#/components/schemas/NullableNumber" }
-        duration: { $ref: "#/components/schemas/Spread" }
-        ci_seconds: { $ref: "#/components/schemas/Seconds" }
+        duration:
+          $ref: "#/components/schemas/Spread"
+          description: Over `runs`, those without a verdict left out.
+        ci_seconds:
+          $ref: "#/components/schemas/Seconds"
+          description: Every run's time, those without a verdict included.
         wasted_seconds:
           $ref: "#/components/schemas/Seconds"
-          description: CI time of the runs without SUCCESS.
+          description: Time of the failed runs.
         weekly:
           type: array
           description: Success rate per week; null for a week without runs.
@@ -876,7 +889,7 @@ components:
       type: object
       description: |
         Repos against the team's baseline of the same kind of run, and runs
-        far past it. Failures are FAILURE and UNSTABLE; ABORTED counts as
+        far past it. A run without a verdict (see RunVerdict) counts as
         neither failure nor run.
       additionalProperties: false
       required: [min_runs, slow_factor, flaky_factor, outlier_factor, kinds, outliers]
@@ -923,7 +936,7 @@ components:
                   required: [repo, runs, failures, failure_rate, wasted_seconds, flaky]
                   properties:
                     repo: { type: string }
-                    runs: { type: integer, description: "Runs counted for the rate, ABORTED out." }
+                    runs: { type: integer, description: Runs with a verdict. }
                     failures: { type: integer }
                     failure_rate: { $ref: "#/components/schemas/NullableNumber" }
                     wasted_seconds: { $ref: "#/components/schemas/Seconds" }
@@ -1046,7 +1059,7 @@ components:
       type: object
       description: A finished CI run in the period, newest first.
       additionalProperties: false
-      required: [pipeline_name, run_id, kind, commit_sha, duration_s, image_refs, status]
+      required: [pipeline_name, run_id, kind, commit_sha, duration_s, image_refs, status, verdict]
       properties:
         pipeline_name: { type: string }
         run_id: { type: string }
@@ -1054,7 +1067,17 @@ components:
         commit_sha: { type: [string, "null"] }
         duration_s: { type: [integer, "null"] }
         image_refs: { type: array, items: { type: string } }
-        status: { type: [string, "null"] }
+        status: { type: [string, "null"], description: As the CI sent it. }
+        verdict: { $ref: "#/components/schemas/RunVerdict" }
+
+    RunVerdict:
+      type: string
+      enum: [success, failure, none]
+      description: |
+        What a run's status says about the build: `success` for SUCCESS
+        (Jenkins), Succeeded or Completed (Tekton); `failure` for FAILURE,
+        UNSTABLE (Jenkins) or Failed (Tekton); `none` for anything else
+        (ABORTED, NOT_BUILT, Tekton's None), a run that ended without saying.
 
     Meta:
       type: object

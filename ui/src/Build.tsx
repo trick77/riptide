@@ -56,7 +56,14 @@ function KindRow({ b }: { b: BuildStats }) {
         </div>
         <div className="text-[11.5px] text-muted">{KIND_NOTE[b.kind]}</div>
       </div>
-      <div className={`${CELL} text-right text-ink-dim`}>{b.runs}</div>
+      <div className={`${CELL} text-right text-ink-dim`}>
+        {b.runs}
+        {b.no_verdict > 0 && (
+          <div className="text-[11px] text-muted">
+            + {b.no_verdict} ohne Ergebnis
+          </div>
+        )}
+      </div>
       <div className={`${CELL} text-right text-ink`}>{pct(b.success_rate)}</div>
       <div className={`${CELL} text-right text-ink`}>
         {d.value} <span className="text-muted">{d.unit}</span>
@@ -66,7 +73,7 @@ function KindRow({ b }: { b: BuildStats }) {
       </div>
       <div
         className={`${CELL} text-right text-ink-dim`}
-        title={`${b.failed} Läufe ohne SUCCESS`}
+        title={`${b.failed} Läufe mit FAILURE oder UNSTABLE`}
       >
         {num(b.wasted_seconds / 3600, 1)} h
       </div>
@@ -128,9 +135,10 @@ function Hotspots({
         </p>
       )}
       <p className="mt-2.5 mb-0 text-xs text-muted">
-        Fehler: FAILURE und UNSTABLE. ABORTED zählt weder als Fehler noch als
-        Lauf. Auffällig: Quote mindestens {num(flaky, 1)}× die des Teams,
-        höchstens halbwegs zwischen ihr und 100 %, ab {minRuns} Läufen.
+        Fehler: FAILURE, UNSTABLE, bei Tekton Failed. Ein Lauf ohne Ergebnis
+        (ABORTED, NOT_BUILT) zählt weder als Fehler noch als Lauf. Auffällig:
+        Quote mindestens {num(flaky, 1)}× die des Teams, höchstens halbwegs
+        zwischen ihr und 100 %, ab {minRuns} Läufen.
       </p>
     </Card>
   );
@@ -187,7 +195,8 @@ function Outliers({
       <p className="mt-2.5 mb-0 text-xs text-muted">
         Hängen mehrere Pipelines zur selben Zeit, liegt es an der Infrastruktur
         (Agent weg, wartender Input-Schritt), nicht am Repo. Eine Art braucht
-        dafür mindestens {minRuns} Läufe.
+        dafür mindestens {minRuns} Läufe mit Ergebnis; abgebrochene Läufe
+        erscheinen trotzdem.
       </p>
     </Card>
   );
@@ -250,8 +259,10 @@ export function Build({ m }: { m: Metrics }) {
               ))}
             </div>
             <p className="mt-2.5 mb-0 text-xs text-muted">
-              Erfolg: COMPLETED-Läufe mit Status SUCCESS. Verschwendet: Dauer
-              der Läufe mit FAILURE, UNSTABLE oder ABORTED.
+              Erfolg: Anteil der Läufe mit SUCCESS (Tekton: Succeeded,
+              Completed). Verschwendet: Dauer der Läufe mit FAILURE, UNSTABLE
+              oder Failed. Ohne Ergebnis (ABORTED, NOT_BUILT, None): kein Lauf,
+              nur CI-Zeit; ein Jenkins-timeout() endet ebenfalls ABORTED.
             </p>
           </Card>
           <Card className="mt-3">

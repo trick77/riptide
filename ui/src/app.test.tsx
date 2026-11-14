@@ -557,6 +557,46 @@ describe("App", () => {
     expect(
       await screen.findByText(/Argo CD meldet erst seit 07\.11\.2026/),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/wenig belastbar\.$/)).toBeNull();
+  });
+
+  it("flags a deploy rate on less than a week of data", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      const m = metrics();
+      return {
+        ...m,
+        delivery: {
+          ...m.delivery,
+          frequency: {
+            ...m.delivery.frequency,
+            since: ago(2),
+            low_sample: true,
+          },
+        },
+      };
+    });
+    render(<App />);
+    expect(
+      await screen.findByText(/Weniger als eine Woche Daten: wenig belastbar/),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the runs without a verdict a kind leaves out", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      const m = metrics();
+      return {
+        ...m,
+        build: {
+          ...m.build,
+          kinds: [{ ...m.build.kinds[0], no_verdict: 3 }],
+        },
+      };
+    });
+    render(<App />);
+    await screen.findByRole("heading", { name: "Build" });
+    expect(screen.getByText("+ 3 ohne Ergebnis")).toBeInTheDocument();
   });
 
   it("treats a blank search as none", async () => {

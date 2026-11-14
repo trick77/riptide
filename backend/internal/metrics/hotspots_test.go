@@ -144,6 +144,52 @@ func TestFlaggedReposStayListed(t *testing.T) {
 	}
 }
 
+// The kind table counts as the hotspots do: an aborted run is neither a
+// failure nor a run, its time only CI time.
+func TestBuildsLeaveAbortedOut(t *testing.T) {
+	ds := data(func(ds *dataset.Dataset) {
+		ds.Runs = runs("kasse/a", 4, 100, 1, "FAILURE")
+		ds.Runs = append(ds.Runs, runs("kasse/b", 2, 5000, 2, "ABORTED")...)
+		ds.Runs = append(ds.Runs, runs("kasse/c", 1, 100, 1, "NOT_BUILT")...)
+	})
+	b := build(ds, p4(), filter{})
+	if len(b.Kinds) != 1 {
+		t.Fatalf("kinds = %+v", b.Kinds)
+	}
+	// NOT_BUILT says nothing about the build either: runs = succeeded +
+	// failed.
+	k := b.Kinds[0]
+	if k.Runs != 4 || k.Succeeded != 3 || k.Failed != 1 || k.NoVerdict != 3 || k.WastedSeconds != 100 || k.CISeconds != 10500 {
+		t.Errorf("kind = %+v", k)
+	}
+	expectNear(t, "success rate", k.SuccessRate, 3.0/4)
+	expectNear(t, "p50 without aborted", k.Duration.P50, 100)
+	expectNear(t, "week", k.Weekly[3], 3.0/4)
+	h := kindOf(b.Hotspots, KindMain)
+	expectNear(t, "hotspot team p50", h.Duration.P50, 100)
+	for _, d := range h.Durations {
+		if d.Repo == "kasse/b" {
+			t.Errorf("aborted runs as durations: %+v", d)
+		}
+	}
+	// Tekton's words: Succeeded and Completed pass, Failed fails, None says
+	// nothing.
+	tekton := data(func(ds *dataset.Dataset) {
+		for i, st := range []string{"Succeeded", "Completed", "Failed", "None"} {
+			ds.Runs = append(ds.Runs, run(func(r *dataset.Run) { r.Source, r.RunID, r.Status = "tekton", fmt.Sprint(i), s(st) }))
+		}
+	})
+	tk := build(tekton, p4(), filter{}).Kinds[0]
+	if tk.Runs != 3 || tk.Succeeded != 2 || tk.Failed != 1 || tk.NoVerdict != 1 {
+		t.Errorf("tekton = %+v", tk)
+	}
+	// Only aborted runs: the kind shows, without a rate.
+	only := build(data(func(ds *dataset.Dataset) { ds.Runs = runs("kasse/b", 2, 100, 2, "ABORTED") }), p4(), filter{})
+	if len(only.Kinds) != 1 || only.Kinds[0].Runs != 0 || only.Kinds[0].SuccessRate != nil {
+		t.Errorf("only aborted = %+v", only.Kinds)
+	}
+}
+
 // A team failing most of its runs still has a flaky repo: the one that
 // always fails.
 func TestFlakyAboveHalf(t *testing.T) {

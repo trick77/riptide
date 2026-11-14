@@ -66,6 +66,7 @@ function kindStats(
     runs,
     succeeded,
     failed: runs - succeeded,
+    no_verdict: 0,
     success_rate: succeeded / runs,
     duration: spread(runs, 600),
     ci_seconds: runs * 600,
@@ -164,6 +165,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
         first_seen: 1,
         resyncs: 1,
         per_week: 0.29,
+        low_sample: false,
         since: null,
         weeks: deployWeeks,
         succeeded: 3,
@@ -289,6 +291,7 @@ export function runFact(o: Partial<RunFact> = {}): RunFact {
     duration_s: 600,
     image_refs: [],
     status: "SUCCESS",
+    verdict: "success",
     ...o,
   };
 }
@@ -343,12 +346,18 @@ export function facts(o: Partial<Facts> = {}): Facts {
       kind: "release",
       image_refs: ["reg/kasse-api:1.1"],
     }),
-    runFact({ run_id: "11", status: "FAILURE", duration_s: 900 }),
+    runFact({
+      run_id: "11",
+      status: "FAILURE",
+      verdict: "failure",
+      duration_s: 900,
+    }),
     runFact({
       run_id: "12",
       kind: "feature",
       pipeline_name: "kasse-api/feature%2Fx",
       status: "UNSTABLE",
+      verdict: "failure",
     }),
   ];
   return {

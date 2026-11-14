@@ -54,7 +54,6 @@ cd backend && go test -race ./...    # DB tests skip without SHIP_TEST_DSN (comp
 
 ## UI (`ui/`, embedded)
 
-- `ui/src/metrics.ts` reapplies each README query's filters (the API serves supersets with flags); percentiles = `percentile_cont`.
 - **Build numbers never across run kinds.** User: releases skip tests, feature builds fail more.
 - Screenshots or numbers from a real import never into the repo or a PR.
 

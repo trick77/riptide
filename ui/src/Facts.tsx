@@ -2,14 +2,14 @@
 // deploys, runs.
 
 import type { ReactNode } from "react";
-import type { DeployFact, Facts as FactsData, PRFact } from "./api";
+import type { DeployFact, Facts as FactsData, PRFact, RunFact } from "./api";
 import { KIND_LABEL } from "./Build";
 import { dateTime, dur, shortImage, shortSha } from "./format";
 import type { Tab } from "./state";
 import { Mono, Pill, SectionHead, type Tone } from "./ui";
 
-// The backend searches these words too (metrics.prStateTerm, deployClass):
-// change one here, change it there.
+// The backend searches these words too (prStateTerm, deployTerm in
+// backend/internal/metrics/facts.go); a Go test fails when they differ.
 const PR_STATE: Record<PRFact["state"], [string, Tone]> = {
   merged: ["Gemergt", "ok"],
   open: ["Offen", "none"],
@@ -25,11 +25,11 @@ const DEPLOY_CLASS: Record<DeployFact["class"], [string | null, Tone]> = {
   sync: ["Sync ohne neue Images", "none"],
 };
 
-const RUN_TONE: Record<string, Tone> = {
-  SUCCESS: "ok",
-  FAILURE: "fail",
-  UNSTABLE: "warn",
-  ABORTED: "none",
+// By the backend's verdict, whichever CI's words the status is in.
+const RUN_TONE: Record<RunFact["verdict"], Tone> = {
+  success: "ok",
+  failure: "fail",
+  none: "none",
 };
 
 type Col = { label: string; right?: boolean };
@@ -178,13 +178,7 @@ export function Facts({
               ? r.image_refs.map(shortImage).join(", ")
               : "–"}
           </Mono>,
-          r.status ? (
-            <Pill tone={RUN_TONE[r.status.toUpperCase()] ?? "none"}>
-              {r.status}
-            </Pill>
-          ) : (
-            "–"
-          ),
+          r.status ? <Pill tone={RUN_TONE[r.verdict]}>{r.status}</Pill> : "–",
         ])}
       />
     );
