@@ -65,25 +65,31 @@ type Dataset struct {
 
 // Meta describes the window and where each source's data starts.
 type Meta struct {
-	Team            string     `json:"team"`
-	From            time.Time  `json:"from"`
-	To              time.Time  `json:"to"`
-	GeneratedAt     time.Time  `json:"generated_at"`
-	ProductionStage string     `json:"production_stage"`
-	DataStart       DataStart  `json:"data_start"`
-	BuildDataFrom   *time.Time `json:"build_data_from"`
+	Team            string    `json:"team"`
+	From            time.Time `json:"from"`
+	To              time.Time `json:"to"`
+	GeneratedAt     time.Time `json:"generated_at"`
+	ProductionStage string    `json:"production_stage"`
+	// The team's first and latest event per source, over all history.
+	DataStart     SourceTimes `json:"data_start"`
+	DataEnd       SourceTimes `json:"data_end"`
+	BuildDataFrom *time.Time  `json:"build_data_from"`
 	// BuildTypeFrom is the team's first pipeline row carrying a build_type:
 	// before it a NULL build_type means not collected yet.
 	BuildTypeFrom *time.Time `json:"build_type_from"`
 }
 
-// DataStart is the team's first event per source, over all history; nil
-// when the source never reported for the team.
-type DataStart struct {
-	Bitbucket *time.Time `json:"bitbucket" db:"bitbucket"`
-	Pipeline  *time.Time `json:"pipeline" db:"pipeline"`
-	ArgoCD    *time.Time `json:"argocd" db:"argocd"`
-	Noergler  *time.Time `json:"noergler" db:"noergler"`
+// SourceTimes is one instant per source; nil when the source never
+// reported for the team.
+type SourceTimes struct {
+	Bitbucket *time.Time `json:"bitbucket"`
+	Pipeline  *time.Time `json:"pipeline"`
+	ArgoCD    *time.Time `json:"argocd"`
+	Noergler  *time.Time `json:"noergler"`
+}
+
+func (s *SourceTimes) ptrs() []*time.Time {
+	return []*time.Time{s.Bitbucket, s.Pipeline, s.ArgoCD, s.Noergler}
 }
 
 // Product is a Bitbucket project key and what of it shows up in the window.
@@ -98,6 +104,7 @@ type PR struct {
 	Repo       string     `json:"repo" db:"repo"`
 	Project    string     `json:"project" db:"project"`
 	PRID       int64      `json:"pr_id" db:"pr_id"`
+	Title      *string    `json:"title" db:"title"`
 	GitOps     bool       `json:"gitops" db:"gitops"`
 	Bot        bool       `json:"bot" db:"bot"`
 	ChangeType *string    `json:"change_type" db:"change_type"`
@@ -151,6 +158,9 @@ type Deploy struct {
 	DurationS   *int64    `json:"duration_s" db:"duration_s"`
 	Images      []string  `json:"images" db:"images"`
 	Kind        *string   `json:"kind" db:"kind"`
+	// NewImages are the images a release brought, those the previous
+	// deploy did not run; empty for anything but a release.
+	NewImages []string `json:"new_images" db:"new_images"`
 }
 
 // LeadTime is one commit's first deploy to one environment.
@@ -179,6 +189,7 @@ type Run struct {
 	BranchKind   string     `json:"branch_kind" db:"-"`
 	BuildType    *string    `json:"build_type" db:"build_type"`
 	RunID        string     `json:"run_id" db:"run_id"`
+	CommitSHA    *string    `json:"commit_sha" db:"commit_sha"`
 	Status       *string    `json:"status" db:"status"`
 	StartedAt    *time.Time `json:"started_at" db:"started_at"`
 	FinishedAt   *time.Time `json:"finished_at" db:"finished_at"`
@@ -231,7 +242,10 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 	if err != nil {
 		return nil, err
 	}
-	d.Meta.DataStart, d.Meta.BuildDataFrom, d.Meta.BuildTypeFrom = meta.DataStart, meta.BuildDataFrom, meta.BuildTypeFrom
+	d.Meta.DataStart = SourceTimes{Bitbucket: meta.Bitbucket, Pipeline: meta.Pipeline, ArgoCD: meta.ArgoCD, Noergler: meta.Noergler}
+	d.Meta.DataEnd = SourceTimes{Bitbucket: meta.BitbucketEnd, Pipeline: meta.PipelineEnd, ArgoCD: meta.ArgoCDEnd,
+		Noergler: meta.NoerglerEnd}
+	d.Meta.BuildDataFrom, d.Meta.BuildTypeFrom = meta.BuildDataFrom, meta.BuildTypeFrom
 
 	if d.PRs, err = all[PR](ctx, tx, "prs", prsSQL, p.Team, p.From, p.To); err != nil {
 		return nil, err
@@ -281,8 +295,17 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 	return d, nil
 }
 
+// metaRow is sql/meta.sql's row: both SourceTimes flat, under their own
+// column names.
 type metaRow struct {
-	DataStart
+	Bitbucket     *time.Time `db:"bitbucket"`
+	Pipeline      *time.Time `db:"pipeline"`
+	ArgoCD        *time.Time `db:"argocd"`
+	Noergler      *time.Time `db:"noergler"`
+	BitbucketEnd  *time.Time `db:"bitbucket_end"`
+	PipelineEnd   *time.Time `db:"pipeline_end"`
+	ArgoCDEnd     *time.Time `db:"argocd_end"`
+	NoerglerEnd   *time.Time `db:"noergler_end"`
 	BuildDataFrom *time.Time `db:"build_data_from"`
 	BuildTypeFrom *time.Time `db:"build_type_from"`
 }
@@ -290,8 +313,7 @@ type metaRow struct {
 // utc puts every timestamp in UTC: pgx scans timestamptz in the process's
 // local zone, and the API speaks UTC whatever the host is set to.
 func (d *Dataset) utc() {
-	ptrs := []*time.Time{d.Meta.DataStart.Bitbucket, d.Meta.DataStart.Pipeline, d.Meta.DataStart.ArgoCD,
-		d.Meta.DataStart.Noergler, d.Meta.BuildDataFrom, d.Meta.BuildTypeFrom}
+	ptrs := append(append(d.Meta.DataStart.ptrs(), d.Meta.DataEnd.ptrs()...), d.Meta.BuildDataFrom, d.Meta.BuildTypeFrom)
 	for i := range d.PRs {
 		p := &d.PRs[i]
 		ptrs = append(ptrs, p.OpenedAt, p.ReadyAt, p.FirstReviewAt, p.ApprovedAt, p.MergedAt, p.FirstCommitAt)

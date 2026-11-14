@@ -99,6 +99,7 @@ type prEvent struct {
 	automation            string
 	draft                 bool
 	mergeCommit           string
+	title                 string
 	jira                  []string
 	at                    time.Time
 }
@@ -120,6 +121,9 @@ func (s *seeder) pr(e prEvent) {
 		head = &h
 	}
 	pull := map[string]any{"id": e.id, "draft": e.draft, "fromRef": map[string]any{"displayId": e.branch, "latestCommit": head}}
+	if e.title != "" {
+		pull["title"] = e.title
+	}
 	if e.mergeCommit != "" {
 		pull["properties"] = map[string]any{"mergeCommit": map[string]any{"id": e.mergeCommit}}
 	}
@@ -257,12 +261,12 @@ func seed(t *testing.T, pool *pgxpool.Pool) {
 	// PR #7: the full chain, approval as the reviewer's first touch.
 	s.push(kasseAPI, "feature/kas-7-pay", hours(20), commit{sha: sha("1"), authored: hours(19)})
 	s.pr(prEvent{event: "pr:opened", repo: kasseAPI, id: 7, author: "dev-anna", branch: "feature/KAS-7-pay",
-		jira: []string{"KAS-7"}, at: days(1)})
+		title: "Pay with card", jira: []string{"KAS-7"}, at: days(1)})
 	s.pr(prEvent{event: "pr:comment:added", repo: kasseAPI, id: 7, author: "noergler", automation: "noergler",
 		at: days(1).Add(time.Hour)})
 	s.pr(prEvent{event: "pr:reviewer:approved", repo: kasseAPI, id: 7, author: "rita", at: days(1).Add(3 * time.Hour)})
 	s.pr(prEvent{event: "pr:merged", repo: kasseAPI, id: 7, author: "dev-anna", branch: "feature/KAS-7-pay",
-		mergeCommit: sha("2"), jira: []string{"KAS-7"}, at: days(1).Add(5 * time.Hour)})
+		mergeCommit: sha("2"), title: "Pay by card", jira: []string{"KAS-7"}, at: days(1).Add(5 * time.Hour)})
 
 	// Master history of kasse-api and the release that ships it.
 	s.push(kasseAPI, "master", days(-12), commit{sha: sha("a"), authored: days(-12), message: "previous release head"})

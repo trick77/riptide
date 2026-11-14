@@ -427,11 +427,13 @@ runs (lint, vuln scan, tests with a Postgres it starts from `compose.yaml`'s
 The database schema is in [docs/schema.md](docs/schema.md), generated from the
 migrations. Releases are cut by hand with the Release workflow.
 
-## Read API (UI listener)
+## UI and read API (UI listener)
 
 `riptide serve` runs two listeners. The collector (`BACKEND_LISTEN_ADDR`,
 `:8000`) takes the webhooks, `/auth/ping` and the probes. The UI listener
-(`BACKEND_UI_ADDR`, `127.0.0.1:8080`) serves only the read API under `/api`.
+(`BACKEND_UI_ADDR`, `127.0.0.1:8080`) serves the UI on `/` and the read API
+under `/api`; locally, `docker compose up` publishes it on
+http://127.0.0.1:8080.
 In the pod only the auth proxy sidecar reaches it on loopback, so the route
 that carries webhooks cannot reach `/api`. The read API does no
 authentication of its own, so riptide refuses a non-loopback
@@ -452,9 +454,21 @@ deploy `kind` are set from the data, never from name lists; `bot` adds
 riptide's automation detection as it stands at read time, the same for a
 PR's opener, its reviewers and a commit's author. A PR's `environments` lists
 its merge commit's first deploy per environment, earliest first, including
-deploys after the window; `meta.production_stage` names the production one. `meta.build_type_from` tells a run's missing `build_type` before the
-team's pipelines sent any from one the sender left out. The shape is
-`Dataset` in [`backend/api/openapi.yaml`](backend/api/openapi.yaml).
+deploys after the window; `meta.production_stage` names the production one.
+`meta.build_type_from` tells a run's missing `build_type` before the team's
+pipelines sent any from one the sender left out. The shape is `Dataset` in
+[`backend/api/openapi.yaml`](backend/api/openapi.yaml). `GET /api/teams`
+lists the configured teams for the UI's team picker.
+
+The UI ([`ui/`](ui/), React, built into the binary) is one page per team:
+whole calendar weeks (4, 12 or 26), filtered by product (Bitbucket project)
+and searchable. Every number has a "Woher?" with its definition, its basis
+and the query it follows. Build numbers are never averaged across kinds of
+run: releases, master builds, feature/PR builds and other branches each get
+their own success rate and duration. The view lives in the query string
+(`?team=…&product=…&w=12&bots=1`), so a link or a printout reproduces it.
+`make fe-build` builds it; `npm --prefix ui run dev` serves it with hot
+reload against a local `riptide serve` on 127.0.0.1:8080.
 
 ## Database
 

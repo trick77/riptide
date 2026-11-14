@@ -7,6 +7,16 @@ repository.
 Real account handles, hostnames and tokens belong in the mounted
 `riptide.json` / team-keys Secret, never in this file: the repository is public.
 
+## 2026-11-14 — the UI
+
+**The UI listener now serves the UI on `/`** next to `/api`, from the same
+binary and image. Nothing to configure: put the auth proxy sidecar in front
+of `BACKEND_UI_ADDR` and give it a Route; the webhook Route stays on the
+collector's port. `GET /api/teams` lists the configured teams for the team
+picker. The dataset (contract 1.2.0) gains a PR's `title`, a run's
+`commit_sha`, a deploy's `new_images` and `meta.data_end`, each source's
+latest event.
+
 ## 2026-11-13 — UI listener and read API, pipeline build_type
 
 **Migrations 0004 and 0005 run in the init container** (`riptide migrate`,

@@ -3,4 +3,13 @@
 # having to remember this list. BuildKit reads the -f Containerfile outside these rules.
 *
 !backend
+!ui
+# The host's node_modules (darwin native binaries) would land on top of the image's own install; the image builds
+# dist itself.
+ui/node_modules
+ui/dist
+ui/coverage
+# The host's UI build in the Go tree: the image builds dist in its own stage, a stale one must not come in with the
+# context.
+backend/web/dist
 # ship:end

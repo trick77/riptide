@@ -94,6 +94,11 @@ func TestDataset(t *testing.T) {
 			!eqTime(ds.Pipeline, ts(days(-5).Add(10*time.Minute))) || !eqTime(ds.Noergler, ts(days(-19))) {
 			t.Errorf("data start = %v %v %v %v", ds.Bitbucket, ds.Pipeline, ds.ArgoCD, ds.Noergler)
 		}
+		de := m.DataEnd
+		if !eqTime(de.Bitbucket, ts(days(6).Add(time.Hour))) || !eqTime(de.ArgoCD, ts(days(30))) ||
+			!eqTime(de.Pipeline, ts(days(9).Add(10*time.Minute))) || !eqTime(de.Noergler, ts(days(1).Add(5*time.Hour))) {
+			t.Errorf("data end = %v %v %v %v", de.Bitbucket, de.Pipeline, de.ArgoCD, de.Noergler)
+		}
 		if m.BuildDataFrom == nil || m.BuildTypeFrom == nil {
 			t.Error("build_data_from or build_type_from is nil")
 		}
@@ -127,6 +132,10 @@ func TestDataset(t *testing.T) {
 			t.Fatalf("prs = %v", keys)
 		}
 		p7 := byKey[kasseAPI+"#7"]
+		// The title as last seen: edited before the merge.
+		if str(p7.Title) != "Pay by card" || byKey[kasseAPI+"#5"].Title != nil {
+			t.Errorf("titles = %v %v", str(p7.Title), str(byKey[kasseAPI+"#5"].Title))
+		}
 		if p7.Project != "kasse" || p7.GitOps || p7.Bot || str(p7.ChangeType) != "feature" || p7.State != "merged" ||
 			strings.Join(p7.JiraKeys, ",") != "KAS-7" || str(p7.MergeCommit) != sha("2") {
 			t.Errorf("pr 7 = %+v", p7)
@@ -190,6 +199,17 @@ func TestDataset(t *testing.T) {
 			first.DurationS == nil || *first.DurationS != 45 || strings.Join(first.Images, ",") != "reg/kasse-api:1.1" {
 			t.Errorf("deploy = %+v", first)
 		}
+		// What each brought: the release its new image, the rest nothing.
+		var brought []string
+		for _, dep := range d.Deploys {
+			if dep.NewImages == nil {
+				t.Errorf("%s: new_images is nil", dep.App)
+			}
+			brought = append(brought, strings.Join(dep.NewImages, ","))
+		}
+		if got := strings.Join(brought, "|"); got != "|reg/kasse-api:1.1||||" {
+			t.Errorf("new images = %q", got)
+		}
 	})
 
 	t.Run("lead times", func(t *testing.T) {
@@ -246,7 +266,7 @@ func TestDataset(t *testing.T) {
 			t.Errorf("runs =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 		}
 		r := d.Runs[2]
-		if r.Source != "jenkins" || r.RunID != "10" || str(r.Status) != "SUCCESS" || r.DurationS == nil || *r.DurationS != 600 ||
+		if r.Source != "jenkins" || r.RunID != "10" || str(r.CommitSHA) != sha("4") || str(r.Status) != "SUCCESS" || r.DurationS == nil || *r.DurationS != 600 ||
 			strings.Join(r.ImageRefs, ",") != "reg/kasse-api:1.1" || r.StartedAt == nil || r.FinishedAt == nil {
 			t.Errorf("run = %+v", r)
 		}

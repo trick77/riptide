@@ -3,6 +3,9 @@ go:
   dir: backend
   # Carried over from the old ci/ coverage gate: the floor the Python collector had.
   floor: 85
+ui:
+  # ship empties it but for .gitkeep before the build (vite's emptyOutDir is off).
+  embed: backend/web/dist
 postgres: compose:db
 steps:
   - { name: openapi lint, run: npx --yes @stoplight/spectral-cli@6.15.0 lint backend/api/openapi.yaml --ruleset .spectral.yaml }

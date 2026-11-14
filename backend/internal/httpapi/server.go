@@ -41,6 +41,9 @@ func NewUI(log *slog.Logger) *Server {
 // HandleFunc registers a handler function on the mux.
 func (s *Server) HandleFunc(pattern string, h http.HandlerFunc) { s.mux.HandleFunc(pattern, h) }
 
+// Handle registers a handler on the mux.
+func (s *Server) Handle(pattern string, h http.Handler) { s.mux.Handle(pattern, h) }
+
 // Handler is the mux wrapped in the middleware chain: the access log
 // outermost, so a panic's log line and its 500 carry the request id.
 // Senders' X-Request-Id is adopted (TrustRequestID) so one id follows a

@@ -56,7 +56,15 @@ SELECT a.app_name AS app,
          WHEN h.first_seen THEN 'first_seen'
          WHEN h.images IS DISTINCT FROM h.previous_images THEN 'release'
          ELSE 'sync'
-       END AS kind
+       END AS kind,
+       -- What a release brought: its images the previous deploy did not
+       -- run. Empty for anything but a release: a first_seen has nothing to
+       -- compare against.
+       CASE
+         WHEN h.id IS NOT NULL AND NOT h.first_seen THEN
+           ARRAY(SELECT unnest(h.images) EXCEPT SELECT unnest(h.previous_images) ORDER BY 1)
+         ELSE '{}'
+       END::text[] AS new_images
 FROM argocd_events a
 LEFT JOIN history h ON h.id = a.id
 WHERE a.team = $1 AND a.occurred_at >= $2 AND a.occurred_at < $3

@@ -51,9 +51,15 @@ cd backend && go test -race ./...    # DB tests skip without SHIP_TEST_DSN (comp
 - **Persist failure**: log `webhook_persist_failed`, answer 500, never swallow.
 - Splunk `props.conf` is the platform team's; reference copy `docs/splunk-props.conf`.
 
+## UI (`ui/`, embedded)
+
+- `ui/src/metrics.ts` reapplies each README query's filters (the API serves supersets with flags); percentiles = `percentile_cont`.
+- **Build numbers never across run kinds.** User: releases skip tests, feature builds fail more.
+- Screenshots or numbers from a real import never into the repo or a PR.
+
 ## Out of v1
 
 Push back unless the user is explicit:
 - Change failure rate / recovery time: no reliable incident source (schema has room for a rollback proxy)
 - Backfill workers (ingestion is forward-only)
-- Aggregates or metric endpoints: `/api` serves per-team facts, UI listener only (loopback); percentiles in the UI
+- Aggregates or metric endpoints: `/api` serves per-team facts, UI listener only (loopback); the UI computes
