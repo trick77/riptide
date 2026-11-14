@@ -7,6 +7,34 @@ repository.
 Real account handles, hostnames and tokens belong in the mounted
 `riptide.json` / team-keys Secret, never in this file: the repository is public.
 
+## 2026-11-13 — UI listener and read API, pipeline build_type
+
+**Migrations 0004 and 0005 run in the init container** (`riptide migrate`,
+as every migration). 0004 adds `pipeline_events.build_type` and backfills
+it from stored payloads. It also redefines the `deploy_commit_ranges` view,
+with the same columns and the same ranges (a range it listed twice is now
+listed once): on a year of data it took 14 s, now about 1 s. Ad-hoc queries
+on the lead-time views need no change. 0005 adds indexes by team and time on
+the four event tables; while each builds, webhook inserts into that table
+wait rather than fail (a plain build: a concurrent one deadlocks against a
+second migrator, see the file). Nothing else is required.
+
+**A second listener, `BACKEND_UI_ADDR`** (default `127.0.0.1:8080`), serves
+the read API (`GET /api/dataset`) and nothing else; the collector on
+`BACKEND_LISTEN_ADDR` does not serve `/api`. The default binds loopback, so
+without an auth proxy sidecar in the pod nothing can reach it. The read API
+does no authentication of its own: put the proxy in front of it, never a
+Route or Service. riptide refuses to start on a non-loopback
+`BACKEND_UI_ADDR` unless `BACKEND_UI_ALLOW_REMOTE=true` (meant for compose,
+where something else keeps the port private), and on a UI port the
+collector already binds. If the UI listener cannot bind, `serve` stops, like
+it does for the collector's. Every user the proxy lets in can read every
+team.
+
+**`build_type`** (optional, pipeline `COMPLETED` events): Jenkins can now
+report what kind of build a run was (`release`, `hotfix`, `build`, ...); see
+[Setup: Jenkins notification](setup-jenkins-notification.md).
+
 ## 2026-11-13 — distroless image, new probes, log field renames
 
 **Every `RIPTIDE_*` variable is now `BACKEND_*`**, suffix unchanged, no

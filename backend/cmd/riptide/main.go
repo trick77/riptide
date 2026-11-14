@@ -209,22 +209,56 @@ func serve(s settings.Settings, log *slog.Logger) error {
 
 	go rt.Run(ctx, s.ReloadInterval)
 
-	srv := httpapi.New(log, db.ReadyChecks()...)
-	api.Register(srv, api.Deps{Store: db, Runtime: rt, Log: log})
+	deps := api.Deps{Store: db, Reader: db, Runtime: rt, Log: log}
+	collector := httpapi.New(log, db.ReadyChecks()...)
+	api.Register(collector, deps)
+	// The read API gets a listener of its own, never a route on the
+	// collector's: in the pod only the auth proxy sidecar reaches
+	// 127.0.0.1:8080, so a caller of the webhook route (a Route or Ingress
+	// to :8000) cannot reach /api, whatever it sends.
+	ui := httpapi.NewUI(log)
+	api.RegisterUI(ui, deps)
 
 	cfg := rt.Config()
 	log.Info("riptide_collector_starting",
 		"teams", len(cfg.Teams),
 		"keys", len(rt.Keys().TeamNames()),
 		"production_stage", cfg.Environments.ProductionStage)
-	hs := httpx.NewServer(s.ListenAddr, srv.Handler())
+	hs := httpx.NewServer(s.ListenAddr, collector.Handler())
 	// Webhook bodies are small and arrive whole: a sender trickling one is
 	// cut off, as before kit. No SSE or downloads here for it to cut.
 	hs.ReadTimeout = 60 * time.Second
-	log.Info("listening", "addr", s.ListenAddr)
-	if err := httpx.Serve(ctx, hs, 15*time.Second); err != nil {
+	us := httpx.NewServer(s.UIAddr, ui.Handler())
+	log.Info("listening", "addr", s.ListenAddr, "ui_addr", s.UIAddr)
+	if err := serveAll(ctx, hs, us); err != nil {
 		return err
 	}
 	log.Info("riptide_collector_stopped")
 	return nil
+}
+
+// shutdownTimeout is how long a stopping listener drains in-flight requests.
+const shutdownTimeout = 15 * time.Second
+
+// serveAll runs every server until ctx ends, and stops them all as soon as
+// one returns: a listener that cannot bind (or dies) takes the process down
+// rather than leaving half a service running. The errors are joined.
+func serveAll(ctx context.Context, servers ...*http.Server) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errs := make(chan error, len(servers))
+	for _, srv := range servers {
+		go func() {
+			err := httpx.Serve(ctx, srv, shutdownTimeout)
+			cancel()
+			errs <- err
+		}()
+	}
+	var all []error
+	for range servers {
+		if err := <-errs; err != nil {
+			all = append(all, err)
+		}
+	}
+	return errors.Join(all...)
 }

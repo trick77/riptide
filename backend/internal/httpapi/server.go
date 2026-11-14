@@ -31,6 +31,13 @@ func New(log *slog.Logger, checks ...httpx.Check) *Server {
 	return s
 }
 
+// NewUI builds a server without the probes, for the UI listener: the
+// collector's listener answers the orchestrator, this one only the UI's
+// requests. Same middleware chain and error shape.
+func NewUI(log *slog.Logger) *Server {
+	return &Server{log: log, mux: http.NewServeMux()}
+}
+
 // HandleFunc registers a handler function on the mux.
 func (s *Server) HandleFunc(pattern string, h http.HandlerFunc) { s.mux.HandleFunc(pattern, h) }
 
