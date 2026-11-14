@@ -446,20 +446,34 @@ loopback), and a UI port the collector already binds. Access is decided by
 the auth proxy in front of the UI listener: every authenticated user can read
 every team, deliberately; per-team scoping would belong in the proxy.
 
-`GET /api/dataset?team=<team>&from=<date>&to=<date>` returns one team's facts
-for the window `[from, to)` (RFC 3339 or `YYYY-MM-DD`, where a date as `to`
-includes that day; the default is the last 28 days, the maximum 400 days):
-one row per PR, deploy, shipped commit, CI run and noergler review. It never
-returns aggregates: the UI filters by product and computes the percentiles.
-Each field follows the rules of the [Metrics](#metrics) queries, and a test
-checks it against them on the same data. `gitops`, `service_account` and
+The backend computes every number the UI shows; the UI renders and formats,
+it computes nothing. `GET /api/metrics?team=<team>&weeks=4|12|26&tz=<zone>`
+returns the page's metrics over whole calendar weeks in the viewer's time
+zone, the current one running to now: deploy frequency, lead times and their
+breakdown, code review, builds per kind of run with their hotspots, and
+noergler costs. `product=<key>` narrows it to one Bitbucket project,
+`bots=1` counts bots' PRs in. `GET /api/facts` takes the same parameters
+plus `q` and returns the PRs, deploys and runs behind the numbers, newest
+first, searched; it reads no lead times or reviews, so it takes the product
+as given, the one `/api/metrics` answered. Each number follows the rules of the [Metrics](#metrics)
+queries, and a test checks the deployment-frequency weeks and the lead-time
+breakdown against them on the same data. `gitops`, `service_account` and
 deploy `kind` are set from the data, never from name lists; `bot` adds
 riptide's automation detection as it stands at read time, the same for a
-PR's opener, its reviewers and a commit's author. A PR's `environments` lists
-its merge commit's first deploy per environment, earliest first, including
-deploys after the window; `meta.production_stage` names the production one.
-`meta.build_type_from` tells a run's missing `build_type` before the team's
-pipelines sent any from one the sender left out. The shape is `Dataset` in
+PR's opener, its reviewers and a commit's author.
+
+Build hotspots compare each repo with the team's runs of the same kind
+(release, main, feature, other, unknown), never across kinds: a repo whose
+median takes at least twice the team's is slow, one whose failure rate is at
+least twice the team's is flaky (at most halfway from the team's rate to
+100 %, or a team failing most runs could have none), both from 10 runs on.
+A run of a commit Bitbucket never saw counts with the repository its
+pipeline is named after. Failures are FAILURE
+and UNSTABLE; an ABORTED run is neither a failure nor a run (a superseded
+build is cancelled, not broken). Failing repos rank by the CI time their
+broken runs wasted. A run past three times its kind's p90 is an outlier:
+several repos stuck at the same time point at shared infrastructure, not at
+a repo. The thresholds are starting values, not measured. The shapes are in
 [`backend/api/openapi.yaml`](backend/api/openapi.yaml). `GET /api/teams`
 lists the configured teams for the UI's team picker.
 

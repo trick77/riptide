@@ -8,128 +8,96 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import type { Dataset } from "./api";
-import { jiraPrefix } from "./Facts";
+import type { Facts, Metrics } from "./api";
 import { LeadChain } from "./LeadChain";
 import { parseState, stateQuery } from "./state";
 import {
-  NOW,
   ago,
-  dataset,
-  deploy,
-  leadTime,
-  pr,
-  review,
-  run,
+  deployFact,
+  facts,
+  metrics,
+  prFact,
+  spread,
 } from "./test/fixtures";
 
-function sample(): Dataset {
-  return dataset({
-    prs: [
-      pr({
-        pr_id: 1,
-        title: "KAS-1: Pay by card",
-        environments: [
-          { environment: "intg", first_deployed_at: ago(1.7) },
-          { environment: "prod", first_deployed_at: ago(1) },
-        ],
-      }),
-      pr({
-        pr_id: 2,
-        title: "Bump lib",
-        bot: true,
-        change_type: "other",
-        jira_keys: [],
-      }),
-      pr({
-        pr_id: 3,
-        repo: "kasse/kasse-gitops",
-        gitops: true,
-        title: "kasse PROD 1.1",
-        jira_keys: ["KAS-1", "KAS-2", "KAS-3", "KAS-4"],
-      }),
-      pr({
-        pr_id: 4,
-        project: "portal",
-        repo: "portal/portal-web",
-        title: null,
-        change_type: "bugfix",
-        jira_keys: [],
-        state: "open",
-        merged_at: null,
-      }),
-    ],
-    deploys: [
-      deploy({ revision: "r1", at: ago(1) }),
-      deploy({
-        revision: "r1",
-        app: "kasse-intg",
-        environment: "intg",
-        at: ago(1.7),
-      }),
-      deploy({ revision: "r2", kind: "sync", new_images: [], at: ago(8) }),
-      deploy({
-        revision: "r3",
-        app: "kasse-new",
-        kind: "first_seen",
-        new_images: [],
-        at: ago(15),
-      }),
-      deploy({
-        revision: "r4",
-        phase: "Failed",
-        kind: null,
-        new_images: [],
-        at: ago(2),
-      }),
-    ],
-    lead_times: [
-      leadTime({ lead_time_s: 2 * 86400 }),
-      leadTime({ lead_time_s: 3 * 3600, environment: "intg" }),
-      leadTime({ lead_time_s: 600, bot: true }),
-    ],
-    runs: [
-      run({
-        build_type: "release",
-        run_id: "10",
-        image_refs: ["reg/kasse-api:1.1"],
-      }),
-      run({ run_id: "11", status: "FAILURE", duration_s: 900 }),
-      run({
-        run_id: "12",
-        branch_kind: "feature",
-        pipeline_name: "kasse-api/feature%2Fx",
-        status: "UNSTABLE",
-      }),
-    ],
-    reviews: [
-      review(),
-      review({
-        pr_key: "kasse/kasse-api#9",
-        outcome: "declined",
-        cost_usd: "0.25",
-      }),
-    ],
-  });
+type Answer = Metrics | Facts | Response;
+
+// The sample team's answers: per product, bots and search as the backend
+// would compute them.
+function sample(url: URL): Answer {
+  const weeks = Number(url.searchParams.get("weeks") ?? 4);
+  const product = url.searchParams.get("product");
+  if (url.pathname === "/api/facts") {
+    const q = url.searchParams.get("q");
+    if (q === "portal")
+      return facts({
+        prs: { count: 1, rows: [facts().prs.rows[2]] },
+        deploys: { count: 0, rows: [] },
+        runs: { count: 0, rows: [] },
+      });
+    if (q === "kasse-api:1.1")
+      return facts({
+        deploys: { count: 5, rows: facts().deploys.rows },
+      });
+    return facts();
+  }
+  const m = metrics(weeks);
+  if (product === "portal") {
+    const empty = metrics(weeks);
+    return {
+      ...m,
+      product: "portal",
+      delivery: {
+        ...m.delivery,
+        frequency: {
+          ...m.delivery.frequency,
+          releases: 0,
+          syncs: 0,
+          first_seen: 0,
+          resyncs: 0,
+          per_week: 0,
+          succeeded: 0,
+          failed: 0,
+          finished: 0,
+          success_rate: null,
+        },
+      },
+      build: { ...empty.build, kinds: [] },
+      costs: { ...empty.costs, rows: [] },
+    };
+  }
+  if (url.searchParams.get("bots") === "1")
+    return {
+      ...m,
+      bots: true,
+      review: { ...m.review, merged: 2, untracked: 1, untracked_rate: 0.5 },
+    };
+  return m;
 }
 
 function mockFetch(
-  ds: Dataset | (() => Promise<Response>),
+  answer: (url: URL) => Answer = sample,
   teams = ["team-a", "team-b"],
 ) {
   const calls: string[] = [];
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url: string) => {
-      calls.push(url);
-      if (url.startsWith("/api/teams"))
+    vi.fn(async (raw: string) => {
+      calls.push(raw);
+      const url = new URL(raw, "http://riptide.test");
+      if (url.pathname === "/api/teams")
         return new Response(JSON.stringify({ teams }));
-      if (typeof ds === "function") return ds();
-      return new Response(JSON.stringify(ds));
+      const a = answer(url);
+      return a instanceof Response ? a : new Response(JSON.stringify(a));
     }),
   );
   return calls;
 }
+
+const metricsCalls = (calls: string[]) =>
+  calls.filter((c) => c.startsWith("/api/metrics"));
+const factsCalls = (calls: string[]) =>
+  calls.filter((c) => c.startsWith("/api/facts"));
 
 beforeEach(() => {
   window.history.replaceState(null, "", "/");
@@ -138,29 +106,33 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const now = () => NOW;
-
 describe("App", () => {
   it("loads the first team and shows every section", async () => {
-    const calls = mockFetch(sample());
-    render(<App now={now} />);
-    await screen.findByRole("heading", { name: "Delivery" });
+    const calls = mockFetch();
+    render(<App />);
+    // The facts come last: they ask for the product the metrics resolved.
+    await screen.findByRole("heading", { name: "Daten" });
     for (const h of [
+      "Delivery",
       "Code-Review",
       "Build",
       "Kosten der KI-Reviews",
-      "Daten",
     ]) {
       expect(screen.getByRole("heading", { name: h })).toBeInTheDocument();
     }
-    expect(calls[1]).toMatch(/^\/api\/dataset\?team=team-a&from=2026-10-1/);
+    // The viewer's zone goes along: the backend cuts the weeks there.
+    expect(metricsCalls(calls)[0]).toBe(
+      "/api/metrics?team=team-a&weeks=4&tz=Europe%2FZurich",
+    );
+    expect(factsCalls(calls)[0]).toBe(
+      "/api/facts?team=team-a&weeks=4&tz=Europe%2FZurich",
+    );
     expect(
       screen.getByText(/Team team-a, alle Produkte · KW 43–46/),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/Datenstand: Bitbucket 12\.11\./),
     ).toBeInTheDocument();
-    // one release, one sync, one first deploy; the failed sync apart
     expect(screen.getByText("1 Releases aus 3 Syncs")).toBeInTheDocument();
     expect(
       screen.getByText("1 fehlgeschlagen von 4 Syncs"),
@@ -169,11 +141,12 @@ describe("App", () => {
       screen.getByText(/1 Erstdeploys ohne Vergleichswert/),
     ).toBeInTheDocument();
     expect(screen.getByText("Lead Time intg")).toBeInTheDocument();
+    expect(screen.getAllByText(/wenig belastbar/).length).toBeGreaterThan(0);
   });
 
   it("explains a number on demand, one at a time", async () => {
-    mockFetch(sample());
-    render(<App now={now} />);
+    mockFetch();
+    render(<App />);
     await screen.findByRole("heading", { name: "Delivery" });
     const whys = screen.getAllByRole("button", { name: "Woher?" });
     fireEvent.click(whys[0]);
@@ -200,14 +173,15 @@ describe("App", () => {
     expect(screen.queryByRole("region", { name: /^Woher/ })).toBeNull();
   });
 
-  it("filters by product, counts bots in on request, keeps it in the URL", async () => {
-    mockFetch(sample());
-    render(<App now={now} />);
+  it("asks for a product and bots, keeps them in the URL", async () => {
+    const calls = mockFetch();
+    render(<App />);
     await screen.findByRole("heading", { name: "Delivery" });
     const products = screen.getByRole("group", { name: "Produkt" });
     fireEvent.click(within(products).getByRole("button", { name: /portal/ }));
     expect(window.location.search).toBe("?product=portal");
-    expect(screen.getByText(/Team team-a, Produkt portal/)).toBeInTheDocument();
+    await screen.findByText(/Team team-a, Produkt portal/);
+    expect(metricsCalls(calls).at(-1)).toMatch(/&product=portal$/);
     expect(screen.getByText("Argo-Apps")).toBeInTheDocument();
     expect(screen.getByText("keine")).toBeInTheDocument();
     expect(screen.getByText("keine Deploys im Zeitraum")).toBeInTheDocument();
@@ -217,71 +191,79 @@ describe("App", () => {
     expect(
       screen.getByText("Keine noergler-Reviews im Zeitraum."),
     ).toBeInTheDocument();
+    expect(screen.getByText("Kosten nach Repo")).toBeInTheDocument();
 
     fireEvent.click(
       within(products).getByRole("button", { name: /Alle Produkte/ }),
     );
+    await screen.findByText(/Team team-a, alle Produkte/);
     expect(screen.getByText("0 von 1 gemergten PRs")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Bots einbeziehen" }));
     expect(window.location.search).toBe("?bots=1");
-    // the bot's PR carries no Jira key
-    expect(screen.getByText("1 von 2 gemergten PRs")).toBeInTheDocument();
+    expect(
+      await screen.findByText("1 von 2 gemergten PRs"),
+    ).toBeInTheDocument();
+    expect(metricsCalls(calls).at(-1)).toMatch(/&bots=1$/);
     expect(screen.getAllByText("Bots").length).toBeGreaterThan(0);
   });
 
   it("switches the window and the team, refetching", async () => {
-    const calls = mockFetch(sample());
-    render(<App now={now} />);
+    const calls = mockFetch();
+    render(<App />);
     await screen.findByRole("heading", { name: "Delivery" });
     fireEvent.click(screen.getByRole("button", { name: "12 W" }));
-    await waitFor(() => expect(calls).toHaveLength(3));
-    expect(calls[2]).toMatch(/from=2026-08-2/);
     await screen.findByText(/KW 35–46/);
+    expect(metricsCalls(calls).at(-1)).toMatch(/weeks=12/);
     fireEvent.change(screen.getByLabelText("Team"), {
       target: { value: "team-b" },
     });
-    await waitFor(() => expect(calls[3]).toMatch(/team=team-b/));
+    await waitFor(() =>
+      expect(metricsCalls(calls).at(-1)).toMatch(/team=team-b/),
+    );
     expect(window.location.search).toBe("?team=team-b&w=12");
   });
 
-  it("searches the facts and switches tables", async () => {
-    mockFetch(sample());
-    render(<App now={now} />);
+  it("asks the backend to search the facts, switches tables", async () => {
+    const calls = mockFetch();
+    render(<App />);
     await screen.findByRole("heading", { name: "Daten" });
     const tabs = screen.getByRole("tablist", { name: "Faktentabelle" });
     expect(within(tabs).getByRole("tab", { name: /PRs 3/ })).toHaveAttribute(
       "aria-selected",
       "true",
     );
-    expect(
-      screen.getByText("Pay by card", { exact: false }),
-    ).toBeInTheDocument();
+    expect(screen.getByText("KAS-1: Pay by card")).toBeInTheDocument();
+    expect(screen.getByText("KAS-2 KAS-3 KAS-4")).toBeInTheDocument();
     expect(screen.getByText("Promotion")).toBeInTheDocument();
     expect(screen.getByText("#4")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/Suche nach/), {
       target: { value: "portal" },
     });
     expect(
-      within(tabs).getByRole("tab", { name: /PRs 1/ }),
+      await within(tabs).findByRole("tab", { name: /PRs 1/ }),
     ).toBeInTheDocument();
+    expect(factsCalls(calls).at(-1)).toMatch(/&q=portal$/);
     expect(screen.getByText("gefiltert nach «portal»")).toBeInTheDocument();
     fireEvent.click(within(tabs).getByRole("tab", { name: /Deploys/ }));
     expect(screen.getByText("Keine Treffer für «portal».")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/Suche nach/), {
-      target: { value: "" },
+      target: { value: "kasse-api:1.1" },
     });
+    expect(
+      await within(tabs).findByRole("tab", { name: /Deploys 5/ }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Erstdeploy")).toBeInTheDocument();
     expect(screen.getByText("Failed")).toBeInTheDocument();
     expect(screen.getAllByText("kasse-api:1.1").length).toBeGreaterThan(0);
     fireEvent.click(within(tabs).getByRole("tab", { name: /Läufe/ }));
-    expect(window.location.search).toBe("?tab=runs");
+    expect(window.location.search).toBe("?q=kasse-api%3A1.1&tab=runs");
     expect(screen.getByText("UNSTABLE")).toBeInTheDocument();
     expect(screen.getAllByText("Releases").length).toBeGreaterThan(0);
   });
 
-  it("shows tooltips on hover and picks the build kind for durations", async () => {
-    mockFetch(sample());
-    render(<App now={now} />);
+  it("shows tooltips on hover and picks the build kind for hotspots", async () => {
+    mockFetch();
+    render(<App />);
     await screen.findByRole("heading", { name: "Build" });
     const cols = screen.getAllByTestId("week-col");
     fireEvent.mouseEnter(cols[3]);
@@ -289,10 +271,15 @@ describe("App", () => {
     fireEvent.mouseLeave(cols[3]);
     expect(screen.queryByRole("tooltip")).toBeNull();
     const kinds = screen.getByRole("group", { name: "Lauf-Art" });
+    // master builds first: one failed run of kasse-api
+    expect(screen.getByText("1 / 1")).toBeInTheDocument();
     fireEvent.click(within(kinds).getByRole("button", { name: "Releases" }));
     expect(
       within(kinds).getByRole("button", { name: "Releases" }),
     ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getByText("Keine fehlgeschlagenen Läufe dieser Art."),
+    ).toBeInTheDocument();
     fireEvent.mouseEnter(
       screen.getByRole("img", { name: /Erfolgsquote/ }).parentElement!
         .lastElementChild!.lastElementChild!,
@@ -307,14 +294,96 @@ describe("App", () => {
     expect(screen.getAllByRole("tooltip").length).toBeGreaterThan(0);
   });
 
+  it("flags the hotspots the backend found", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      const m = metrics();
+      const h = m.build.hotspots;
+      h.kinds[1] = {
+        ...h.kinds[1],
+        durations: [
+          {
+            repo: "kasse/slow-api",
+            runs: 12,
+            duration: spread(12, 1800, 2400),
+            factor: 3,
+            slow: true,
+          },
+        ],
+        failing: [
+          {
+            repo: "kasse/flaky-api",
+            runs: 20,
+            failures: 8,
+            failure_rate: 0.4,
+            wasted_seconds: 7200,
+            flaky: true,
+          },
+        ],
+      };
+      h.outliers = [
+        {
+          kind: "main",
+          pipeline_name: "kasse-api/master",
+          repo: "kasse/kasse-api",
+          run_id: "7",
+          started_at: ago(3),
+          duration_s: 32 * 3600,
+          status: "SUCCESS",
+          factor: 160,
+        },
+      ];
+      return m;
+    });
+    render(<App />);
+    await screen.findByRole("heading", { name: "Hotspots" });
+    expect(screen.getByText("kasse/slow-api · langsam")).toBeInTheDocument();
+    expect(screen.getByText("auffällig")).toBeInTheDocument();
+    expect(screen.getByText("8 / 20")).toBeInTheDocument();
+    expect(screen.getByText("2.0 h")).toBeInTheDocument();
+    expect(screen.getByText("160×")).toBeInTheDocument();
+    expect(screen.getByText("#7")).toBeInTheDocument();
+  });
+
+  it("asks for the facts of the product the metrics resolved", async () => {
+    window.history.replaceState(null, "", "/?product=gone");
+    const calls = mockFetch();
+    render(<App />);
+    await screen.findByRole("heading", { name: "Daten" });
+    expect(metricsCalls(calls)[0]).toMatch(/&product=gone$/);
+    expect(factsCalls(calls)[0]).not.toMatch(/product=/);
+  });
+
+  it("labels cycle-time buckets it has no words for by their bounds", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      const m = metrics();
+      return {
+        ...m,
+        review: {
+          ...m.review,
+          cycle_histogram: {
+            upper_bounds_s: [600],
+            human: [1, 2],
+            bot: [0, 0],
+          },
+        },
+      };
+    });
+    render(<App />);
+    await screen.findByRole("heading", { name: "Code-Review" });
+    expect(screen.getByText("bis 10 min")).toBeInTheDocument();
+    expect(screen.getByText("ab 10 min")).toBeInTheDocument();
+  });
+
   it("reports a failed load with the server's detail", async () => {
     mockFetch(
-      async () =>
+      () =>
         new Response(JSON.stringify({ detail: "unknown team" }), {
           status: 404,
         }),
     );
-    render(<App now={now} />);
+    render(<App />);
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "404: unknown team",
     );
@@ -322,18 +391,30 @@ describe("App", () => {
 
   it("keeps a non-JSON error's status text", async () => {
     mockFetch(
-      async () =>
-        new Response("<html>", { status: 502, statusText: "Bad Gateway" }),
+      () => new Response("<html>", { status: 502, statusText: "Bad Gateway" }),
     );
-    render(<App now={now} />);
+    render(<App />);
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "502: Bad Gateway",
     );
   });
 
+  it("reports a failed facts load", async () => {
+    mockFetch((url) =>
+      url.pathname === "/api/facts"
+        ? new Response(JSON.stringify({ detail: "boom" }), { status: 500 })
+        : metrics(),
+    );
+    render(<App />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("500: boom");
+    expect(
+      screen.getByRole("heading", { name: "Delivery" }),
+    ).toBeInTheDocument();
+  });
+
   it("says so when the config has no team", async () => {
-    mockFetch(sample(), []);
-    render(<App now={now} />);
+    mockFetch(sample, []);
+    render(<App />);
     expect(
       await screen.findByText(
         "In der Konfiguration ist kein Team eingetragen.",
@@ -348,15 +429,15 @@ describe("App", () => {
         throw new Error("offline");
       }),
     );
-    render(<App now={now} />);
+    render(<App />);
     expect(await screen.findByRole("alert")).toHaveTextContent("offline");
   });
 
   it("prints", async () => {
-    mockFetch(sample());
+    mockFetch();
     const print = vi.fn();
     vi.stubGlobal("print", print);
-    render(<App now={now} />);
+    render(<App />);
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /Drucken/ }));
     });
@@ -364,17 +445,37 @@ describe("App", () => {
   });
 
   it("explains a build section with only unknown runs", async () => {
-    mockFetch(
-      dataset({
-        runs: [run({ build_type: null })],
-        meta: {
-          ...dataset().meta,
-          build_type_from: null,
-          build_data_from: ago(3),
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      const m = metrics();
+      return {
+        ...m,
+        lead_chain: {
+          ...m.lead_chain,
+          stages: m.lead_chain.stages.map((s) => ({
+            ...s,
+            n: 0,
+            p50: null,
+            p90: null,
+            share: null,
+            hot: false,
+          })),
+          sum_p50: null,
         },
-      }),
-    );
-    render(<App now={now} />);
+        build: {
+          ...m.build,
+          data_from: ago(3),
+          starts_inside: true,
+          gap_weeks: 3,
+          kinds: [{ ...m.build.kinds[1], kind: "unknown" }],
+          hotspots: {
+            ...m.build.hotspots,
+            kinds: [{ ...m.build.hotspots.kinds[1], kind: "unknown" }],
+          },
+        },
+      };
+    });
+    render(<App />);
     expect(
       await screen.findByText(/Nur Läufe unbekannter Art/),
     ).toBeInTheDocument();
@@ -386,13 +487,14 @@ describe("App", () => {
 
   it("drops a failure once the same load succeeds", async () => {
     let n = 0;
-    mockFetch(async () => {
-      n++;
-      return n === 1
-        ? new Response(JSON.stringify({ detail: "boom" }), { status: 500 })
-        : new Response(JSON.stringify(sample()));
+    mockFetch((url) => {
+      if (url.pathname === "/api/metrics" && ++n === 1)
+        return new Response(JSON.stringify({ detail: "boom" }), {
+          status: 500,
+        });
+      return sample(url);
     });
-    render(<App now={now} />);
+    render(<App />);
     expect(await screen.findByRole("alert")).toHaveTextContent("boom");
     fireEvent.click(screen.getByRole("button", { name: "12 W" }));
     await screen.findByRole("heading", { name: "Delivery" });
@@ -401,76 +503,93 @@ describe("App", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("finds a deploy by any image it ran, shows no negative wait", async () => {
-    const ds = sample();
-    ds.prs[0].approved_at = ago(2.5); // before ready_at: not a wait
-    mockFetch(ds);
-    render(<App now={now} />);
+  it("shows an unknown wait as a dash, never as 0 s", async () => {
+    mockFetch((url) =>
+      url.pathname === "/api/facts"
+        ? facts({
+            prs: { count: 1, rows: [prFact({ review_s: null })] },
+            deploys: { count: 1, rows: [deployFact()] },
+          })
+        : metrics(),
+    );
+    render(<App />);
     await screen.findByRole("heading", { name: "Daten" });
     const row = screen.getByText("KAS-1: Pay by card").closest("tr")!;
     expect(within(row).getAllByText("–").length).toBeGreaterThan(0);
     expect(within(row).queryByText("0 s")).toBeNull();
-    fireEvent.change(screen.getByLabelText(/Suche nach/), {
-      target: { value: "kasse-api:1.1" },
-    });
-    const tabs = screen.getByRole("tablist", { name: "Faktentabelle" });
-    // the release, the sync and the failed sync ran it; only one brought it
-    expect(
-      within(tabs).getByRole("tab", { name: /Deploys 5/ }),
-    ).toBeInTheDocument();
   });
 
   it("tells a team Argo CD does not report for from one without deploys", async () => {
-    const ds = sample();
-    ds.deploys = [];
-    ds.meta.data_start.argocd = null;
-    mockFetch(ds);
-    render(<App now={now} />);
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      const m = metrics();
+      return {
+        ...m,
+        delivery: {
+          ...m.delivery,
+          frequency: {
+            ...m.delivery.frequency,
+            syncs: 0,
+            argo_reporting: false,
+          },
+        },
+      };
+    });
+    render(<App />);
     expect(
       await screen.findByText("Argo CD meldet für das Team noch nicht"),
     ).toBeInTheDocument();
   });
 
   it("notes when Argo CD started inside the window", async () => {
-    const ds = sample();
-    ds.meta.data_start.argocd = ago(5);
-    mockFetch(ds);
-    render(<App now={now} />);
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      const m = metrics();
+      return {
+        ...m,
+        delivery: {
+          ...m.delivery,
+          frequency: { ...m.delivery.frequency, since: ago(5) },
+        },
+      };
+    });
+    render(<App />);
     expect(
       await screen.findByText(/Argo CD meldet erst seit 07\.11\.2026/),
     ).toBeInTheDocument();
   });
 
   it("treats a blank search as none", async () => {
-    mockFetch(sample());
-    render(<App now={now} />);
+    const calls = mockFetch();
+    render(<App />);
     await screen.findByRole("heading", { name: "Daten" });
     fireEvent.change(screen.getByLabelText(/Suche nach/), {
       target: { value: "   " },
     });
+    await new Promise((r) => setTimeout(r, 300));
     expect(screen.queryByText(/gefiltert nach/)).toBeNull();
+    expect(factsCalls(calls).every((c) => !c.includes("q="))).toBe(true);
   });
 });
 
 describe("lead chain", () => {
-  const zero = { n: 1, p50: 0, p90: 0 };
-  it("splits evenly when every median is zero, never NaN", () => {
+  it("draws the shares the backend computed, no stage it left out", () => {
+    const zero = { n: 1, p50: 0, p90: 0, low_sample: true, hot: false };
     render(
       <LeadChain
         prod="prod"
         chain={{
-          stages: (
-            ["coding", "review", "merge", "toPre", "toProd"] as const
-          ).map((key) => ({ key, spread: zero })),
-          preEnvironment: null,
-          approved: 1,
-          approvedOnFirstTouch: 1,
+          stages: (["coding", "review", "merge", "to_prod"] as const).map(
+            (key) => ({ key, ...zero, share: 0.25 }),
+          ),
+          pre_environment: null,
+          sum_p50: 0,
+          before_prod: 0,
         }}
       />,
     );
     expect(document.body.textContent).not.toMatch(/NaN/);
     expect(screen.getByText(/25 %/)).toBeInTheDocument();
-    // no stage before production: no row for it, prod counted from the merge
     expect(screen.queryByText(/Bis null/)).toBeNull();
     expect(screen.getByText("gemergt → auf prod")).toBeInTheDocument();
   });
@@ -496,18 +615,5 @@ describe("state", () => {
       team: null,
     });
     expect(stateQuery(parseState(""))).toBe("");
-  });
-});
-
-describe("jira prefix", () => {
-  it("leaves out keys the title shows, caps the rest", () => {
-    expect(
-      jiraPrefix(pr({ title: "KAS-1: x", jira_keys: ["KAS-1", "KAS-2"] })),
-    ).toBe("KAS-2");
-    expect(
-      jiraPrefix(
-        pr({ title: null, jira_keys: ["A-1", "A-2", "A-3", "A-4", "A-5"] }),
-      ),
-    ).toBe("A-1 A-2 A-3 +2");
   });
 });

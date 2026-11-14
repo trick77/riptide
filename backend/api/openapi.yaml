@@ -4,7 +4,7 @@ info:
   title: riptide API
   # The CONTRACT's version, not the binary's. The two move independently:
   # a release that changes no route leaves this alone.
-  version: 1.2.0
+  version: 2.0.0
   description: |
     DevOps delivery-metrics ingestion. Senders post raw events from Bitbucket
     Data Center, CI pipelines (Jenkins, Tekton, ...), Argo CD and noergler;
@@ -50,8 +50,8 @@ tags:
     description: |
       The UI's read API. Served on the UI listener only (`BACKEND_UI_ADDR`,
       loopback by default, behind the auth proxy), never on the collector's
-      listener that takes the webhooks. Per-team facts, one row per event;
-      no aggregates: the UI computes its percentiles.
+      listener that takes the webhooks. Every number is computed here, on
+      read: the UI renders and formats, it computes nothing.
 
 paths:
   /webhooks/bitbucket/{team}:
@@ -262,62 +262,78 @@ paths:
                 properties:
                   teams: { type: array, items: { type: string } }
 
-  /api/dataset:
+  /api/metrics:
     get:
       tags: [read]
-      operationId: dataset
-      summary: One team's facts for a window
+      operationId: metrics
+      summary: Every number of one team's page
       description: |
-        Every PR, deploy, shipped commit, CI run and noergler review of the
-        team in the window `[from, to)`, as rows. The rules behind each field
-        are the README's metric queries. Product = Bitbucket project key, the
-        part of a repository's name before `/`; an App's product is that of
-        the GitOps repo its revision is a commit of.
+        Delivery, lead-time breakdown, code review, builds with their
+        hotspots, and noergler costs of the team over the period: whole
+        calendar weeks in the viewer's zone, the current one running to now.
+        The rules are the README's metric queries. Product = Bitbucket
+        project key, the part of a repository's name before `/`; an App's
+        product is that of the GitOps repo its revision is a commit of.
 
         No authentication of its own: the UI listener is reached through the
         auth proxy only.
       security: []
       parameters:
-        - name: team
-          in: query
-          required: true
-          description: A team from the config's `teams`.
-          schema: { type: string, minLength: 1 }
-        - name: from
+        - $ref: "#/components/parameters/ReadTeam"
+        - $ref: "#/components/parameters/ReadWeeks"
+        - $ref: "#/components/parameters/ReadTZ"
+        - $ref: "#/components/parameters/ReadProduct"
+        - $ref: "#/components/parameters/ReadBots"
+      responses:
+        "200":
+          description: The metrics.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Metrics" }
+        "404": { $ref: "#/components/responses/ReadUnknownTeam" }
+        "422": { $ref: "#/components/responses/ReadBadQuery" }
+        "500": { $ref: "#/components/responses/ReadFailed" }
+
+  /api/facts:
+    get:
+      tags: [read]
+      operationId: facts
+      summary: The single facts behind the numbers, searched
+      description: |
+        The team's PRs, deploys and CI runs of the period, newest first,
+        filtered by product, bots (PRs only) and a case-insensitive search;
+        each table the first 300 matches and how many matched.
+
+        No authentication of its own: the UI listener is reached through the
+        auth proxy only.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ReadTeam"
+        - $ref: "#/components/parameters/ReadWeeks"
+        - $ref: "#/components/parameters/ReadTZ"
+        - name: product
           in: query
           required: false
           description: |
-            Window start, inclusive: RFC 3339, or a `YYYY-MM-DD` date (UTC
-            midnight). Default: 28 days before `to`.
+            A product key, applied as given: one without rows matches none.
+            Send the `product` /api/metrics answered; the facts read no lead
+            times or reviews, so they cannot tell every product the page knows.
           schema: { type: string }
-        - name: to
+        - $ref: "#/components/parameters/ReadBots"
+        - name: q
           in: query
           required: false
-          description: |
-            Window end, exclusive: RFC 3339, or a `YYYY-MM-DD` date, which
-            includes that day. Default: now. At most 400 days after `from`.
+          description: Search text; empty matches everything.
           schema: { type: string }
       responses:
         "200":
-          description: The dataset.
+          description: The facts tables.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Dataset" }
-        "404":
-          description: The team is not in the config.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
-        "422":
-          description: "`team` missing, a bound unreadable, `from` not before `to`, or a window over 400 days."
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
-        "500":
-          description: The database could not be read.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
+              schema: { $ref: "#/components/schemas/Facts" }
+        "404": { $ref: "#/components/responses/ReadUnknownTeam" }
+        "422": { $ref: "#/components/responses/ReadBadQuery" }
+        "500": { $ref: "#/components/responses/ReadFailed" }
 
 components:
   securitySchemes:
@@ -352,6 +368,53 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/ValidationError" }
+    ReadUnknownTeam:
+      description: The team is not in the config.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ReadBadQuery:
+      description: "`team` missing, or `weeks`, `tz` or `bots` unreadable."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ReadFailed:
+      description: The database could not be read.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  parameters:
+    ReadTeam:
+      name: team
+      in: query
+      required: true
+      description: A team from the config's `teams`.
+      schema: { type: string, minLength: 1 }
+    ReadWeeks:
+      name: weeks
+      in: query
+      required: false
+      description: The period in calendar weeks, the current one running to now. Default 4.
+      schema: { type: integer, enum: [4, 12, 26] }
+    ReadTZ:
+      name: tz
+      in: query
+      required: false
+      description: The viewer's IANA time zone; weeks run Monday 00:00 to Monday 00:00 there. Default UTC.
+      schema: { type: string, examples: [Europe/Zurich] }
+    ReadProduct:
+      name: product
+      in: query
+      required: false
+      description: A product key; one without data in the period, or none, is all products.
+      schema: { type: string }
+    ReadBots:
+      name: bots
+      in: query
+      required: false
+      description: "`1` counts bots' PRs in (on their own series where a chart has one)."
+      schema: { type: string, enum: ["0", "1", "true", "false"] }
 
   schemas:
     Error:
@@ -566,32 +629,434 @@ components:
       format: date-time
       description: RFC 3339, UTC; null when it did not happen (yet).
 
-    Dataset:
+    NullableNumber:
+      type: [number, "null"]
+      description: Null when there is nothing to compute it from.
+
+    Seconds:
+      type: number
+      description: A duration in seconds.
+
+    NullableSeconds:
+      type: [number, "null"]
+      description: A duration in seconds; null when unknown or negative.
+
+    Spread:
+      type: object
+      description: A sample's size, median and 90th percentile (Postgres percentile_cont); null percentiles on no values.
+      additionalProperties: false
+      required: [n, p50, p90]
+      properties:
+        n: { type: integer, minimum: 0 }
+        p50: { $ref: "#/components/schemas/NullableNumber" }
+        p90: { $ref: "#/components/schemas/NullableNumber" }
+
+    RunKind:
+      type: string
+      enum: [release, main, feature, other, unknown]
+      description: |
+        `release`: build_type release or hotfix; `main`: main branch, no
+        release; `feature`: feature/…, bugfix/…, PR-…; `other`: any other
+        branch; `unknown`: a main-branch run before the team's first
+        build_type, release or not.
+
+    Metrics:
       type: object
       additionalProperties: false
-      required: [meta, products, prs, deploys, lead_times, runs, reviews]
+      required: [meta, period, products, product, bots, delivery, lead_chain, review, build, costs]
       properties:
-        meta: { $ref: "#/components/schemas/DatasetMeta" }
+        meta: { $ref: "#/components/schemas/Meta" }
+        period: { $ref: "#/components/schemas/Period" }
         products:
           type: array
-          items: { $ref: "#/components/schemas/DatasetProduct" }
-        prs:
-          type: array
-          items: { $ref: "#/components/schemas/DatasetPR" }
-        deploys:
-          type: array
-          items: { $ref: "#/components/schemas/DatasetDeploy" }
-        lead_times:
-          type: array
-          items: { $ref: "#/components/schemas/DatasetLeadTime" }
-        runs:
-          type: array
-          items: { $ref: "#/components/schemas/DatasetRun" }
-        reviews:
-          type: array
-          items: { $ref: "#/components/schemas/DatasetReview" }
+          items: { $ref: "#/components/schemas/Product" }
+        product:
+          type: [string, "null"]
+          description: The product shown; null for all, also when the one asked for has no data in the period.
+        bots: { type: boolean, description: "Bots' PRs counted in, as asked." }
+        delivery: { $ref: "#/components/schemas/Delivery" }
+        lead_chain: { $ref: "#/components/schemas/LeadChain" }
+        review: { $ref: "#/components/schemas/Review" }
+        build: { $ref: "#/components/schemas/Build" }
+        costs: { $ref: "#/components/schemas/Costs" }
 
-    DatasetMeta:
+    Period:
+      type: object
+      additionalProperties: false
+      required: [from, to, weeks]
+      properties:
+        from: { $ref: "#/components/schemas/Instant" }
+        to: { $ref: "#/components/schemas/Instant" }
+        weeks:
+          type: array
+          description: The calendar weeks, oldest first; every weekly series has one value per week.
+          items:
+            type: object
+            additionalProperties: false
+            required: [start, end, kw]
+            properties:
+              start: { $ref: "#/components/schemas/Instant" }
+              end: { $ref: "#/components/schemas/Instant" }
+              kw: { type: integer, minimum: 1, maximum: 53, description: ISO 8601 week number. }
+
+    Delivery:
+      type: object
+      additionalProperties: false
+      required: [production_stage, pre_environment, frequency, lead_time, lead_time_pre]
+      properties:
+        production_stage: { type: string }
+        pre_environment:
+          type: [string, "null"]
+          description: The stage before production the lead-time breakdown names, else the product's most deployed one.
+        frequency: { $ref: "#/components/schemas/DeployFrequency" }
+        lead_time: { $ref: "#/components/schemas/LeadTimes" }
+        lead_time_pre:
+          oneOf:
+            - { $ref: "#/components/schemas/LeadTimes" }
+            - { type: "null" }
+
+    DeployFrequency:
+      type: object
+      description: Successful production syncs in the period, counted once per GitOps revision.
+      additionalProperties: false
+      required: [releases, syncs, first_seen, resyncs, per_week, since, weeks, succeeded, failed, finished,
+                 success_rate, argo_reporting]
+      properties:
+        releases: { type: integer, description: Revisions that brought new images. }
+        syncs: { type: integer, description: All revisions. }
+        first_seen: { type: integer, description: "Revisions that were some App's first deploy, no release." }
+        resyncs: { type: integer, description: Revisions without new images. }
+        per_week:
+          type: number
+          description: Releases per week over the period, or since `since`.
+        since:
+          $ref: "#/components/schemas/NullableInstant"
+          description: When Argo CD's data starts inside the period; null when it covers it.
+        weeks:
+          type: array
+          description: Each revision in the week of its first deploy.
+          items:
+            type: object
+            additionalProperties: false
+            required: [release, sync, first_seen]
+            properties:
+              release: { type: integer }
+              sync: { type: integer }
+              first_seen: { type: integer }
+        succeeded: { type: integer, description: "Successful syncs, not revisions." }
+        failed: { type: integer }
+        finished: { type: integer }
+        success_rate: { $ref: "#/components/schemas/NullableNumber" }
+        argo_reporting:
+          type: boolean
+          description: Argo CD reported for the team before the period's end.
+
+    LeadTimes:
+      type: object
+      description: Per commit to its first deploy on the environment; merges and service accounts out, bots apart.
+      additionalProperties: false
+      required: [environment, human, bot, low_sample]
+      properties:
+        environment: { type: string }
+        human: { $ref: "#/components/schemas/Spread" }
+        bot: { $ref: "#/components/schemas/Spread" }
+        low_sample: { type: boolean, description: "Fewer than 10 human commits, but some." }
+
+    LeadChain:
+      type: object
+      description: The lead-time breakdown per human PR merged in the period.
+      additionalProperties: false
+      required: [stages, pre_environment, sum_p50, before_prod]
+      properties:
+        stages:
+          type: array
+          description: In order; `to_pre` only when there is a stage before production.
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, n, p50, p90, low_sample, share, hot]
+            properties:
+              key: { type: string, enum: [coding, review, merge, to_pre, to_prod] }
+              n: { type: integer }
+              p50: { $ref: "#/components/schemas/NullableNumber" }
+              p90: { $ref: "#/components/schemas/NullableNumber" }
+              low_sample: { type: boolean, description: Fewer than 10 PRs. }
+              share:
+                $ref: "#/components/schemas/NullableNumber"
+                description: The stage's part of the summed medians, 0..1; equal parts when all medians are 0.
+              hot: { type: boolean, description: The stage with the largest median. }
+        pre_environment: { type: [string, "null"] }
+        sum_p50:
+          $ref: "#/components/schemas/NullableNumber"
+          description: Sum of the stage medians; null when no stage has data.
+        before_prod:
+          type: number
+          description: Sum of the medians before the last stage.
+
+    Review:
+      type: object
+      additionalProperties: false
+      required: [cycle, review, approved, approved_on_first_touch, first_touch_rate, merged, untracked,
+                 untracked_rate, cycle_histogram, change_mix]
+      properties:
+        cycle:
+          $ref: "#/components/schemas/Spread"
+          description: Opened to merged, human PRs merged in the period, GitOps repos out.
+        review:
+          $ref: "#/components/schemas/Spread"
+          description: Ready to first human approval, the breakdown's review stage.
+        approved: { type: integer }
+        approved_on_first_touch: { type: integer }
+        first_touch_rate: { $ref: "#/components/schemas/NullableNumber" }
+        merged: { type: integer, description: "Merged PRs, bots per the filter." }
+        untracked: { type: integer, description: "Of those, without a Jira key." }
+        untracked_rate: { $ref: "#/components/schemas/NullableNumber" }
+        cycle_histogram:
+          type: object
+          description: PRs per cycle-time bucket; one count more than bounds, the last bucket open.
+          additionalProperties: false
+          required: [upper_bounds_s, human, bot]
+          properties:
+            upper_bounds_s:
+              type: array
+              description: Each bucket's upper bound in seconds, exclusive, ascending.
+              items: { type: number }
+            human: { type: array, items: { type: integer } }
+            bot: { type: array, items: { type: integer } }
+        change_mix:
+          type: array
+          description: Merged PRs per week by branch prefix.
+          items:
+            type: object
+            additionalProperties: false
+            required: [feature, bugfix, hotfix, other]
+            properties:
+              feature: { type: integer }
+              bugfix: { type: integer }
+              hotfix: { type: integer }
+              other: { type: integer }
+
+    Build:
+      type: object
+      additionalProperties: false
+      required: [data_from, starts_inside, gap_weeks, kinds, hotspots]
+      properties:
+        data_from:
+          $ref: "#/components/schemas/NullableInstant"
+          description: When riptide first received a run of the team.
+        starts_inside: { type: boolean, description: "`data_from` falls after the period's start." }
+        gap_weeks: { type: integer, description: Leading weeks that ended before `data_from`. }
+        kinds:
+          type: array
+          description: Per kind of run with runs, never averaged across kinds.
+          items: { $ref: "#/components/schemas/BuildStats" }
+        hotspots: { $ref: "#/components/schemas/Hotspots" }
+
+    BuildStats:
+      type: object
+      additionalProperties: false
+      required: [kind, runs, succeeded, failed, success_rate, duration, ci_seconds, wasted_seconds, weekly]
+      properties:
+        kind: { $ref: "#/components/schemas/RunKind" }
+        runs: { type: integer }
+        succeeded: { type: integer }
+        failed: { type: integer, description: "Runs without SUCCESS: FAILURE, UNSTABLE, ABORTED, anything else." }
+        success_rate: { $ref: "#/components/schemas/NullableNumber" }
+        duration: { $ref: "#/components/schemas/Spread" }
+        ci_seconds: { $ref: "#/components/schemas/Seconds" }
+        wasted_seconds:
+          $ref: "#/components/schemas/Seconds"
+          description: CI time of the runs without SUCCESS.
+        weekly:
+          type: array
+          description: Success rate per week; null for a week without runs.
+          items: { $ref: "#/components/schemas/NullableNumber" }
+
+    Hotspots:
+      type: object
+      description: |
+        Repos against the team's baseline of the same kind of run, and runs
+        far past it. Failures are FAILURE and UNSTABLE; ABORTED counts as
+        neither failure nor run.
+      additionalProperties: false
+      required: [min_runs, slow_factor, flaky_factor, outlier_factor, kinds, outliers]
+      properties:
+        min_runs: { type: integer, description: Runs a repo needs in a kind to be flagged. }
+        slow_factor: { type: number, description: A repo median this many times the team's is slow. }
+        flaky_factor:
+          type: number
+          description: A failure rate this many times the team's is flaky, at most halfway from the team's rate to 100 %.
+        outlier_factor: { type: number, description: A run this many times its kind's team p90 is an outlier. }
+        kinds:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [kind, duration, failure_rate, durations, failing, outlier_threshold_s]
+            properties:
+              kind: { $ref: "#/components/schemas/RunKind" }
+              duration:
+                $ref: "#/components/schemas/Spread"
+                description: The team's, all repos of the kind.
+              failure_rate: { $ref: "#/components/schemas/NullableNumber" }
+              durations:
+                type: array
+                description: Repos by median duration, longest first, the top 8.
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [repo, runs, duration, factor, slow]
+                  properties:
+                    repo: { type: string }
+                    runs: { type: integer }
+                    duration: { $ref: "#/components/schemas/Spread" }
+                    factor:
+                      $ref: "#/components/schemas/NullableNumber"
+                      description: The repo's median over the team's.
+                    slow: { type: boolean }
+              failing:
+                type: array
+                description: Repos with failed runs by wasted CI time, the top 8.
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [repo, runs, failures, failure_rate, wasted_seconds, flaky]
+                  properties:
+                    repo: { type: string }
+                    runs: { type: integer, description: "Runs counted for the rate, ABORTED out." }
+                    failures: { type: integer }
+                    failure_rate: { $ref: "#/components/schemas/NullableNumber" }
+                    wasted_seconds: { $ref: "#/components/schemas/Seconds" }
+                    flaky: { type: boolean }
+              outlier_threshold_s:
+                $ref: "#/components/schemas/NullableSeconds"
+                description: Null below `min_runs` runs with a duration.
+        outliers:
+          type: array
+          description: Runs past their kind's threshold across kinds, longest first, the top 10.
+          items:
+            type: object
+            additionalProperties: false
+            required: [kind, pipeline_name, repo, run_id, started_at, duration_s, status, factor]
+            properties:
+              kind: { $ref: "#/components/schemas/RunKind" }
+              pipeline_name: { type: string }
+              repo: { type: string }
+              run_id: { type: string }
+              started_at: { $ref: "#/components/schemas/NullableInstant" }
+              duration_s: { $ref: "#/components/schemas/Seconds" }
+              status: { type: [string, "null"] }
+              factor: { type: number, description: The run's duration over its kind's team p90. }
+
+    Costs:
+      type: object
+      description: noergler spend, final rollups closed in the period, in USD.
+      additionalProperties: false
+      required: [total, merged, merged_reviews, per_kloc, wasted, rows, reviewed_repos]
+      properties:
+        total: { type: number }
+        merged: { type: number }
+        merged_reviews: { type: integer }
+        per_kloc:
+          $ref: "#/components/schemas/NullableNumber"
+          description: Per 1000 changed lines of merged PRs.
+        wasted: { type: number, description: Spent on PRs declined or deleted. }
+        rows:
+          type: array
+          description: By product (all products) or by repo (one product), largest first.
+          items:
+            type: object
+            additionalProperties: false
+            required: [label, value]
+            properties:
+              label: { type: string }
+              value: { type: number }
+        reviewed_repos: { type: integer }
+
+    Facts:
+      type: object
+      additionalProperties: false
+      required: [production_stage, limit, prs, deploys, runs]
+      properties:
+        production_stage: { type: string }
+        limit: { type: integer, description: Rows per table at most. }
+        prs:
+          type: object
+          additionalProperties: false
+          required: [count, rows]
+          properties:
+            count: { type: integer }
+            rows: { type: array, items: { $ref: "#/components/schemas/PRFact" } }
+        deploys:
+          type: object
+          additionalProperties: false
+          required: [count, rows]
+          properties:
+            count: { type: integer }
+            rows: { type: array, items: { $ref: "#/components/schemas/DeployFact" } }
+        runs:
+          type: object
+          additionalProperties: false
+          required: [count, rows]
+          properties:
+            count: { type: integer }
+            rows: { type: array, items: { $ref: "#/components/schemas/RunFact" } }
+
+    PRFact:
+      type: object
+      description: A PR opened or merged in the period, newest merge or opening first.
+      additionalProperties: false
+      required: [repo, pr_id, title, jira_prefix, gitops, bot, change_type, state, review_s, cycle_s, merged_at,
+                 prod_at, to_prod_s]
+      properties:
+        repo: { type: string }
+        pr_id: { type: integer }
+        title: { type: [string, "null"] }
+        jira_prefix: { type: string, description: "The Jira keys the title does not show, three at most." }
+        gitops: { type: boolean, description: A GitOps repo's promotion PR. }
+        bot: { type: boolean }
+        change_type: { type: [string, "null"] }
+        state: { type: string, enum: [open, merged, declined, deleted] }
+        review_s: { $ref: "#/components/schemas/NullableSeconds" }
+        cycle_s: { $ref: "#/components/schemas/NullableSeconds" }
+        merged_at: { $ref: "#/components/schemas/NullableInstant" }
+        prod_at:
+          $ref: "#/components/schemas/NullableInstant"
+          description: The merge commit's first production deploy.
+        to_prod_s: { $ref: "#/components/schemas/NullableSeconds" }
+
+    DeployFact:
+      type: object
+      description: A finished Argo CD sync in the period, newest first.
+      additionalProperties: false
+      required: [at, app, environment, revision, new_images, class, phase]
+      properties:
+        at: { $ref: "#/components/schemas/Instant" }
+        app: { type: string }
+        environment: { type: [string, "null"] }
+        revision: { type: string }
+        new_images: { type: array, items: { type: string } }
+        class:
+          type: string
+          enum: [failed, release, first_seen, sync]
+          description: What it counts as; `failed` for any phase but Succeeded.
+        phase: { type: string, description: "Argo CD's operation phase: Succeeded, Failed, ..." }
+
+    RunFact:
+      type: object
+      description: A finished CI run in the period, newest first.
+      additionalProperties: false
+      required: [pipeline_name, run_id, kind, commit_sha, duration_s, image_refs, status]
+      properties:
+        pipeline_name: { type: string }
+        run_id: { type: string }
+        kind: { $ref: "#/components/schemas/RunKind" }
+        commit_sha: { type: [string, "null"] }
+        duration_s: { type: [integer, "null"] }
+        image_refs: { type: array, items: { type: string } }
+        status: { type: [string, "null"] }
+
+    Meta:
       type: object
       additionalProperties: false
       required: [team, from, to, generated_at, production_stage, data_start, data_end, build_data_from,
@@ -632,7 +1097,7 @@ components:
         argocd: { $ref: "#/components/schemas/NullableInstant" }
         noergler: { $ref: "#/components/schemas/NullableInstant" }
 
-    DatasetProduct:
+    Product:
       type: object
       additionalProperties: false
       required: [key, repos, apps]
@@ -640,159 +1105,3 @@ components:
         key: { type: string, description: "The Bitbucket project key, lowercased." }
         repos: { type: array, items: { type: string } }
         apps: { type: array, items: { type: string } }
-
-    DatasetPR:
-      type: object
-      description: |
-        A PR opened or merged in the window, keyed by (repo, pr_id). Its
-        timestamps come from its whole history. Bots and GitOps PRs are
-        flagged, not dropped. No author names.
-      additionalProperties: false
-      required: [repo, project, pr_id, title, gitops, bot, change_type, jira_keys, state, opened_at, ready_at,
-                 first_review_at, approved_at, approved_on_first_touch, merged_at, first_commit_at,
-                 merge_commit, environments]
-      properties:
-        repo: { type: string }
-        project: { type: string }
-        pr_id: { type: integer }
-        title: { type: [string, "null"], description: The title as last seen. }
-        gitops:
-          type: boolean
-          description: The repo is a GitOps repo (Argo CD deploys its commits); its PRs are stage promotions, leave them out of PR metrics.
-        bot:
-          type: boolean
-          description: Opened by an automation account (detected at ingest, or declared by a sender).
-        change_type: { type: [string, "null"] }
-        jira_keys: { type: array, items: { type: string } }
-        state: { type: string, enum: [open, merged, declined, deleted] }
-        opened_at:
-          $ref: "#/components/schemas/NullableInstant"
-          description: Null for a PR opened before ingestion started.
-        ready_at:
-          $ref: "#/components/schemas/NullableInstant"
-          description: Pickup clock start, the draft-to-ready flip or the opening of a non-draft PR; null for a draft never made ready.
-        first_review_at:
-          $ref: "#/components/schemas/NullableInstant"
-          description: First reviewer touch after ready_at, bots and the author excluded.
-        approved_at:
-          $ref: "#/components/schemas/NullableInstant"
-          description: First approval by a reviewer counted as for first_review_at.
-        approved_on_first_touch:
-          type: boolean
-          description: The approval was that reviewer set's first touch (approved_at = first_review_at).
-        merged_at: { $ref: "#/components/schemas/NullableInstant" }
-        first_commit_at:
-          $ref: "#/components/schemas/NullableInstant"
-          description: Oldest commit pushed to the PR's branch; a rebase resets it.
-        merge_commit: { type: [string, "null"], description: Lowercased. }
-        environments:
-          type: array
-          description: |
-            The merge commit's first deploy per environment (e.g. intg, prod),
-            earliest first, including deploys after the window's end. Empty
-            until it deploys.
-          items:
-            type: object
-            additionalProperties: false
-            required: [environment, first_deployed_at]
-            properties:
-              environment: { type: string }
-              first_deployed_at: { $ref: "#/components/schemas/Instant" }
-
-    DatasetDeploy:
-      type: object
-      description: A finished Argo CD sync (Succeeded or Failed) in the window.
-      additionalProperties: false
-      required: [app, project, environment, revision, at, phase, duration_s, images, kind, new_images]
-      properties:
-        app: { type: string }
-        project:
-          type: [string, "null"]
-          description: The project of the GitOps repo the revision is a commit of; null when Bitbucket never saw it.
-        environment: { type: [string, "null"] }
-        revision: { type: string }
-        at: { $ref: "#/components/schemas/Instant" }
-        phase: { type: string }
-        duration_s: { type: [integer, "null"] }
-        images: { type: array, items: { type: string } }
-        kind:
-          type: [string, "null"]
-          enum: [release, sync, first_seen, null]
-          description: |
-            `release`: new images against the App's previous successful
-            deploy (over all history); `sync`: the same images again;
-            `first_seen`: the App's first deploy in the data; null on a failed
-            sync. Count releases as distinct revisions.
-        new_images:
-          type: array
-          items: { type: string }
-          description: The images a release brought, those the App's previous successful deploy did not run; empty for anything but a release.
-
-    DatasetLeadTime:
-      type: object
-      description: A commit's first deploy to an environment, first deployed in the window.
-      additionalProperties: false
-      required: [repo, project, environment, commit_sha, authored_at, first_deployed_at, lead_time_s, is_merge,
-                 service_account, bot]
-      properties:
-        repo: { type: string }
-        project: { type: string }
-        environment: { type: string }
-        commit_sha: { type: string }
-        authored_at: { $ref: "#/components/schemas/Instant" }
-        first_deployed_at: { $ref: "#/components/schemas/Instant" }
-        lead_time_s: { type: integer }
-        is_merge: { type: boolean }
-        service_account:
-          type: boolean
-          description: Release tooling or a declared service account; leave it out.
-        bot:
-          type: boolean
-          description: An automation account; report it on its own line.
-
-    DatasetRun:
-      type: object
-      description: A finished CI run (phase COMPLETED) in the window.
-      additionalProperties: false
-      required: [source, pipeline_name, branch, branch_kind, build_type, run_id, commit_sha, status, started_at,
-                 finished_at, duration_s, repo, project, image_refs]
-      properties:
-        source: { type: string }
-        pipeline_name: { type: string }
-        branch:
-          type: string
-          description: pipeline_name after the first `/`, `%2F` decoded; empty when there is none.
-        branch_kind: { type: string, enum: [main, release, feature, pr, other] }
-        build_type: { type: [string, "null"] }
-        run_id: { type: string }
-        commit_sha: { type: [string, "null"] }
-        status: { type: [string, "null"] }
-        started_at: { $ref: "#/components/schemas/NullableInstant" }
-        finished_at: { $ref: "#/components/schemas/NullableInstant" }
-        duration_s: { type: [integer, "null"] }
-        repo:
-          type: [string, "null"]
-          description: The repo Bitbucket saw the run's commit in; null when it never did.
-        project: { type: [string, "null"] }
-        image_refs: { type: array, items: { type: string } }
-
-    DatasetReview:
-      type: object
-      description: A PR's final noergler rollup, closed in the window.
-      additionalProperties: false
-      required: [pr_key, repo, project, outcome, cost_usd, lines_added, lines_removed, files_changed,
-                 findings_count, total_runs, closed_at]
-      properties:
-        pr_key: { type: string }
-        repo: { type: [string, "null"] }
-        project: { type: [string, "null"] }
-        outcome: { type: [string, "null"] }
-        cost_usd:
-          type: [string, "null"]
-          description: The stored decimal as text, never a float.
-        lines_added: { type: [integer, "null"] }
-        lines_removed: { type: [integer, "null"] }
-        files_changed: { type: [integer, "null"] }
-        findings_count: { type: [integer, "null"] }
-        total_runs: { type: [integer, "null"] }
-        closed_at: { $ref: "#/components/schemas/Instant" }
