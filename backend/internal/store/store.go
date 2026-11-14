@@ -20,6 +20,7 @@ import (
 	"github.com/trick77/ship/kit/httpx"
 	"github.com/trick77/ship/kit/migrate"
 
+	"github.com/trick77/riptide/internal/dataset"
 	"github.com/trick77/riptide/internal/parse"
 )
 
@@ -204,11 +205,11 @@ func (s *Store) InsertPipeline(ctx context.Context, d *parse.PipelineDraft, team
 	}
 	return s.insert(ctx, `INSERT INTO pipeline_events (
 		delivery_id, source, pipeline_name, run_id, phase, status, commit_sha, image_refs,
-		actor_handle, actor_account_kind, started_at, finished_at, occurred_at, team, payload
-	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb)
+		actor_handle, actor_account_kind, build_type, started_at, finished_at, occurred_at, team, payload
+	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb)
 	ON CONFLICT (delivery_id) DO NOTHING RETURNING delivery_id`,
 		d.DeliveryID, d.Source, d.PipelineName, d.RunID, d.Phase, d.Status, d.CommitSHA, images,
-		d.ActorHandle, d.ActorAccountKind, d.StartedAt, d.FinishedAt, d.OccurredAt, team, string(d.Payload))
+		d.ActorHandle, d.ActorAccountKind, d.BuildType, d.StartedAt, d.FinishedAt, d.OccurredAt, team, string(d.Payload))
 }
 
 // InsertArgoCD stores an Argo CD sync notification.
@@ -243,6 +244,11 @@ func nullable(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// Dataset reads one team's facts for the read API.
+func (s *Store) Dataset(ctx context.Context, p dataset.Params) (*dataset.Dataset, error) {
+	return dataset.Load(ctx, s.pool, p)
 }
 
 // RecentActivity counts events received since `since`, per source and per

@@ -149,6 +149,28 @@ func TestPipelineFields(t *testing.T) {
 			t.Errorf("times = %v %v", d.StartedAt, d.FinishedAt)
 		}
 	})
+	t.Run("build type trimmed and lowercased", func(t *testing.T) {
+		b := base()
+		b["build_type"] = "  Release "
+		d, err := Pipeline(encode(t, b))
+		if err != nil || str(d.BuildType) != "release" {
+			t.Errorf("build type = %q, %v", str(d.BuildType), err)
+		}
+	})
+	t.Run("blank or absent build type is nil", func(t *testing.T) {
+		for _, v := range []any{"", "   ", nil} {
+			b := base()
+			b["build_type"] = v
+			d, err := Pipeline(encode(t, b))
+			if err != nil || d.BuildType != nil {
+				t.Errorf("%q: build type = %v, %v", v, d.BuildType, err)
+			}
+		}
+		d, err := Pipeline(encode(t, base()))
+		if err != nil || d.BuildType != nil {
+			t.Errorf("absent: build type = %v, %v", d.BuildType, err)
+		}
+	})
 	t.Run("extra fields allowed", func(t *testing.T) {
 		b := base()
 		b["build_url"] = "https://jenkins/job/1"
@@ -168,6 +190,7 @@ func TestPipelineFields(t *testing.T) {
 		{"bad kind", "body.actor_account_kind", "literal_error", func(b map[string]any) { b["actor_account_kind"] = "robot" }},
 		{"image refs not a list", "body.image_refs", "list_type", func(b map[string]any) { b["image_refs"] = "reg/acme/ui:1.0" }},
 		{"image refs entry not a string", "body.image_refs.1", "string_type", func(b map[string]any) { b["image_refs"] = []any{"reg/acme/ui:1.0", 3} }},
+		{"numeric build type", "body.build_type", "string_type", func(b map[string]any) { b["build_type"] = 3 }},
 		{"missing started_at", "body.started_at", "missing", func(b map[string]any) { delete(b, "started_at") }},
 		{"bad started_at", "body.started_at", "datetime_from_date_parsing", func(b map[string]any) { b["started_at"] = "yesterday" }},
 		{"bool started_at", "body.started_at", "datetime_type", func(b map[string]any) { b["started_at"] = true }},

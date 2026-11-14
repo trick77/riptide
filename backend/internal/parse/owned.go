@@ -26,10 +26,13 @@ type PipelineDraft struct {
 	// ActorAccountKind is nil without a handle: the kind describes the
 	// handle, and there is nothing for it to describe.
 	ActorAccountKind *string
-	StartedAt        time.Time
-	FinishedAt       *time.Time
-	OccurredAt       time.Time
-	Payload          []byte
+	// BuildType is what kind of build the pipeline says the run was
+	// (release, hotfix, build, ...), trimmed and lowercased; nil when absent.
+	BuildType  *string
+	StartedAt  time.Time
+	FinishedAt *time.Time
+	OccurredAt time.Time
+	Payload    []byte
 }
 
 // Pipeline validates a pipeline body. Unknown fields are allowed and
@@ -48,6 +51,7 @@ func Pipeline(raw []byte) (*PipelineDraft, error) {
 		CommitSHA:    strings.ToLower(o.requiredString("commit_sha", 7)),
 		ImageRefs:    imageRefs(o),
 		ActorHandle:  o.optionalTrimmed("actor_handle"),
+		BuildType:    lowered(o.optionalTrimmed("build_type")),
 		StartedAt:    o.requiredTime("started_at"),
 		FinishedAt:   o.optionalTime("finished_at", false),
 		Payload:      raw,
@@ -68,6 +72,14 @@ func Pipeline(raw []byte) (*PipelineDraft, error) {
 		d.OccurredAt = *d.FinishedAt
 	}
 	return d, nil
+}
+
+// lowered lowercases an optional value.
+func lowered(s *string) *string {
+	if s == nil {
+		return nil
+	}
+	return ptr(strings.ToLower(*s))
 }
 
 // imageRefs merges `image_ref` (one image) and `image_refs` (several) into
