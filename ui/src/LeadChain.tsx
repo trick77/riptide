@@ -1,8 +1,8 @@
-// Where the time to production goes: the five stages of the lead-time
-// breakdown as a proportional bar, then per stage its PR count, median and
-// p90 on a log scale (minutes to a month do not fit a linear one).
+// Where the time to production goes: the stages of the lead-time breakdown
+// as a proportional bar, then per stage its PR count, median and p90 on a
+// log scale (minutes to a month do not fit a linear one).
 
-import type { Chain, Stage } from "./metrics";
+import type { LeadChain as Chain, StageKey } from "./api";
 import { dur, pct } from "./format";
 import { Card, CardHead } from "./ui";
 
@@ -26,14 +26,14 @@ const TICKS: [number, string][] = [
 export function stageNames(
   c: Chain,
   prod: string,
-): Record<Stage["key"], [string, string]> {
-  const pre = c.preEnvironment;
+): Record<StageKey, [string, string]> {
+  const pre = c.pre_environment;
   return {
     coding: ["Coding", "erster Commit → PR bereit"],
     review: ["Review", "PR bereit → Approval"],
     merge: ["Merge", "Approval → gemergt"],
-    toPre: [`Bis ${pre}`, `gemergt → auf ${pre}`],
-    toProd: [
+    to_pre: [`Bis ${pre}`, `gemergt → auf ${pre}`],
+    to_prod: [
       `Bis ${prod}`,
       pre
         ? `auf ${pre} (ohne: gemergt) → auf ${prod}`
@@ -42,34 +42,10 @@ export function stageNames(
   };
 }
 
-export function LeadChain({
-  chain: full,
-  prod,
-}: {
-  chain: Chain;
-  prod: string;
-}) {
-  // Without a stage before production there is no "to pre" stage to show.
-  const chain = {
-    ...full,
-    stages: full.stages.filter(
-      (s) => s.key !== "toPre" || full.preEnvironment != null,
-    ),
-  };
+export function LeadChain({ chain, prod }: { chain: Chain; prod: string }) {
   const names = stageNames(chain, prod);
-  const withData = chain.stages.filter((s) => s.spread.p50 != null);
-  const sum = withData.reduce((a, s) => a + s.spread.p50!, 0);
-  // All medians zero (one PR through in a second): equal shares, not NaN.
-  const total = sum > 0 ? sum : withData.length;
-  const share = (s: Stage) => (sum > 0 ? s.spread.p50! / sum : 1 / total);
-  const hot = withData.reduce<Stage | null>(
-    (a, s) => (!a || s.spread.p50! > a.spread.p50! ? s : a),
-    null,
-  );
+  const withData = chain.stages.filter((s) => s.p50 != null);
   const last = chain.stages[chain.stages.length - 1];
-  const beforeProd = withData
-    .filter((s) => s !== last)
-    .reduce((a, s) => a + s.spread.p50!, 0);
   return (
     <Card className="mt-3">
       <CardHead
@@ -78,9 +54,7 @@ export function LeadChain({
         right={
           <div className="text-[12.5px] text-muted">
             Summe der Mediane{" "}
-            <span className="text-ink tabular-nums">
-              {dur(withData.length ? sum : null)}
-            </span>
+            <span className="text-ink tabular-nums">{dur(chain.sum_p50)}</span>
           </div>
         }
       />
@@ -88,22 +62,18 @@ export function LeadChain({
         <>
           <div
             role="img"
-            aria-label={`Lead Time nach Etappe: ${chain.stages.map((s) => `${names[s.key][0]} ${dur(s.spread.p50)}`).join(", ")}`}
+            aria-label={`Lead Time nach Etappe: ${chain.stages.map((s) => `${names[s.key][0]} ${dur(s.p50)}`).join(", ")}`}
             className="mt-4 flex h-7 gap-0.5"
           >
             {withData.map((s, i) => (
               <div
                 key={s.key}
-                title={`${names[s.key][0]}: ${dur(s.spread.p50)}`}
+                title={`${names[s.key][0]}: ${dur(s.p50)}`}
                 className={`h-7 min-w-[3px] first:rounded-l-md last:rounded-r-md ${
-                  s === hot
-                    ? "bg-accent-strong"
-                    : i % 2
-                      ? "bg-muted"
-                      : "bg-ink-3"
+                  s.hot ? "bg-accent-strong" : i % 2 ? "bg-muted" : "bg-ink-3"
                 }`}
                 style={{
-                  flex: `${Math.max(share(s), 0.004)} 1 0`,
+                  flex: `${Math.max(s.share ?? 0, 0.004)} 1 0`,
                 }}
               />
             ))}
@@ -111,15 +81,13 @@ export function LeadChain({
           <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
             <span>
               Bis vor {prod}:{" "}
-              <span className="text-ink">{dur(beforeProd)}</span>
+              <span className="text-ink">{dur(chain.before_prod)}</span>
             </span>
-            {last.spread.p50 != null && (
+            {last.p50 != null && (
               <span>
                 Warten auf {prod}:{" "}
-                <span className="text-accent-strong">
-                  {dur(last.spread.p50)}
-                </span>{" "}
-                ({pct(share(last))} der Zeit)
+                <span className="text-accent-strong">{dur(last.p50)}</span> (
+                {pct(last.share)} der Zeit)
               </span>
             )}
           </div>
@@ -154,9 +122,8 @@ export function LeadChain({
           ))}
         </div>
         {chain.stages.map((s) => {
-          const { n, p50, p90 } = s.spread;
-          const isHot = s === hot;
-          const color = isHot
+          const { n, p50, p90 } = s;
+          const color = s.hot
             ? "var(--color-accent-strong)"
             : "var(--color-s1)";
           const a = p50 == null ? 0 : L(p50);
@@ -170,9 +137,11 @@ export function LeadChain({
                 </div>
               </div>
               <div
-                className={`border-b border-border-soft py-2 text-right text-[13.5px] tabular-nums ${n < 10 ? "text-ochre" : "text-ink-dim"}`}
+                className={`border-b border-border-soft py-2 text-right text-[13.5px] tabular-nums ${s.low_sample ? "text-ochre" : "text-ink-dim"}`}
                 title={
-                  n < 10 ? "Weniger als 10 PRs: wenig belastbar" : undefined
+                  s.low_sample
+                    ? "Weniger als 10 PRs: wenig belastbar"
+                    : undefined
                 }
               >
                 {n}

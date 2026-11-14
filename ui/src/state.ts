@@ -1,7 +1,9 @@
 // The page's state lives in the query string, so a link or a printed
 // report reproduces the view: ?team=…&product=…&w=12&bots=1&q=…
 
-import { WINDOWS, type WindowWeeks } from "./period";
+// The period lengths the backend offers, in weeks.
+export const WINDOWS = [4, 12, 26] as const;
+export type WindowWeeks = (typeof WINDOWS)[number];
 
 export type Tab = "prs" | "deploys" | "runs";
 

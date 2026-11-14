@@ -20,6 +20,7 @@ cd backend && go test -race ./...    # DB tests skip without SHIP_TEST_DSN (comp
 - **Team keys: separate file**, mounted in prod, never committed. The bearer **is** the team identity: every webhook tagged `team = caller_team`.
 - **No `service` column, no `service_id` on the wire.** Aggregate by repo / pipeline / app, org-wide by `team`. Dropped; never re-propose.
 - **Metrics computed on read.** No aggregation tables, no rollup jobs in v1.
+- **No computation in the browser.** `internal/metrics` computes every number, bucket, percentile, threshold, classification, sort, search and top-N; the UI renders, formats (de-CH) and scales charts only. One source of truth, tested in Go against real Postgres. Weeks are the viewer's calendar: the UI sends `tz`.
 - **Deploy↔commit join = full image reference**, per `docs/correlating-deploys-to-commits.md`. Image **tags are not SHAs**: measured 0 of 4 936 refs, all semver; never parse a SHA out of a tag.
 - **Read the README's "Reading the event tables" before any query.** `repo:refs_changed` is ref movement (~15 000 of 16 295 master events were release tooling), and `change_type` means something only on PR events. Never infer intent from an event-type name.
 - **Lead time per `docs/dora-lead-time.md`**: per commit, bots their own line. Never quote the newest-commit-per-release shortcut: measured 26.7 h against a real 193.6 h.
@@ -62,4 +63,3 @@ cd backend && go test -race ./...    # DB tests skip without SHIP_TEST_DSN (comp
 Push back unless the user is explicit:
 - Change failure rate / recovery time: no reliable incident source (schema has room for a rollback proxy)
 - Backfill workers (ingestion is forward-only)
-- Aggregates or metric endpoints: `/api` serves per-team facts, UI listener only (loopback); the UI computes

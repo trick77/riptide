@@ -1,22 +1,28 @@
-// The single facts behind every number, searchable: PRs, deploys, runs.
+// The single facts behind every number, searched by the backend: PRs,
+// deploys, runs.
 
-import { type ReactNode, useMemo } from "react";
-import type { Dataset, Deploy, PR, Run } from "./api";
+import type { ReactNode } from "react";
+import type { DeployFact, Facts as FactsData, PRFact } from "./api";
 import { KIND_LABEL } from "./Build";
 import { dateTime, dur, shortImage, shortSha } from "./format";
-import { inProduct, runKind, type Filter } from "./metrics";
 import type { Tab } from "./state";
-import { between } from "./stats";
 import { Mono, Pill, SectionHead, type Tone } from "./ui";
 
-// Rows past this are left out of the table, not of any number.
-const LIMIT = 300;
-
-const PR_STATE: Record<PR["state"], [string, Tone]> = {
+// The backend searches these words too (metrics.prStateTerm, deployClass):
+// change one here, change it there.
+const PR_STATE: Record<PRFact["state"], [string, Tone]> = {
   merged: ["Gemergt", "ok"],
   open: ["Offen", "none"],
   declined: ["Abgelehnt", "none"],
   deleted: ["Gelöscht", "none"],
+};
+
+// A failed sync shows its phase.
+const DEPLOY_CLASS: Record<DeployFact["class"], [string | null, Tone]> = {
+  failed: [null, "fail"],
+  release: ["Release", "ok"],
+  first_seen: ["Erstdeploy", "warn"],
+  sync: ["Sync ohne neue Images", "none"],
 };
 
 const RUN_TONE: Record<string, Tone> = {
@@ -25,42 +31,6 @@ const RUN_TONE: Record<string, Tone> = {
   UNSTABLE: "warn",
   ABORTED: "none",
 };
-
-function deployKind(d: Deploy): [string, Tone] {
-  if (d.phase !== "Succeeded") return [d.phase, "fail"];
-  if (d.kind === "release") return ["Release", "ok"];
-  if (d.kind === "first_seen") return ["Erstdeploy", "warn"];
-  return ["Sync ohne neue Images", "none"];
-}
-
-// The Jira keys a PR's title does not already show, three at most: a
-// promotion PR collects every key it ships.
-export function jiraPrefix(p: PR): string {
-  const title = p.title ?? "";
-  const keys = p.jira_keys.filter((k) => !title.includes(k));
-  if (keys.length <= 3) return keys.join(" ");
-  return `${keys.slice(0, 3).join(" ")} +${keys.length - 3}`;
-}
-
-// Newest first. The API's instants are all UTC with a Z, so string order
-// is time order.
-function newest<T>(rows: T[], at: (r: T) => string | null): T[] {
-  return [...rows].sort((a, b) => {
-    const x = at(a) ?? "";
-    const y = at(b) ?? "";
-    return x < y ? 1 : x > y ? -1 : 0;
-  });
-}
-
-// A wait the metrics would count: a negative one (approved before the
-// ready flip, say) is left out there, so it shows as unknown here.
-function wait(from: string | null, to: string | null): string {
-  const s = between(from, to);
-  return dur(s != null && s >= 0 ? s : null);
-}
-
-const matches = (q: string, ...fields: (string | null | undefined)[]) =>
-  !q || fields.join(" ").toLowerCase().includes(q);
 
 type Col = { label: string; right?: boolean };
 
@@ -101,90 +71,22 @@ function Table({ cols, rows }: { cols: Col[]; rows: ReactNode[][] }) {
   );
 }
 
-type Sorted = { prs: PR[]; deploys: Deploy[]; runs: Run[] };
-
-// Sorted once per dataset; a search keystroke only filters.
-function sortAll(ds: Dataset): Sorted {
-  return {
-    prs: newest(ds.prs, (p) => p.merged_at ?? p.opened_at),
-    deploys: newest(ds.deploys, (d) => d.at),
-    runs: newest(ds.runs, (r) => r.finished_at ?? r.started_at),
-  };
-}
-
-function prRows(prs: PR[], f: Filter, q: string): PR[] {
-  return prs.filter(
-    (p) =>
-      inProduct(p.project, f) &&
-      (f.bots || !p.bot) &&
-      matches(
-        q,
-        p.repo,
-        p.title,
-        p.change_type,
-        `#${p.pr_id}`,
-        ...p.jira_keys,
-        PR_STATE[p.state][0],
-      ),
-  );
-}
-
-function deployRows(deploys: Deploy[], f: Filter, q: string): Deploy[] {
-  return deploys.filter(
-    (d) =>
-      inProduct(d.project, f) &&
-      // every image it ran, not only the new ones: a search for an image
-      // finds its re-syncs and failed syncs too
-      matches(
-        q,
-        d.app,
-        d.environment,
-        d.revision,
-        ...d.images,
-        deployKind(d)[0],
-      ),
-  );
-}
-
-function runRows(runs: Run[], f: Filter, q: string): Run[] {
-  return runs.filter(
-    (r) =>
-      inProduct(r.project, f) &&
-      matches(
-        q,
-        r.pipeline_name,
-        r.repo,
-        r.commit_sha,
-        r.status,
-        r.build_type,
-        ...r.image_refs,
-      ),
-  );
-}
-
 export function Facts({
-  ds,
-  filter,
+  facts,
   q,
   tab,
   onTab,
 }: {
-  ds: Dataset;
-  filter: Filter;
+  facts: FactsData;
   q: string;
   tab: Tab;
   onTab: (t: Tab) => void;
 }) {
-  const needle = q.trim().toLowerCase();
-  const sorted = useMemo(() => sortAll(ds), [ds]);
-  const prod = ds.meta.production_stage;
-  const prs = prRows(sorted.prs, filter, needle);
-  const deploys = deployRows(sorted.deploys, filter, needle);
-  const runs = runRows(sorted.runs, filter, needle);
+  const prod = facts.production_stage;
   const counts: Record<Tab, number> = {
-    prs: prs.length,
-    deploys: deploys.length,
-    runs: runs.length,
+    prs: facts.prs.count,
+    deploys: facts.deploys.count,
+    runs: facts.runs.count,
   };
   const tabs: [Tab, string][] = [
     ["prs", "PRs"],
@@ -202,36 +104,26 @@ export function Facts({
           { label: "Typ" },
           { label: "Review", right: true },
           { label: "Cycle", right: true },
-          { label: `bis ${ds.meta.production_stage}`, right: true },
+          { label: `bis ${prod}`, right: true },
           { label: "Status" },
         ]}
-        rows={prs.slice(0, LIMIT).map((p) => {
-          const [state, tone] = PR_STATE[p.state];
-          const prodAt =
-            p.environments.find((e) => e.environment === prod)
-              ?.first_deployed_at ?? null;
-          return [
-            <>
-              {jiraPrefix(p) && (
-                <Mono className="text-accent-strong">{jiraPrefix(p)} </Mono>
-              )}
-              {p.title ?? <span className="text-muted">#{p.pr_id}</span>}
-            </>,
-            <Mono className="whitespace-nowrap">{p.repo}</Mono>,
-            <span className="text-muted">
-              {p.gitops ? "Promotion" : (p.change_type ?? "–")}
-              {p.bot ? " · Bot" : ""}
-            </span>,
-            wait(p.ready_at, p.approved_at),
-            wait(p.opened_at, p.merged_at),
-            p.merged_at
-              ? prodAt
-                ? wait(p.merged_at, prodAt)
-                : "noch nicht"
-              : "–",
-            <Pill tone={tone}>{state}</Pill>,
-          ];
-        })}
+        rows={facts.prs.rows.map((p) => [
+          <>
+            {p.jira_prefix && (
+              <Mono className="text-accent-strong">{p.jira_prefix} </Mono>
+            )}
+            {p.title ?? <span className="text-muted">#{p.pr_id}</span>}
+          </>,
+          <Mono className="whitespace-nowrap">{p.repo}</Mono>,
+          <span className="text-muted">
+            {p.gitops ? "Promotion" : (p.change_type ?? "–")}
+            {p.bot ? " · Bot" : ""}
+          </span>,
+          dur(p.review_s),
+          dur(p.cycle_s),
+          p.merged_at ? (p.prod_at ? dur(p.to_prod_s) : "noch nicht") : "–",
+          <Pill tone={PR_STATE[p.state][1]}>{PR_STATE[p.state][0]}</Pill>,
+        ])}
       />
     );
   } else if (tab === "deploys") {
@@ -245,23 +137,22 @@ export function Facts({
           { label: "Neue Images" },
           { label: "Zählt als" },
         ]}
-        rows={deploys.slice(0, LIMIT).map((d) => {
-          const [kind, tone] = deployKind(d);
-          return [
-            <span className="whitespace-nowrap tabular-nums">
-              {dateTime(d.at)}
-            </span>,
-            <Mono className="whitespace-nowrap">{d.app}</Mono>,
-            <span className="text-muted">{d.environment ?? "–"}</span>,
-            <Mono className="text-muted">{shortSha(d.revision)}</Mono>,
-            <Mono>
-              {d.new_images.length
-                ? d.new_images.map(shortImage).join(", ")
-                : "–"}
-            </Mono>,
-            <Pill tone={tone}>{kind}</Pill>,
-          ];
-        })}
+        rows={facts.deploys.rows.map((d) => [
+          <span className="whitespace-nowrap tabular-nums">
+            {dateTime(d.at)}
+          </span>,
+          <Mono className="whitespace-nowrap">{d.app}</Mono>,
+          <span className="text-muted">{d.environment ?? "–"}</span>,
+          <Mono className="text-muted">{shortSha(d.revision)}</Mono>,
+          <Mono>
+            {d.new_images.length
+              ? d.new_images.map(shortImage).join(", ")
+              : "–"}
+          </Mono>,
+          <Pill tone={DEPLOY_CLASS[d.class][1]}>
+            {DEPLOY_CLASS[d.class][0] ?? d.phase}
+          </Pill>,
+        ])}
       />
     );
   } else {
@@ -276,29 +167,25 @@ export function Facts({
           { label: "Images" },
           { label: "Status" },
         ]}
-        rows={runs
-          .slice(0, LIMIT)
-          .map((r) => [
-            <Mono className="whitespace-nowrap">{r.pipeline_name}</Mono>,
-            <span className="text-muted">#{r.run_id}</span>,
-            <span className="text-muted">
-              {KIND_LABEL[runKind(r, ds.meta.build_type_from)]}
-            </span>,
-            <Mono className="text-muted">{shortSha(r.commit_sha)}</Mono>,
-            dur(r.duration_s),
-            <Mono>
-              {r.image_refs.length
-                ? r.image_refs.map(shortImage).join(", ")
-                : "–"}
-            </Mono>,
-            r.status ? (
-              <Pill tone={RUN_TONE[r.status.toUpperCase()] ?? "none"}>
-                {r.status}
-              </Pill>
-            ) : (
-              "–"
-            ),
-          ])}
+        rows={facts.runs.rows.map((r) => [
+          <Mono className="whitespace-nowrap">{r.pipeline_name}</Mono>,
+          <span className="text-muted">#{r.run_id}</span>,
+          <span className="text-muted">{KIND_LABEL[r.kind]}</span>,
+          <Mono className="text-muted">{shortSha(r.commit_sha)}</Mono>,
+          dur(r.duration_s),
+          <Mono>
+            {r.image_refs.length
+              ? r.image_refs.map(shortImage).join(", ")
+              : "–"}
+          </Mono>,
+          r.status ? (
+            <Pill tone={RUN_TONE[r.status.toUpperCase()] ?? "none"}>
+              {r.status}
+            </Pill>
+          ) : (
+            "–"
+          ),
+        ])}
       />
     );
   }
@@ -336,20 +223,18 @@ export function Facts({
             ))}
           </div>
           <span className="text-[12.5px] text-muted">
-            {needle
-              ? `gefiltert nach «${q.trim()}»`
+            {q
+              ? `gefiltert nach «${q}»`
               : "Neueste zuerst · die Suche oben filtert alle Tabellen"}
-            {counts[tab] > LIMIT
-              ? ` · die ersten ${LIMIT} von ${counts[tab]}`
+            {counts[tab] > facts.limit
+              ? ` · die ersten ${facts.limit} von ${counts[tab]}`
               : ""}
           </span>
         </div>
         <div className="mt-2.5 overflow-x-auto">
           {counts[tab] === 0 ? (
             <p className="my-3.5 text-[13.5px] text-muted">
-              {needle
-                ? `Keine Treffer für «${q.trim()}».`
-                : "Keine Einträge im Zeitraum."}
+              {q ? `Keine Treffer für «${q}».` : "Keine Einträge im Zeitraum."}
             </p>
           ) : (
             table

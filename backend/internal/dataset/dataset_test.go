@@ -17,6 +17,7 @@ import (
 
 	"github.com/trick77/riptide/internal/config"
 	"github.com/trick77/riptide/internal/dataset"
+	"github.com/trick77/riptide/internal/metrics"
 )
 
 func load(t *testing.T, s interface {
@@ -437,54 +438,63 @@ func TestDatasetApprovalCountsHumanReviewers(t *testing.T) {
 	}
 }
 
-// The facts reproduce the README's reference queries run on the same data:
-// the release count of the deployment-frequency query and every stage of the
-// lead-time breakdown.
-func TestDatasetMatchesTheREADMEQueries(t *testing.T) {
+// The facts tables' read skips the lead times and the reviews, nothing else.
+func TestDatasetFactsOnly(t *testing.T) {
 	st, pool := migrated(t)
 	seed(t, pool)
-	d := load(t, st, days(-60), days(60))
+	full := load(t, st, days(-60), days(60))
+	d, err := st.Dataset(context.Background(), dataset.Params{
+		Team: team, From: days(-60), To: days(60), ProductionStage: "prod", Automated: automated(t), Now: days(28),
+		FactsOnly: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(full.LeadTimes) == 0 || len(full.Reviews) == 0 {
+		t.Fatalf("seed has no lead times or reviews: %d/%d", len(full.LeadTimes), len(full.Reviews))
+	}
+	if d.LeadTimes == nil || len(d.LeadTimes) != 0 || d.Reviews == nil || len(d.Reviews) != 0 {
+		t.Errorf("facts only read lead times %d, reviews %d", len(d.LeadTimes), len(d.Reviews))
+	}
+	if len(d.PRs) != len(full.PRs) || len(d.Deploys) != len(full.Deploys) || len(d.Runs) != len(full.Runs) {
+		t.Errorf("facts only lost rows: %d/%d/%d", len(d.PRs), len(d.Deploys), len(d.Runs))
+	}
+}
+
+// The metrics computed from the facts reproduce the README's reference
+// queries run on the same data: the weekly counts of the
+// deployment-frequency query and every stage of the lead-time breakdown.
+// UTC weeks, as date_trunc('week') in the README. The period ends with the
+// seed's window: the README counts a revision re-synced in a later week in
+// that week too, the metrics once, in the week it first deployed.
+func TestMetricsMatchTheREADMEQueries(t *testing.T) {
+	st, pool := migrated(t)
+	seed(t, pool)
+	period := metrics.NewPeriod(26, days(28), time.UTC)
+	m := metrics.Compute(load(t, st, period.From, period.To), metrics.Params{Period: period})
 
 	t.Run("deployment frequency", func(t *testing.T) {
 		rows := readmeRows(t, pool, "#### Deployment-frequency query",
 			`SELECT week, releases, first_seen, syncs FROM (%s) q WHERE team = 'checkout'`)
 		readme := map[string][3]int64{}
 		for _, r := range rows {
-			readme[r[0].(time.Time).Format(time.DateOnly)] = [3]int64{r[1].(int64), r[2].(int64), r[3].(int64)}
+			if week := r[0].(time.Time); week.Before(period.To) {
+				readme[week.Format(time.DateOnly)] = [3]int64{r[1].(int64), r[2].(int64), r[3].(int64)}
+			}
 		}
-		// The same counts from the facts: distinct revisions per week.
-		type set = map[string]bool
-		weeks := map[string][3]set{}
-		for _, dep := range d.Deploys {
-			if str(dep.Environment) != "prod" || dep.Phase != "Succeeded" {
-				continue
-			}
-			wk := weekStart(dep.At).Format(time.DateOnly)
-			s, ok := weeks[wk]
-			if !ok {
-				s = [3]set{{}, {}, {}}
-				weeks[wk] = s
-			}
-			switch str(dep.Kind) {
-			case "release":
-				s[0][dep.Revision] = true
-			case "first_seen":
-				s[1][dep.Revision] = true
-			}
-			s[2][dep.Revision] = true
-		}
+		// The same counts from the metrics: distinct revisions per week.
 		facts := map[string][3]int64{}
-		var releases int64
-		for wk, s := range weeks {
-			facts[wk] = [3]int64{int64(len(s[0])), int64(len(s[1])), int64(len(s[2]))}
-			releases += int64(len(s[0]))
+		for i, w := range m.Delivery.Frequency.Weeks {
+			if n := w.Release + w.FirstSeen + w.Sync; n > 0 {
+				facts[period.Weeks[i].Start.Format(time.DateOnly)] = [3]int64{int64(w.Release), int64(w.FirstSeen), int64(n)}
+			}
 		}
-		if len(readme) != len(facts) || releases != 1 {
-			t.Fatalf("weeks: readme %v, facts %v (releases %d)", readme, facts, releases)
+		if len(readme) != len(facts) || m.Delivery.Frequency.Releases != 1 {
+			t.Fatalf("weeks: readme %v, metrics %v (releases %d)", readme, facts, m.Delivery.Frequency.Releases)
 		}
 		for wk, want := range readme {
 			if facts[wk] != want {
-				t.Errorf("week %s: facts %v, readme %v", wk, facts[wk], want)
+				t.Errorf("week %s: metrics %v, readme %v", wk, facts[wk], want)
 			}
 		}
 	})
@@ -492,86 +502,23 @@ func TestDatasetMatchesTheREADMEQueries(t *testing.T) {
 	t.Run("lead-time breakdown", func(t *testing.T) {
 		rows := readmeRows(t, pool, "#### Lead-time breakdown query",
 			`SELECT step, prs, extract(epoch FROM p50)::float8, approved_on_first_touch FROM (%s) q`)
-		var chain []dataset.PR
-		for _, p := range d.PRs {
-			if !p.Bot && !p.GitOps && p.MergedAt != nil && p.ReadyAt != nil {
-				chain = append(chain, p)
-			}
-		}
-		stage := func(step int64) []float64 {
-			var out []float64
-			add := func(a, b *time.Time) {
-				if a != nil && b != nil && !b.Before(*a) {
-					out = append(out, b.Sub(*a).Seconds())
-				}
-			}
-			for _, p := range chain {
-				intg, prod := envAt(p, "intg"), envAt(p, "prod")
-				switch step {
-				case 1:
-					add(p.FirstCommitAt, p.ReadyAt)
-				case 2:
-					add(p.ReadyAt, p.ApprovedAt)
-				case 3:
-					add(p.ApprovedAt, p.MergedAt)
-				case 4:
-					add(p.MergedAt, intg)
-				case 5:
-					add(intg, prod)
-				}
-			}
-			return out
-		}
-		if len(rows) != 5 {
-			t.Fatalf("readme stages = %v", rows)
+		if len(rows) != 5 || len(m.LeadChain.Stages) != 5 {
+			t.Fatalf("readme stages = %v, metrics %+v", rows, m.LeadChain.Stages)
 		}
 		for _, r := range rows {
 			step, prs, p50 := r[0].(int32), r[1].(int64), r[2].(float64)
-			got := stage(int64(step))
-			if int64(len(got)) != prs || math.Abs(median(got)-p50) > 1 {
-				t.Errorf("stage %d: facts %d PRs p50 %.0fs, readme %d PRs p50 %.0fs", step, len(got), median(got), prs, p50)
+			got := m.LeadChain.Stages[step-1]
+			if int64(got.N) != prs || got.P50 == nil || math.Abs(*got.P50-p50) > 1 {
+				t.Errorf("stage %d (%s): metrics %d PRs p50 %v, readme %d PRs p50 %.0fs", step, got.Key, got.N, got.P50, prs, p50)
 			}
 			if step == 2 {
-				var first int64
-				for _, p := range chain {
-					if p.ApprovedOnFirstTouch {
-						first++
-					}
-				}
+				first := int64(m.Review.ApprovedOnFirstTouch)
 				if r[3] == nil || r[3].(int64) != first || first != 1 {
-					t.Errorf("approved on first touch: facts %d, readme %v", first, r[3])
+					t.Errorf("approved on first touch: metrics %d, readme %v", first, r[3])
 				}
 			}
 		}
 	})
-}
-
-func envAt(p dataset.PR, env string) *time.Time {
-	for _, e := range p.Environments {
-		if e.Environment == env {
-			return &e.FirstDeployedAt
-		}
-	}
-	return nil
-}
-
-// median is percentile_cont(0.5).
-func median(xs []float64) float64 {
-	if len(xs) == 0 {
-		return 0
-	}
-	s := slices.Clone(xs)
-	slices.Sort(s)
-	pos := 0.5 * float64(len(s)-1)
-	lo := int(math.Floor(pos))
-	hi := int(math.Ceil(pos))
-	return s[lo] + (s[hi]-s[lo])*(pos-float64(lo))
-}
-
-// weekStart is date_trunc('week', t) in UTC: the Monday.
-func weekStart(t time.Time) time.Time {
-	t = t.UTC().Truncate(24 * time.Hour)
-	return t.AddDate(0, 0, -((int(t.Weekday()) + 6) % 7))
 }
 
 // readmeRows runs the first SQL block under heading in the README, wrapped

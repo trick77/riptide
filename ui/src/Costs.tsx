@@ -1,20 +1,19 @@
-import type { Dataset } from "./api";
+import type { Metrics } from "./api";
 import { BarList } from "./charts";
 import { money } from "./format";
-import { costs, type Filter } from "./metrics";
 import { Card, CardHead, SectionHead } from "./ui";
 
-export function Costs({ ds, filter }: { ds: Dataset; filter: Filter }) {
-  const c = costs(ds, filter);
+export function Costs({ m }: { m: Metrics }) {
+  const c = m.costs;
   const tiles: [string, string, string][] = [
     [
       "Ausgaben gemergt",
       money(c.merged),
-      `${c.mergedReviews} gemergte PRs reviewt`,
+      `${c.merged_reviews} gemergte PRs reviewt`,
     ],
     [
       "Pro KLOC",
-      c.perKloc == null ? "–" : money(c.perKloc),
+      c.per_kloc == null ? "–" : money(c.per_kloc),
       "Kosten pro 1000 geänderte Zeilen, gemergte PRs",
     ],
     ["Verworfen", money(c.wasted), "Reviews für abgelehnte oder gelöschte PRs"],
@@ -46,9 +45,7 @@ export function Costs({ ds, filter }: { ds: Dataset; filter: Filter }) {
         <Card className="flex-[2_1_520px]">
           <CardHead
             title={
-              filter.product == null
-                ? "Kosten nach Produkt"
-                : "Kosten nach Repo"
+              m.product == null ? "Kosten nach Produkt" : "Kosten nach Repo"
             }
             sub="Alle Reviews im Zeitraum, neuestes Rollup pro PR"
           />
@@ -60,7 +57,7 @@ export function Costs({ ds, filter }: { ds: Dataset; filter: Filter }) {
             </p>
           )}
           <div className="mt-3.5 text-xs text-muted">
-            Nur Repos, die noergler reviewt: {c.reviewedRepos} im Zeitraum.
+            Nur Repos, die noergler reviewt: {c.reviewed_repos} im Zeitraum.
             Gesamt {money(c.total)}.
           </div>
         </Card>

@@ -7,6 +7,13 @@ repository.
 Real account handles, hostnames and tokens belong in the mounted
 `riptide.json` / team-keys Secret, never in this file: the repository is public.
 
+## 2026-11-14 — metrics computed in the backend
+
+**`GET /api/dataset` is gone** (contract 2.0.0). The UI now reads
+`GET /api/metrics` and `GET /api/facts`, computed in the backend; nothing
+to configure. Anything else that read `/api/dataset` through the auth proxy
+has to move to those two.
+
 ## 2026-11-14 — riptide-collector is now riptide
 
 **The image is `ghcr.io/trick77/riptide`**, no longer

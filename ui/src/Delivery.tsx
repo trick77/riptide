@@ -1,16 +1,7 @@
-import type { Dataset } from "./api";
+import type { LeadTimes, Metrics } from "./api";
 import { WeekStack } from "./charts";
 import { dur, durParts, fullDate, num, pct } from "./format";
 import { LeadChain } from "./LeadChain";
-import {
-  type Chain,
-  deployFrequency,
-  environments,
-  leadTime,
-  type Filter,
-  type LeadTimes,
-} from "./metrics";
-import type { Period } from "./period";
 import {
   Card,
   CardHead,
@@ -24,12 +15,7 @@ import {
 } from "./ui";
 
 type Props = {
-  ds: Dataset;
-  period: Period;
-  filter: Filter;
-  // The lead-time breakdown, computed once in App for this section and the
-  // review section.
-  ch: Chain;
+  m: Metrics;
   why: string | null;
   onWhy: (key: string) => void;
 };
@@ -46,22 +32,17 @@ function leadTile(l: LeadTimes, showBots: boolean) {
       (showBots && l.bot.n > 0
         ? ` · Bots p50 ${dur(l.bot.p50)} (${l.bot.n})`
         : ""),
+    warn: l.low_sample ? "Weniger als 10 Commits: wenig belastbar" : undefined,
   };
 }
 
-export function Delivery({ ds, period, filter, ch, why, onWhy }: Props) {
-  const prod = ds.meta.production_stage;
-  // The stage the chain below names, so tile and chain agree; else the
-  // product's most deployed one.
-  const pre =
-    ch.preEnvironment ??
-    environments(ds, filter).filter((e) => e !== prod)[0] ??
-    null;
-  const freq = deployFrequency(ds, period, filter, prod);
-  const lt = leadTime(ds, filter, prod);
-  const ltPre = pre ? leadTime(ds, filter, pre) : null;
-  const finished = freq.succeeded + freq.failed;
-  const argoStart = ds.meta.data_start.argocd;
+export function Delivery({ m, why, onWhy }: Props) {
+  // As the numbers were computed, not as the toggle stands while they load.
+  const bots = m.bots;
+  const { production_stage: prod, pre_environment: pre } = m.delivery;
+  const freq = m.delivery.frequency;
+  const lt = m.delivery.lead_time;
+  const ltPre = m.delivery.lead_time_pre;
   const sinceNote = freq.since
     ? `Argo CD meldet erst seit ${fullDate(new Date(freq.since))}: die Wochen davor sind leer, die Rate gilt ab dann.`
     : null;
@@ -70,7 +51,7 @@ export function Delivery({ ds, period, filter, ch, why, onWhy }: Props) {
     freq: {
       title: "Deploy-Frequenz",
       def: `Erfolgreiche Deploys auf ${prod}, deren Images sich vom vorherigen Deploy derselben Argo-App unterscheiden, einmal pro GitOps-Revision gezählt, geteilt durch die Wochen im Zeitraum, in denen Argo CD meldete.`,
-      basis: `${freq.releases} Releases, ${freq.syncs - freq.releases - freq.firstSeen} Syncs ohne neue Images und ${freq.firstSeen} Erstdeploys aus ${freq.syncs} Revisionen.`,
+      basis: `${freq.releases} Releases, ${freq.resyncs} Syncs ohne neue Images und ${freq.first_seen} Erstdeploys aus ${freq.syncs} Revisionen.`,
       filters: [
         "operation_phase = Succeeded",
         `environment = ${prod}`,
@@ -79,7 +60,7 @@ export function Delivery({ ds, period, filter, ch, why, onWhy }: Props) {
       ],
       coverage:
         (sinceNote ? `${sinceNote} ` : "") +
-        (freq.firstSeen > 0
+        (freq.first_seen > 0
           ? "Der erste Deploy einer App seit Datenbeginn hat keinen Vorgänger: Release oder Re-Sync ist unbekannt, er zählt nicht als Release."
           : "Jede App hat einen Vorgänger in den Daten, alle Deploys sind vergleichbar."),
       query: "README · Deployment-frequency query",
@@ -114,7 +95,7 @@ export function Delivery({ ds, period, filter, ch, why, onWhy }: Props) {
     dsucc: {
       title: "Deploy-Erfolg",
       def: `Anteil der Syncs auf ${prod} mit operation_phase Succeeded an allen abgeschlossenen Syncs.`,
-      basis: `${finished} abgeschlossene Syncs, davon ${freq.failed} Failed.`,
+      basis: `${freq.finished} abgeschlossene Syncs, davon ${freq.failed} Failed.`,
       filters: [
         "operation_phase IN (Succeeded, Failed)",
         `environment = ${prod}`,
@@ -124,8 +105,9 @@ export function Delivery({ ds, period, filter, ch, why, onWhy }: Props) {
     },
   };
   const open = why && whys[why] ? whys[why] : null;
-  const lead = leadTile(lt, filter.bots);
-  const leadPre = ltPre ? leadTile(ltPre, filter.bots) : null;
+  const lead = leadTile(lt, bots);
+  const leadPre = ltPre ? leadTile(ltPre, bots) : null;
+  const weeks = m.period.weeks;
 
   return (
     <section id="delivery" aria-labelledby="h-delivery" className="mt-9">
@@ -133,20 +115,19 @@ export function Delivery({ ds, period, filter, ch, why, onWhy }: Props) {
       <Grid>
         <Tile
           label={`Deploy-Frequenz ${prod}`}
-          value={freq.syncs ? num(freq.perWeek, 1) : "–"}
+          value={freq.syncs ? num(freq.per_week, 1) : "–"}
           unit={freq.syncs ? "Releases / Woche" : ""}
           note={
             freq.syncs
               ? `${freq.releases} Releases aus ${freq.syncs} Syncs`
-              : argoStart == null ||
-                  Date.parse(argoStart) >= period.to.getTime()
-                ? "Argo CD meldet für das Team noch nicht"
-                : "keine Deploys im Zeitraum"
+              : freq.argo_reporting
+                ? "keine Deploys im Zeitraum"
+                : "Argo CD meldet für das Team noch nicht"
           }
           warn={
             sinceNote ??
-            (freq.firstSeen > 0
-              ? `${freq.firstSeen} Erstdeploys ohne Vergleichswert, separat gezeigt`
+            (freq.first_seen > 0
+              ? `${freq.first_seen} Erstdeploys ohne Vergleichswert, separat gezeigt`
               : undefined)
           }
           open={why === "freq"}
@@ -155,38 +136,28 @@ export function Delivery({ ds, period, filter, ch, why, onWhy }: Props) {
         <Tile
           label={`Lead Time ${prod}`}
           {...lead}
-          warn={
-            lt.human.n > 0 && lt.human.n < 10
-              ? "Weniger als 10 Commits: wenig belastbar"
-              : undefined
-          }
           open={why === "lead"}
           onWhy={() => onWhy("lead")}
         />
-        {leadPre && ltPre && (
+        {leadPre && (
           <Tile
             label={`Lead Time ${pre}`}
             {...leadPre}
-            warn={
-              ltPre.human.n > 0 && ltPre.human.n < 10
-                ? "Weniger als 10 Commits: wenig belastbar"
-                : undefined
-            }
             open={why === "leadPre"}
             onWhy={() => onWhy("leadPre")}
           />
         )}
         <Tile
           label={`Deploy-Erfolg ${prod}`}
-          value={finished ? pct(freq.succeeded / finished) : "–"}
-          note={`${freq.failed} fehlgeschlagen von ${finished} Syncs`}
+          value={pct(freq.success_rate)}
+          note={`${freq.failed} fehlgeschlagen von ${freq.finished} Syncs`}
           open={why === "dsucc"}
           onWhy={() => onWhy("dsucc")}
         />
       </Grid>
       {open && <WhyPanel why={open} />}
 
-      <LeadChain chain={ch} prod={prod} />
+      <LeadChain chain={m.lead_chain} prod={prod} />
 
       <div className="mt-3 flex flex-wrap gap-3">
         <Card className="flex-[2_1_560px]">
@@ -205,7 +176,7 @@ export function Delivery({ ds, period, filter, ch, why, onWhy }: Props) {
             }
           />
           <WeekStack
-            labels={period.weeks.map((w) => `KW ${w.kw}`)}
+            labels={weeks.map((w) => `KW ${w.kw}`)}
             series={[
               { key: "release", label: "Releases", className: "bg-s1" },
               {
@@ -214,14 +185,14 @@ export function Delivery({ ds, period, filter, ch, why, onWhy }: Props) {
                 className: "bg-other",
               },
               {
-                key: "firstSeen",
+                key: "first_seen",
                 label: "Erstdeploys",
                 className: "texture-unknown",
               },
             ]}
             values={freq.weeks}
             ariaLabel={`Deploys auf ${prod} pro Woche: ${freq.weeks
-              .map((w, i) => `KW ${period.weeks[i].kw} ${w.release} Releases`)
+              .map((w, i) => `KW ${weeks[i].kw} ${w.release} Releases`)
               .join(", ")}`}
           />
         </Card>
@@ -241,15 +212,15 @@ export function Delivery({ ds, period, filter, ch, why, onWhy }: Props) {
                 ],
                 [
                   "Syncs ohne neue Images",
-                  freq.syncs - freq.releases - freq.firstSeen,
+                  freq.resyncs,
                   "bg-other",
                   "Config-Änderungen, manuelle Re-Syncs",
                 ],
                 [
                   "Erstdeploys ohne Vergleich",
-                  freq.firstSeen,
+                  freq.first_seen,
                   "texture-unknown",
-                  freq.firstSeen
+                  freq.first_seen
                     ? "erster Deploy einer App seit Datenbeginn"
                     : "keine im Zeitraum",
                 ],
