@@ -1,5 +1,8 @@
-// Number, duration and date formatting, Swiss German conventions (de-CH:
-// 1’234.5, 24.11.).
+// Number, duration and date formatting, Swiss conventions (de-CH: 1’234.5,
+// 24.11.) in both UI languages (user, 2026-11-15): only the unit words
+// follow the language.
+
+import i18n from "./i18n";
 
 const LOCALE = "de-CH";
 
@@ -19,14 +22,14 @@ export function money(x: number): string {
 }
 
 // A duration in seconds, in the largest unit that keeps it readable:
-// "45 s", "12 min", "3,4 h", "8,1 Tage".
+// "45 s", "12 min", "3.4 h", "8.1 Tage" / "8.1 days".
 export function dur(seconds: number | null | undefined): string {
   if (seconds == null || !Number.isFinite(seconds)) return "–";
   const s = Math.max(0, seconds);
-  if (s < 60) return `${num(Math.round(s))} s`;
-  if (s < 3600) return `${num(Math.round(s / 60))} min`;
-  if (s < 86400) return `${num(s / 3600, 1)} h`;
-  return `${num(s / 86400, 1)} Tage`;
+  if (s < 60) return i18n.t("units.s", { n: num(Math.round(s)) });
+  if (s < 3600) return i18n.t("units.min", { n: num(Math.round(s / 60)) });
+  if (s < 86400) return i18n.t("units.h", { n: num(s / 3600, 1) });
+  return i18n.t("units.days", { n: num(s / 86400, 1) });
 }
 
 // dur split into value and unit, for a tile's big number.
@@ -62,6 +65,15 @@ export function fullDate(d: Date): string {
     month: "2-digit",
     year: "numeric",
   });
+}
+
+// A CI's status word as a pill shows it: Jenkins' shouting "UNSTABLE" ->
+// "Unstable", "NOT_BUILT" -> "Not built". Any other word (Tekton's
+// "PipelineRunTimeout") stays as the CI wrote it.
+export function ciWord(s: string): string {
+  if (!/^[A-Z_]+$/.test(s)) return s;
+  const w = s.replace(/_/g, " ").toLowerCase();
+  return w.charAt(0).toUpperCase() + w.slice(1);
 }
 
 export function shortSha(sha: string | null): string {

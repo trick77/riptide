@@ -2,7 +2,9 @@
 // never a number across kinds; one list of the repos that slow it down;
 // runs stuck together as one sentence.
 
+import type { TFunction } from "i18next";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   BuildStats,
   Metrics,
@@ -14,22 +16,6 @@ import type {
 import { clock, dateTime, dayMonth, dur, fullDate, num, pct } from "./format";
 import type { Tab } from "./state";
 import { Card, CardHead, Compare, Mono, Note, Pill, SectionHead } from "./ui";
-
-export const KIND_LABEL: Record<RunKind, string> = {
-  release: "Releases",
-  main: "master-Builds",
-  feature: "Feature- und PR-Builds",
-  other: "Andere Branches",
-  unknown: "master, Art unbekannt",
-};
-
-const KIND_NOTE: Record<RunKind, string> = {
-  release: "build_type release oder hotfix",
-  main: "Hauptbranch, kein Release",
-  feature: "feature/…, bugfix/…, PR-…",
-  other: "release/… ohne Release, Nightlies",
-  unknown: "vor der ersten build_type-Meldung",
-};
 
 // Line colours in the series ramp's fixed order, by kind, so a kind keeps
 // its colour whichever kinds the filter leaves.
@@ -50,6 +36,7 @@ const SH = 48;
 
 // A kind's weekly success rate on the scale all cards share.
 function Spark({ b, low }: { b: BuildStats; low: number }) {
+  const { t } = useTranslation();
   const n = b.weekly.length;
   const x = (i: number) => (n < 2 ? SW / 2 : 4 + (i / (n - 1)) * (SW - 8));
   const y = (v: number) => SH - 4 - ((v - low) / (1 - low)) * (SH - 8);
@@ -71,7 +58,10 @@ function Spark({ b, low }: { b: BuildStats; low: number }) {
       viewBox={`0 0 ${SW} ${SH}`}
       className="mt-2 block h-12 w-full"
       role="img"
-      aria-label={`Erfolgsquote pro Woche, ${KIND_LABEL[b.kind]}: ${b.weekly.map((v) => (v == null ? "–" : pct(v))).join(", ")}`}
+      aria-label={t("build.sparkAria", {
+        kind: t(`build.kind.${b.kind}`),
+        parts: b.weekly.map((v) => (v == null ? "–" : pct(v))).join(", "),
+      })}
     >
       <line x1="0" x2={SW} y1="4" y2="4" stroke="var(--color-grid-minor)" />
       <line
@@ -106,6 +96,7 @@ function Spark({ b, low }: { b: BuildStats; low: number }) {
 }
 
 function KindCard({ b, low, m }: { b: BuildStats; low: number; m: Metrics }) {
+  const { t } = useTranslation();
   const c = m.comparison.build.find((x) => x.kind === b.kind);
   const weeks = m.period.weeks;
   return (
@@ -116,50 +107,58 @@ function KindCard({ b, low, m }: { b: BuildStats; low: number; m: Metrics }) {
           className="size-2.5 rounded-[3px]"
           style={{ background: KIND_STROKE[b.kind] }}
         />
-        {KIND_LABEL[b.kind]}
+        {t(`build.kind.${b.kind}`)}
       </div>
-      <div className="text-[11.5px] text-muted">{KIND_NOTE[b.kind]}</div>
+      <div className="text-[11.5px] text-muted">
+        {t(`build.kindNote.${b.kind}`)}
+      </div>
       <div className="mt-1 flex flex-wrap gap-x-5 gap-y-1">
         <div className="text-xs text-muted">
           <div className="text-[20px] font-medium text-ink tabular-nums">
             {pct(b.success_rate)}
           </div>
-          erfolgreich
+          {t("build.successful")}
         </div>
         <div className="text-xs text-muted">
           <div className="text-[20px] font-medium text-ink tabular-nums">
             {dur(b.duration.p50)}
           </div>
-          typische Dauer
+          {t("build.typicalDuration")}
         </div>
         <div className="text-xs text-muted">
           <div className="text-[20px] font-medium text-ink tabular-nums">
-            {num(b.wasted_seconds / 3600, 1)} h
+            {t("common.hours", { n: num(b.wasted_seconds / 3600, 1) })}
           </div>
-          rote Läufe, von {num(b.ci_seconds / 3600, 1)} h CI-Zeit
+          {t("build.redRuns", { h: num(b.ci_seconds / 3600, 1) })}
         </div>
       </div>
       {b.waiting.n > 0 && (
         <div
           className="text-xs text-muted"
-          title={`Median über ${b.waiting.n} der ${b.duration.n} Läufe, die melden, wann sie einen Agent bekamen`}
+          title={t("build.waitingTitle", {
+            n: b.waiting.n,
+            total: b.duration.n,
+          })}
         >
-          davon typischerweise {dur(b.waiting.p50)} Warten auf einen Agent,{" "}
-          {dur(b.building.p50)} Bauen
+          {t("build.waiting", {
+            wait: dur(b.waiting.p50),
+            build: dur(b.building.p50),
+          })}
         </div>
       )}
       <Spark b={b} low={low} />
       <div className="flex justify-between text-[10.5px] text-faint">
-        <span>
-          KW {weeks[0]?.kw} · Erfolg, Skala {pct(low)}–100 %
-        </span>
-        <span>KW {weeks[weeks.length - 1]?.kw}</span>
+        <span>{t("build.scale", { kw: weeks[0]?.kw, low: pct(low) })}</span>
+        <span>{t("common.cw", { kw: weeks[weeks.length - 1]?.kw })}</span>
       </div>
       <div className="text-xs text-muted">
-        {b.runs} Läufe
-        {b.no_verdict > 0 && ` + ${b.no_verdict} ohne Ergebnis`}
+        {t("build.runs", { count: b.runs })}
+        {b.no_verdict > 0 && t("build.noVerdict", { n: b.no_verdict })}
         {b.outlier_runs > 0 &&
-          ` · ${b.outlier_runs} Ausreisser (${num(b.outlier_seconds / 3600, 1)} h) nicht in Dauer und CI-Zeit`}
+          t("build.outliers", {
+            n: b.outlier_runs,
+            h: num(b.outlier_seconds / 3600, 1),
+          })}
       </div>
       {c &&
         // Neither compares, for the same reason: say it once.
@@ -186,6 +185,7 @@ function KindCard({ b, low, m }: { b: BuildStats; low: number; m: Metrics }) {
 }
 
 function reason(
+  t: TFunction,
   h: RepoHotspot,
   teamRate: number | null,
   teamP50: number | null,
@@ -193,20 +193,25 @@ function reason(
   const out: [string, "fail" | "warn", string][] = [];
   if (h.flaky)
     out.push([
-      "fehleranfällig",
+      t("build.flaky"),
       "fail",
-      `${pct(h.failure_rate)} rot, Team ${pct(teamRate)}`,
+      t("build.flakyText", { rate: pct(h.failure_rate), team: pct(teamRate) }),
     ]);
   if (h.slow)
     out.push([
-      "langsam",
+      t("build.slow"),
       "warn",
-      `typische Dauer ${dur(h.duration.p50)}, Team ${dur(teamP50)} (${num(h.factor ?? 0, 1)}×)`,
+      t("build.slowText", {
+        p50: dur(h.duration.p50),
+        team: dur(teamP50),
+        factor: num(h.factor ?? 0, 1),
+      }),
     ]);
   return out;
 }
 
 function Groups({ groups }: { groups: OutlierGroup[] }) {
+  const { t } = useTranslation();
   const shared = groups.filter((g) => g.shared);
   if (!shared.length) return null;
   return (
@@ -214,13 +219,23 @@ function Groups({ groups }: { groups: OutlierGroup[] }) {
       {shared.map((g) => (
         <li key={g.from}>
           <span className="font-medium text-ink">
-            {g.runs} Läufe aus {g.repos.length} Repos starteten{" "}
-            {dayMonth(new Date(g.from)) === dayMonth(new Date(g.to))
-              ? `am ${dayMonth(new Date(g.from))} zwischen ${clock(g.from)} und ${clock(g.to)}`
-              : `zwischen ${dateTime(g.from)} und ${dateTime(g.to)}`}
+            {t("build.group", {
+              count: g.runs,
+              repos: g.repos.length,
+              when:
+                dayMonth(new Date(g.from)) === dayMonth(new Date(g.to))
+                  ? t("build.groupSameDay", {
+                      day: dayMonth(new Date(g.from)),
+                      from: clock(g.from),
+                      to: clock(g.to),
+                    })
+                  : t("build.groupSpan", {
+                      from: dateTime(g.from),
+                      to: dateTime(g.to),
+                    }),
+            })}
           </span>
-          : das spricht für die Infrastruktur (Agents weg, wartender
-          Input-Schritt), nicht für die Repos.
+          {t("build.groupRest")}
         </li>
       ))}
     </ul>
@@ -228,16 +243,22 @@ function Groups({ groups }: { groups: OutlierGroup[] }) {
 }
 
 function OutlierTable({ rows }: { rows: Outlier[] }) {
+  const { t } = useTranslation();
   return (
     <div className="mt-3 overflow-x-auto">
       <div className="grid min-w-[700px] grid-cols-[minmax(180px,2fr)_minmax(130px,1.2fr)_110px_80px_80px_80px] items-center gap-x-3.5">
-        {["Pipeline", "Art", "Start", "Dauer", "Warten", "× Median"].map(
-          (h, i) => (
-            <div key={h} className={`${HEAD} ${i > 1 ? "text-right" : ""}`}>
-              {h}
-            </div>
-          ),
-        )}
+        {[
+          t("build.colPipeline"),
+          t("build.colKind"),
+          t("build.colStart"),
+          t("build.colDuration"),
+          t("build.colWaiting"),
+          t("build.colFactor"),
+        ].map((h, i) => (
+          <div key={h} className={`${HEAD} ${i > 1 ? "text-right" : ""}`}>
+            {h}
+          </div>
+        ))}
         {rows.map((o) => (
           <div key={`${o.pipeline_name}#${o.run_id}`} className="contents">
             <div className={`${CELL} overflow-hidden`}>
@@ -246,7 +267,9 @@ function OutlierTable({ rows }: { rows: Outlier[] }) {
               </Mono>{" "}
               <span className="text-muted">#{o.run_id}</span>
             </div>
-            <div className={`${CELL} text-muted`}>{KIND_LABEL[o.kind]}</div>
+            <div className={`${CELL} text-muted`}>
+              {t(`build.kind.${o.kind}`)}
+            </div>
             <div className={`${CELL} text-right text-ink-dim`}>
               {o.started_at ? dateTime(o.started_at) : "–"}
             </div>
@@ -255,11 +278,7 @@ function OutlierTable({ rows }: { rows: Outlier[] }) {
             </div>
             <div
               className={`${CELL} text-right text-ink-dim`}
-              title={
-                o.wait_s == null
-                  ? "Der Lauf meldet nicht, wann er einen Agent bekam"
-                  : undefined
-              }
+              title={o.wait_s == null ? t("build.noAgent") : undefined}
             >
               {o.wait_s != null ? dur(o.wait_s) : "–"}
             </div>
@@ -280,6 +299,7 @@ export function Build({
   m: Metrics;
   onFacts: (tab: Tab, q: string) => void;
 }) {
+  const { t } = useTranslation();
   const b = m.build;
   const h = b.hotspots;
   const stats = b.kinds;
@@ -300,27 +320,23 @@ export function Build({
     <section id="build" aria-labelledby="h-build" className="mt-10">
       <SectionHead
         id="h-build"
-        eyebrow="CI · Jenkins · Tekton · jede Lauf-Art für sich"
-        title="Wie schnell und verlässlich ist das Feedback?"
-        lead="Releases überspringen Tests, Feature-Builds scheitern öfter. Darum gibt es keine Summe über alle Arten: jede Karte steht für sich."
+        eyebrow={t("build.eyebrow")}
+        title={t("build.title")}
+        lead={t("build.lead")}
         frameworks={[
           ["DevEx", "Feedback loops"],
-          ["Core 4", "Effectiveness, Treiber"],
+          ["Core 4", t("build.fwEffectiveness")],
           ["SPACE", "Efficiency & flow"],
         ]}
       />
       {b.starts_inside && b.data_from && (
         <Note>
-          Build-Daten ab {fullDate(new Date(b.data_from))}: der erste Lauf, den
-          Riptide für das Team erhalten hat. Ältere Wochen bleiben leer statt
-          falsch.
+          {t("build.dataFrom", { date: fullDate(new Date(b.data_from)) })}
         </Note>
       )}
       {stats.length === 0 ? (
         <Card className="mt-3">
-          <p className="m-0 text-[13.5px] text-muted">
-            Keine abgeschlossenen Läufe im Zeitraum.
-          </p>
+          <p className="m-0 text-[13.5px] text-muted">{t("build.noRuns")}</p>
         </Card>
       ) : (
         <>
@@ -329,20 +345,16 @@ export function Build({
               <KindCard key={s.kind} b={s} low={low} m={m} />
             ))}
           </div>
-          <p className="mt-2 mb-0 text-xs text-muted">
-            Erfolgreich: SUCCESS (Tekton: Succeeded, Completed). Rot: FAILURE,
-            UNSTABLE oder Failed. Ohne Ergebnis (ABORTED, NOT_BUILT): kein Lauf,
-            nur CI-Zeit; ein Jenkins-timeout() endet ebenfalls ABORTED.
-          </p>
+          <p className="mt-2 mb-0 text-xs text-muted">{t("build.legend")}</p>
 
           <Card className="mt-3">
             <CardHead
-              title="Repos, die das Feedback bremsen"
-              sub="Jedes Repo gegen alle Läufe derselben Art im Team · die Schwellen sind Startwerte, nicht gemessen"
+              title={t("build.hotspotsTitle")}
+              sub={t("build.hotspotsSub")}
               right={
                 <div
                   role="group"
-                  aria-label="Lauf-Art"
+                  aria-label={t("build.kindGroup")}
                   className="no-print flex flex-wrap gap-1"
                 >
                   {stats.map((s) => (
@@ -357,7 +369,7 @@ export function Build({
                           : "bg-transparent text-muted"
                       }`}
                     >
-                      {KIND_LABEL[s.kind]}
+                      {t(`build.kind.${s.kind}`)}
                     </button>
                   ))}
                 </div>
@@ -366,16 +378,21 @@ export function Build({
             {k && k.repos.length ? (
               <div className="mt-3 overflow-x-auto">
                 <div className="grid min-w-[640px] grid-cols-[minmax(150px,1.3fr)_minmax(220px,2fr)_96px_150px] items-center gap-x-3.5">
-                  {["Repo", "Warum", "CI-Zeit rot", ""].map((t, i) => (
+                  {[
+                    t("build.colRepo"),
+                    t("build.colWhy"),
+                    t("build.colRed"),
+                    "",
+                  ].map((head, i) => (
                     <div
-                      key={t || i}
+                      key={head || i}
                       className={`${HEAD} ${i === 2 ? "text-right" : ""}`}
                     >
-                      {t}
+                      {head}
                     </div>
                   ))}
                   {k.repos.map((r) => {
-                    const why = reason(r, k.failure_rate, k.duration.p50);
+                    const why = reason(t, r, k.failure_rate, k.duration.p50);
                     return (
                       <div key={r.repo} className="contents">
                         <div className={`${CELL} overflow-hidden`}>
@@ -395,13 +412,18 @@ export function Build({
                             ))
                           ) : (
                             <span className="text-[12.5px] text-muted">
-                              <Pill tone="none">unauffällig</Pill>{" "}
-                              {dur(r.duration.p50)}, {pct(r.failure_rate)} rot
+                              <Pill tone="none">{t("build.fine")}</Pill>{" "}
+                              {t("build.fineText", {
+                                p50: dur(r.duration.p50),
+                                rate: pct(r.failure_rate),
+                              })}
                             </span>
                           )}
                         </div>
                         <div className={`${CELL} text-right text-ink-dim`}>
-                          {num(r.wasted_seconds / 3600, 1)} h
+                          {t("common.hours", {
+                            n: num(r.wasted_seconds / 3600, 1),
+                          })}
                         </div>
                         <div className={`${CELL} text-right`}>
                           <button
@@ -409,7 +431,7 @@ export function Build({
                             onClick={() => onFacts("runs", r.repo)}
                             className="no-print border-0 bg-transparent p-0 text-[13px] text-accent-strong hover:underline"
                           >
-                            Läufe ansehen →
+                            {t("build.viewRuns")}
                           </button>
                         </div>
                       </div>
@@ -419,50 +441,52 @@ export function Build({
               </div>
             ) : (
               <p className="mt-3.5 mb-0 text-[13.5px] text-muted">
-                Keine Läufe dieser Art mit Ergebnis.
+                {t("build.noneOfKind")}
               </p>
             )}
             <p className="mt-2.5 mb-0 text-xs text-muted">
-              Fehleranfällig: Quote mindestens {num(h.flaky_factor, 1)}× die des
-              Teams, höchstens halbwegs zwischen ihr und 100 %. Langsam: Median
-              mindestens {num(h.slow_factor, 1)}× der des Teams. Beides ab{" "}
-              {h.min_runs} Läufen.
+              {t("build.hotspotsRule", {
+                flaky: num(h.flaky_factor, 1),
+                slow: num(h.slow_factor, 1),
+                min: h.min_runs,
+              })}
             </p>
           </Card>
 
           <Card className="mt-3">
             <CardHead
-              title="Hängende Läufe"
-              sub={`Läufe über ${num(h.outlier_factor, 0)}× dem Median ihrer Art und über ${dur(h.outlier_min_s)}`}
+              title={t("build.stuckTitle")}
+              sub={t("build.stuckSub", {
+                factor: num(h.outlier_factor, 0),
+                min: dur(h.outlier_min_s),
+              })}
             />
             {h.outliers.length ? (
               <>
                 <p className="mt-2 mb-0 text-[13.5px] text-ink-dim">
-                  {h.outlier_count === 1
-                    ? "1 Lauf hing"
-                    : `${h.outlier_count} Läufe hingen`}{" "}
-                  im Zeitraum. Ihre Zeit zählt weder in Dauer noch CI-Zeit.
+                  {t("build.stuck", { count: h.outlier_count })}
+                  {t("build.stuckRest")}
                 </p>
                 <Groups groups={h.outlier_groups} />
                 <details className="mt-2">
                   <summary className="cursor-pointer text-[13px] text-muted">
                     {h.outlier_count > h.outliers.length
-                      ? `Die längsten ${h.outliers.length} anzeigen`
-                      : "Läufe anzeigen"}
+                      ? t("build.showLongest", { n: h.outliers.length })
+                      : t("build.showAll")}
                   </summary>
                   <OutlierTable rows={h.outliers} />
                 </details>
               </>
             ) : (
               <p className="mt-3.5 mb-0 text-[13.5px] text-muted">
-                Keine Ausreisser im Zeitraum.
+                {t("build.noOutliers")}
               </p>
             )}
             <p className="mt-2.5 mb-0 text-xs text-muted">
-              Ein Repo mit mindestens {h.outlier_repo_min_runs} eigenen Läufen
-              mit Ergebnis und Dauer muss zudem {num(h.outlier_factor, 0)}×
-              seinen eigenen Median überschreiten: ein langsames Repo ist kein
-              Ausreisser. Abgebrochene Läufe erscheinen trotzdem.
+              {t("build.stuckRule", {
+                min: h.outlier_repo_min_runs,
+                factor: num(h.outlier_factor, 0),
+              })}
             </p>
           </Card>
         </>

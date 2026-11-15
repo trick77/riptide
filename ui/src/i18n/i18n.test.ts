@@ -1,0 +1,114 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { dur } from "../format";
+import { de } from "./de";
+import { en } from "./en";
+import i18n, {
+  browserLanguage,
+  initialLanguage,
+  setLanguage,
+  storedLanguage,
+} from "./index";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("language", () => {
+  it("reads German for every de-* browser locale", () => {
+    for (const l of ["de", "de-CH", "de-DE", "de-AT", "DE-ch"]) {
+      expect(browserLanguage(l)).toBe("de");
+    }
+  });
+  it("reads English for everything else", () => {
+    for (const l of ["en-US", "fr-CH", "it-CH", "rm", ""]) {
+      expect(browserLanguage(l)).toBe("en");
+    }
+  });
+
+  it("lets a stored choice win over the browser", () => {
+    vi.spyOn(navigator, "language", "get").mockReturnValue("de-CH");
+    expect(initialLanguage()).toBe("de");
+    localStorage.setItem("lang", "en");
+    expect(initialLanguage()).toBe("en");
+  });
+
+  it("ignores junk and blocked storage", () => {
+    localStorage.setItem("lang", "fr");
+    expect(storedLanguage()).toBeNull();
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    expect(storedLanguage()).toBeNull();
+  });
+
+  it("switches, keeps the choice and tags the page", () => {
+    setLanguage("en");
+    expect(i18n.language).toBe("en");
+    expect(localStorage.getItem("lang")).toBe("en");
+    expect(document.documentElement.lang).toBe("en");
+    setLanguage("de");
+    expect(localStorage.getItem("lang")).toBe("de");
+    expect(document.documentElement.lang).toBe("de");
+  });
+
+  it("still switches when storage is blocked", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    setLanguage("en");
+    expect(i18n.language).toBe("en");
+  });
+
+  it("translates the unit words, never the number format", () => {
+    expect(dur(8.1 * 86400)).toBe("8.1 Tage");
+    setLanguage("en");
+    expect(dur(8.1 * 86400)).toBe("8.1 days");
+    expect(dur(2.5 * 3600)).toBe("2.5 h");
+  });
+});
+
+// leaves flattens a catalog to dotted key -> string.
+function leaves(o: object, prefix = ""): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(o)) {
+    const key = prefix ? `${prefix}.${k}` : k;
+    if (typeof v === "string") out[key] = v;
+    else Object.assign(out, leaves(v as object, key));
+  }
+  return out;
+}
+
+const placeholders = (s: string) =>
+  [...s.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).sort();
+
+describe("catalogs", () => {
+  const enLeaves = leaves(en);
+  const deLeaves = leaves(de);
+
+  it("have the same keys", () => {
+    expect(Object.keys(deLeaves).sort()).toEqual(Object.keys(enLeaves).sort());
+  });
+
+  // A dropped {{prod}} renders the raw placeholder, and only in the one
+  // language nobody looked at.
+  it("carry the same placeholders per key", () => {
+    for (const [k, v] of Object.entries(enLeaves)) {
+      expect([k, placeholders(deLeaves[k])]).toEqual([k, placeholders(v)]);
+    }
+  });
+
+  it("write Swiss German: double s, never eszett", () => {
+    for (const [k, v] of Object.entries(deLeaves)) {
+      expect([k, v.includes("ß")]).toEqual([k, false]);
+    }
+  });
+
+  // A Denglish participle ends in -ed, never -t: gemerged, as in
+  // ../noergler (user, 2026-11-15). Its inflected forms read worse still,
+  // so a sentence is rephrased rather than "gemergte".
+  it("write gemerged, never gemergt", () => {
+    for (const [k, v] of Object.entries(deLeaves)) {
+      expect([k, /gemergt/i.exec(v)?.[0] ?? null]).toEqual([k, null]);
+    }
+  });
+});

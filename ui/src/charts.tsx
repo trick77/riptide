@@ -4,6 +4,7 @@
 // between stacked segments, recessive grid, a tooltip on every mark.
 
 import { type ReactNode, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { num } from "./format";
 
 export type Series = { key: string; label: string; className: string };
@@ -257,6 +258,7 @@ export function RateLines({
   format: (v: number) => string;
   ariaLabel: string;
 }) {
+  const { t: tr } = useTranslation();
   const [hover, setHover] = useState<number | null>(null);
   const n = labels.length;
   const LH = 160;
@@ -292,7 +294,7 @@ export function RateLines({
               style={{ width: `${(gapUntil / n) * 100}%` }}
             >
               <span className="rounded bg-panel px-1.5 py-px text-[11.5px] text-muted">
-                keine verlässlichen Daten
+                {tr("chart.noData")}
               </span>
             </div>
           )}

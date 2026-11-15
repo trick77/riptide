@@ -2,42 +2,40 @@
 // deploys, runs.
 
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import type { DeployFact, Facts as FactsData, PRFact, RunFact } from "./api";
-import { KIND_LABEL } from "./Build";
-import { dateTime, dur, shortImage, shortSha } from "./format";
+import { ciWord, dateTime, dur, shortImage, shortSha } from "./format";
+import terms from "./i18n/terms.json";
 import type { Tab } from "./state";
 import { Mono, Pill, SectionHead, type Tone } from "./ui";
 
-// The backend searches these words too (prStateTerm, deployTerm in
-// backend/internal/metrics/facts.go); a Go test fails when they differ.
-const PR_STATE: Record<PRFact["state"], [string, Tone]> = {
-  merged: ["Gemergt", "ok"],
-  open: ["Offen", "none"],
-  declined: ["Abgelehnt", "none"],
-  deleted: ["Gelöscht", "none"],
+// The words of states, classes, types and run outcomes are in
+// i18n/terms.json: the backend searches them too, in both languages (the
+// *Term maps in backend/internal/metrics/facts.go); a Go test fails when
+// they differ.
+const PR_STATE_TONE: Record<PRFact["state"], Tone> = {
+  merged: "ok",
+  open: "none",
+  declined: "none",
+  deleted: "none",
 };
 
 // A failed sync shows its phase.
-const DEPLOY_CLASS: Record<DeployFact["class"], [string | null, Tone]> = {
-  failed: [null, "fail"],
-  release: ["Release", "ok"],
-  first_seen: ["Erstdeploy", "warn"],
-  sync: ["Sync ohne neue Images", "none"],
+const DEPLOY_TONE: Record<DeployFact["class"], Tone> = {
+  failed: "fail",
+  release: "ok",
+  first_seen: "warn",
+  sync: "none",
 };
 
-// A PR's change type, from its branch prefix (parse.ChangeType). "Anderes" is
-// searched by the backend too (changeTypeTerm); the others match the code.
-const CHANGE_TYPE: Record<string, string> = {
-  feature: "Feature",
-  bugfix: "Bugfix",
-  hotfix: "Hotfix",
-  chore: "Chore",
-  refactor: "Refactor",
-  docs: "Docs",
-  other: "Anderes",
-};
+// A PR's change type, from its branch prefix (parse.ChangeType); a prefix
+// terms.json does not know yet shows as the backend sent it.
+type ChangeType = keyof typeof terms.en.changeType;
+const isChangeType = (s: string): s is ChangeType =>
+  Object.hasOwn(terms.en.changeType, s);
 
-// By the backend's verdict, whichever CI's words the status is in.
+// By the backend's verdict, whichever CI's words the status is in; the
+// word is the backend's outcome in the viewer's language, or the CI's own.
 const RUN_TONE: Record<RunFact["verdict"], Tone> = {
   success: "ok",
   failure: "fail",
@@ -104,33 +102,32 @@ export function Facts({
   tab: Tab;
   onTab: (t: Tab) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <section id="daten" aria-labelledby="h-daten" className="mt-10">
       <SectionHead
         id="h-daten"
-        eyebrow="Einzelfakten hinter allen Zahlen"
-        title="Daten"
-        lead="Jede Zahl oben besteht aus diesen PRs, Deploys und Läufen. Die Suche filtert nur diese Tabellen."
+        eyebrow={t("facts.eyebrow")}
+        title={t("facts.title")}
+        lead={t("facts.lead")}
       />
       <div className="no-print mb-3 max-w-[480px]">
         <label htmlFor="search" className="sr-only">
-          Suche nach Repo, App, PR oder Jira-Key
+          {t("facts.searchLabel")}
         </label>
         <input
           id="search"
           type="search"
           value={input}
           onChange={(e) => onInput(e.target.value)}
-          placeholder="Repo, App, PR, Jira-Key …"
+          placeholder={t("facts.placeholder")}
           className="box-border h-9 w-full rounded-ui-sm border border-border bg-bg px-3 text-[13.5px] text-ink focus-visible:outline-2 focus-visible:outline-accent-strong"
         />
       </div>
       {facts ? (
         <FactsTables facts={facts} q={q} tab={tab} onTab={onTab} />
       ) : failed ? (
-        <p className="m-0 text-[13.5px] text-muted">
-          Die Einzelfakten konnten nicht geladen werden; die Meldung steht oben.
-        </p>
+        <p className="m-0 text-[13.5px] text-muted">{t("facts.failed")}</p>
       ) : (
         <div aria-busy="true" className="skeleton h-40 rounded-ui-lg" />
       )}
@@ -149,6 +146,7 @@ function FactsTables({
   tab: Tab;
   onTab: (t: Tab) => void;
 }) {
+  const { t } = useTranslation();
   const prod = facts.production_stage;
   const counts: Record<Tab, number> = {
     prs: facts.prs.count,
@@ -156,23 +154,31 @@ function FactsTables({
     runs: facts.runs.count,
   };
   const tabs: [Tab, string][] = [
-    ["prs", "PRs"],
-    ["deploys", "Deploys"],
-    ["runs", "Läufe"],
+    ["prs", t("facts.tabPRs")],
+    ["deploys", t("facts.tabDeploys")],
+    ["runs", t("facts.tabRuns")],
   ];
+  const prType = (p: PRFact) =>
+    p.gitops
+      ? t("facts.promotion")
+      : p.change_type
+        ? isChangeType(p.change_type)
+          ? t(`facts.changeType.${p.change_type}`)
+          : p.change_type
+        : "–";
 
   let table: ReactNode;
   if (tab === "prs") {
     table = (
       <Table
         cols={[
-          { label: "PR" },
-          { label: "Repo" },
-          { label: "Typ" },
-          { label: "Review", right: true },
-          { label: "Cycle", right: true },
-          { label: `bis ${prod}`, right: true },
-          { label: "Status" },
+          { label: t("facts.colPR") },
+          { label: t("facts.colRepo") },
+          { label: t("facts.colType") },
+          { label: t("facts.colReview"), right: true },
+          { label: t("facts.colCycle"), right: true },
+          { label: t("facts.colToProd", { prod }), right: true },
+          { label: t("facts.colStatus") },
         ]}
         rows={facts.prs.rows.map((p) => [
           <>
@@ -183,17 +189,19 @@ function FactsTables({
           </>,
           <Mono className="whitespace-nowrap">{p.repo}</Mono>,
           <span className="text-muted">
-            {p.gitops
-              ? "Promotion"
-              : p.change_type
-                ? (CHANGE_TYPE[p.change_type] ?? p.change_type)
-                : "–"}
-            {p.bot ? " · Bot" : ""}
+            {prType(p)}
+            {p.bot ? t("facts.bot") : ""}
           </span>,
           dur(p.review_s),
           dur(p.cycle_s),
-          p.merged_at ? (p.prod_at ? dur(p.to_prod_s) : "Nein") : "–",
-          <Pill tone={PR_STATE[p.state][1]}>{PR_STATE[p.state][0]}</Pill>,
+          p.merged_at
+            ? p.prod_at
+              ? dur(p.to_prod_s)
+              : t("facts.notOnProd")
+            : "–",
+          <Pill tone={PR_STATE_TONE[p.state]}>
+            {t(`facts.prState.${p.state}`)}
+          </Pill>,
         ])}
       />
     );
@@ -201,12 +209,12 @@ function FactsTables({
     table = (
       <Table
         cols={[
-          { label: "Zeitpunkt" },
-          { label: "Argo-App" },
-          { label: "Stufe" },
-          { label: "Revision" },
-          { label: "Neue Images" },
-          { label: "Zählt als" },
+          { label: t("facts.colAt") },
+          { label: t("facts.colApp") },
+          { label: t("facts.colStage") },
+          { label: t("facts.colRevision") },
+          { label: t("facts.colNewImages") },
+          { label: t("facts.colCountsAs") },
         ]}
         rows={facts.deploys.rows.map((d) => [
           <span className="whitespace-nowrap tabular-nums">
@@ -220,8 +228,8 @@ function FactsTables({
               ? d.new_images.map(shortImage).join(", ")
               : "–"}
           </Mono>,
-          <Pill tone={DEPLOY_CLASS[d.class][1]}>
-            {DEPLOY_CLASS[d.class][0] ?? d.phase}
+          <Pill tone={DEPLOY_TONE[d.class]}>
+            {d.class === "failed" ? d.phase : t(`facts.deployClass.${d.class}`)}
           </Pill>,
         ])}
       />
@@ -230,18 +238,18 @@ function FactsTables({
     table = (
       <Table
         cols={[
-          { label: "Pipeline" },
-          { label: "Lauf", right: true },
-          { label: "Art" },
-          { label: "Commit" },
-          { label: "Dauer", right: true },
-          { label: "Images" },
-          { label: "Status" },
+          { label: t("facts.colPipeline") },
+          { label: t("facts.colRun"), right: true },
+          { label: t("facts.colKind") },
+          { label: t("facts.colCommit") },
+          { label: t("facts.colDuration"), right: true },
+          { label: t("facts.colImages") },
+          { label: t("facts.colStatus") },
         ]}
         rows={facts.runs.rows.map((r) => [
           <Mono className="whitespace-nowrap">{r.pipeline_name}</Mono>,
           <span className="text-muted">#{r.run_id}</span>,
-          <span className="text-muted">{KIND_LABEL[r.kind]}</span>,
+          <span className="text-muted">{t(`build.kind.${r.kind}`)}</span>,
           <Mono className="text-muted">{shortSha(r.commit_sha)}</Mono>,
           dur(r.duration_s),
           <Mono>
@@ -249,7 +257,15 @@ function FactsTables({
               ? r.image_refs.map(shortImage).join(", ")
               : "–"}
           </Mono>,
-          r.status ? <Pill tone={RUN_TONE[r.verdict]}>{r.status}</Pill> : "–",
+          r.status ? (
+            <Pill tone={RUN_TONE[r.verdict]}>
+              {r.outcome
+                ? t(`facts.runOutcome.${r.outcome}`)
+                : ciWord(r.status)}
+            </Pill>
+          ) : (
+            "–"
+          ),
         ])}
       />
     );
@@ -260,7 +276,7 @@ function FactsTables({
       <div className="flex flex-wrap items-center justify-between gap-2.5">
         <div
           role="tablist"
-          aria-label="Faktentabelle"
+          aria-label={t("facts.tabs")}
           className="inline-flex gap-0.5"
         >
           {tabs.map(([key, label]) => (
@@ -280,16 +296,16 @@ function FactsTables({
           ))}
         </div>
         <span className="text-[12.5px] text-muted">
-          {q ? `gefiltert nach «${q}»` : "Neueste zuerst"}
+          {q ? t("facts.filtered", { q }) : t("facts.newest")}
           {counts[tab] > facts.limit
-            ? ` · die ersten ${facts.limit} von ${counts[tab]}`
+            ? t("facts.firstOf", { limit: facts.limit, count: counts[tab] })
             : ""}
         </span>
       </div>
       <div className="mt-2.5 overflow-x-auto">
         {counts[tab] === 0 ? (
           <p className="my-3.5 text-[13.5px] text-muted">
-            {q ? `Keine Treffer für «${q}».` : "Keine Einträge im Zeitraum."}
+            {q ? t("facts.noHits", { q }) : t("facts.empty")}
           </p>
         ) : (
           table

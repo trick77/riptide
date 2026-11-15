@@ -1282,7 +1282,7 @@ components:
       type: object
       description: A finished CI run in the period, newest first.
       additionalProperties: false
-      required: [pipeline_name, run_id, kind, commit_sha, duration_s, image_refs, status, verdict]
+      required: [pipeline_name, run_id, kind, commit_sha, duration_s, image_refs, status, verdict, outcome]
       properties:
         pipeline_name: { type: string }
         run_id: { type: string }
@@ -1292,6 +1292,14 @@ components:
         image_refs: { type: array, items: { type: string } }
         status: { type: [string, "null"], description: As the CI sent it. }
         verdict: { $ref: "#/components/schemas/RunVerdict" }
+        outcome:
+          type: [string, "null"]
+          enum: [succeeded, failed, null]
+          description: |
+            The status in the UI's words when it plainly says succeeded
+            (SUCCESS, Succeeded, Completed) or failed (FAILURE, Failed);
+            null for any other word (UNSTABLE, ABORTED, …), which the UI
+            shows as the CI sent it.
 
     RunVerdict:
       type: string

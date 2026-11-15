@@ -2,7 +2,9 @@
 // only, through the generated utilities.
 
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import type { Change } from "./api";
+import { type UiLanguage, setLanguage } from "./i18n";
 
 export function Eyebrow({
   children,
@@ -37,6 +39,7 @@ export function SectionHead({
   lead?: ReactNode;
   frameworks?: Framework[];
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <Eyebrow>{eyebrow}</Eyebrow>
@@ -53,7 +56,7 @@ export function SectionHead({
       )}
       {frameworks && (
         <ul
-          aria-label="Einordnung"
+          aria-label={t("frameworksLabel")}
           className="m-0 mb-3.5 flex list-none flex-wrap gap-1.5 p-0"
         >
           {frameworks.map(([name, metric]) => (
@@ -73,19 +76,10 @@ export function SectionHead({
   );
 }
 
-const VERDICT: Record<Change["verdict"], [string, Tone] | null> = {
-  better: ["besser", "ok"],
-  worse: ["schlechter", "warn"],
-  same: ["unverändert", "none"],
-  none: null,
-};
-
-const REASON: Record<NonNullable<Change["reason"]>, string> = {
-  low_sample: "kein Vergleich: zu wenig Daten in einer der beiden Perioden",
-  incomplete:
-    "kein Vergleich: die Daten der Vorperiode sind nicht vollständig, oder Erstdeploys überwiegen",
-  no_value: "kein Vergleich: ein Wert fehlt",
-  undirected: "",
+const VERDICT_TONE: Record<Exclude<Change["verdict"], "none">, Tone> = {
+  better: "ok",
+  worse: "warn",
+  same: "none",
 };
 
 // A number against the previous period: before → now and the backend's
@@ -99,25 +93,64 @@ export function Compare({
   now: string;
   format: (v: number) => string;
 }) {
-  const v = VERDICT[change.verdict];
+  const { t } = useTranslation();
   if (change.prev == null)
     return (
       <div className="mt-1 border-t border-border-soft pt-2 text-xs text-muted">
-        {change.reason ? REASON[change.reason] : "kein Vergleich"}
+        {change.reason === "undirected"
+          ? ""
+          : change.reason
+            ? t(`compare.${change.reason}`)
+            : t("compare.none")}
       </div>
     );
+  const v = change.verdict;
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 border-t border-border-soft pt-2 text-[12.5px] text-ink-dim">
-      {v && <Pill tone={v[1]}>{v[0]}</Pill>}
+      {v !== "none" && <Pill tone={VERDICT_TONE[v]}>{t(`compare.${v}`)}</Pill>}
       <span>
-        Vorperiode{" "}
-        <span className="text-ink tabular-nums">{format(change.prev)}</span> →
-        jetzt <span className="text-ink tabular-nums">{now}</span>
+        {t("compare.previous")}{" "}
+        <span className="text-ink tabular-nums">{format(change.prev)}</span> →{" "}
+        {t("compare.now")} <span className="text-ink tabular-nums">{now}</span>
       </span>
       {change.reason === "undirected" && (
-        <span className="text-muted">ohne Richtung</span>
+        <span className="text-muted">{t("compare.undirected")}</span>
       )}
     </div>
+  );
+}
+
+// The header's language switch: the active language's code behind a
+// globe, a click switches to the other. Same markup as ../noergler's.
+export function LanguageSwitch() {
+  const { t, i18n } = useTranslation();
+  const next: UiLanguage = i18n.language === "de" ? "en" : "de";
+  return (
+    <button
+      type="button"
+      onClick={() => setLanguage(next)}
+      aria-label={t("lang.switch")}
+      title={t("lang.switch")}
+      className="no-print inline-flex h-8 items-center gap-1.5 rounded-ui-sm border border-border bg-panel px-2.5 text-[12.5px] tracking-[.06em] text-ink-dim hover:bg-active"
+    >
+      <svg
+        aria-hidden="true"
+        width="15"
+        height="15"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="text-muted"
+      >
+        <circle cx="12" cy="12" r="9" />
+        <path d="M3 12h18" />
+        <path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18z" />
+      </svg>
+      {t("lang.code")}
+    </button>
   );
 }
 
@@ -221,6 +254,7 @@ export function Tile({
   open,
   onWhy,
 }: TileProps) {
+  const { t } = useTranslation();
   return (
     <div
       className={`flex flex-col gap-1 rounded-ui border px-3.5 py-3 ${open ? "border-accent-fill bg-active" : "border-border bg-panel"}`}
@@ -236,7 +270,7 @@ export function Tile({
             onClick={onWhy}
             className="no-print rounded-md border-0 bg-transparent px-[7px] py-px text-xs whitespace-nowrap text-muted hover:bg-active hover:text-ink"
           >
-            Was heisst das?
+            {t("why.button")}
           </button>
         )}
       </div>
@@ -293,17 +327,19 @@ export type Why = {
 };
 
 export function WhyPanel({ why }: { why: Why }) {
+  const { t } = useTranslation();
+  const title = t("why.means", { title: why.title });
   const reading: [string, ReactNode][] = (
     [
-      [`Was heisst das? · ${why.title}`, why.means],
-      ["Genauer hinschauen, wenn", why.watch],
-      ["Hebel", why.lever],
+      [title, why.means],
+      [t("why.watch"), why.watch],
+      [t("common.lever"), why.lever],
     ] as [string, ReactNode][]
   ).filter(([, v]) => v != null);
   return (
     <div
       role="region"
-      aria-label={`Was heisst das? · ${why.title}`}
+      aria-label={title}
       className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-x-7 gap-y-4 rounded-ui-lg border border-elevated-border bg-active px-[18px] py-4"
     >
       {reading.map(([head, text]) => (
@@ -313,11 +349,11 @@ export function WhyPanel({ why }: { why: Why }) {
         </div>
       ))}
       <div>
-        <Eyebrow>Woher · Definition</Eyebrow>
+        <Eyebrow>{t("why.def")}</Eyebrow>
         <p className="mt-1.5 mb-0 text-[13.5px] text-ink-dim">{why.def}</p>
       </div>
       <div>
-        <Eyebrow>Datenbasis</Eyebrow>
+        <Eyebrow>{t("why.basis")}</Eyebrow>
         <p className="mt-1.5 mb-0 text-[13.5px] text-ink-dim">{why.basis}</p>
         <div className="mt-2 flex flex-wrap gap-1.5">
           {why.filters.map((f) => (
@@ -331,10 +367,10 @@ export function WhyPanel({ why }: { why: Why }) {
         </div>
       </div>
       <div>
-        <Eyebrow>Abdeckung</Eyebrow>
+        <Eyebrow>{t("why.coverage")}</Eyebrow>
         <p className="mt-1.5 mb-0 text-[13.5px] text-ink-dim">{why.coverage}</p>
         <p className="mt-1.5 mb-0 text-[12.5px] text-muted">
-          Query:{" "}
+          {t("why.query")}{" "}
           <span className="font-mono text-xs text-accent-strong">
             {why.query}
           </span>

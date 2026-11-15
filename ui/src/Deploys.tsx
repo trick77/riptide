@@ -1,12 +1,14 @@
 // How evenly code reaches production: releases per week against the
 // team's own median week, and the mix of work merged.
 
+import { useTranslation } from "react-i18next";
 import type { Metrics } from "./api";
 import { WeekStack } from "./charts";
 import { num, pct } from "./format";
 import { Card, CardHead, Compare, Legend, SectionHead, Swatch } from "./ui";
 
 export function Deploys({ m }: { m: Metrics }) {
+  const { t } = useTranslation();
   const prod = m.delivery.production_stage;
   const freq = m.delivery.frequency;
   const weeks = m.period.weeks;
@@ -14,90 +16,116 @@ export function Deploys({ m }: { m: Metrics }) {
     <section id="deploys" aria-labelledby="h-deploys" className="mt-10">
       <SectionHead
         id="h-deploys"
-        eyebrow="Ausrollen"
-        title={`Wie gleichmässig kommt Code nach ${prod}?`}
-        lead="Gleichmässig ist gut: Lücken und Spitzen deuten auf Sammelreleases, die viele Änderungen auf einmal ausliefern."
+        eyebrow={t("deploys.eyebrow")}
+        title={t("deploys.title", { prod })}
+        lead={t("deploys.lead")}
         frameworks={[
           ["DORA", "Deployment frequency"],
-          ["Core 4", "Speed, sekundär"],
+          ["Core 4", t("deploys.fwSpeed")],
           ["Flow", "Flow velocity"],
         ]}
       />
       <Card>
         <CardHead
-          title={`Releases auf ${prod} pro Woche`}
-          sub="Nur Releases mit neuen Images; die Linie ist die typische Woche des Teams"
+          title={t("deploys.cardTitle", { prod })}
+          sub={t("deploys.cardSub")}
           right={
             <Legend>
-              <Swatch className="bg-s1" label="Release" />
+              <Swatch className="bg-s1" label={t("deploys.release")} />
             </Legend>
           }
         />
         <WeekStack
-          labels={weeks.map((w) => `KW ${w.kw}`)}
-          series={[{ key: "release", label: "Releases", className: "bg-s1" }]}
+          labels={weeks.map((w) => t("common.cw", { kw: w.kw }))}
+          series={[
+            {
+              key: "release",
+              label: t("deploys.releases"),
+              className: "bg-s1",
+            },
+          ]}
           values={freq.weeks}
           reference={
             freq.median_week == null
               ? undefined
               : {
                   value: freq.median_week,
-                  label: `typisch ${num(freq.median_week, 1)} pro Woche`,
+                  label: t("deploys.typical", {
+                    n: num(freq.median_week, 1),
+                  }),
                 }
           }
-          ariaLabel={`Releases auf ${prod} pro Woche: ${freq.weeks
-            .map((w, i) => `KW ${weeks[i].kw} ${w.release}`)
-            .join(", ")}`}
+          ariaLabel={t("deploys.aria", {
+            prod,
+            parts: freq.weeks
+              .map(
+                (w, i) => `${t("common.cw", { kw: weeks[i].kw })} ${w.release}`,
+              )
+              .join(", "),
+          })}
         />
         <p className="mt-2.5 mb-0 text-xs text-muted">
-          {freq.resyncs} Syncs ohne neue Images und {freq.first_seen}{" "}
-          Erstdeploys zählen nicht; was sie sind, steht bei der Deploy-Frequenz
-          unter «Was heisst das?». Die typische Woche ist der Median über die
-          ganzen Wochen, in denen Argo CD meldete.
+          {t("deploys.note", {
+            resyncs: t("common.resyncs", { count: freq.resyncs }),
+            firstSeen: t("common.firstDeploys", { count: freq.first_seen }),
+          })}
         </p>
       </Card>
     </section>
   );
 }
 
-const MIX: [keyof Metrics["review"]["mix_total"], string, string][] = [
-  ["feature", "Feature", "bg-s1"],
-  ["bugfix", "Bugfix", "bg-s2"],
-  ["hotfix", "Hotfix", "bg-s3"],
-  ["other", "Anderes / ohne Präfix", "bg-other"],
+const MIX: [keyof Metrics["review"]["mix_total"], string][] = [
+  ["feature", "bg-s1"],
+  ["bugfix", "bg-s2"],
+  ["hotfix", "bg-s3"],
+  ["other", "bg-other"],
 ];
 
 export function Mix({ m }: { m: Metrics }) {
+  const { t } = useTranslation();
   const r = m.review;
-  const shown = MIX.filter(([k]) => (r.mix_share[k] ?? 0) > 0);
+  const mix = MIX.map(([k, cls]) => [k, t(`mix.${k}`), cls] as const);
+  const shown = mix.filter(([k]) => (r.mix_share[k] ?? 0) > 0);
   return (
     <section id="arbeitsmix" aria-labelledby="h-arbeitsmix" className="mt-10">
       <SectionHead
         id="h-arbeitsmix"
-        eyebrow="Arbeitsmix"
-        title="Woran arbeitet das Team?"
-        lead="Anteil der gemergten PRs nach Branch-Präfix, nicht der Zeit. Kein Zielwert: wichtig ist, ob der Mix zum Plan des Teams passt."
+        eyebrow={t("mix.eyebrow")}
+        title={t("mix.title")}
+        lead={t("mix.lead")}
         frameworks={[
-          ["Core 4", "Impact, Näherung für «Zeit für Neues»"],
+          ["Core 4", t("mix.fwImpact")],
           ["Flow", "Flow distribution"],
         ]}
       />
       <Card>
         <CardHead
-          title="Gemergte PRs nach Art"
-          sub={`${r.merged} PRs im Zeitraum, ${m.bots ? "Bots eingeschlossen" : "ohne Bots"}`}
+          title={t("mix.cardTitle")}
+          sub={t("mix.cardSub", {
+            count: r.merged,
+            bots: m.bots ? t("mix.botsIn") : t("common.withoutBots"),
+          })}
         />
         {shown.length ? (
           <>
             <div
               role="img"
-              aria-label={`Arbeitsmix: ${shown.map(([k, l]) => `${l} ${pct(r.mix_share[k])}`).join(", ")}`}
+              aria-label={t("mix.aria", {
+                parts: shown
+                  .map(([k, l]) => `${l} ${pct(r.mix_share[k])}`)
+                  .join(", "),
+              })}
               className="mt-3.5 flex h-7 gap-0.5"
             >
               {shown.map(([k, l, cls]) => (
                 <div
                   key={k}
-                  title={`${l}: ${r.mix_total[k]} PRs, ${pct(r.mix_share[k])}`}
+                  title={t("mix.barTitle", {
+                    label: l,
+                    count: r.mix_total[k],
+                    share: pct(r.mix_share[k]),
+                  })}
                   className={`flex h-7 min-w-[4px] items-center overflow-hidden px-2 text-xs whitespace-nowrap text-ink first:rounded-l-md last:rounded-r-md ${cls}`}
                   style={{ flex: `${r.mix_share[k]} 1 0` }}
                 >
@@ -107,7 +135,7 @@ export function Mix({ m }: { m: Metrics }) {
             </div>
             <div className="mt-2">
               <Legend>
-                {MIX.map(([k, l, cls]) => (
+                {mix.map(([k, l, cls]) => (
                   <Swatch
                     key={k}
                     className={cls}
@@ -119,15 +147,14 @@ export function Mix({ m }: { m: Metrics }) {
           </>
         ) : (
           <p className="mt-3.5 mb-0 text-[13.5px] text-muted">
-            Keine gemergten PRs im Zeitraum.
+            {t("common.noMergedPRs")}
           </p>
         )}
         <div className="mt-4 text-[13.5px] text-ink-dim">
           <span className="font-medium text-ink">
-            {pct(r.untracked_rate)} ohne Jira-Key
+            {t("mix.untracked", { rate: pct(r.untracked_rate) })}
           </span>{" "}
-          ({r.untracked} von {r.merged}). Diese Arbeit taucht in keiner Planung
-          auf. Frage fürs Team: Key vergessen oder ungeplante Arbeit?
+          {t("mix.untrackedText", { n: r.untracked, total: r.merged })}
         </div>
         <Compare
           change={m.comparison.untracked}
