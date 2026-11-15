@@ -235,7 +235,7 @@ func build(ds *dataset.Dataset, p Period, f filter) Build {
 	out.Hotspots = Hotspots{
 		MinRuns: HotspotMinRuns, SlowFactor: SlowFactor, FlakyFactor: FlakyFactor,
 		OutlierFactor: OutlierFactor, OutlierMinS: OutlierMinS, OutlierRepoMinRuns: OutlierRepoMinRuns,
-		Kinds: []KindHotspots{}, Outliers: []Outlier{},
+		Kinds: []KindHotspots{}, Outliers: []Outlier{}, OutlierGroups: []OutlierGroup{},
 	}
 	for _, kind := range runKinds {
 		rs := by[kind]
@@ -285,6 +285,10 @@ func build(ds *dataset.Dataset, p Period, f filter) Build {
 		out.Hotspots.Outliers = append(out.Hotspots.Outliers, outliers...)
 	}
 	o := out.Hotspots.Outliers
+	// Grouped before the cut to the longest: a short stuck run still tells
+	// that the agents were gone.
+	out.Hotspots.OutlierGroups = outlierGroups(o)
+	out.Hotspots.OutlierCount = len(o)
 	slices.SortStableFunc(o, func(a, b Outlier) int { return cmp.Compare(b.DurationS, a.DurationS) })
 	out.Hotspots.Outliers = o[:min(len(o), outlierTop)]
 	return out
@@ -406,8 +410,15 @@ const (
 	// in the outlier cut: fewer than HotspotMinRuns, so a nightly of a few
 	// runs a period, hours long, keeps its time.
 	OutlierRepoMinRuns = 3
-	hotspotTop         = 8
-	outlierTop         = 10
+	// OutlierGroupWindow: an outlier started within this of a group's last
+	// one belongs to it; stuck together, they point at the agents, not at
+	// the repos.
+	OutlierGroupWindow = 30 * time.Minute
+	// OutlierGroupRepos is the fewest repos a group needs to be shared
+	// infrastructure rather than one repo stuck twice.
+	OutlierGroupRepos = 2
+	hotspotTop        = 8
+	outlierTop        = 10
 )
 
 // RepoDuration is one repo's run durations against its kind's team median,
@@ -453,6 +464,10 @@ type KindHotspots struct {
 	// Failing are the repos with broken runs by wasted CI time: the top 8
 	// and every flaky one.
 	Failing []RepoFailures `json:"failing"`
+	// Repos are both lists in one, a row per repo: the flaky ones by wasted
+	// CI time, then the slow ones by factor, then the rest by wasted time
+	// and median; the top 8 and every flagged one.
+	Repos []RepoHotspot `json:"repos"`
 	// OutlierThresholdS is OutlierFactor times the team's median, outliers
 	// included, at least OutlierMinS; null without a run with a verdict and
 	// a duration. A repo with a longer median of its own has a higher one.
@@ -489,6 +504,107 @@ type Hotspots struct {
 	// Outliers across kinds, longest first, the top 10: runs of several
 	// repos stuck at the same time point at shared infrastructure.
 	Outliers []Outlier `json:"outliers"`
+	// OutlierCount is every outlier of the period, before the cut to the top.
+	OutlierCount int `json:"outlier_count"`
+	// OutlierGroups are the outliers of all kinds that started close
+	// together, two runs or more, the largest first.
+	OutlierGroups []OutlierGroup `json:"outlier_groups"`
+}
+
+// RepoHotspot is one repo against the team's runs of the same kind,
+// duration and failures in one row.
+type RepoHotspot struct {
+	Repo string `json:"repo"`
+	// Runs have a verdict; Duration is over those with a duration too,
+	// outliers aside.
+	Runs          int      `json:"runs"`
+	Duration      Spread   `json:"duration"`
+	Factor        *float64 `json:"factor"`
+	Slow          bool     `json:"slow"`
+	Failures      int      `json:"failures"`
+	FailureRate   *float64 `json:"failure_rate"`
+	WastedSeconds float64  `json:"wasted_seconds"`
+	Flaky         bool     `json:"flaky"`
+}
+
+// OutlierGroup is outliers whose starts follow each other within
+// OutlierGroupWindow: chained, so a long outage is one group of any span.
+type OutlierGroup struct {
+	From time.Time `json:"from"`
+	To   time.Time `json:"to"`
+	Runs int       `json:"runs"`
+	// Repos are the distinct repos, by name.
+	Repos []string `json:"repos"`
+	// Shared: OutlierGroupRepos repos or more, so the agents, not a repo.
+	Shared bool `json:"shared"`
+}
+
+// compareHotspots orders RepoHotspot rows: flaky by wasted CI time, then
+// slow by factor, then the rest by wasted time and median.
+func compareHotspots(a, b RepoHotspot) int {
+	rank := func(h RepoHotspot) int {
+		switch {
+		case h.Flaky:
+			return 0
+		case h.Slow:
+			return 1
+		}
+		return 2
+	}
+	p50 := func(h RepoHotspot) float64 {
+		if h.Duration.P50 == nil {
+			return 0
+		}
+		return *h.Duration.P50
+	}
+	factor := func(h RepoHotspot) float64 {
+		if h.Factor == nil {
+			return 0
+		}
+		return *h.Factor
+	}
+	c := cmp.Compare(rank(a), rank(b))
+	if c == 0 && rank(a) == 1 {
+		c = cmp.Compare(factor(b), factor(a))
+	}
+	return cmp.Or(c, cmp.Compare(b.WastedSeconds, a.WastedSeconds), cmp.Compare(p50(b), p50(a)),
+		cmp.Compare(a.Repo, b.Repo))
+}
+
+// outlierGroups groups the outliers by start, chained: a run started within
+// OutlierGroupWindow of the group's last one joins it, so an outage of hours
+// stays one group. Single ones are no group.
+func outlierGroups(outliers []Outlier) []OutlierGroup {
+	var started []Outlier
+	for _, o := range outliers {
+		if o.StartedAt != nil {
+			started = append(started, o)
+		}
+	}
+	slices.SortStableFunc(started, func(a, b Outlier) int { return a.StartedAt.Compare(*b.StartedAt) })
+	out := []OutlierGroup{}
+	for i := 0; i < len(started); {
+		j := i + 1
+		for j < len(started) && started[j].StartedAt.Sub(*started[j-1].StartedAt) <= OutlierGroupWindow {
+			j++
+		}
+		if j-i > 1 {
+			var repos []string
+			for _, o := range started[i:j] {
+				if !slices.Contains(repos, o.Repo) {
+					repos = append(repos, o.Repo)
+				}
+			}
+			slices.Sort(repos)
+			out = append(out, OutlierGroup{
+				From: started[i].StartedAt.UTC(), To: started[j-1].StartedAt.UTC(), Runs: j - i,
+				Repos: repos, Shared: len(repos) >= OutlierGroupRepos,
+			})
+		}
+		i = j
+	}
+	slices.SortStableFunc(out, func(a, b OutlierGroup) int { return cmp.Compare(b.Runs, a.Runs) })
+	return out
 }
 
 // flakyThreshold is the failure rate that flags a repo against the team's
@@ -568,28 +684,39 @@ func kindHotspots(kind string, kr kindRuns) (KindHotspots, []Outlier) {
 	}
 	k := KindHotspots{
 		Kind: kind, Duration: spread(durations), FailureRate: ratio(failures, counted),
-		Durations: []RepoDuration{}, Failing: []RepoFailures{},
+		Durations: []RepoDuration{}, Failing: []RepoFailures{}, Repos: []RepoHotspot{},
 	}
 	for repo, rr := range repos {
+		h := RepoHotspot{
+			Repo: repo, Runs: rr.counted, Duration: spread(rr.durations), Failures: rr.failures,
+			FailureRate: ratio(rr.failures, rr.counted), WastedSeconds: rr.wasted,
+		}
 		if len(rr.durations) > 0 {
-			d := RepoDuration{Repo: repo, Runs: rr.timed, Duration: spread(rr.durations)}
+			d := RepoDuration{Repo: repo, Runs: rr.timed, Duration: h.Duration}
 			if t := k.Duration.P50; t != nil && *t > 0 {
 				d.Factor = ptr(*d.Duration.P50 / *t)
 				d.Slow = d.Runs >= HotspotMinRuns && *d.Factor >= SlowFactor
 			}
 			k.Durations = append(k.Durations, d)
+			h.Factor, h.Slow = d.Factor, d.Slow
 		}
 		if rr.failures > 0 {
 			f := RepoFailures{
 				Repo: repo, Runs: rr.counted, Failures: rr.failures,
-				FailureRate: ratio(rr.failures, rr.counted), WastedSeconds: rr.wasted,
+				FailureRate: h.FailureRate, WastedSeconds: rr.wasted,
 			}
 			if t := k.FailureRate; t != nil && *t > 0 {
 				f.Flaky = f.Runs >= HotspotMinRuns && *f.FailureRate >= flakyThreshold(*t)
 			}
 			k.Failing = append(k.Failing, f)
+			h.Flaky = f.Flaky
+		}
+		if rr.counted > 0 {
+			k.Repos = append(k.Repos, h)
 		}
 	}
+	slices.SortFunc(k.Repos, compareHotspots)
+	k.Repos = topOrFlagged(k.Repos, func(h RepoHotspot) bool { return h.Flaky || h.Slow })
 	slices.SortFunc(k.Durations, func(a, b RepoDuration) int {
 		return cmp.Or(cmp.Compare(*b.Duration.P50, *a.Duration.P50), cmp.Compare(a.Repo, b.Repo))
 	})

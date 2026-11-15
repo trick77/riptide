@@ -104,7 +104,22 @@ func TestReadParams(t *testing.T) {
 			h.mem.params = nil
 			w := h.serveUI(newRequest(http.MethodGet, path+c.query, nil))
 			expectStatus(t, w, http.StatusOK)
-			p := h.mem.params[0]
+			// The metrics read the previous period too, side by side: the
+			// same weeks right before, in either order.
+			reads := map[bool]dataset.Params{}
+			for _, x := range h.mem.params {
+				reads[x.To.Equal(now)] = x
+			}
+			p := reads[true]
+			if path == "/api/metrics?" {
+				prev, ok := reads[false]
+				if len(h.mem.params) != 2 || !ok || !prev.To.Equal(c.from) ||
+					prev.From.Before(c.from.AddDate(0, 0, -7*c.weeks-1)) {
+					t.Errorf("%s%s: previous = %+v", path, c.query, h.mem.params)
+				}
+			} else if len(h.mem.params) != 1 {
+				t.Errorf("%s%s: reads = %d", path, c.query, len(h.mem.params))
+			}
 			// The facts read no lead times or reviews.
 			if p.Team != "checkout" || !p.From.Equal(c.from) || !p.To.Equal(now) || p.ProductionStage != "prod" ||
 				!p.Now.Equal(now) || p.FactsOnly != (path == "/api/facts?") {

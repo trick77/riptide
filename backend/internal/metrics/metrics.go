@@ -15,6 +15,8 @@ const lowSample = 10
 // Params selects what the page shows of a dataset.
 type Params struct {
 	Period Period
+	// Previous is the period Period is compared with (PreviousPeriod).
+	Previous Period
 	// Product is a Bitbucket project key; empty, or one the dataset does
 	// not know, is all products.
 	Product string
@@ -58,22 +60,40 @@ type Metrics struct {
 	Review    Review   `json:"review"`
 	Build     Build    `json:"build"`
 	Costs     Costs    `json:"costs"`
+	// Findings are what the numbers ask the team to look at.
+	Findings []Finding `json:"findings"`
+	// Comparison is the numbers against the previous period.
+	Comparison Comparison `json:"comparison"`
 }
 
-// Compute is every metric of the page.
-func Compute(ds *dataset.Dataset, p Params) Metrics {
+// Compute is every metric of the page, ds over p.Period, prev the dataset
+// over p.Previous it is compared with.
+func Compute(ds, prev *dataset.Dataset, p Params) Metrics {
+	// The product as this period's data resolves it, for both periods: a
+	// product the previous one lacks is that product without data, not all.
 	f := newFilter(ds, p)
-	humans := mergedPRs(ds, p.Period, f, false)
+	m := compute(ds, p.Period, f)
+	m.Findings = findings(m.LeadChain, m.Build, m.Review)
+	if prev == nil {
+		prev = &dataset.Dataset{Meta: ds.Meta}
+	}
+	m.Comparison = compare(m, compute(prev, p.Previous, f), p.Previous)
+	return m
+}
+
+// compute is the page's sections over one period.
+func compute(ds *dataset.Dataset, period Period, f filter) Metrics {
+	humans := mergedPRs(ds, period, f, false)
 	ch := chain(ds, humans)
 	m := Metrics{
 		Meta:      ds.Meta,
-		Period:    p.Period,
+		Period:    period,
 		Products:  ds.Products,
 		Bots:      f.bots,
-		Delivery:  delivery(ds, p.Period, f, ch),
+		Delivery:  delivery(ds, period, f, ch),
 		LeadChain: leadChain(ch),
-		Review:    review(humans, mergedPRs(ds, p.Period, f, f.bots), p.Period, ch),
-		Build:     build(ds, p.Period, f),
+		Review:    review(humans, mergedPRs(ds, period, f, f.bots), period, ch),
+		Build:     build(ds, period, f),
 		Costs:     costs(ds, f),
 	}
 	if f.product != "" {
@@ -135,6 +155,10 @@ type DeployFrequency struct {
 	SuccessRate *float64     `json:"success_rate"`
 	// ArgoReporting: Argo CD reported for the team before the period's end.
 	ArgoReporting bool `json:"argo_reporting"`
+	// MedianWeek is the median of the releases per week over the whole weeks
+	// Argo CD reported all of: the running week and one Argo CD started in
+	// would read low. Null without such a week.
+	MedianWeek *float64 `json:"median_week"`
 }
 
 func deployFrequency(ds *dataset.Dataset, p Period, f filter, env string) DeployFrequency {
@@ -203,6 +227,13 @@ func deployFrequency(ds *dataset.Dataset, p Period, f filter, env string) Deploy
 	out.SuccessRate = ratio(out.Succeeded, out.Finished)
 	start := ds.Meta.DataStart.ArgoCD
 	out.ArgoReporting = start != nil && start.Before(p.To)
+	var whole []float64
+	for i, w := range p.Weeks {
+		if start != nil && !start.After(w.Start) && !w.End.After(p.To) {
+			whole = append(whole, float64(out.Weeks[i].Release))
+		}
+	}
+	out.MedianWeek = Median(whole)
 	return out
 }
 
@@ -420,14 +451,16 @@ type Chain struct {
 	// Stages in order; to_pre only when there is a stage before production.
 	Stages         []Stage `json:"stages"`
 	PreEnvironment *string `json:"pre_environment"`
-	// SumP50 is the sum of the stage medians; null when no stage has data.
-	SumP50 *float64 `json:"sum_p50"`
+	// AttentionShare and MinPRs are when the hot stage is a finding to
+	// attend to, not a hint: its share at least, on at least so many PRs.
+	AttentionShare float64 `json:"attention_share"`
+	MinPRs         int     `json:"min_prs"`
 	// BeforeProd is the sum of the medians before the last stage.
 	BeforeProd float64 `json:"before_prod"`
 }
 
 func leadChain(c rawChain) Chain {
-	out := Chain{PreEnvironment: c.preEnvironment}
+	out := Chain{PreEnvironment: c.preEnvironment, AttentionShare: StageAttention, MinPRs: lowSample}
 	var total float64
 	withData := 0
 	for _, k := range stageKeys {
@@ -445,7 +478,6 @@ func leadChain(c rawChain) Chain {
 	if withData == 0 {
 		return out
 	}
-	out.SumP50 = ptr(total)
 	hot := -1
 	for i := range out.Stages {
 		s := &out.Stages[i]
@@ -558,8 +590,34 @@ type Review struct {
 	Untracked      int        `json:"untracked"`
 	UntrackedRate  *float64   `json:"untracked_rate"`
 	CycleHistogram Histograms `json:"cycle_histogram"`
-	ChangeMix      []MixWeek  `json:"change_mix"`
+	// WithinDay are the human PRs merged within a day of opening, of those
+	// in Cycle.
+	WithinDay Share     `json:"within_day"`
+	ChangeMix []MixWeek `json:"change_mix"`
+	// MixTotal is ChangeMix over the period, MixShare each prefix's part of
+	// it: the mix reads off the whole period, a week of few PRs swings.
+	MixTotal MixWeek  `json:"mix_total"`
+	MixShare MixShare `json:"mix_share"`
 }
+
+// Share is count of n; Rate null when n is 0.
+type Share struct {
+	Count int      `json:"count"`
+	N     int      `json:"n"`
+	Rate  *float64 `json:"rate"`
+}
+
+// MixShare is each branch prefix's part of the merged PRs; null without any.
+type MixShare struct {
+	Feature *float64 `json:"feature"`
+	Bugfix  *float64 `json:"bugfix"`
+	Hotfix  *float64 `json:"hotfix"`
+	Other   *float64 `json:"other"`
+}
+
+// Day is the cycle time a PR is merged under to count in WithinDay:
+// exclusive, as the histogram's bounds, so the two agree at 24 h.
+const Day = 86400.0
 
 // review is the section over the human PRs merged in the period and those
 // counted per the bot filter, both from mergedPRs.
@@ -575,6 +633,21 @@ func review(humans, withBots []dataset.PR, p Period, ch rawChain) Review {
 		}
 	}
 	cycle := cycleTimes(humans)
+	within := 0
+	for _, s := range cycle {
+		if s < Day {
+			within++
+		}
+	}
+	mix := changeMix(withBots, p)
+	var total MixWeek
+	for _, w := range mix {
+		total.Feature += w.Feature
+		total.Bugfix += w.Bugfix
+		total.Hotfix += w.Hotfix
+		total.Other += w.Other
+	}
+	all := total.Feature + total.Bugfix + total.Hotfix + total.Other
 	return Review{
 		Cycle:                spread(cycle),
 		Review:               spread(ch.waits[StageReview]),
@@ -589,7 +662,13 @@ func review(humans, withBots []dataset.PR, p Period, ch rawChain) Review {
 			Human:        histogram(cycle),
 			Bot:          histogram(cycleTimes(bots)),
 		},
-		ChangeMix: changeMix(withBots, p),
+		WithinDay: Share{Count: within, N: len(cycle), Rate: ratio(within, len(cycle))},
+		ChangeMix: mix,
+		MixTotal:  total,
+		MixShare: MixShare{
+			Feature: ratio(total.Feature, all), Bugfix: ratio(total.Bugfix, all),
+			Hotfix: ratio(total.Hotfix, all), Other: ratio(total.Other, all),
+		},
 	}
 }
 
@@ -610,8 +689,10 @@ type Costs struct {
 	// PerKloc is per 1000 changed lines of merged PRs; null without line
 	// counts.
 	PerKloc *float64 `json:"per_kloc"`
-	// Wasted is spent on PRs declined or deleted.
-	Wasted float64 `json:"wasted"`
+	// Wasted is spent on PRs declined or deleted; WastedShare its part of
+	// Total, null when Total is 0.
+	Wasted      float64  `json:"wasted"`
+	WastedShare *float64 `json:"wasted_share"`
 	// Rows are by product (all products) or by repo (one product), largest
 	// first.
 	Rows          []CostRow `json:"rows"`
@@ -686,6 +767,9 @@ func costs(ds *dataset.Dataset, f filter) Costs {
 		Wasted:        float(wasted),
 		Rows:          []CostRow{},
 		ReviewedRepos: len(repos),
+	}
+	if total.Sign() > 0 {
+		out.WastedShare = ptr(float(new(big.Rat).Quo(wasted, total)))
 	}
 	if lines > 0 {
 		k := new(big.Rat).Quo(merged, new(big.Rat).SetInt64(lines))
