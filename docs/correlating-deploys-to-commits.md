@@ -1,6 +1,6 @@
 # Correlating deploys back to commits
 
-Lead time for changes, tickets-per-deploy and per-ticket flow all need the same
+Change lead time, tickets-per-deploy and per-ticket flow all need the same
 thing: given an Argo CD deploy, which App-repo commits did it ship?
 
 `argocd_events.revision` does **not** answer that. It is the GitOps-repo SHA —
