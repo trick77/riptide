@@ -155,17 +155,19 @@ function Hotspots({
 function Outliers({
   rows,
   factor,
+  minS,
   minRuns,
 }: {
   rows: Outlier[];
   factor: number;
+  minS: number;
   minRuns: number;
 }) {
   return (
     <Card className="mt-3 overflow-x-auto">
       <CardHead
         title="Ausreisser"
-        sub={`Läufe über ${num(factor, 0)}× dem Median ihrer Art, längste zuerst`}
+        sub={`Läufe über ${num(factor, 0)}× dem Median ihrer Art und über ${dur(minS)}, längste zuerst`}
       />
       {rows.length ? (
         <div className="mt-3.5 grid min-w-[620px] grid-cols-[minmax(180px,2fr)_minmax(130px,1.2fr)_110px_80px_80px] items-center gap-x-3.5">
@@ -190,7 +192,7 @@ function Outliers({
                 {dur(o.duration_s)}
               </div>
               <div className={`${CELL} text-right text-ink-dim`}>
-                {num(o.factor, 0)}×
+                {o.factor != null ? `${num(o.factor, 0)}×` : "–"}
               </div>
             </div>
           ))}
@@ -203,10 +205,10 @@ function Outliers({
       <p className="mt-2.5 mb-0 text-xs text-muted">
         Hängen mehrere Pipelines zur selben Zeit, liegt es an der Infrastruktur
         (Agent weg, wartender Input-Schritt), nicht am Repo. Ein Repo mit
-        mindestens {minRuns} eigenen Läufen und längerem Median wird an diesem
-        gemessen: ein langsames Repo ist kein Ausreisser. Eine Art braucht dafür
-        mindestens {minRuns} Läufe mit Ergebnis; abgebrochene Läufe erscheinen
-        trotzdem. Ihre Zeit fehlt in Dauer, CI-Zeit und verschwendeter Zeit.
+        mindestens {minRuns} eigenen Läufen mit Ergebnis und Dauer muss zudem{" "}
+        {num(factor, 0)}× seinen eigenen Median überschreiten: ein langsames
+        Repo ist kein Ausreisser. Abgebrochene Läufe erscheinen trotzdem. Ihre
+        Zeit fehlt in Dauer, CI-Zeit und verschwendeter Zeit.
       </p>
     </Card>
   );
@@ -381,7 +383,8 @@ export function Build({ m }: { m: Metrics }) {
           <Outliers
             rows={h.outliers}
             factor={h.outlier_factor}
-            minRuns={h.min_runs}
+            minS={h.outlier_min_s}
+            minRuns={h.outlier_repo_min_runs}
           />
         </>
       )}
