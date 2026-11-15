@@ -72,17 +72,22 @@ func Compute(ds, prev *dataset.Dataset, p Params) Metrics {
 	// The product as this period's data resolves it, for both periods: a
 	// product the previous one lacks is that product without data, not all.
 	f := newFilter(ds, p)
-	m := compute(ds, p.Period, f)
-	m.Findings = findings(m.LeadChain, m.Build, m.Review)
 	if prev == nil {
 		prev = &dataset.Dataset{Meta: ds.Meta}
 	}
-	m.Comparison = compare(m, compute(prev, p.Previous, f), p.Previous)
+	// The previous period first: every repo's build flags compare with it,
+	// its runs named as this period's.
+	names := newRepoNamer(slices.Concat(ds.Runs, prev.Runs))
+	pm := compute(prev, p.Previous, f, &baseline{repos: names})
+	base := &baseline{repos: names, kinds: pm.Build.repos, incomplete: buildsIncomplete(ds.Meta, p.Previous.From)}
+	m := compute(ds, p.Period, f, base)
+	m.Findings = findings(m.LeadChain, m.Build, m.Review)
+	m.Comparison = compare(m, pm, p.Previous)
 	return m
 }
 
-// compute is the page's sections over one period.
-func compute(ds *dataset.Dataset, period Period, f filter) Metrics {
+// compute is the page's sections over one period; base as build takes it.
+func compute(ds *dataset.Dataset, period Period, f filter, base *baseline) Metrics {
 	humans := mergedPRs(ds, period, f, false)
 	ch := chain(ds, humans)
 	m := Metrics{
@@ -93,7 +98,7 @@ func compute(ds *dataset.Dataset, period Period, f filter) Metrics {
 		Delivery:  delivery(ds, period, f, ch),
 		LeadChain: leadChain(ch),
 		Review:    review(humans, mergedPRs(ds, period, f, f.bots), period, ch),
-		Build:     build(ds, period, f),
+		Build:     build(ds, period, f, base),
 		Costs:     costs(ds, f),
 	}
 	if f.product != "" {

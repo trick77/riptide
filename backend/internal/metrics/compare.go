@@ -3,6 +3,8 @@ package metrics
 import (
 	"math"
 	"time"
+
+	"github.com/trick77/riptide/internal/dataset"
 )
 
 // The page compares a team with itself only: the same number of weeks right
@@ -18,6 +20,10 @@ const (
 	// quadrupled its failures).
 	ShareTolerance = 0.03
 )
+
+// eps absorbs float rounding at a threshold, here and in the build flags:
+// 3/20 is no less than 0.1 + 0.05.
+const eps = 1e-9
 
 // Verdicts of a Change.
 const (
@@ -52,12 +58,18 @@ type Change struct {
 	Reason *string `json:"reason"`
 }
 
-// KindChange is a kind of run's success rate and median duration against
-// the previous period's runs of the same kind.
+// KindChange is a kind of run against the previous period's runs of the
+// same kind: its success rate, and its repos each against their own. No
+// median duration of the kind: a kind mixes toolchains, and a period with
+// more of the slow ones would read as slower builds.
 type KindChange struct {
-	Kind     string `json:"kind"`
-	Success  Change `json:"success"`
-	Duration Change `json:"duration"`
+	Kind    string `json:"kind"`
+	Success Change `json:"success"`
+	// Slower and Flakier are the repos flagged slow and flaky.
+	Slower  int `json:"slower"`
+	Flakier int `json:"flakier"`
+	// Compared are the repos with enough runs in both periods.
+	Compared int `json:"compared"`
 }
 
 // Comparison is the page's numbers against the previous period.
@@ -124,12 +136,12 @@ func judge(cur, prev side, d direction, s scale, incomplete bool) Change {
 	case relative:
 		// From 0 there is no relative change, but there is a direction: a
 		// team that starts deploying moves, one that stays at 0 does not.
-		if *prev.v == 0 && *cur.v == 0 || *prev.v != 0 && math.Abs(delta / *prev.v) <= Tolerance+1e-9 {
+		if *prev.v == 0 && *cur.v == 0 || *prev.v != 0 && math.Abs(delta / *prev.v) <= Tolerance+eps {
 			c.Verdict = ChangeSame
 			return c
 		}
 	case points:
-		if math.Abs(delta) <= ShareTolerance+1e-9 {
+		if math.Abs(delta) <= ShareTolerance+eps {
 			c.Verdict = ChangeSame
 			return c
 		}
@@ -152,11 +164,7 @@ func compare(cur, prev Metrics, period Period) Comparison {
 	from := period.From
 	argo := before(meta.DataStart.ArgoCD, from)
 	bitbucket := before(meta.DataStart.Bitbucket, from)
-	// A build type first reported inside the previous period splits its
-	// master runs into unknown and known kinds; one never reported keeps
-	// both periods unknown alike.
-	t := meta.BuildTypeFrom
-	builds := before(meta.BuildDataFrom, from) || (t != nil && t.After(from))
+	builds := buildsIncomplete(meta, from)
 	noergler := before(meta.DataStart.Noergler, from)
 
 	cf, pf := cur.Delivery.Frequency, prev.Delivery.Frequency
@@ -202,15 +210,38 @@ func compare(cur, prev Metrics, period Period) Comparison {
 				p = x
 			}
 		}
-		out.Build = append(out.Build, KindChange{
+		kc := KindChange{
 			Kind: b.Kind,
 			Success: judge(side{b.SuccessRate, b.Runs >= lowSample},
 				side{p.SuccessRate, p.Runs >= lowSample}, up, points, builds),
-			Duration: judge(side{b.Duration.P50, b.Duration.N >= lowSample},
-				side{p.Duration.P50, p.Duration.N >= lowSample}, down, relative, builds),
-		})
+			Compared: cur.Build.compared[b.Kind],
+		}
+		// The hotspots keep every flagged repo past their cut to the top.
+		for _, k := range cur.Build.Hotspots.Kinds {
+			if k.Kind != b.Kind {
+				continue
+			}
+			for _, h := range k.Repos {
+				if h.Slow {
+					kc.Slower++
+				}
+				if h.Flaky {
+					kc.Flakier++
+				}
+			}
+		}
+		out.Build = append(out.Build, kc)
 	}
 	return out
+}
+
+// buildsIncomplete: the run data does not cover the previous period from
+// from on. A build type first reported inside it also splits its master
+// runs into unknown and known kinds; one never reported keeps both periods
+// unknown alike.
+func buildsIncomplete(meta dataset.Meta, from time.Time) bool {
+	t := meta.BuildTypeFrom
+	return before(meta.BuildDataFrom, from) || (t != nil && t.After(from))
 }
 
 func leadChange(c, p LeadTimes, incomplete bool) Change {

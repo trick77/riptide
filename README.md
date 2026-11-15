@@ -466,11 +466,18 @@ deploy `kind` are set from the data, never from name lists; `bot` adds
 riptide's automation detection as it stands at read time, the same for a
 PR's opener, its reviewers and a commit's author.
 
-Build hotspots compare each repo with the team's runs of the same kind
-(release, main, feature, other, unknown), never across kinds: a repo whose
-median takes at least twice the team's is slow, one whose failure rate is at
-least twice the team's is flaky (at most halfway from the team's rate to
-100 %, or a team failing most runs could have none), both from 10 runs on.
+Build hotspots compare each repo with its own runs of the same kind
+(release, main, feature, other, unknown) in the previous period, never with
+the team's: a kind mixes toolchains, and against the team a UI build with
+Playwright smoke tests is always slow while a Gradle repo that doubled
+hides. A repo whose median takes at least 1.5 times its previous one is
+slow; one whose failure rate is at least twice its previous one and 5
+points above it, with 2 failed runs or more, is flaky (at most halfway from
+the previous rate to 100 %, or a repo failing most runs could never get
+flaky); both from 10 runs in each period on. A repo new to the kind, or
+without enough runs, or before the run data covers the previous period, is
+not compared; the kind counts the repos that got slower or flakier instead
+of comparing its mixed median.
 A run of a commit Bitbucket never saw counts with the repository its
 pipeline is named after. A run succeeded on SUCCESS (Jenkins), Succeeded
 or Completed (Tekton) and failed on FAILURE, UNSTABLE or Failed; anything
@@ -479,7 +486,9 @@ superseded build is cancelled, not broken), in the hotspots as in the runs
 per kind, where only its CI time counts. A Jenkins `timeout()` ends
 ABORTED too, so a repo that keeps timing out shows as CI time, not as
 failures. Failing repos rank by the CI time their
-broken runs wasted. A run past three times its kind's p90 is an outlier:
+broken runs wasted. A run past six times its kind's median and over an
+hour (and, with 3 runs of its repo or more, six times the repo's median) is
+an outlier:
 several repos stuck at the same time point at shared infrastructure, not at
 a repo. The thresholds are starting values, not measured. The shapes are in
 [`backend/api/openapi.yaml`](backend/api/openapi.yaml). `GET /api/teams`
