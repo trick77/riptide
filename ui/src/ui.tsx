@@ -59,7 +59,7 @@ export function SectionHead({
           {frameworks.map(([name, metric]) => (
             <li key={name + metric}>
               <a
-                href="#landkarte"
+                href="#frameworks"
                 className="inline-block rounded-md border border-elevated-border px-2 py-px text-[11.5px] text-ink-dim no-underline hover:bg-active"
               >
                 <span className="mr-1 font-medium text-muted">{name}</span>

@@ -120,7 +120,7 @@ describe("App", () => {
       "Woran arbeitet das Team?",
       "Wie schnell und verlässlich ist das Feedback?",
       "Was kosten die KI-Reviews?",
-      "Welche Metrik-Sets Riptide abdeckt",
+      "Welche Frameworks Riptide abdeckt",
     ]) {
       expect(screen.getByRole("heading", { name: h })).toBeInTheDocument();
     }

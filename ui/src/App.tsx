@@ -32,7 +32,7 @@ const NAV: [string, string][] = [
   ["build", "Build"],
   ["kosten", "Kosten"],
   ["daten", "Daten"],
-  ["landkarte", "Landkarte"],
+  ["frameworks", "Frameworks"],
 ];
 
 const SOURCES: [keyof Metrics["meta"]["data_end"], string][] = [
