@@ -43,6 +43,15 @@ type Config struct {
 	Teams        map[string]Team
 	Automation   []AutomationSource
 	Environments Environments
+	// ExcludedProjects are Bitbucket project keys, lowercased, the metrics
+	// leave out: shared libraries and tooling, not a team's product. Applied
+	// on read, so the rows stay and the exclusion is retroactive.
+	ExcludedProjects map[string]bool
+}
+
+// ExcludedProject reports whether the metrics leave the project key out.
+func (c *Config) ExcludedProject(key string) bool {
+	return c.ExcludedProjects[strings.ToLower(key)]
 }
 
 // TeamNames returns the configured team names, sorted.
@@ -70,7 +79,7 @@ func Parse(data []byte) (*Config, error) {
 	if top == nil {
 		return nil, errors.New("config must be a JSON object at the top level")
 	}
-	cfg := &Config{Teams: map[string]Team{}}
+	cfg := &Config{Teams: map[string]Team{}, ExcludedProjects: map[string]bool{}}
 
 	if raw, ok := top["teams"]; ok && !isNull(raw) {
 		var teams []json.RawMessage
@@ -134,6 +143,20 @@ func Parse(data []byte) (*Config, error) {
 		return nil, err
 	}
 	cfg.Environments = env
+
+	excluded, err := stringList(top, "excluded_projects")
+	if err != nil {
+		return nil, fmt.Errorf("`excluded_projects` %w", err)
+	}
+	for _, k := range excluded {
+		// Bitbucket shows keys uppercase, ingest stores them lowercased
+		// (repo_full_name): a key typed as Bitbucket shows it must match.
+		k = strings.ToLower(strings.TrimSpace(k))
+		if k == "" {
+			return nil, errors.New("`excluded_projects` entries must be non-empty strings")
+		}
+		cfg.ExcludedProjects[k] = true
+	}
 	return cfg, nil
 }
 

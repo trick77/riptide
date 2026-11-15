@@ -157,6 +157,7 @@ func (d Deps) load(ctx context.Context, v view, p metrics.Period, factsOnly bool
 		Automated: func(author, displayName string) bool {
 			return cfg.DetectAutomationSource(author, displayName, "", false) != ""
 		},
+		Excluded:  cfg.ExcludedProject,
 		Now:       v.now,
 		FactsOnly: factsOnly,
 	})

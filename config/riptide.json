@@ -3,6 +3,7 @@
     "production_stage": "prod",
     "ignored_stages": []
   },
+  "excluded_projects": [],
   "teams": [
     {
       "name": "checkout",

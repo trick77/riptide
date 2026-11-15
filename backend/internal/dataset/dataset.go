@@ -48,6 +48,10 @@ type Params struct {
 	// author (login and display name), so a commit and a PR by the same bot
 	// agree; nil detects nothing.
 	Automated func(author, displayName string) bool
+	// Excluded is config's excluded_projects: rows of an excluded Bitbucket
+	// project key are dropped, so neither a number nor the product list
+	// sees them; a row without a project stays. nil excludes nothing.
+	Excluded func(project string) bool
 	// Now stamps meta.generated_at.
 	Now time.Time
 	// FactsOnly skips the lead times and the reviews: the facts tables read
@@ -273,6 +277,8 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 		}
 	}
 
+	exclude(d, p.Excluded)
+
 	automated := func(login, displayName string) bool {
 		return p.Automated != nil && p.Automated(login, displayName)
 	}
@@ -303,6 +309,21 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 	d.Products = products(d)
 	d.utc()
 	return d, nil
+}
+
+// exclude drops the rows of excluded projects before anything is derived
+// from them: a PR's environments, the product list. Meta keeps the team's
+// whole data range, which is when sources reported, not a metric.
+func exclude(d *Dataset, excluded func(string) bool) {
+	if excluded == nil {
+		return
+	}
+	out := func(project *string) bool { return project != nil && excluded(*project) }
+	d.PRs = slices.DeleteFunc(d.PRs, func(x PR) bool { return excluded(x.Project) })
+	d.Deploys = slices.DeleteFunc(d.Deploys, func(x Deploy) bool { return out(x.Project) })
+	d.Runs = slices.DeleteFunc(d.Runs, func(x Run) bool { return out(x.Project) })
+	d.LeadTimes = slices.DeleteFunc(d.LeadTimes, func(x LeadTime) bool { return excluded(x.Project) })
+	d.Reviews = slices.DeleteFunc(d.Reviews, func(x Review) bool { return out(x.Project) })
 }
 
 // metaRow is sql/meta.sql's row: both SourceTimes flat, under their own

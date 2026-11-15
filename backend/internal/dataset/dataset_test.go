@@ -496,6 +496,87 @@ func TestDatasetFactsOnly(t *testing.T) {
 	}
 }
 
+func projectsOf[T any](xs []T, project func(T) *string) []*string {
+	out := make([]*string, len(xs))
+	for i, x := range xs {
+		out[i] = project(x)
+	}
+	return out
+}
+
+// An excluded project drops out of every section and the product list; the
+// other projects' rows are exactly those of a read without the exclusion.
+func TestDatasetExcludedProject(t *testing.T) {
+	st, pool := migrated(t)
+	seed(t, pool)
+	// The seed's portal has a PR and a deploy; give it a run (its commit is
+	// one Bitbucket saw in portal), a review and a release that ships a
+	// portal-web commit, for a lead time.
+	s := &seeder{t: t, pool: pool, n: 1000}
+	s.run(run{pipeline: "portal-web/master", runID: "1", status: "SUCCESS", commit: sha("7"), started: days(6)})
+	s.rollup(team, portalWeb+"#2", "declined", days(6).Add(time.Hour))
+	base, head, ops := strings.Repeat("e1", 20), strings.Repeat("e2", 20), strings.Repeat("e3", 20)
+	s.push(portalWeb, "master", days(5), commit{sha: base, authored: days(5)})
+	s.push(portalWeb, "master", days(6), commit{sha: head, authored: days(6)})
+	s.push(portalOps, "master", days(6).Add(time.Hour), commit{sha: ops, authored: days(6).Add(time.Hour),
+		message: "portal PROD 2.1\n\n[portal-web 2.0 -> 2.1](https://git.example.com/projects/portal/repos/portal-web/compare/diff?targetBranch=" +
+			base + "&sourceBranch=" + head + ")"})
+	s.deploy(team, "portal-prod", "prod", ops, "Succeeded", days(6).Add(2*time.Hour), "reg/portal-web:2.1")
+	full := load(t, st, days(-60), days(60))
+	// Typed as Bitbucket shows the key; stored lowercased.
+	cfg, err := config.Parse([]byte(`{"excluded_projects": ["PORTAL"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := st.Dataset(context.Background(), dataset.Params{
+		Team: team, From: days(-60), To: days(60), ProductionStage: "prod", Automated: automated(t), Now: days(28),
+		Excluded: cfg.ExcludedProject,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects := func(ps ...*string) (portal, other int) {
+		for _, p := range ps {
+			if p != nil && *p == "portal" {
+				portal++
+			} else {
+				other++
+			}
+		}
+		return
+	}
+	for _, c := range []struct {
+		name      string
+		full, got []*string
+	}{
+		{"prs", projectsOf(full.PRs, func(x dataset.PR) *string { return &x.Project }),
+			projectsOf(d.PRs, func(x dataset.PR) *string { return &x.Project })},
+		{"deploys", projectsOf(full.Deploys, func(x dataset.Deploy) *string { return x.Project }),
+			projectsOf(d.Deploys, func(x dataset.Deploy) *string { return x.Project })},
+		{"runs", projectsOf(full.Runs, func(x dataset.Run) *string { return x.Project }),
+			projectsOf(d.Runs, func(x dataset.Run) *string { return x.Project })},
+		{"lead times", projectsOf(full.LeadTimes, func(x dataset.LeadTime) *string { return &x.Project }),
+			projectsOf(d.LeadTimes, func(x dataset.LeadTime) *string { return &x.Project })},
+		{"reviews", projectsOf(full.Reviews, func(x dataset.Review) *string { return x.Project }),
+			projectsOf(d.Reviews, func(x dataset.Review) *string { return x.Project })},
+	} {
+		fullPortal, fullOther := projects(c.full...)
+		gotPortal, gotOther := projects(c.got...)
+		if fullPortal == 0 {
+			t.Errorf("%s: no portal rows without the exclusion, the test proves nothing", c.name)
+		}
+		if gotPortal != 0 || gotOther != fullOther {
+			t.Errorf("%s: %d portal, %d other kept; want 0, %d", c.name, gotPortal, gotOther, fullOther)
+		}
+	}
+	if len(d.Products) != 1 || d.Products[0].Key != "kasse" {
+		t.Errorf("products = %+v", d.Products)
+	}
+	if !eqTime(d.Meta.DataStart.Bitbucket, full.Meta.DataStart.Bitbucket) {
+		t.Errorf("data start moved: %v", d.Meta.DataStart.Bitbucket)
+	}
+}
+
 // The metrics computed from the facts reproduce the README's reference
 // queries run on the same data: the weekly counts of the
 // deployment-frequency query and every stage of the lead-time breakdown.
