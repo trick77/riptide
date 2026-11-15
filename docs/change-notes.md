@@ -7,6 +7,15 @@ repository.
 Real account handles, hostnames and tokens belong in the mounted
 `riptide.json` / team-keys Secret, never in this file: the repository is public.
 
+## 2026-11-15 — projects left out of the metrics
+
+**`riptide.json` takes a top-level `excluded_projects`**, a list of
+Bitbucket project keys the metrics leave out: shared libraries, pipeline
+definitions, tooling. Add the key of such a project to the production
+`riptide.json`; it is hot-reloaded and applies to past periods too, the
+events stay stored. See
+[onboarding-a-team.md](onboarding-a-team.md#1-add-the-team-to-the-config).
+
 ## 2026-11-15 — the wait for a build agent
 
 **Migration 0006** adds `pipeline_events.agent_started_at` and fills it from

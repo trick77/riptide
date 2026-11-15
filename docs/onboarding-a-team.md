@@ -20,6 +20,28 @@ CI validates the file (uniqueness, email shape) — fix any errors before
 merging. After merge the running collector re-reads the file within
 ~30 seconds (or restart it for instant pickup).
 
+A Bitbucket project that is not a product (shared libraries, pipeline
+definitions, tooling) goes into the top-level `excluded_projects` list by
+its project key:
+
+```json
+"excluded_projects": ["DD"]
+```
+
+The metrics, the facts tables and the product list then leave its PRs,
+builds, deploys, lead times and noergler reviews out, for every team. The
+exclusion is applied on read: the events stay stored, past periods change
+too, and removing the key brings them back. Keys match case-insensitively.
+
+Never exclude a project that holds GitOps repos: an App's deploys belong to
+its GitOps repo's project, so they would vanish while the lead times still
+show them shipping. Select the project in the UI's product bar first: one
+that lists Argo-Apps holds GitOps repos.
+
+A CI run belongs to a project only through its commit, which Bitbucket must
+have reported: runs of an excluded project's commits Bitbucket never saw
+keep counting.
+
 ## 2. Generate the team's per-source secrets
 
 Each source the team uses gets its **own raw secret** (Bitbucket = HMAC

@@ -88,6 +88,10 @@ func TestParseRejects(t *testing.T) {
 		{"ignored stages null", `{"environments": {"ignored_stages": null}}`, "ignored_stages"},
 		{"empty ignored stage", `{"environments": {"ignored_stages": [""]}}`, "ignored_stages"},
 		{"prod in ignored", `{"environments": {"production_stage": "Prod", "ignored_stages": ["PROD"]}}`, "production_stage"},
+		{"excluded projects a string", `{"excluded_projects": "DD"}`, "`excluded_projects` must be a list of strings"},
+		{"excluded project a number", `{"excluded_projects": [1]}`, "`excluded_projects` must be a list of strings"},
+		{"empty excluded project", `{"excluded_projects": [""]}`, "`excluded_projects` entries must be non-empty strings"},
+		{"blank excluded project", `{"excluded_projects": [" "]}`, "`excluded_projects` entries must be non-empty strings"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := Parse([]byte(c.body))
@@ -105,6 +109,20 @@ func TestEnvironments(t *testing.T) {
 	}
 	if !reflect.DeepEqual(c.Environments.IgnoredStages, map[string]bool{"dev": true, "entw": true, "syst": true}) {
 		t.Errorf("ignored = %v", c.Environments.IgnoredStages)
+	}
+}
+
+func TestExcludedProjects(t *testing.T) {
+	c := mustParse(t, `{"excluded_projects": ["DD", " tools "]}`)
+	for key, want := range map[string]bool{"DD": true, "dd": true, "TOOLS": true, "SHOP": false, "": false} {
+		if got := c.ExcludedProject(key); got != want {
+			t.Errorf("ExcludedProject(%q) = %v, want %v", key, got, want)
+		}
+	}
+	for _, body := range []string{`{}`, `{"excluded_projects": null}`, `{"excluded_projects": []}`} {
+		if c := mustParse(t, body); c.ExcludedProject("DD") {
+			t.Errorf("%s excludes DD", body)
+		}
 	}
 }
 
