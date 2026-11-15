@@ -7,6 +7,17 @@ repository.
 Real account handles, hostnames and tokens belong in the mounted
 `riptide.json` / team-keys Secret, never in this file: the repository is public.
 
+## 2026-11-15 — the image runs from /
+
+**The image's working directory is `/`**, no longer the distroless
+`/home/nonroot`. Under OpenShift's random uid riptide could not even look
+into that 0700 directory for its optional `./.env` and refused to start; a
+`workingDir: /` set in a deployment as a workaround can go. The relative
+default paths `config/riptide.json` and `config/team-keys.json` now resolve
+under `/config/`: a deployment that mounted them under `/home/nonroot/config/`
+without setting `BACKEND_CONFIG_PATH` / `BACKEND_TEAM_KEYS_PATH` sets both
+(compose.yaml does already).
+
 ## 2026-11-14 — metrics computed in the backend
 
 **`GET /api/dataset` is gone** (contract 2.0.0). The UI now reads
@@ -98,8 +109,9 @@ returned are gone (reload failures stay in the log as `config_reload_failed` /
 `readiness_db_unreachable` per probe.
 
 **The image is distroless** (`gcr.io/distroless/static`): no shell, no wget,
-no `apk`. It runs as `65532:65532` (was `1001`); OpenShift's random uid still
-works, the binary writes nothing to disk.
+no `apk`. It runs as `65532:65532` (was `1001`); the binary writes nothing to
+disk. Under OpenShift's random uid it did not start until the image ran from
+`/`: see 2026-11-15, the image runs from /.
 
 **Log fields** (Splunk searches and dashboards): the error field is `err`, not
 `error`; the access line `http_request` carries `status`, not `status_code`,
