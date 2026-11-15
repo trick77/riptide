@@ -9,6 +9,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { Facts, Metrics } from "./api";
+import { Costs } from "./Costs";
 import { Flow } from "./Flow";
 import { parseState, stateQuery } from "./state";
 import {
@@ -833,6 +834,30 @@ describe("App", () => {
     await new Promise((r) => setTimeout(r, 300));
     expect(screen.queryByText(/gefiltert nach/)).toBeNull();
     expect(factsCalls(calls).every((c) => !c.includes("q="))).toBe(true);
+  });
+});
+
+describe("costs", () => {
+  it("names the promotion spend only when there is some", () => {
+    const m = metrics();
+    const { unmount } = render(<Costs m={m} />);
+    expect(
+      screen.getByText("davon $0.50 für 1 gemergte PRs"),
+    ).toBeInTheDocument();
+    unmount();
+    render(
+      <Costs
+        m={{
+          ...m,
+          costs: { ...m.costs, promotion: 0.2, promotion_reviews: 2 },
+        }}
+      />,
+    );
+    expect(
+      screen.getByText(
+        "davon $0.50 für 1 gemergte PRs · $0.20 für 2 Promotion-Reviews",
+      ),
+    ).toBeInTheDocument();
   });
 });
 

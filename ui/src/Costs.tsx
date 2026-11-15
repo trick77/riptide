@@ -18,7 +18,12 @@ export function Costs({ m }: { m: Metrics }) {
         <Tile
           label="Ausgaben"
           value={money(c.total)}
-          note={`davon ${money(c.merged)} für ${c.merged_reviews} gemergte PRs`}
+          note={
+            `davon ${money(c.merged)} für ${c.merged_reviews} gemergte PRs` +
+            (c.promotion_reviews > 0
+              ? ` · ${money(c.promotion)} für ${c.promotion_reviews} Promotion-Reviews`
+              : "")
+          }
         />
         <Tile
           label="Davon verworfen"

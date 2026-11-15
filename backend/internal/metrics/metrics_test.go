@@ -510,18 +510,40 @@ func TestCosts(t *testing.T) {
 			reviewRow(func(r *dataset.Review) {
 				r.PRKey, r.Repo, r.Project, r.CostUSD = "portal/portal-web#1", s("portal/portal-web"), s("portal"), s("3.000000")
 			}),
+			// Stage promotions: in the total and the rows, on their own line,
+			// out of merged, wasted and per kloc whatever their outcome.
+			reviewRow(func(r *dataset.Review) {
+				r.PRKey, r.Repo, r.GitOps, r.CostUSD, r.LinesAdded, r.LinesRemoved =
+					"kasse/kasse-gitops#3", s("kasse/kasse-gitops"), true, s("0.200000"), n(1), n(1)
+			}),
+			reviewRow(func(r *dataset.Review) {
+				r.PRKey, r.Repo, r.GitOps, r.Outcome, r.CostUSD =
+					"kasse/kasse-gitops#4", s("kasse/kasse-gitops"), true, s("declined"), s("0.100000")
+			}),
 		}
 	})
 	c := costs(ds, filter{})
-	if !near(c.Total, 5.4) || !near(c.Merged, 5) || c.MergedReviews != 3 || !near(c.Wasted, 0.4) || c.ReviewedRepos != 2 {
+	if !near(c.Total, 5.7) || !near(c.Merged, 5) || c.MergedReviews != 3 || !near(c.Wasted, 0.4) || c.ReviewedRepos != 3 {
 		t.Errorf("costs = %+v", c)
 	}
+	if !near(c.Promotion, 0.3) || c.PromotionReviews != 2 {
+		t.Errorf("promotion = %v over %d", c.Promotion, c.PromotionReviews)
+	}
 	expectNear(t, "per kloc", c.PerKloc, 5.0/1500*1000)
-	if len(c.Rows) != 2 || c.Rows[0].Label != "portal" || c.Rows[1].Label != "kasse" {
+	expectNear(t, "wasted share", c.WastedShare, 0.4/5.4)
+	// Only promotions: nothing to take a share of.
+	onlyPromotion := data(func(ds *dataset.Dataset) {
+		ds.Reviews = []dataset.Review{reviewRow(func(r *dataset.Review) { r.GitOps = true })}
+	})
+	if c := costs(onlyPromotion, filter{}); c.WastedShare != nil || c.PromotionReviews != 1 || !near(c.Total, 0.5) {
+		t.Errorf("only promotion = %+v", c)
+	}
+	if len(c.Rows) != 2 || c.Rows[0].Label != "portal" || c.Rows[1].Label != "kasse" || !near(c.Rows[1].Value, 2.7) {
 		t.Errorf("rows = %+v", c.Rows)
 	}
 	k := costs(ds, filter{product: "kasse"})
-	if len(k.Rows) != 1 || k.Rows[0].Label != "kasse/kasse-api" || !near(k.Rows[0].Value, 2.4) {
+	if len(k.Rows) != 2 || k.Rows[0].Label != "kasse/kasse-api" || !near(k.Rows[0].Value, 2.4) ||
+		k.Rows[1].Label != "kasse/kasse-gitops" || !near(k.Rows[1].Value, 0.3) {
 		t.Errorf("kasse rows = %+v", k.Rows)
 	}
 	if costs(data(), filter{}).PerKloc != nil {
