@@ -298,6 +298,11 @@ describe("App", () => {
     mockFetch((url) => {
       if (url.pathname === "/api/facts") return facts();
       const m = metrics();
+      m.build.kinds[1] = {
+        ...m.build.kinds[1],
+        outlier_runs: 1,
+        outlier_seconds: 32 * 3600,
+      };
       const h = m.build.hotspots;
       h.kinds[1] = {
         ...h.kinds[1],
@@ -342,6 +347,10 @@ describe("App", () => {
     expect(screen.getByText("8 / 20")).toBeInTheDocument();
     expect(screen.getByText("2.0 h")).toBeInTheDocument();
     expect(screen.getByText("160×")).toBeInTheDocument();
+    expect(screen.getByText("+ 32.0 h Ausreisser")).toHaveAttribute(
+      "title",
+      "1 Ausreisser, nicht in der CI-Zeit",
+    );
     expect(screen.getByText("#7")).toBeInTheDocument();
   });
 

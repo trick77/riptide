@@ -70,6 +70,14 @@ function KindRow({ b }: { b: BuildStats }) {
       </div>
       <div className={`${CELL} text-right text-ink-dim`}>
         {num(b.ci_seconds / 3600, 1)} h
+        {b.outlier_runs > 0 && (
+          <div
+            className="text-[11px] text-muted"
+            title={`${b.outlier_runs} Ausreisser, nicht in der CI-Zeit`}
+          >
+            + {num(b.outlier_seconds / 3600, 1)} h Ausreisser
+          </div>
+        )}
       </div>
       <div
         className={`${CELL} text-right text-ink-dim`}
@@ -157,11 +165,11 @@ function Outliers({
     <Card className="mt-3 overflow-x-auto">
       <CardHead
         title="Ausreisser"
-        sub={`Läufe über ${num(factor, 0)}× dem p90 ihrer Art, längste zuerst`}
+        sub={`Läufe über ${num(factor, 0)}× dem Median ihrer Art, längste zuerst`}
       />
       {rows.length ? (
         <div className="mt-3.5 grid min-w-[620px] grid-cols-[minmax(180px,2fr)_minmax(130px,1.2fr)_110px_80px_80px] items-center gap-x-3.5">
-          {["Pipeline", "Art", "Start", "Dauer", "× p90"].map((h, i) => (
+          {["Pipeline", "Art", "Start", "Dauer", "× Median"].map((h, i) => (
             <div key={h} className={`${HEAD} ${i > 1 ? "text-right" : ""}`}>
               {h}
             </div>
@@ -194,9 +202,11 @@ function Outliers({
       )}
       <p className="mt-2.5 mb-0 text-xs text-muted">
         Hängen mehrere Pipelines zur selben Zeit, liegt es an der Infrastruktur
-        (Agent weg, wartender Input-Schritt), nicht am Repo. Eine Art braucht
-        dafür mindestens {minRuns} Läufe mit Ergebnis; abgebrochene Läufe
-        erscheinen trotzdem.
+        (Agent weg, wartender Input-Schritt), nicht am Repo. Ein Repo mit
+        mindestens {minRuns} eigenen Läufen und längerem Median wird an diesem
+        gemessen: ein langsames Repo ist kein Ausreisser. Eine Art braucht dafür
+        mindestens {minRuns} Läufe mit Ergebnis; abgebrochene Läufe erscheinen
+        trotzdem. Ihre Zeit fehlt in Dauer, CI-Zeit und verschwendeter Zeit.
       </p>
     </Card>
   );
@@ -241,7 +251,7 @@ export function Build({ m }: { m: Metrics }) {
               title="Läufe nach Art"
               sub="Releases überspringen Tests, Feature-Builds scheitern öfter: jede Art für sich"
             />
-            <div className="mt-3.5 grid min-w-[620px] grid-cols-[minmax(180px,2fr)_64px_72px_96px_80px_96px] items-center gap-x-3.5">
+            <div className="mt-3.5 grid min-w-[620px] grid-cols-[minmax(180px,2fr)_64px_72px_96px_96px_96px] items-center gap-x-3.5">
               {[
                 "Art",
                 "Läufe",
@@ -263,6 +273,8 @@ export function Build({ m }: { m: Metrics }) {
               Completed). Verschwendet: Dauer der Läufe mit FAILURE, UNSTABLE
               oder Failed. Ohne Ergebnis (ABORTED, NOT_BUILT, None): kein Lauf,
               nur CI-Zeit; ein Jenkins-timeout() endet ebenfalls ABORTED.
+              Ausreisser (siehe unten) zählen als Lauf, ihre Zeit aber weder in
+              Dauer noch CI-Zeit noch verschwendet.
             </p>
           </Card>
           <Card className="mt-3">

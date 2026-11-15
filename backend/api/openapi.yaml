@@ -4,7 +4,7 @@ info:
   title: riptide API
   # The CONTRACT's version, not the binary's. The two move independently:
   # a release that changes no route leaves this alone.
-  version: 2.0.0
+  version: 2.1.0
   description: |
     DevOps delivery-metrics ingestion. Senders post raw events from Bitbucket
     Data Center, CI pipelines (Jenkins, Tekton, ...), Argo CD and noergler;
@@ -861,9 +861,11 @@ components:
       description: |
         One kind of run. A run without a verdict (see RunVerdict) is neither
         a failure nor a run, as in the hotspots: it counts in `no_verdict`
-        and `ci_seconds` only, so `runs` = `succeeded` + `failed`.
+        and `ci_seconds` only, so `runs` = `succeeded` + `failed`. An
+        outlier (see Hotspots) keeps its verdict but none of its time: it
+        counts in `outlier_runs` and `outlier_seconds` instead.
       required: [kind, runs, succeeded, failed, no_verdict, success_rate, duration, ci_seconds, wasted_seconds,
-                 weekly]
+                 outlier_runs, outlier_seconds, weekly]
       properties:
         kind: { $ref: "#/components/schemas/RunKind" }
         runs: { type: integer, description: Runs with a verdict. }
@@ -873,13 +875,17 @@ components:
         success_rate: { $ref: "#/components/schemas/NullableNumber" }
         duration:
           $ref: "#/components/schemas/Spread"
-          description: Over `runs`, those without a verdict left out.
+          description: Over `runs`, those without a verdict and outliers left out.
         ci_seconds:
           $ref: "#/components/schemas/Seconds"
-          description: Every run's time, those without a verdict included.
+          description: Every run's time, those without a verdict included, outliers left out.
         wasted_seconds:
           $ref: "#/components/schemas/Seconds"
-          description: Time of the failed runs.
+          description: Time of the failed runs, outliers left out.
+        outlier_runs: { type: integer, description: "Runs past the kind's outlier threshold, with or without a verdict." }
+        outlier_seconds:
+          $ref: "#/components/schemas/Seconds"
+          description: The outliers' time.
         weekly:
           type: array
           description: Success rate per week; null for a week without runs.
@@ -890,7 +896,8 @@ components:
       description: |
         Repos against the team's baseline of the same kind of run, and runs
         far past it. A run without a verdict (see RunVerdict) counts as
-        neither failure nor run.
+        neither failure nor run. An outlier counts as a run and in failure
+        rates, but in no duration or wasted time.
       additionalProperties: false
       required: [min_runs, slow_factor, flaky_factor, outlier_factor, kinds, outliers]
       properties:
@@ -899,7 +906,12 @@ components:
         flaky_factor:
           type: number
           description: A failure rate this many times the team's is flaky, at most halfway from the team's rate to 100 %.
-        outlier_factor: { type: number, description: A run this many times its kind's team p90 is an outlier. }
+        outlier_factor:
+          type: number
+          description: |
+            A run past this many times its median is an outlier: its kind's
+            team median, or its repo's when that is longer and the repo has
+            `min_runs` runs of the kind. Medians include the outliers.
         kinds:
           type: array
           items:
@@ -910,7 +922,7 @@ components:
               kind: { $ref: "#/components/schemas/RunKind" }
               duration:
                 $ref: "#/components/schemas/Spread"
-                description: The team's, all repos of the kind.
+                description: The team's, all repos of the kind, outliers left out.
               failure_rate: { $ref: "#/components/schemas/NullableNumber" }
               durations:
                 type: array
@@ -943,7 +955,9 @@ components:
                     flaky: { type: boolean }
               outlier_threshold_s:
                 $ref: "#/components/schemas/NullableSeconds"
-                description: Null below `min_runs` runs with a duration.
+                description: |
+                  `outlier_factor` times the team's median; null below
+                  `min_runs` runs with a duration. Higher for a slower repo.
         outliers:
           type: array
           description: Runs past their kind's threshold across kinds, longest first, the top 10.
@@ -959,7 +973,7 @@ components:
               started_at: { $ref: "#/components/schemas/NullableInstant" }
               duration_s: { $ref: "#/components/schemas/Seconds" }
               status: { type: [string, "null"] }
-              factor: { type: number, description: The run's duration over its kind's team p90. }
+              factor: { type: number, description: The run's duration over the median it is measured against. }
 
     Costs:
       type: object
