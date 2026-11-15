@@ -268,8 +268,12 @@ func TestDataset(t *testing.T) {
 		}
 		r := d.Runs[2]
 		if r.Source != "jenkins" || r.RunID != "10" || str(r.CommitSHA) != sha("4") || str(r.Status) != "SUCCESS" || r.DurationS == nil || *r.DurationS != 600 ||
-			strings.Join(r.ImageRefs, ",") != "reg/kasse-api:1.1" || r.StartedAt == nil || r.FinishedAt == nil {
+			strings.Join(r.ImageRefs, ",") != "reg/kasse-api:1.1" || r.StartedAt == nil || r.FinishedAt == nil ||
+			r.AgentStartedAt == nil || !r.AgentStartedAt.Equal(r.StartedAt.Add(2*time.Minute)) {
 			t.Errorf("run = %+v", r)
+		}
+		if pr := d.Runs[1]; pr.AgentStartedAt != nil {
+			t.Errorf("run without agent time = %v", *pr.AgentStartedAt)
 		}
 	})
 
@@ -284,6 +288,37 @@ func TestDataset(t *testing.T) {
 			t.Errorf("review = %+v", r)
 		}
 	})
+}
+
+// A run whose COMPLETED event lacks the agent time takes it from its
+// STARTED event: the same team's, whatever the phase's case. Another
+// team's run of the same name is not it.
+func TestRunAgentTimeFromStarted(t *testing.T) {
+	st, pool := migrated(t)
+	seed(t, pool)
+	agent := days(1).Add(time.Hour + 3*time.Minute)
+	insert := func(id, phase string, at time.Time, teamName string) {
+		t.Helper()
+		if _, err := pool.Exec(t.Context(), `INSERT INTO pipeline_events (delivery_id, source, pipeline_name, run_id, phase,
+			commit_sha, started_at, agent_started_at, occurred_at, team, payload)
+			VALUES ($1, 'jenkins', 'kasse-api/PR-7', '1', $2, $3, $4, $5, $4, $6, '{}')`,
+			id, phase, sha("1"), days(1).Add(time.Hour), at, teamName); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert("other-team", "STARTED", agent.Add(time.Hour), "other")
+	insert("own", "Started", agent, team)
+	d := load(t, st, t0, days(28))
+	for _, r := range d.Runs {
+		if r.PipelineName != "kasse-api/PR-7" {
+			continue
+		}
+		if r.AgentStartedAt == nil || !r.AgentStartedAt.Equal(agent) {
+			t.Errorf("agent started at = %v, want %v", r.AgentStartedAt, agent)
+		}
+		return
+	}
+	t.Fatal("run kasse-api/PR-7 missing")
 }
 
 // The window is [from, to): rows on the end bound fall out, a deploy's kind

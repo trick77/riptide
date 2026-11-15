@@ -221,11 +221,19 @@ func (s *seeder) run(r run) {
 		status = &r.status
 	}
 	finished := r.started.Add(10 * time.Minute)
+	// The pipelines that report a build_type report their agent time too:
+	// two minutes waiting for one.
+	var agent *time.Time
+	if buildType != nil {
+		a := r.started.Add(2 * time.Minute)
+		agent = &a
+	}
 	s.exec(`INSERT INTO pipeline_events (delivery_id, source, pipeline_name, run_id, phase, status, commit_sha,
-		image_refs, actor_handle, actor_account_kind, build_type, started_at, finished_at, occurred_at, team, payload)
-		VALUES ($1, 'jenkins', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13, '{}')`,
+		image_refs, actor_handle, actor_account_kind, build_type, started_at, agent_started_at, finished_at,
+		occurred_at, team, payload)
+		VALUES ($1, 'jenkins', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13, $14, '{}')`,
 		s.id(), r.pipeline, r.runID, r.phase, status, r.commit, r.images, actor, kind, buildType,
-		r.started, finished, r.teamName)
+		r.started, agent, finished, r.teamName)
 }
 
 func (s *seeder) rollup(teamName, prKey, outcome string, closed time.Time) {

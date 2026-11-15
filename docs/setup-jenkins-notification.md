@@ -23,6 +23,7 @@ mandatory** — without them the metrics break.
   "actor_account_kind": "service",
   "build_type": "<release|hotfix|build|..., optional>",
   "started_at": "<ISO 8601 UTC>",
+  "agent_started_at": "<ISO 8601 UTC, optional>",
   "finished_at": "<ISO 8601 UTC>"
 }
 ```
@@ -40,6 +41,15 @@ riptide stores the declaration instead of guessing from the name.
 `build_type` says what kind of build the run was, in the pipeline's own terms
 (`release`, `hotfix`, `build`, ...). Send it on `COMPLETED`; riptide stores it
 trimmed and lowercased and does not decide which values exist.
+
+`agent_started_at` is when the run got its build agent. `started_at`
+(`currentBuild.startTimeInMillis`) is when Jenkins started the run, before it
+waited for one; on a busy Kubernetes cloud that wait for an agent pod can be
+most of a run's duration, and it says nothing about the build. Take the time
+as the first thing inside `node { ... }` and send it on `STARTED`, on
+`COMPLETED` too where the value is still at hand (a `COMPLETED` without it
+takes the run's `STARTED` value); the build section then shows the wait
+apart from the build. Optional: without it a run's duration stays one number, wait included.
 
 `image_ref` / `image_refs` are optional but send them whenever the run publishes an image: they are
 the only reliable link from an Argo CD deploy back to the commit, because

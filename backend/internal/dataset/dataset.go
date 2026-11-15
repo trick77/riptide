@@ -196,11 +196,14 @@ type Run struct {
 	CommitSHA    *string    `json:"commit_sha" db:"commit_sha"`
 	Status       *string    `json:"status" db:"status"`
 	StartedAt    *time.Time `json:"started_at" db:"started_at"`
-	FinishedAt   *time.Time `json:"finished_at" db:"finished_at"`
-	DurationS    *int64     `json:"duration_s" db:"duration_s"`
-	Repo         *string    `json:"repo" db:"repo"`
-	Project      *string    `json:"project" db:"project"`
-	ImageRefs    []string   `json:"image_refs" db:"image_refs"`
+	// AgentStartedAt is when the run got its build agent, as the CI
+	// reported it; nil when it did not.
+	AgentStartedAt *time.Time `json:"agent_started_at" db:"agent_started_at"`
+	FinishedAt     *time.Time `json:"finished_at" db:"finished_at"`
+	DurationS      *int64     `json:"duration_s" db:"duration_s"`
+	Repo           *string    `json:"repo" db:"repo"`
+	Project        *string    `json:"project" db:"project"`
+	ImageRefs      []string   `json:"image_refs" db:"image_refs"`
 }
 
 // Review is one PR's final noergler rollup. CostUSD is the stored decimal
@@ -335,7 +338,7 @@ func (d *Dataset) utc() {
 		ptrs = append(ptrs, &d.LeadTimes[i].AuthoredAt, &d.LeadTimes[i].FirstDeployedAt)
 	}
 	for i := range d.Runs {
-		ptrs = append(ptrs, d.Runs[i].StartedAt, d.Runs[i].FinishedAt)
+		ptrs = append(ptrs, d.Runs[i].StartedAt, d.Runs[i].AgentStartedAt, d.Runs[i].FinishedAt)
 	}
 	for i := range d.Reviews {
 		ptrs = append(ptrs, &d.Reviews[i].ClosedAt)

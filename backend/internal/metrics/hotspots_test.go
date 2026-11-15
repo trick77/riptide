@@ -3,6 +3,7 @@ package metrics
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/trick77/riptide/internal/dataset"
 )
@@ -309,6 +310,61 @@ func TestBuildsLeaveAbortedOut(t *testing.T) {
 	only := build(data(func(ds *dataset.Dataset) { ds.Runs = runs("kasse/b", 2, 100, 2, "ABORTED") }), p4(), filter{})
 	if len(only.Kinds) != 1 || only.Kinds[0].Runs != 0 || only.Kinds[0].SuccessRate != nil {
 		t.Errorf("only aborted = %+v", only.Kinds)
+	}
+}
+
+// The wait for an agent and the build split only the runs that report when
+// they got one: a run without it, or with one outside the run, has neither,
+// never a wait of 0. Duration stays over all of them; outliers carry their
+// wait.
+func TestBuildSplitsAgentWait(t *testing.T) {
+	start := ago(1)
+	at := func(s float64) *time.Time { return ptr(start.Add(time.Duration(s * float64(time.Second)))) }
+	timed := func(id string, total, agent float64, status string) dataset.Run {
+		return run(func(r *dataset.Run) {
+			r.RunID, r.Status, r.StartedAt, r.FinishedAt, r.DurationS = id, s(status), at(0), at(total), n(int64(total))
+			if agent >= -1 {
+				r.AgentStartedAt = at(agent)
+			}
+		})
+	}
+	ds := data(func(ds *dataset.Dataset) {
+		ds.Runs = []dataset.Run{
+			timed("1", 600, 60, "SUCCESS"),
+			timed("2", 600, 120, "FAILURE"),
+			timed("3", 600, -2, "SUCCESS"),      // no agent time reported
+			timed("4", 600, -1, "SUCCESS"),      // agent before the start: skew
+			timed("5", 600, 700, "SUCCESS"),     // agent after the end: skew
+			timed("6", 600, 30, "ABORTED"),      // no verdict, no build time
+			timed("7", 20000, 19000, "SUCCESS"), // stuck: an outlier
+			timed("8", 20000, -2, "SUCCESS"),    // stuck, no agent time
+		}
+	})
+	b := build(ds, p4(), filter{})
+	k := b.Kinds[0]
+	if k.Duration.N != 5 || k.Waiting.N != 2 || k.Building.N != 2 {
+		t.Fatalf("n: duration %d, waiting %d, building %d", k.Duration.N, k.Waiting.N, k.Building.N)
+	}
+	expectNear(t, "wait p50", k.Waiting.P50, 90)
+	expectNear(t, "build p50", k.Building.P50, 510)
+	expectNear(t, "duration p50", k.Duration.P50, 600)
+	if len(b.Hotspots.Outliers) != 2 {
+		t.Fatalf("outliers = %+v", b.Hotspots.Outliers)
+	}
+	for _, o := range b.Hotspots.Outliers {
+		switch o.RunID {
+		case "7":
+			expectNear(t, "outlier wait", o.WaitS, 19000)
+		case "8":
+			if o.WaitS != nil {
+				t.Errorf("outlier without agent time has wait %v", *o.WaitS)
+			}
+		}
+	}
+	// No run reports one: both empty, nulls rather than 0.
+	none := build(data(func(ds *dataset.Dataset) { ds.Runs = runs("kasse/a", 3, 100, 0, "") }), p4(), filter{})
+	if w := none.Kinds[0].Waiting; w.N != 0 || w.P50 != nil {
+		t.Errorf("waiting without agent times = %+v", w)
 	}
 }
 

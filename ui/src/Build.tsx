@@ -67,6 +67,16 @@ function KindRow({ b }: { b: BuildStats }) {
       <div className={`${CELL} text-right text-ink`}>{pct(b.success_rate)}</div>
       <div className={`${CELL} text-right text-ink`}>
         {d.value} <span className="text-muted">{d.unit}</span>
+        {b.waiting.n > 0 && (
+          <div
+            className="text-[11px] text-muted"
+            title={`Median über ${b.waiting.n} der ${b.duration.n} Läufe, die melden, wann sie einen Agent bekamen`}
+          >
+            Bau {dur(b.building.p50)}
+            <br />
+            Warten {dur(b.waiting.p50)}
+          </div>
+        )}
       </div>
       <div className={`${CELL} text-right text-ink-dim`}>
         {num(b.ci_seconds / 3600, 1)} h
@@ -170,12 +180,14 @@ function Outliers({
         sub={`Läufe über ${num(factor, 0)}× dem Median ihrer Art und über ${dur(minS)}, längste zuerst`}
       />
       {rows.length ? (
-        <div className="mt-3.5 grid min-w-[620px] grid-cols-[minmax(180px,2fr)_minmax(130px,1.2fr)_110px_80px_80px] items-center gap-x-3.5">
-          {["Pipeline", "Art", "Start", "Dauer", "× Median"].map((h, i) => (
-            <div key={h} className={`${HEAD} ${i > 1 ? "text-right" : ""}`}>
-              {h}
-            </div>
-          ))}
+        <div className="mt-3.5 grid min-w-[700px] grid-cols-[minmax(180px,2fr)_minmax(130px,1.2fr)_110px_80px_80px_80px] items-center gap-x-3.5">
+          {["Pipeline", "Art", "Start", "Dauer", "Warten", "× Median"].map(
+            (h, i) => (
+              <div key={h} className={`${HEAD} ${i > 1 ? "text-right" : ""}`}>
+                {h}
+              </div>
+            ),
+          )}
           {rows.map((o) => (
             <div key={`${o.pipeline_name}#${o.run_id}`} className="contents">
               <div className={`${CELL} overflow-hidden`}>
@@ -190,6 +202,16 @@ function Outliers({
               </div>
               <div className={`${CELL} text-right text-ink`}>
                 {dur(o.duration_s)}
+              </div>
+              <div
+                className={`${CELL} text-right text-ink-dim`}
+                title={
+                  o.wait_s == null
+                    ? "Der Lauf meldet nicht, wann er einen Agent bekam"
+                    : undefined
+                }
+              >
+                {o.wait_s != null ? dur(o.wait_s) : "–"}
               </div>
               <div className={`${CELL} text-right text-ink-dim`}>
                 {o.factor != null ? `${num(o.factor, 0)}×` : "–"}
@@ -276,7 +298,10 @@ export function Build({ m }: { m: Metrics }) {
               oder Failed. Ohne Ergebnis (ABORTED, NOT_BUILT, None): kein Lauf,
               nur CI-Zeit; ein Jenkins-timeout() endet ebenfalls ABORTED.
               Ausreisser (siehe unten) zählen als Lauf, ihre Zeit aber weder in
-              Dauer noch CI-Zeit noch verschwendet.
+              Dauer noch CI-Zeit noch verschwendet. Bau und Warten: Median über
+              die Läufe, die melden, wann sie einen Agent bekamen
+              (agent_started_at), aufgeteilt in das Warten auf den Agent und den
+              Bau selbst. Die Dauer p50 bleibt über alle Läufe.
             </p>
           </Card>
           <Card className="mt-3">
