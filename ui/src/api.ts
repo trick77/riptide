@@ -153,7 +153,7 @@ export type Outlier = {
   started_at: string | null;
   duration_s: number;
   status: string | null;
-  factor: number;
+  factor: number | null;
 };
 
 export type Hotspots = {
@@ -161,6 +161,8 @@ export type Hotspots = {
   slow_factor: number;
   flaky_factor: number;
   outlier_factor: number;
+  outlier_min_s: number;
+  outlier_repo_min_runs: number;
   kinds: KindHotspots[];
   outliers: Outlier[];
 };
