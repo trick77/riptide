@@ -4,6 +4,7 @@
 
 import type {
   BuildStats,
+  Change,
   DeployFact,
   Facts,
   KindHotspots,
@@ -111,9 +112,33 @@ function kindHotspots(
           },
         ]
       : [],
+    repos: [
+      {
+        repo: "kasse/kasse-api",
+        runs: 1,
+        duration: spread(1, 600),
+        factor: 1,
+        slow: false,
+        failures,
+        failure_rate: failures,
+        wasted_seconds: failures * 600,
+        flaky: false,
+      },
+    ],
     outlier_threshold_s: null,
   };
 }
+
+// A comparison verdict as the backend sends it.
+export function change(
+  verdict: Change["verdict"],
+  prev: number | null = null,
+  reason: Change["reason"] = null,
+): Change {
+  return { prev, verdict, reason };
+}
+
+const lowSample = change("none", null, "low_sample");
 
 // The sample team: one release, a re-sync and a first deploy on prod, a
 // failed sync; one human PR through intg to prod, a bot's PR; three runs.
@@ -178,6 +203,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
         finished: 4,
         success_rate: 0.75,
         argo_reporting: true,
+        median_week: 1,
       },
       lead_time: {
         environment: "prod",
@@ -201,7 +227,8 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
         stage("to_prod", spread(1, 0.7 * 86400), 0.48),
       ],
       pre_environment: "intg",
-      sum_p50: 2 * 86400,
+      attention_share: 0.5,
+      min_prs: 10,
       before_prod: 1.3 * 86400,
     },
     review: {
@@ -218,7 +245,10 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
         human: [0, 0, 0, 1, 0, 0],
         bot: [0, 0, 0, 1, 0, 0],
       },
+      within_day: { count: 1, n: 1, rate: 1 },
       change_mix: mix,
+      mix_total: { feature: 1, bugfix: 0, hotfix: 0, other: 0 },
+      mix_share: { feature: 1, bugfix: 0, hotfix: 0, other: 0 },
     },
     build: {
       data_from: ago(60),
@@ -242,6 +272,8 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
           kindHotspots("feature", 1),
         ],
         outliers: [],
+        outlier_count: 0,
+        outlier_groups: [],
       },
     },
     costs: {
@@ -250,8 +282,44 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       merged_reviews: 1,
       per_kloc: 1,
       wasted: 0.25,
+      wasted_share: 1 / 3,
       rows: [{ label: "kasse", value: 0.75 }],
       reviewed_repos: 1,
+    },
+    findings: [
+      {
+        kind: "stage",
+        tone: "hint",
+        stage: "to_prod",
+        run_kind: null,
+        repo: null,
+      },
+      {
+        kind: "first_touch",
+        tone: "talk",
+        stage: null,
+        run_kind: null,
+        repo: null,
+      },
+    ],
+    comparison: {
+      from: weeks(2 * n)[0].start,
+      to: w[0].start,
+      deploy_frequency: change("better", 0.1),
+      deploy_success: change("same", 0.75),
+      lead_time: change("worse", 86400),
+      lead_time_pre: lowSample,
+      review_time: lowSample,
+      within_day: lowSample,
+      first_touch: change("none", 0.5, "undirected"),
+      untracked: lowSample,
+      cost_per_kloc: change("none", null, "incomplete"),
+      wasted_share: lowSample,
+      build: [
+        { kind: "release", success: lowSample, duration: lowSample },
+        { kind: "main", success: lowSample, duration: lowSample },
+        { kind: "feature", success: lowSample, duration: lowSample },
+      ],
     },
     ...o,
   };

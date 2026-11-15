@@ -9,7 +9,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { Facts, Metrics } from "./api";
-import { LeadChain } from "./LeadChain";
+import { Flow } from "./Flow";
 import { parseState, stateQuery } from "./state";
 import {
   ago,
@@ -111,12 +111,16 @@ describe("App", () => {
     const calls = mockFetch();
     render(<App />);
     // The facts come last: they ask for the product the metrics resolved.
-    await screen.findByRole("heading", { name: "Daten" });
+    await screen.findByRole("tablist", { name: "Faktentabelle" });
     for (const h of [
-      "Delivery",
-      "Code-Review",
-      "Build",
-      "Kosten der KI-Reviews",
+      "Was jetzt?",
+      "Throughput und Instability",
+      "Wo wartet eine Änderung?",
+      "Wie gleichmässig kommt Code nach prod?",
+      "Woran arbeitet das Team?",
+      "Wie schnell und verlässlich ist das Feedback?",
+      "Was kosten die KI-Reviews?",
+      "Welche Metrik-Sets Riptide abdeckt",
     ]) {
       expect(screen.getByRole("heading", { name: h })).toBeInTheDocument();
     }
@@ -133,50 +137,189 @@ describe("App", () => {
     expect(
       screen.getByText(/Datenstand: Bitbucket 12\.11\./),
     ).toBeInTheDocument();
-    expect(screen.getByText("1 Releases aus 3 Syncs")).toBeInTheDocument();
+    expect(screen.getByText("1 Releases im Zeitraum")).toBeInTheDocument();
     expect(
-      screen.getByText("1 fehlgeschlagen von 4 Syncs"),
+      screen.getByText("1 von 4 Syncs fehlgeschlagen"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/1 Erstdeploys ohne Vergleichswert/),
     ).toBeInTheDocument();
-    expect(screen.getByText("Lead Time intg")).toBeInTheDocument();
+    expect(screen.getByText(/Lead Time bis intg/)).toBeInTheDocument();
     expect(screen.getAllByText(/wenig belastbar/).length).toBeGreaterThan(0);
+    // The DORA names, and the side Riptide cannot measure.
+    expect(
+      screen.getByText("DORA · Change lead time · Throughput"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("nicht gemessen")).toBeInTheDocument();
+    expect(screen.getByText("typisch 1.0 pro Woche")).toBeInTheDocument();
   });
 
   it("explains a number on demand, one at a time", async () => {
     mockFetch();
     render(<App />);
-    await screen.findByRole("heading", { name: "Delivery" });
-    const whys = screen.getAllByRole("button", { name: "Woher?" });
+    await screen.findByRole("heading", { name: "Was jetzt?" });
+    const whys = screen.getAllByRole("button", { name: "Was heisst das?" });
     fireEvent.click(whys[0]);
     expect(
-      screen.getByRole("region", { name: "Woher · Deploy-Frequenz" }),
+      screen.getByRole("region", { name: "Was heisst das? · Deploy-Frequenz" }),
     ).toBeInTheDocument();
     expect(screen.getByText("pro revision")).toBeInTheDocument();
+    expect(screen.getByText("Genauer hinschauen, wenn")).toBeInTheDocument();
     for (const [i, title] of [
-      [1, "Lead Time prod"],
-      [2, "Lead Time intg"],
-      [3, "Deploy-Erfolg"],
-      [4, "PR-Cycle-Time"],
-      [5, "Review-Zeit"],
-      [6, "Review-Tiefe"],
-      [7, "Ohne Jira-Key"],
+      [1, "Lead Time bis prod"],
+      [2, "Deploy-Erfolg"],
+      [3, "Review-Zeit"],
+      [4, "Approval ohne Kommentar"],
+      [5, "Innert 24 h gemergt"],
     ] as const) {
       fireEvent.click(whys[i]);
       expect(
-        screen.getByRole("region", { name: `Woher · ${title}` }),
+        screen.getByRole("region", { name: `Was heisst das? · ${title}` }),
       ).toBeInTheDocument();
-      expect(screen.getAllByRole("region", { name: /^Woher/ })).toHaveLength(1);
+      expect(
+        screen.getAllByRole("region", { name: /^Was heisst das\?/ }),
+      ).toHaveLength(1);
     }
-    fireEvent.click(whys[7]);
-    expect(screen.queryByRole("region", { name: /^Woher/ })).toBeNull();
+    fireEvent.click(whys[5]);
+    expect(
+      screen.queryByRole("region", { name: /^Was heisst das\?/ }),
+    ).toBeNull();
+  });
+
+  it("shows each number against the previous period", async () => {
+    mockFetch();
+    render(<App />);
+    await screen.findByRole("heading", { name: "Was jetzt?" });
+    expect(screen.getByText("besser")).toBeInTheDocument();
+    expect(screen.getByText("schlechter")).toBeInTheDocument();
+    expect(screen.getAllByText("unverändert").length).toBeGreaterThan(0);
+    expect(screen.getByText("ohne Richtung")).toBeInTheDocument();
+    expect(
+      screen.getAllByText(
+        "kein Vergleich: zu wenig Daten in einer der beiden Perioden",
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getByText(
+        "kein Vergleich: die Daten der Vorperiode sind nicht vollständig, oder Erstdeploys überwiegen",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/verglichen mit den 4 Wochen davor/),
+    ).toBeInTheDocument();
+  });
+
+  it("words the findings and links them to the facts", async () => {
+    const calls = mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      const m = metrics();
+      m.lead_chain.stages[0].share = 0.6;
+      m.build.hotspots.kinds[2].repos = [
+        {
+          repo: "kasse/flaky-api",
+          runs: 20,
+          failures: 8,
+          failure_rate: 0.4,
+          wasted_seconds: 7200,
+          duration: spread(20, 600),
+          factor: 1,
+          slow: false,
+          flaky: true,
+        },
+        {
+          repo: "kasse/slow-api",
+          runs: 12,
+          failures: 0,
+          failure_rate: 0,
+          wasted_seconds: 0,
+          duration: spread(12, 1800),
+          factor: 3,
+          slow: true,
+          flaky: false,
+        },
+      ];
+      m.findings = [
+        {
+          kind: "stage",
+          tone: "attention",
+          stage: "coding",
+          run_kind: null,
+          repo: null,
+        },
+        {
+          kind: "flaky",
+          tone: "attention",
+          stage: null,
+          run_kind: "feature",
+          repo: "kasse/flaky-api",
+        },
+        {
+          kind: "slow",
+          tone: "attention",
+          stage: null,
+          run_kind: "feature",
+          repo: "kasse/slow-api",
+        },
+        // a repo the hotspots no longer name: left out, not wrong
+        {
+          kind: "slow",
+          tone: "attention",
+          stage: null,
+          run_kind: "main",
+          repo: "gone",
+        },
+      ];
+      return m;
+    });
+    render(<App />);
+    await screen.findByRole("heading", { name: "Was jetzt?" });
+    expect(
+      screen.getByText("60 % der Zeit bis prod liegt in der Etappe «Coding»."),
+    ).toBeInTheDocument();
+    // The thresholds as the backend sent them.
+    expect(
+      screen.getByText(/ab 50 % der Zeit und 10 PRs \(Startwert\)/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "kasse/flaky-api: 40 % der Feature- und PR-Builds scheitern.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "kasse/slow-api liefert Feedback 3.0× langsamer als das Team.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("Achtung · Build")).toHaveLength(2);
+    expect(screen.queryByText(/gone/)).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Läufe von kasse/flaky-api ansehen →",
+      }),
+    );
+    expect(window.location.search).toBe("?q=kasse%2Fflaky-api&tab=runs");
+    await waitFor(() =>
+      expect(factsCalls(calls).at(-1)).toMatch(/&q=kasse%2Fflaky-api$/),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Zum Fluss →" }));
+  });
+
+  it("says so when no rule fires", async () => {
+    mockFetch((url) =>
+      url.pathname === "/api/facts" ? facts() : metrics(4, { findings: [] }),
+    );
+    render(<App />);
+    expect(
+      await screen.findByText(
+        "Keine Auffälligkeiten nach den Regeln, die Riptide anwendet.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("asks for a product and bots, keeps them in the URL", async () => {
     const calls = mockFetch();
     render(<App />);
-    await screen.findByRole("heading", { name: "Delivery" });
+    await screen.findByRole("heading", { name: "Was jetzt?" });
     const products = screen.getByRole("group", { name: "Produkt" });
     fireEvent.click(within(products).getByRole("button", { name: /portal/ }));
     expect(window.location.search).toBe("?product=portal");
@@ -191,18 +334,16 @@ describe("App", () => {
     expect(
       screen.getByText("Keine noergler-Reviews im Zeitraum."),
     ).toBeInTheDocument();
-    expect(screen.getByText("Kosten nach Repo")).toBeInTheDocument();
+    expect(screen.getByText("Nach Repo")).toBeInTheDocument();
 
     fireEvent.click(
       within(products).getByRole("button", { name: /Alle Produkte/ }),
     );
     await screen.findByText(/Team team-a, alle Produkte/);
-    expect(screen.getByText("0 von 1 gemergten PRs")).toBeInTheDocument();
+    expect(screen.getByText(/^\(0 von 1\)/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Bots einbeziehen" }));
     expect(window.location.search).toBe("?bots=1");
-    expect(
-      await screen.findByText("1 von 2 gemergten PRs"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/^\(1 von 2\)/)).toBeInTheDocument();
     expect(metricsCalls(calls).at(-1)).toMatch(/&bots=1$/);
     expect(screen.getAllByText("Bots").length).toBeGreaterThan(0);
   });
@@ -210,7 +351,7 @@ describe("App", () => {
   it("switches the window and the team, refetching", async () => {
     const calls = mockFetch();
     render(<App />);
-    await screen.findByRole("heading", { name: "Delivery" });
+    await screen.findByRole("heading", { name: "Was jetzt?" });
     fireEvent.click(screen.getByRole("button", { name: "12 W" }));
     await screen.findByText(/KW 35–46/);
     expect(metricsCalls(calls).at(-1)).toMatch(/weeks=12/);
@@ -226,8 +367,7 @@ describe("App", () => {
   it("asks the backend to search the facts, switches tables", async () => {
     const calls = mockFetch();
     render(<App />);
-    await screen.findByRole("heading", { name: "Daten" });
-    const tabs = screen.getByRole("tablist", { name: "Faktentabelle" });
+    const tabs = await screen.findByRole("tablist", { name: "Faktentabelle" });
     expect(within(tabs).getByRole("tab", { name: /PRs 3/ })).toHaveAttribute(
       "aria-selected",
       "true",
@@ -264,27 +404,27 @@ describe("App", () => {
   it("shows tooltips on hover and picks the build kind for hotspots", async () => {
     mockFetch();
     render(<App />);
-    await screen.findByRole("heading", { name: "Build" });
+    await screen.findByRole("heading", {
+      name: "Wie schnell und verlässlich ist das Feedback?",
+    });
     const cols = screen.getAllByTestId("week-col");
     fireEvent.mouseEnter(cols[3]);
     expect(screen.getByRole("tooltip")).toHaveTextContent("KW 46");
     fireEvent.mouseLeave(cols[3]);
     expect(screen.queryByRole("tooltip")).toBeNull();
     const kinds = screen.getByRole("group", { name: "Lauf-Art" });
-    // master builds first: one failed run of kasse-api
-    expect(screen.getByText("1 / 1")).toBeInTheDocument();
+    // feature builds first: kasse-api broke one run, nothing flagged
+    expect(
+      within(kinds).getByRole("button", { name: "Feature- und PR-Builds" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("unauffällig")).toBeInTheDocument();
     fireEvent.click(within(kinds).getByRole("button", { name: "Releases" }));
     expect(
       within(kinds).getByRole("button", { name: "Releases" }),
     ).toHaveAttribute("aria-pressed", "true");
     expect(
-      screen.getByText("Keine fehlgeschlagenen Läufe dieser Art."),
-    ).toBeInTheDocument();
-    fireEvent.mouseEnter(
-      screen.getByRole("img", { name: /Erfolgsquote/ }).parentElement!
-        .lastElementChild!.lastElementChild!,
-    );
-    expect(screen.getByRole("tooltip")).toHaveTextContent("KW 46");
+      screen.getAllByRole("img", { name: /^Erfolgsquote pro Woche/ }),
+    ).toHaveLength(3);
     fireEvent.mouseEnter(
       screen
         .getByText("< 15 min")
@@ -306,28 +446,55 @@ describe("App", () => {
         building: spread(4, 3 * 60),
       };
       const h = m.build.hotspots;
-      h.kinds[1] = {
-        ...h.kinds[1],
-        durations: [
-          {
-            repo: "kasse/slow-api",
-            runs: 12,
-            duration: spread(12, 1800, 2400),
-            factor: 3,
-            slow: true,
-          },
-        ],
-        failing: [
+      h.kinds[2] = {
+        ...h.kinds[2],
+        failure_rate: 0.1,
+        repos: [
           {
             repo: "kasse/flaky-api",
             runs: 20,
             failures: 8,
             failure_rate: 0.4,
             wasted_seconds: 7200,
+            duration: spread(20, 600),
+            factor: 1,
+            slow: false,
             flaky: true,
+          },
+          {
+            repo: "kasse/slow-api",
+            runs: 12,
+            failures: 0,
+            failure_rate: 0,
+            wasted_seconds: 0,
+            duration: spread(12, 1800, 2400),
+            factor: 3,
+            slow: true,
+            flaky: false,
           },
         ],
       };
+      h.outlier_groups = [
+        {
+          from: ago(3),
+          to: ago(2.99),
+          runs: 2,
+          repos: ["kasse/kasse-api", "kasse/kasse-web"],
+          shared: true,
+        },
+        // one repo stuck twice: no sentence about the agents
+        { from: ago(5), to: ago(5), runs: 2, repos: ["a"], shared: false },
+        // across midnight: both days
+        {
+          from: "2026-11-05T22:50:00Z",
+          to: "2026-11-05T23:15:00Z",
+          runs: 3,
+          repos: ["b", "c"],
+          shared: true,
+        },
+      ];
+      // More stuck than the 10 longest the backend sends.
+      h.outlier_count = 25;
       h.outliers = [
         {
           kind: "main",
@@ -355,26 +522,44 @@ describe("App", () => {
       return m;
     });
     render(<App />);
-    await screen.findByRole("heading", { name: "Hotspots" });
-    expect(screen.getByText("kasse/slow-api · langsam")).toBeInTheDocument();
-    expect(screen.getByText("auffällig")).toBeInTheDocument();
-    expect(screen.getByText("8 / 20")).toBeInTheDocument();
+    await screen.findByText("Repos, die das Feedback bremsen");
+    expect(screen.getByText("fehleranfällig")).toBeInTheDocument();
+    expect(screen.getByText(/40 % rot, Team 10 %/)).toBeInTheDocument();
+    expect(screen.getByText("langsam")).toBeInTheDocument();
+    expect(screen.getByText(/Team 10 min \(3\.0×\)/)).toBeInTheDocument();
     expect(screen.getByText("2.0 h")).toBeInTheDocument();
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Läufe ansehen →" })[1],
+    );
+    expect(window.location.search).toBe("?q=kasse%2Fslow-api&tab=runs");
+    // Stuck together across repos: the agents, said once.
+    expect(
+      screen.getByText(/2 Läufe aus 2 Repos starteten am/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "3 Läufe aus 2 Repos starteten zwischen 05.11. 23:50 und 06.11. 00:15",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText(/Repos starteten/)).toHaveLength(2);
+    expect(
+      screen.getByText(/^25 Läufe hingen im Zeitraum/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Die längsten 2 anzeigen")).toBeInTheDocument();
     expect(screen.getByText("160×")).toBeInTheDocument();
     // A team median of 0 gives no factor.
     expect(
       screen.getByText("#8").parentElement?.parentElement,
     ).toHaveTextContent(/–$/);
-    expect(screen.getByText("+ 32.0 h Ausreisser")).toHaveAttribute(
-      "title",
-      "1 Ausreisser, nicht in der CI-Zeit",
-    );
+    expect(
+      screen.getByText(/1 Ausreisser \(32\.0 h\) nicht in Dauer und CI-Zeit/),
+    ).toBeInTheDocument();
     expect(screen.getByText("#7")).toBeInTheDocument();
     // The agent wait, beside the duration, only where runs report it.
     expect(screen.getByTitle(/^Median über 4 der /)).toHaveTextContent(
-      /Bau 3 minWarten 7 min/,
+      "davon typischerweise 7 min Warten auf einen Agent, 3 min Bauen",
     );
-    expect(screen.getAllByText(/^Bau /)).toHaveLength(1);
+    expect(screen.getAllByText(/Warten auf einen Agent/)).toHaveLength(1);
     expect(
       screen.getByText("#7").parentElement?.parentElement,
     ).toHaveTextContent("20.0 h");
@@ -387,7 +572,7 @@ describe("App", () => {
     window.history.replaceState(null, "", "/?product=gone");
     const calls = mockFetch();
     render(<App />);
-    await screen.findByRole("heading", { name: "Daten" });
+    await screen.findByRole("tablist", { name: "Faktentabelle" });
     expect(metricsCalls(calls)[0]).toMatch(/&product=gone$/);
     expect(factsCalls(calls)[0]).not.toMatch(/product=/);
   });
@@ -409,7 +594,7 @@ describe("App", () => {
       };
     });
     render(<App />);
-    await screen.findByRole("heading", { name: "Code-Review" });
+    await screen.findByRole("heading", { name: "Wo wartet eine Änderung?" });
     expect(screen.getByText("bis 10 min")).toBeInTheDocument();
     expect(screen.getByText("ab 10 min")).toBeInTheDocument();
   });
@@ -446,7 +631,11 @@ describe("App", () => {
     render(<App />);
     expect(await screen.findByRole("alert")).toHaveTextContent("500: boom");
     expect(
-      screen.getByRole("heading", { name: "Delivery" }),
+      screen.getByRole("heading", { name: "Was jetzt?" }),
+    ).toBeInTheDocument();
+    // The data section says so instead of loading forever.
+    expect(
+      screen.getByText(/Die Einzelfakten konnten nicht geladen werden/),
     ).toBeInTheDocument();
   });
 
@@ -498,7 +687,6 @@ describe("App", () => {
             share: null,
             hot: false,
           })),
-          sum_p50: null,
         },
         build: {
           ...m.build,
@@ -515,7 +703,7 @@ describe("App", () => {
     });
     render(<App />);
     expect(
-      await screen.findByText(/Nur Läufe unbekannter Art/),
+      await screen.findByText("vor der ersten build_type-Meldung"),
     ).toBeInTheDocument();
     expect(screen.getByText(/Build-Daten ab 09\.11\.2026/)).toBeInTheDocument();
     expect(
@@ -535,7 +723,7 @@ describe("App", () => {
     render(<App />);
     expect(await screen.findByRole("alert")).toHaveTextContent("boom");
     fireEvent.click(screen.getByRole("button", { name: "12 W" }));
-    await screen.findByRole("heading", { name: "Delivery" });
+    await screen.findByRole("heading", { name: "Was jetzt?" });
     fireEvent.click(screen.getByRole("button", { name: "4 W" }));
     await screen.findByText(/KW 43–46/);
     expect(screen.queryByRole("alert")).toBeNull();
@@ -551,8 +739,7 @@ describe("App", () => {
         : metrics(),
     );
     render(<App />);
-    await screen.findByRole("heading", { name: "Daten" });
-    const row = screen.getByText("KAS-1: Pay by card").closest("tr")!;
+    const row = (await screen.findByText("KAS-1: Pay by card")).closest("tr")!;
     expect(within(row).getAllByText("–").length).toBeGreaterThan(0);
     expect(within(row).queryByText("0 s")).toBeNull();
   });
@@ -633,8 +820,7 @@ describe("App", () => {
       };
     });
     render(<App />);
-    await screen.findByRole("heading", { name: "Build" });
-    expect(screen.getByText("+ 3 ohne Ergebnis")).toBeInTheDocument();
+    expect(await screen.findByText(/\+ 3 ohne Ergebnis/)).toBeInTheDocument();
   });
 
   it("treats a blank search as none", async () => {
@@ -650,26 +836,36 @@ describe("App", () => {
   });
 });
 
-describe("lead chain", () => {
+describe("flow", () => {
   it("draws the shares the backend computed, no stage it left out", () => {
     const zero = { n: 1, p50: 0, p90: 0, low_sample: true, hot: false };
+    const m = metrics();
     render(
-      <LeadChain
-        prod="prod"
-        chain={{
-          stages: (["coding", "review", "merge", "to_prod"] as const).map(
-            (key) => ({ key, ...zero, share: 0.25 }),
-          ),
-          pre_environment: null,
-          sum_p50: 0,
-          before_prod: 0,
+      <Flow
+        why={null}
+        onWhy={() => {}}
+        m={{
+          ...m,
+          delivery: { ...m.delivery, lead_time_pre: null },
+          comparison: { ...m.comparison, lead_time_pre: null },
+          lead_chain: {
+            stages: (["coding", "review", "merge", "to_prod"] as const).map(
+              (key) => ({ key, ...zero, share: 0.25 }),
+            ),
+            pre_environment: null,
+            attention_share: 0.5,
+            min_prs: 10,
+            before_prod: 0,
+          },
         }}
       />,
     );
     expect(document.body.textContent).not.toMatch(/NaN/);
-    expect(screen.getByText(/25 %/)).toBeInTheDocument();
+    expect(screen.getAllByText(/25 % der Zeit/)).toHaveLength(4);
     expect(screen.queryByText(/Bis null/)).toBeNull();
     expect(screen.getByText("gemergt → auf prod")).toBeInTheDocument();
+    // No stage is hot: no lever named.
+    expect(screen.queryByText(/Der Hebel liegt/)).toBeNull();
   });
 });
 

@@ -453,7 +453,9 @@ it computes nothing. `GET /api/metrics?team=<team>&weeks=4|12|26&tz=<zone>`
 returns the page's metrics over whole calendar weeks in the viewer's time
 zone, the current one running to now: deploy frequency, lead times and their
 breakdown, code review, builds per kind of run with their hotspots, and
-noergler costs. `product=<key>` narrows it to one Bitbucket project,
+noergler costs; each against the same number of whole weeks right before
+(a second read of that window), and the findings the page leads with.
+`product=<key>` narrows it to one Bitbucket project,
 `bots=1` counts bots' PRs in. `GET /api/facts` takes the same parameters
 plus `q` and returns the PRs, deploys and runs behind the numbers, newest
 first, searched; it reads no lead times or reviews, so it takes the product
@@ -485,8 +487,15 @@ lists the configured teams for the UI's team picker.
 
 The UI ([`ui/`](ui/), React, built into the binary) is one page per team:
 whole calendar weeks (4, 12 or 26), filtered by product (Bitbucket project)
-and searchable. Every number has a "Woher?" with its definition, its basis
-and the query it follows. Build numbers are never averaged across kinds of
+and searchable. It leads with what the numbers ask the team to look at,
+then goes by question: where a change waits, how evenly it ships, what the
+team works on, how fast the CI answers, what the reviews cost, the facts
+behind it all, and which metric sets (DORA, DX Core 4, SPACE, DevEx, Flow)
+each number belongs to. Every number says which way is better (or that
+none is), compares with the previous period (durations and rates within
+10 % and shares within 3 points count as the same) and has a "Was heisst
+das?" with how to read it, its definition, its basis and the query it
+follows. Build numbers are never averaged across kinds of
 run: releases, master builds, feature/PR builds and other branches each get
 their own success rate and duration. The view lives in the query string
 (`?team=…&product=…&w=12&bots=1`), so a link or a printout reproduces it.

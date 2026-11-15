@@ -45,6 +45,7 @@ export type DeployFrequency = {
   finished: number;
   success_rate: number | null;
   argo_reporting: boolean;
+  median_week: number | null;
 };
 
 export type LeadTimes = {
@@ -74,7 +75,8 @@ export type Stage = Spread & {
 export type LeadChain = {
   stages: Stage[];
   pre_environment: string | null;
-  sum_p50: number | null;
+  attention_share: number;
+  min_prs: number;
   before_prod: number;
 };
 
@@ -99,8 +101,13 @@ export type Review = {
     human: number[];
     bot: number[];
   };
+  within_day: Share;
   change_mix: MixWeek[];
+  mix_total: MixWeek;
+  mix_share: Record<keyof MixWeek, number | null>;
 };
+
+export type Share = { count: number; n: number; rate: number | null };
 
 export type RunKind = "release" | "main" | "feature" | "other" | "unknown";
 
@@ -144,7 +151,28 @@ export type KindHotspots = {
   failure_rate: number | null;
   durations: RepoDuration[];
   failing: RepoFailures[];
+  repos: RepoHotspot[];
   outlier_threshold_s: number | null;
+};
+
+export type RepoHotspot = {
+  repo: string;
+  runs: number;
+  duration: Spread;
+  factor: number | null;
+  slow: boolean;
+  failures: number;
+  failure_rate: number | null;
+  wasted_seconds: number;
+  flaky: boolean;
+};
+
+export type OutlierGroup = {
+  from: string;
+  to: string;
+  runs: number;
+  repos: string[];
+  shared: boolean;
 };
 
 export type Outlier = {
@@ -168,6 +196,8 @@ export type Hotspots = {
   outlier_repo_min_runs: number;
   kinds: KindHotspots[];
   outliers: Outlier[];
+  outlier_count: number;
+  outlier_groups: OutlierGroup[];
 };
 
 export type Build = {
@@ -184,8 +214,39 @@ export type Costs = {
   merged_reviews: number;
   per_kloc: number | null;
   wasted: number;
+  wasted_share: number | null;
   rows: { label: string; value: number }[];
   reviewed_repos: number;
+};
+
+export type Finding = {
+  kind: "stage" | "flaky" | "slow" | "first_touch";
+  tone: "attention" | "hint" | "talk";
+  stage: StageKey | null;
+  run_kind: RunKind | null;
+  repo: string | null;
+};
+
+export type Change = {
+  prev: number | null;
+  verdict: "better" | "worse" | "same" | "none";
+  reason: "low_sample" | "incomplete" | "no_value" | "undirected" | null;
+};
+
+export type Comparison = {
+  from: string;
+  to: string;
+  deploy_frequency: Change;
+  deploy_success: Change;
+  lead_time: Change;
+  lead_time_pre: Change | null;
+  review_time: Change;
+  within_day: Change;
+  first_touch: Change;
+  untracked: Change;
+  cost_per_kloc: Change;
+  wasted_share: Change;
+  build: { kind: RunKind; success: Change; duration: Change }[];
 };
 
 export type Metrics = {
@@ -199,6 +260,8 @@ export type Metrics = {
   review: Review;
   build: Build;
   costs: Costs;
+  findings: Finding[];
+  comparison: Comparison;
 };
 
 export type PRFact = {
