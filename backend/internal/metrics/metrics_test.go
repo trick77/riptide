@@ -433,7 +433,7 @@ func buildData() *dataset.Dataset {
 }
 
 func TestBuilds(t *testing.T) {
-	b := build(buildData(), p4(), filter{})
+	b := build(buildData(), p4(), filter{}, nil)
 	type row struct {
 		kind            string
 		runs, succeeded int
@@ -453,14 +453,14 @@ func TestBuilds(t *testing.T) {
 	}
 	expectNear(t, "main week 4", main.Weekly[3], 0.5)
 	expectNil(t, "main week 1", main.Weekly[0])
-	if got := build(buildData(), p4(), filter{product: "portal"}); len(got.Kinds) != 0 {
+	if got := build(buildData(), p4(), filter{product: "portal"}, nil); len(got.Kinds) != 0 {
 		t.Errorf("portal = %+v", got.Kinds)
 	}
 	// Run data from ten days back: the first two weeks are a gap.
 	if !b.StartsInside || b.GapWeeks != 2 {
 		t.Errorf("starts inside %v, gap %d", b.StartsInside, b.GapWeeks)
 	}
-	none := build(data(func(ds *dataset.Dataset) { ds.Meta.BuildDataFrom = nil }), p4(), filter{})
+	none := build(data(func(ds *dataset.Dataset) { ds.Meta.BuildDataFrom = nil }), p4(), filter{}, nil)
 	if none.StartsInside || none.GapWeeks != 4 || len(none.Kinds) != 0 {
 		t.Errorf("no data = %+v", none)
 	}
@@ -482,16 +482,16 @@ func TestRunKind(t *testing.T) {
 }
 
 func TestRepoDurations(t *testing.T) {
-	h := build(buildData(), p4(), filter{}).Hotspots
+	h := build(buildData(), p4(), filter{}, nil).Hotspots
 	byKind := map[string]KindHotspots{}
 	for _, k := range h.Kinds {
 		byKind[k.Kind] = k
 	}
-	main := byKind[KindMain].Durations
+	main := byKind[KindMain].Repos
 	if len(main) != 1 || main[0].Repo != "kasse/kasse-api" || main[0].Runs != 2 || *main[0].Duration.P50 != 750 {
 		t.Errorf("main = %+v", main)
 	}
-	if other := byKind[KindOther].Durations; other[0].Repo != "nightly" {
+	if other := byKind[KindOther].Repos; other[0].Repo != "nightly" {
 		t.Errorf("other = %+v", other)
 	}
 }

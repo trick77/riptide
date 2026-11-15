@@ -15,6 +15,7 @@ import { initialLanguage } from "./i18n";
 import { parseState, stateQuery } from "./state";
 import {
   ago,
+  change,
   deployFact,
   facts,
   metrics,
@@ -223,8 +224,10 @@ describe("App", () => {
           runs: 20,
           failures: 8,
           failure_rate: 0.4,
+          failure_change: change("worse", 0.1),
           wasted_seconds: 7200,
           duration: spread(20, 600),
+          duration_change: change("same", 600),
           factor: 1,
           slow: false,
           flaky: true,
@@ -234,8 +237,10 @@ describe("App", () => {
           runs: 12,
           failures: 0,
           failure_rate: 0,
+          failure_change: change("same", 0),
           wasted_seconds: 0,
           duration: spread(12, 1800),
+          duration_change: change("worse", 600),
           factor: 3,
           slow: true,
           flaky: false,
@@ -290,7 +295,12 @@ describe("App", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "kasse/slow-api liefert Feedback 3.0× langsamer als das Team.",
+        "kasse/slow-api liefert Feedback 3.0× langsamer als in der Vorperiode.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "8 von 20 Läufen rot, in der Vorperiode 10 %. Das kostet 2.0 h CI-Zeit und jedes Mal einen Neustart.",
       ),
     ).toBeInTheDocument();
     expect(screen.getAllByText("Achtung · Build")).toHaveLength(2);
@@ -485,11 +495,17 @@ describe("App", () => {
     fireEvent.mouseLeave(cols[3]);
     expect(screen.queryByRole("tooltip")).toBeNull();
     const kinds = screen.getByRole("group", { name: "Lauf-Art" });
-    // feature builds first: kasse-api broke one run, nothing flagged
+    // feature builds first: kasse-api broke one run, too few to compare
     expect(
       within(kinds).getByRole("button", { name: "Feature- und PR-Builds" }),
     ).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText("Unauffällig")).toBeInTheDocument();
+    expect(screen.getByText("Kein Vergleich")).toBeInTheDocument();
+    expect(
+      screen.getByText(/unter 10 Läufen in einer der beiden Perioden;/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByText("Repos: kein Vergleich mit der Vorperiode"),
+    ).toHaveLength(3);
     fireEvent.click(within(kinds).getByRole("button", { name: "Releases" }));
     expect(
       within(kinds).getByRole("button", { name: "Releases" }),
@@ -527,8 +543,10 @@ describe("App", () => {
             runs: 20,
             failures: 8,
             failure_rate: 0.4,
+            failure_change: change("worse", 0.1),
             wasted_seconds: 7200,
             duration: spread(20, 600),
+            duration_change: change("same", 600),
             factor: 1,
             slow: false,
             flaky: true,
@@ -538,13 +556,34 @@ describe("App", () => {
             runs: 12,
             failures: 0,
             failure_rate: 0,
+            failure_change: change("same", 0),
             wasted_seconds: 0,
             duration: spread(12, 1800, 2400),
+            duration_change: change("worse", 600),
             factor: 3,
             slow: true,
             flaky: false,
           },
+          {
+            repo: "kasse/new-api",
+            runs: 12,
+            failures: 0,
+            failure_rate: 0,
+            failure_change: change("none", null, "no_value"),
+            wasted_seconds: 0,
+            duration: spread(12, 300),
+            duration_change: change("none", null, "no_value"),
+            factor: null,
+            slow: false,
+            flaky: false,
+          },
         ],
+      };
+      m.comparison.build[2] = {
+        ...m.comparison.build[2],
+        slower: 1,
+        flakier: 1,
+        compared: 2,
       };
       h.outlier_groups = [
         {
@@ -595,10 +634,26 @@ describe("App", () => {
     });
     render(<App />);
     await screen.findByText("Repos, die das Feedback bremsen");
-    expect(screen.getByText("Fehleranfällig")).toBeInTheDocument();
-    expect(screen.getByText(/40 % rot, Team 10 %/)).toBeInTheDocument();
-    expect(screen.getByText("Langsam")).toBeInTheDocument();
-    expect(screen.getByText(/Team 10 min \(3\.0×\)/)).toBeInTheDocument();
+    // Each repo against its own previous period, never the team.
+    expect(screen.getByText("Fehleranfälliger geworden")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Vorperiode 10 % → jetzt 40 % rot/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Langsamer geworden")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Vorperiode 10 min → jetzt 30 min \(3\.0×\)/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Team 10/)).toBeNull();
+    expect(
+      screen.getByText(
+        /keine vergleichbaren Läufe dieser Art in der Vorperiode;/,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/fehleranfälliger geworden als in der Vorperiode/),
+    ).toHaveTextContent(
+      "Von 2 Repos sind 1 langsamer, 1 fehleranfälliger geworden als in der Vorperiode",
+    );
     expect(screen.getByText("2.0 h")).toBeInTheDocument();
     fireEvent.click(
       screen.getAllByRole("button", { name: "Läufe ansehen →" })[1],

@@ -164,18 +164,19 @@ export const de = {
     runsOf: "Läufe von {{repo}} ansehen →",
     flakyTitle: "{{repo}}: {{rate}} der {{kind}} scheitern.",
     flakyBody:
-      "{{failures}} von {{runs}} Läufen rot, im Team {{teamRate}}. Das kostet {{hours}} h CI-Zeit und jedes Mal einen Neustart.",
+      "{{failures}} von {{runs}} Läufen rot, in der Vorperiode {{prevRate}}. Das kostet {{hours}} h CI-Zeit und jedes Mal einen Neustart.",
     flakyLever:
       "instabile Tests finden und isolieren, statt Läufe einfach neu zu starten",
     flakyRule:
-      "Regel: auffällig ab {{factor}}× der Team-Quote, höchstens halbwegs bis 100 %, ab {{min}} Läufen (Startwert)",
-    slowTitle: "{{repo}} liefert Feedback {{factor}}× langsamer als das Team.",
+      "Regel: auffällig ab {{factor}}× der eigenen Quote der Vorperiode und {{points}} Prozentpunkte darüber, höchstens halbwegs bis 100 %, mit mindestens {{failures}} roten Läufen, ab {{min}} Läufen in beiden Perioden (Startwert)",
+    slowTitle:
+      "{{repo}} liefert Feedback {{factor}}× langsamer als in der Vorperiode.",
     slowBody:
-      "{{kind}} dauern typischerweise {{p50}}, im Team {{teamP50}}. So lange wartet, wer pusht.",
+      "{{kind}} dauern typischerweise {{p50}}, in der Vorperiode {{prevP50}}. So lange wartet, wer pusht.",
     slowLever:
       "Build-Cache nutzen, Tests parallelisieren, langsame Integrationstests aus dem PR-Build nehmen",
     slowRule:
-      "Regel: Median ab {{factor}}× Team, ab {{min}} Läufen (Startwert)",
+      "Regel: Median ab {{factor}}× der eigenen Vorperiode, ab {{min}} Läufen in beiden Perioden (Startwert)",
     sinceNote:
       "Argo CD meldet erst seit {{date}}: die Wochen davor sind leer, die Rate gilt ab dann.",
     sinceLow: " Weniger als eine Woche Daten: wenig belastbar.",
@@ -409,7 +410,10 @@ export const de = {
     },
     sparkAria: "Erfolgsquote pro Woche, {{kind}}: {{parts}}",
     successful: "erfolgreich",
-    typicalDuration: "typische Dauer",
+    typicalDuration: "typische Dauer, alle Repos",
+    repos:
+      "Von {{compared}} Repos sind {{slower}} langsamer, {{flakier}} fehleranfälliger geworden als in der Vorperiode",
+    reposNone: "Repos: kein Vergleich mit der Vorperiode",
     redRuns: "rote Läufe, von {{h}} h CI-Zeit",
     waitingTitle:
       "Median über {{n}} der {{total}} Läufe, die melden, wann sie einen Agent bekamen",
@@ -420,11 +424,15 @@ export const de = {
     runs_other: "{{count}} Läufe",
     noVerdict: " + {{n}} ohne Ergebnis",
     outliers: " · {{n}} Ausreisser ({{h}} h) nicht in Dauer und CI-Zeit",
-    flaky: "Fehleranfällig",
-    flakyText: "{{rate}} rot, Team {{team}}",
-    slow: "Langsam",
-    slowText: "typische Dauer {{p50}}, Team {{team}} ({{factor}}×)",
+    flaky: "Fehleranfälliger geworden",
+    flakyText: "Vorperiode {{prev}} → jetzt {{rate}} rot",
+    slow: "Langsamer geworden",
+    slowText: "Vorperiode {{prev}} → jetzt {{p50}} ({{factor}}×)",
     fine: "Unauffällig",
+    noCompare: "Kein Vergleich",
+    noCompareNoValue: "keine vergleichbaren Läufe dieser Art in der Vorperiode",
+    noCompareIncomplete: "Build-Daten der Vorperiode unvollständig",
+    noCompareLowSample: "unter {{min}} Läufen in einer der beiden Perioden",
     fineText: "{{p50}}, {{rate}} rot",
     group_one: "{{count}} Lauf aus {{repos}} Repos startete {{when}}",
     group_other: "{{count}} Läufe aus {{repos}} Repos starteten {{when}}",
@@ -450,7 +458,7 @@ export const de = {
       "Erfolgreich: SUCCESS (Tekton: Succeeded, Completed). Rot: FAILURE, UNSTABLE oder Failed. Ohne Ergebnis (ABORTED, NOT_BUILT): kein Lauf, nur CI-Zeit; ein Jenkins-timeout() endet ebenfalls ABORTED.",
     hotspotsTitle: "Repos, die das Feedback bremsen",
     hotspotsSub:
-      "Jedes Repo gegen alle Läufe derselben Art im Team · die Schwellen sind Startwerte, nicht gemessen",
+      "Jedes Repo gegen seine eigenen Läufe derselben Art in der Vorperiode · die Schwellen sind Startwerte, nicht gemessen",
     kindGroup: "Lauf-Art",
     colRepo: "Repo",
     colWhy: "Warum",
@@ -458,7 +466,7 @@ export const de = {
     viewRuns: "Läufe ansehen →",
     noneOfKind: "Keine Läufe dieser Art mit Ergebnis.",
     hotspotsRule:
-      "Fehleranfällig: Quote mindestens {{flaky}}× die des Teams, höchstens halbwegs zwischen ihr und 100 %. Langsam: Median mindestens {{slow}}× der des Teams. Beides ab {{min}} Läufen.",
+      "Fehleranfälliger geworden: Quote mindestens {{flaky}}× die der Vorperiode und {{points}} Prozentpunkte darüber, höchstens halbwegs zwischen ihr und 100 %, mit mindestens {{failures}} roten Läufen. Langsamer geworden: Median mindestens {{slow}}× der der Vorperiode. Beides ab {{min}} Läufen in beiden Perioden. Nie gegen das Team: eine Lauf-Art mischt Gradle-, npm- und andere Builds, ein UI-Build mit Smoke-Tests wäre sonst immer langsam.",
     stuckTitle: "Hängende Läufe",
     stuckSub: "Läufe über {{factor}}× dem Median ihrer Art und über {{min}}",
     stuck_one: "1 Lauf hing",

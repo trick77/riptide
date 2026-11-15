@@ -91,36 +91,17 @@ function kindHotspots(
     kind,
     duration: spread(1, 600),
     failure_rate: failures,
-    durations: [
-      {
-        repo: "kasse/kasse-api",
-        runs: 1,
-        duration: spread(1, 600),
-        factor: 1,
-        slow: false,
-      },
-    ],
-    failing: failures
-      ? [
-          {
-            repo: "kasse/kasse-api",
-            runs: 1,
-            failures: 1,
-            failure_rate: 1,
-            wasted_seconds: 600,
-            flaky: false,
-          },
-        ]
-      : [],
     repos: [
       {
         repo: "kasse/kasse-api",
         runs: 1,
         duration: spread(1, 600),
-        factor: 1,
+        duration_change: change("none", null, "low_sample"),
+        factor: null,
         slow: false,
         failures,
         failure_rate: failures,
+        failure_change: change("none", null, "low_sample"),
         wasted_seconds: failures * 600,
         flaky: false,
       },
@@ -261,8 +242,10 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       ],
       hotspots: {
         min_runs: 10,
-        slow_factor: 2,
+        slow_factor: 1.5,
         flaky_factor: 2,
+        flaky_min_points: 0.05,
+        flaky_min_failures: 2,
         outlier_factor: 6,
         outlier_min_s: 3600,
         outlier_repo_min_runs: 3,
@@ -318,9 +301,27 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       cost_per_kloc: change("none", null, "incomplete"),
       wasted_share: lowSample,
       build: [
-        { kind: "release", success: lowSample, duration: lowSample },
-        { kind: "main", success: lowSample, duration: lowSample },
-        { kind: "feature", success: lowSample, duration: lowSample },
+        {
+          kind: "release",
+          success: lowSample,
+          slower: 0,
+          flakier: 0,
+          compared: 0,
+        },
+        {
+          kind: "main",
+          success: lowSample,
+          slower: 0,
+          flakier: 0,
+          compared: 0,
+        },
+        {
+          kind: "feature",
+          success: lowSample,
+          slower: 0,
+          flakier: 0,
+          compared: 0,
+        },
       ],
     },
     ...o,

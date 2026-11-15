@@ -168,18 +168,19 @@ export const en = {
     runsOf: "View the runs of {{repo}} →",
     flakyTitle: "{{repo}}: {{rate}} of {{kind}} fail.",
     flakyBody:
-      "{{failures}} of {{runs}} runs red, team-wide {{teamRate}}. That costs {{hours}} h of CI time and a restart each time.",
+      "{{failures}} of {{runs}} runs red, {{prevRate}} in the previous period. That costs {{hours}} h of CI time and a restart each time.",
     flakyLever:
       "find and isolate unstable tests instead of just restarting runs",
     flakyRule:
-      "Rule: flagged from {{factor}}× the team's rate, at most halfway to 100 %, from {{min}} runs (starting value)",
-    slowTitle: "{{repo}} delivers feedback {{factor}}× slower than the team.",
+      "Rule: flagged from {{factor}}× its own rate of the previous period and {{points}} points above it, at most halfway to 100 %, with {{failures}} red runs or more, from {{min}} runs in both periods (starting value)",
+    slowTitle:
+      "{{repo}} delivers feedback {{factor}}× slower than in the previous period.",
     slowBody:
-      "{{kind}} typically take {{p50}}, team-wide {{teamP50}}. That is how long whoever pushes waits.",
+      "{{kind}} typically take {{p50}}, {{prevP50}} in the previous period. That is how long whoever pushes waits.",
     slowLever:
       "use the build cache, run tests in parallel, move slow integration tests out of the PR build",
     slowRule:
-      "Rule: median from {{factor}}× the team, from {{min}} runs (starting value)",
+      "Rule: median from {{factor}}× its own of the previous period, from {{min}} runs in both periods (starting value)",
     sinceNote:
       "Argo CD only reports since {{date}}: the weeks before are empty, the rate applies from then on.",
     sinceLow: " Less than a week of data: not very reliable.",
@@ -415,7 +416,10 @@ export const en = {
     },
     sparkAria: "Success rate per week, {{kind}}: {{parts}}",
     successful: "successful",
-    typicalDuration: "typical duration",
+    typicalDuration: "typical duration, all repos",
+    repos:
+      "Of {{compared}} repos, {{slower}} got slower and {{flakier}} flakier than in the previous period",
+    reposNone: "Repos: no comparison with the previous period",
     redRuns: "red runs, of {{h}} h CI time",
     waitingTitle:
       "Median over {{n}} of the {{total}} runs that report when they got an agent",
@@ -426,11 +430,15 @@ export const en = {
     runs_other: "{{count}} runs",
     noVerdict: " + {{n}} without a result",
     outliers: " · {{n}} outliers ({{h}} h) not in duration and CI time",
-    flaky: "Flaky",
-    flakyText: "{{rate}} red, team {{team}}",
-    slow: "Slow",
-    slowText: "typical duration {{p50}}, team {{team}} ({{factor}}×)",
+    flaky: "Got flakier",
+    flakyText: "previous period {{prev}} → now {{rate}} red",
+    slow: "Got slower",
+    slowText: "previous period {{prev}} → now {{p50}} ({{factor}}×)",
     fine: "Unremarkable",
+    noCompare: "No comparison",
+    noCompareNoValue: "no comparable runs of this kind in the previous period",
+    noCompareIncomplete: "build data of the previous period incomplete",
+    noCompareLowSample: "under {{min}} runs in one of the two periods",
     fineText: "{{p50}}, {{rate}} red",
     group_one: "{{count}} run from {{repos}} repos started {{when}}",
     group_other: "{{count}} runs from {{repos}} repos started {{when}}",
@@ -456,7 +464,7 @@ export const en = {
       "Successful: SUCCESS (Tekton: Succeeded, Completed). Red: FAILURE, UNSTABLE or Failed. Without a result (ABORTED, NOT_BUILT): no run, only CI time; a Jenkins timeout() also ends ABORTED.",
     hotspotsTitle: "Repos that slow down the feedback",
     hotspotsSub:
-      "Each repo against all runs of the same kind in the team · the thresholds are starting values, not measured",
+      "Each repo against its own runs of the same kind in the previous period · the thresholds are starting values, not measured",
     kindGroup: "Kind of run",
     colRepo: "Repo",
     colWhy: "Why",
@@ -464,7 +472,7 @@ export const en = {
     viewRuns: "View runs →",
     noneOfKind: "No runs of this kind with a result.",
     hotspotsRule:
-      "Flaky: rate at least {{flaky}}× the team's, at most halfway between it and 100 %. Slow: median at least {{slow}}× the team's. Both from {{min}} runs.",
+      "Got flakier: rate at least {{flaky}}× the previous period's and {{points}} points above it, at most halfway between it and 100 %, with {{failures}} red runs or more. Got slower: median at least {{slow}}× the previous period's. Both from {{min}} runs in both periods. Never against the team: a kind mixes Gradle, npm and other builds, so a UI build with smoke tests would always be slow.",
     stuckTitle: "Stuck runs",
     stuckSub: "Runs over {{factor}}× the median of their kind and over {{min}}",
     stuck_one: "1 run got stuck",
