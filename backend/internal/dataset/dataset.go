@@ -216,6 +216,7 @@ type Review struct {
 	PRKey         string    `json:"pr_key" db:"pr_key"`
 	Repo          *string   `json:"repo" db:"repo"`
 	Project       *string   `json:"project" db:"project"`
+	GitOps        bool      `json:"gitops" db:"gitops"`
 	Outcome       *string   `json:"outcome" db:"outcome"`
 	CostUSD       *string   `json:"cost_usd" db:"cost_usd"`
 	LinesAdded    *int64    `json:"lines_added" db:"lines_added"`

@@ -215,6 +215,8 @@ export type Costs = {
   per_kloc: number | null;
   wasted: number;
   wasted_share: number | null;
+  promotion: number;
+  promotion_reviews: number;
   rows: { label: string; value: number }[];
   reviewed_repos: number;
 };

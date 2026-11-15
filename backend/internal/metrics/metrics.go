@@ -682,17 +682,25 @@ type CostRow struct {
 
 // Costs is the noergler spend.
 type Costs struct {
-	// Total is all rollups closed in the window, whatever the outcome.
-	Total         float64 `json:"total"`
+	// Total is all rollups closed in the window, whatever the outcome,
+	// stage promotions included: the spend is real.
+	Total float64 `json:"total"`
+	// Merged, MergedReviews, PerKloc and Wasted leave stage promotions out:
+	// a version bump is a few lines at a full review's price.
 	Merged        float64 `json:"merged"`
 	MergedReviews int     `json:"merged_reviews"`
 	// PerKloc is per 1000 changed lines of merged PRs; null without line
 	// counts.
 	PerKloc *float64 `json:"per_kloc"`
 	// Wasted is spent on PRs declined or deleted; WastedShare its part of
-	// Total, null when Total is 0.
+	// Total less Promotion, null when that is 0: both sides without
+	// promotions, so the share does not move with promotion spend.
 	Wasted      float64  `json:"wasted"`
 	WastedShare *float64 `json:"wasted_share"`
+	// Promotion is spent on stage-promotion PRs (GitOps repos), whatever
+	// the outcome, over PromotionReviews of them.
+	Promotion        float64 `json:"promotion"`
+	PromotionReviews int     `json:"promotion_reviews"`
 	// Rows are by product (all products) or by repo (one product), largest
 	// first.
 	Rows          []CostRow `json:"rows"`
@@ -716,9 +724,9 @@ func float(r *big.Rat) float64 {
 }
 
 func costs(ds *dataset.Dataset, f filter) Costs {
-	total, merged, wasted := new(big.Rat), new(big.Rat), new(big.Rat)
+	total, merged, wasted, promotion := new(big.Rat), new(big.Rat), new(big.Rat), new(big.Rat)
 	var lines int64
-	mergedN := 0
+	mergedN, promotionN := 0, 0
 	by := map[string]*big.Rat{}
 	repos := map[string]bool{}
 	for _, r := range ds.Reviews {
@@ -731,8 +739,11 @@ func costs(ds *dataset.Dataset, f filter) Costs {
 		if r.Outcome != nil {
 			outcome = *r.Outcome
 		}
-		switch outcome {
-		case "merged":
+		switch {
+		case r.GitOps:
+			promotion.Add(promotion, v)
+			promotionN++
+		case outcome == "merged":
 			merged.Add(merged, v)
 			mergedN++
 			if r.LinesAdded != nil {
@@ -741,7 +752,7 @@ func costs(ds *dataset.Dataset, f filter) Costs {
 			if r.LinesRemoved != nil {
 				lines += *r.LinesRemoved
 			}
-		case "declined", "deleted":
+		case outcome == "declined" || outcome == "deleted":
 			wasted.Add(wasted, v)
 		}
 		key := r.Project
@@ -761,15 +772,17 @@ func costs(ds *dataset.Dataset, f filter) Costs {
 		}
 	}
 	out := Costs{
-		Total:         float(total),
-		Merged:        float(merged),
-		MergedReviews: mergedN,
-		Wasted:        float(wasted),
-		Rows:          []CostRow{},
-		ReviewedRepos: len(repos),
+		Total:            float(total),
+		Merged:           float(merged),
+		MergedReviews:    mergedN,
+		Wasted:           float(wasted),
+		Promotion:        float(promotion),
+		PromotionReviews: promotionN,
+		Rows:             []CostRow{},
+		ReviewedRepos:    len(repos),
 	}
-	if total.Sign() > 0 {
-		out.WastedShare = ptr(float(new(big.Rat).Quo(wasted, total)))
+	if work := new(big.Rat).Sub(total, promotion); work.Sign() > 0 {
+		out.WastedShare = ptr(float(new(big.Rat).Quo(wasted, work)))
 	}
 	if lines > 0 {
 		k := new(big.Rat).Quo(merged, new(big.Rat).SetInt64(lines))

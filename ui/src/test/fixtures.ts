@@ -283,6 +283,8 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       per_kloc: 1,
       wasted: 0.25,
       wasted_share: 1 / 3,
+      promotion: 0,
+      promotion_reviews: 0,
       rows: [{ label: "kasse", value: 0.75 }],
       reviewed_repos: 1,
     },
