@@ -124,12 +124,14 @@ function words(
       body: t("overview.flakyBody", {
         failures: repo.failures,
         runs: repo.runs,
-        teamRate: pct(k.failure_rate),
+        prevRate: pct(repo.failure_change.prev),
         hours: num(repo.wasted_seconds / 3600, 1),
       }),
       lever: [t("common.lever"), t("overview.flakyLever")],
       rule: t("overview.flakyRule", {
         factor: num(h.flaky_factor, 1),
+        points: num(h.flaky_min_points * 100, 0),
+        failures: h.flaky_min_failures,
         min: h.min_runs,
       }),
       link,
@@ -143,7 +145,7 @@ function words(
     body: t("overview.slowBody", {
       kind,
       p50: dur(repo.duration.p50),
-      teamP50: dur(k.duration.p50),
+      prevP50: dur(repo.duration_change.prev),
     }),
     lever: [t("common.lever"), t("overview.slowLever")],
     rule: t("overview.slowRule", {

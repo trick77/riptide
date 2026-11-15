@@ -7,6 +7,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   BuildStats,
+  KindChange,
   Metrics,
   Outlier,
   OutlierGroup,
@@ -160,54 +161,75 @@ function KindCard({ b, low, m }: { b: BuildStats; low: number; m: Metrics }) {
             h: num(b.outlier_seconds / 3600, 1),
           })}
       </div>
-      {c &&
-        // Neither compares, for the same reason: say it once.
-        (c.success.prev == null &&
-        c.duration.prev == null &&
-        c.success.reason === c.duration.reason ? (
-          <Compare change={c.success} now="" format={pct} />
-        ) : (
-          <>
-            <Compare
-              change={c.success}
-              now={pct(b.success_rate)}
-              format={pct}
-            />
-            <Compare
-              change={c.duration}
-              now={dur(b.duration.p50)}
-              format={dur}
-            />
-          </>
-        ))}
+      {c && (
+        <>
+          <Compare change={c.success} now={pct(b.success_rate)} format={pct} />
+          <RepoChanges c={c} />
+        </>
+      )}
     </div>
   );
 }
 
-function reason(
-  t: TFunction,
-  h: RepoHotspot,
-  teamRate: number | null,
-  teamP50: number | null,
-) {
+// The kind's repos against their own previous period: no median of the
+// kind, whose mix of toolchains shifts from one period to the next.
+function RepoChanges({ c }: { c: KindChange }) {
+  const { t } = useTranslation();
+  if (!c.compared)
+    return <div className="text-xs text-muted">{t("build.reposNone")}</div>;
+  return (
+    <div className="text-[12.5px] text-ink-dim">
+      {t("build.repos", {
+        compared: c.compared,
+        slower: c.slower,
+        flakier: c.flakier,
+      })}
+    </div>
+  );
+}
+
+// Each repo against its own previous period, never the team: a kind mixes
+// Gradle, npm with Playwright and the rest.
+function reason(t: TFunction, h: RepoHotspot) {
   const out: [string, "fail" | "warn", string][] = [];
   if (h.flaky)
     out.push([
       t("build.flaky"),
       "fail",
-      t("build.flakyText", { rate: pct(h.failure_rate), team: pct(teamRate) }),
+      t("build.flakyText", {
+        prev: pct(h.failure_change.prev),
+        rate: pct(h.failure_rate),
+      }),
     ]);
   if (h.slow)
     out.push([
       t("build.slow"),
       "warn",
       t("build.slowText", {
+        prev: dur(h.duration_change.prev),
         p50: dur(h.duration.p50),
-        team: dur(teamP50),
         factor: num(h.factor ?? 0, 1),
       }),
     ]);
   return out;
+}
+
+// Why a repo has no comparison, in the repo's terms.
+function noCompare(
+  t: TFunction,
+  h: RepoHotspot,
+  minRuns: number,
+): string | null {
+  if (h.duration_change.prev != null || h.failure_change.prev != null)
+    return null;
+  switch (h.duration_change.reason ?? h.failure_change.reason) {
+    case "no_value":
+      return t("build.noCompareNoValue");
+    case "incomplete":
+      return t("build.noCompareIncomplete");
+    default:
+      return t("build.noCompareLowSample", { min: minRuns });
+  }
 }
 
 function Groups({ groups }: { groups: OutlierGroup[] }) {
@@ -392,7 +414,8 @@ export function Build({
                     </div>
                   ))}
                   {k.repos.map((r) => {
-                    const why = reason(t, r, k.failure_rate, k.duration.p50);
+                    const why = reason(t, r);
+                    const none = noCompare(t, r, h.min_runs);
                     return (
                       <div key={r.repo} className="contents">
                         <div className={`${CELL} overflow-hidden`}>
@@ -412,7 +435,10 @@ export function Build({
                             ))
                           ) : (
                             <span className="text-[12.5px] text-muted">
-                              <Pill tone="none">{t("build.fine")}</Pill>{" "}
+                              <Pill tone="none">
+                                {none ? t("build.noCompare") : t("build.fine")}
+                              </Pill>{" "}
+                              {none ? `${none}; ` : ""}
                               {t("build.fineText", {
                                 p50: dur(r.duration.p50),
                                 rate: pct(r.failure_rate),
@@ -447,6 +473,8 @@ export function Build({
             <p className="mt-2.5 mb-0 text-xs text-muted">
               {t("build.hotspotsRule", {
                 flaky: num(h.flaky_factor, 1),
+                points: num(h.flaky_min_points * 100, 0),
+                failures: h.flaky_min_failures,
                 slow: num(h.slow_factor, 1),
                 min: h.min_runs,
               })}

@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -23,6 +24,32 @@ func runs(repo string, count int, d int64, failures int, status string) []datase
 	return out
 }
 
+// baselineOf is what Compute hands build: prev's runs, named as both
+// periods' are.
+func baselineOf(ds, prev *dataset.Dataset, incomplete bool) *baseline {
+	names := newRepoNamer(slices.Concat(ds.Runs, prev.Runs))
+	pb := build(prev, p4(), filter{}, &baseline{repos: names})
+	return &baseline{repos: names, kinds: pb.repos, incomplete: incomplete}
+}
+
+// against is the build section of ds with prev as the previous period.
+func against(ds, prev *dataset.Dataset) Build {
+	return build(ds, p4(), filter{}, baselineOf(ds, prev, false))
+}
+
+// flagged counts a kind's slow and flaky repos.
+func flagged(k KindHotspots) (slower, flakier int) {
+	for _, h := range k.Repos {
+		if h.Slow {
+			slower++
+		}
+		if h.Flaky {
+			flakier++
+		}
+	}
+	return slower, flakier
+}
+
 func kindOf(h Hotspots, kind string) KindHotspots {
 	for _, k := range h.Kinds {
 		if k.Kind == kind {
@@ -32,18 +59,34 @@ func kindOf(h Hotspots, kind string) KindHotspots {
 	return KindHotspots{Kind: "missing"}
 }
 
+func repoOf(k KindHotspots, repo string) RepoHotspot {
+	for _, h := range k.Repos {
+		if h.Repo == repo {
+			return h
+		}
+	}
+	return RepoHotspot{Repo: "missing"}
+}
+
 func TestHotspots(t *testing.T) {
 	ds := data(func(ds *dataset.Dataset) {
-		// slow and flaky: 10 runs of 1000 s, half of them failed
+		// slower and flakier: 10 runs of 1000 s, half of them failed
 		ds.Runs = append(ds.Runs, runs("kasse/slow", 10, 1000, 5, "FAILURE")...)
 		// the bulk: 20 quick green runs, 2 aborted ones that count for nothing
 		ds.Runs = append(ds.Runs, runs("kasse/quick", 22, 100, 2, "ABORTED")...)
 		// two runs stuck for long, both broken: too few to flag
 		ds.Runs = append(ds.Runs, runs("kasse/stuck", 2, 5000, 2, "UNSTABLE")...)
 	})
-	h := build(ds, p4(), filter{}).Hotspots
-	if h.MinRuns != HotspotMinRuns || h.SlowFactor != SlowFactor || h.FlakyFactor != FlakyFactor || h.OutlierFactor != OutlierFactor ||
-		h.OutlierMinS != OutlierMinS {
+	prev := data(func(ds *dataset.Dataset) {
+		ds.Runs = append(ds.Runs, runs("kasse/slow", 10, 400, 0, "")...)
+		ds.Runs = append(ds.Runs, runs("kasse/quick", 20, 100, 0, "")...)
+		ds.Runs = append(ds.Runs, runs("kasse/stuck", 2, 100, 0, "")...)
+	})
+	b := against(ds, prev)
+	h := b.Hotspots
+	if h.MinRuns != HotspotMinRuns || h.SlowFactor != SlowFactor || h.FlakyFactor != FlakyFactor ||
+		h.FlakyMinPoints != FlakyMinPoints || h.FlakyMinFailures != FlakyMinFailures ||
+		h.OutlierFactor != OutlierFactor || h.OutlierMinS != OutlierMinS {
 		t.Errorf("thresholds = %+v", h)
 	}
 	k := kindOf(h, KindMain)
@@ -51,31 +94,26 @@ func TestHotspots(t *testing.T) {
 	// 7 broken of 32 counted runs: ABORTED is no run.
 	expectNear(t, "team failure rate", k.FailureRate, 7.0/32)
 
-	// The stuck repo's runs are outliers: no build time of it is left.
-	if len(k.Durations) != 2 {
-		t.Fatalf("durations = %+v", k.Durations)
+	// Each repo against its own previous period: the slow one took 400 s.
+	slow, quick, stuck := repoOf(k, "kasse/slow"), repoOf(k, "kasse/quick"), repoOf(k, "kasse/stuck")
+	expectNear(t, "slow factor", slow.Factor, 2.5)
+	if !slow.Slow || slow.DurationChange.Verdict != ChangeWorse || quick.Slow || quick.DurationChange.Verdict != ChangeSame {
+		t.Errorf("slow flags = %+v / %+v", slow, quick)
 	}
-	slow, quick := k.Durations[0], k.Durations[1]
-	if slow.Repo != "kasse/slow" || quick.Repo != "kasse/quick" {
-		t.Errorf("order = %+v", k.Durations)
+	// From 0 % to half its runs; the stuck repo's failures count but not
+	// their time, and two runs flag nothing.
+	if !slow.Flaky || slow.WastedSeconds != 5000 || slow.Runs != 10 || slow.Failures != 5 || quick.Flaky {
+		t.Errorf("flaky = %+v / %+v", slow, quick)
 	}
-	expectNear(t, "slow factor", slow.Factor, 10)
-	if !slow.Slow || quick.Slow {
-		t.Errorf("slow flags = %v %v", slow.Slow, quick.Slow)
+	expectNear(t, "previous failure rate", slow.FailureChange.Prev, 0)
+	if stuck.Flaky || stuck.Slow || stuck.WastedSeconds != 0 || stuck.Failures != 2 ||
+		stuck.FailureChange.Reason == nil || *stuck.FailureChange.Reason != ReasonLowSample {
+		t.Errorf("stuck = %+v", stuck)
 	}
-
-	// By wasted CI time; the quick repo broke nothing, the stuck one's
-	// failures count but not their time.
-	if len(k.Failing) != 2 || k.Failing[0].Repo != "kasse/slow" || k.Failing[1].Repo != "kasse/stuck" {
-		t.Fatalf("failing = %+v", k.Failing)
-	}
-	slowF, stuckF := k.Failing[0], k.Failing[1]
-	if stuckF.WastedSeconds != 0 || stuckF.Failures != 2 || slowF.WastedSeconds != 5000 || slowF.Runs != 10 || slowF.Failures != 5 {
-		t.Errorf("failing = %+v", k.Failing)
-	}
-	expectNear(t, "slow repo rate", slowF.FailureRate, 0.5)
-	if !slowF.Flaky || stuckF.Flaky {
-		t.Errorf("flaky flags = %v %v", slowF.Flaky, stuckF.Flaky)
+	// The flagged rows first, the flaky one by wasted time.
+	if slower, flakier := flagged(k); k.Repos[0].Repo != "kasse/slow" || slower != 1 || flakier != 1 ||
+		b.compared[KindMain] != 2 {
+		t.Errorf("repos = %+v, compared %d", k.Repos, b.compared[KindMain])
 	}
 
 	// The team's median is 100 s: 6× that is under the hour, the hour is
@@ -87,6 +125,57 @@ func TestHotspots(t *testing.T) {
 	expectNear(t, "outlier factor", h.Outliers[0].Factor, 50)
 }
 
+// A kind mixes toolchains: a UI repo always slower and redder than a
+// Gradle one is no hotspot, a Gradle repo that doubled is.
+func TestHotspotsAgainstOwnPeriod(t *testing.T) {
+	period := func(gradle int64) *dataset.Dataset {
+		return data(func(ds *dataset.Dataset) {
+			ds.Runs = runs("kasse/web", 20, 900, 4, "FAILURE")
+			ds.Runs = append(ds.Runs, runs("kasse/api", 20, gradle, 0, "")...)
+		})
+	}
+	b := against(period(120), period(60))
+	k := kindOf(b.Hotspots, KindMain)
+	web, api := repoOf(k, "kasse/web"), repoOf(k, "kasse/api")
+	if web.Slow || web.Flaky || !api.Slow || api.Flaky {
+		t.Errorf("web = %+v, api = %+v", web, api)
+	}
+	expectNear(t, "api factor", api.Factor, 2)
+	if slower, flakier := flagged(k); slower != 1 || flakier != 0 || b.compared[KindMain] != 2 {
+		t.Errorf("counts %d %d %d", slower, flakier, b.compared[KindMain])
+	}
+	// A new repo has nothing to compare with; an incomplete previous period
+	// compares nothing.
+	fresh := data(func(ds *dataset.Dataset) { ds.Runs = runs("kasse/new", 20, 100, 0, "") })
+	nb := against(fresh, period(60))
+	if r := repoOf(kindOf(nb.Hotspots, KindMain), "kasse/new"); r.DurationChange.Reason == nil ||
+		*r.DurationChange.Reason != ReasonNoValue || r.Factor != nil || nb.compared[KindMain] != 0 {
+		t.Errorf("new repo = %+v", r)
+	}
+	ik := kindOf(build(period(120), p4(), filter{}, baselineOf(period(120), period(60), true)).Hotspots, KindMain)
+	if r := repoOf(ik, "kasse/api"); r.Slow || r.DurationChange.Reason == nil || *r.DurationChange.Reason != ReasonIncomplete {
+		t.Errorf("incomplete = %+v", r)
+	}
+}
+
+// One red run after a clean period is no flaky repo, however few the runs:
+// the floors of FlakyMinPoints and FlakyMinFailures.
+func TestFlakyNeedsPoints(t *testing.T) {
+	flaky := func(count, red int) bool {
+		prev := data(func(ds *dataset.Dataset) { ds.Runs = runs("kasse/a", count, 100, 0, "") })
+		cur := data(func(ds *dataset.Dataset) { ds.Runs = runs("kasse/a", count, 100, red, "FAILURE") })
+		return repoOf(kindOf(against(cur, prev).Hotspots, KindMain), "kasse/a").Flaky
+	}
+	for _, c := range []struct {
+		count, red int
+		want       bool
+	}{{40, 1, false}, {40, 2, true}, {10, 1, false}, {19, 1, false}, {10, 2, true}} {
+		if got := flaky(c.count, c.red); got != c.want {
+			t.Errorf("%d red of %d: flaky %v", c.red, c.count, got)
+		}
+	}
+}
+
 // A repo slower than the rest but with too few runs for a median of its
 // own keeps its time: under the hour no run is an outlier. Nor does a
 // median of 0 turn outliers off.
@@ -95,7 +184,7 @@ func TestShortRunsAreNoOutliers(t *testing.T) {
 		ds.Runs = runs("kasse/lib", 40, 120, 0, "")
 		ds.Runs = append(ds.Runs, runs("kasse/mono", 4, 900, 0, "")...)
 	})
-	b := build(ds, p4(), filter{})
+	b := build(ds, p4(), filter{}, nil)
 	if k := b.Kinds[0]; k.OutlierRuns != 0 || k.CISeconds != 40*120+4*900 {
 		t.Errorf("kind = %+v", k)
 	}
@@ -103,7 +192,7 @@ func TestShortRunsAreNoOutliers(t *testing.T) {
 		ds.Runs = runs("kasse/lib", 20, 0, 0, "")
 		ds.Runs = append(ds.Runs, runs("kasse/stuck", 1, 100000, 0, "")...)
 	})
-	cb := build(cached, p4(), filter{})
+	cb := build(cached, p4(), filter{}, nil)
 	if k := cb.Kinds[0]; k.OutlierRuns != 1 || k.CISeconds != 0 {
 		t.Errorf("kind at median 0 = %+v", k)
 	}
@@ -134,7 +223,7 @@ func TestStuckRunsLeaveBuildTime(t *testing.T) {
 		// Not stuck: a run 5 times the median.
 		ds.Runs = append(ds.Runs, runs("kasse/c", 1, 500, 0, "")...)
 	})
-	b := build(ds, p4(), filter{})
+	b := build(ds, p4(), filter{}, nil)
 	k := b.Kinds[0]
 	// Each stuck repo has a single run, too few for a median of its own:
 	// measured against the team's 100 s, the aborted one too.
@@ -148,8 +237,14 @@ func TestStuckRunsLeaveBuildTime(t *testing.T) {
 	expectNear(t, "p90 without outliers", k.Duration.P90, 100)
 	h := kindOf(b.Hotspots, KindMain)
 	expectNear(t, "hotspot p90", h.Duration.P90, 100)
-	if len(h.Durations) != 2 {
-		t.Errorf("outliers as durations: %+v", h.Durations)
+	timed := 0
+	for _, r := range h.Repos {
+		if r.Duration.N > 0 {
+			timed++
+		}
+	}
+	if timed != 2 {
+		t.Errorf("outliers as durations: %+v", h.Repos)
 	}
 	if len(b.Hotspots.Outliers) != 10 {
 		t.Fatalf("outliers = %+v", b.Hotspots.Outliers)
@@ -168,7 +263,11 @@ func TestSlowRepoIsNoOutlier(t *testing.T) {
 			r.Repo, r.PipelineName, r.RunID, r.DurationS = s("kasse/mono"), "kasse-mono/master", "stuck", n(50000)
 		}))
 	})
-	b := build(ds, p4(), filter{})
+	prev := data(func(ds *dataset.Dataset) {
+		ds.Runs = runs("kasse/lib", 40, 100, 0, "")
+		ds.Runs = append(ds.Runs, runs("kasse/mono", 10, 2000, 0, "")...)
+	})
+	b := against(ds, prev)
 	k := b.Kinds[0]
 	if k.OutlierRuns != 1 || k.OutlierSeconds != 50000 || k.CISeconds != 40*100+9*5000 {
 		t.Errorf("kind = %+v", k)
@@ -178,8 +277,8 @@ func TestSlowRepoIsNoOutlier(t *testing.T) {
 		t.Fatalf("outliers = %+v", o)
 	}
 	expectNear(t, "factor over the team's median", o[0].Factor, 500)
-	mono := kindOf(b.Hotspots, KindMain).Durations[0]
-	if mono.Repo != "kasse/mono" || mono.Runs != 10 || mono.Duration.N != 9 || !mono.Slow {
+	mono := repoOf(kindOf(b.Hotspots, KindMain), "kasse/mono")
+	if mono.Runs != 10 || mono.Duration.N != 9 || !mono.Slow {
 		t.Errorf("mono = %+v", mono)
 	}
 }
@@ -191,7 +290,7 @@ func TestFewLongRunsAreNoOutliers(t *testing.T) {
 		ds.Runs = runs("kasse/lib", 40, 100, 0, "")
 		ds.Runs = append(ds.Runs, runs("kasse/nightly", 4, 7200, 0, "")...)
 	})
-	if k := build(ds, p4(), filter{}).Kinds[0]; k.OutlierRuns != 0 || k.CISeconds != 40*100+4*7200 {
+	if k := build(ds, p4(), filter{}, nil).Kinds[0]; k.OutlierRuns != 0 || k.CISeconds != 40*100+4*7200 {
 		t.Errorf("kind = %+v", k)
 	}
 }
@@ -200,7 +299,10 @@ func TestHotspotsNeedEnoughRuns(t *testing.T) {
 	ds := data(func(ds *dataset.Dataset) {
 		ds.Runs = append(runs("kasse/a", 5, 100, 0, ""), runs("kasse/b", 1, 99999, 1, "FAILURE")...)
 	})
-	b := build(ds, p4(), filter{})
+	prev := data(func(ds *dataset.Dataset) {
+		ds.Runs = append(runs("kasse/a", 5, 10, 0, ""), runs("kasse/b", 1, 10, 0, "")...)
+	})
+	b := against(ds, prev)
 	k := kindOf(b.Hotspots, KindMain)
 	// Flags need HotspotMinRuns; the outlier cut does not: a kind of a few
 	// runs, one stuck for a day, still loses that day.
@@ -208,13 +310,15 @@ func TestHotspotsNeedEnoughRuns(t *testing.T) {
 	if b.Kinds[0].OutlierRuns != 1 {
 		t.Errorf("kind = %+v", b.Kinds[0])
 	}
-	if k.Durations[0].Slow || k.Failing[0].Flaky {
-		t.Errorf("flagged on one run: %+v", k)
+	a, bb := repoOf(k, "kasse/a"), repoOf(k, "kasse/b")
+	if a.Slow || bb.Flaky || a.Factor != nil || a.DurationChange.Reason == nil || *a.DurationChange.Reason != ReasonLowSample {
+		t.Errorf("flagged on few runs: %+v / %+v", a, bb)
 	}
-	// A team median of 0 gives no factor.
-	zero := data(func(ds *dataset.Dataset) { ds.Runs = runs("kasse/a", 3, 0, 0, "") })
-	if f := kindOf(build(zero, p4(), filter{}).Hotspots, KindMain).Durations[0].Factor; f != nil {
-		t.Errorf("factor over a zero median = %v", *f)
+	// A previous median of 0 gives no factor.
+	zero := data(func(ds *dataset.Dataset) { ds.Runs = runs("kasse/a", 12, 0, 0, "") })
+	twelve := data(func(ds *dataset.Dataset) { ds.Runs = runs("kasse/a", 12, 100, 0, "") })
+	if r := repoOf(kindOf(against(twelve, zero).Hotspots, KindMain), "kasse/a"); r.Factor != nil || r.Slow {
+		t.Errorf("factor over a zero median = %+v", r)
 	}
 }
 
@@ -232,36 +336,35 @@ func TestHotspotsPerKind(t *testing.T) {
 			ds.Runs = append(ds.Runs, r)
 		}
 	})
-	h := build(ds, p4(), filter{}).Hotspots
+	h := build(ds, p4(), filter{}, nil).Hotspots
 	if kindOf(h, KindUnknown).Kind == "missing" || kindOf(h, KindRelease).Kind == "missing" {
 		t.Fatalf("kinds = %+v", h.Kinds)
 	}
 	// Each kind against its own: a long release is no outlier.
-	if len(h.Outliers) != 0 || kindOf(h, KindRelease).Durations[0].Slow {
+	if len(h.Outliers) != 0 {
 		t.Errorf("mixed kinds: %+v", h)
 	}
 }
 
-// A flagged repo stays on the list however many unflagged ones rank above
-// it: eight short-lived repos with long runs, then a slow one with enough.
+// Flagged repos stay on the list past the top, however many: ten repos
+// slower than before, an unflagged one with more wasted time below them.
 func TestFlaggedReposStayListed(t *testing.T) {
-	ds := data(func(ds *dataset.Dataset) {
-		ds.Runs = runs("kasse/bulk", 200, 100, 20, "FAILURE")
-		for i := range 9 {
-			ds.Runs = append(ds.Runs, runs(fmt.Sprintf("kasse/few-%d", i), 2, 500, 2, "FAILURE")...)
-		}
-		ds.Runs = append(ds.Runs, runs("kasse/slow", 12, 300, 0, "")...)
-		ds.Runs = append(ds.Runs, runs("kasse/flaky", 12, 10, 6, "FAILURE")...)
-	})
-	k := kindOf(build(ds, p4(), filter{}).Hotspots, KindMain)
-	last := func(n int) int { return n - 1 }
-	if len(k.Durations) != hotspotTop+1 || k.Durations[last(len(k.Durations))].Repo != "kasse/slow" ||
-		!k.Durations[last(len(k.Durations))].Slow {
-		t.Errorf("durations = %+v", k.Durations)
+	period := func(d int64) *dataset.Dataset {
+		return data(func(ds *dataset.Dataset) {
+			ds.Runs = runs("kasse/bulk", 200, 100, 20, "FAILURE")
+			for i := range 10 {
+				ds.Runs = append(ds.Runs, runs(fmt.Sprintf("kasse/slow-%d", i), 12, d, 0, "")...)
+			}
+		})
 	}
-	if len(k.Failing) != hotspotTop+1 || k.Failing[last(len(k.Failing))].Repo != "kasse/flaky" ||
-		!k.Failing[last(len(k.Failing))].Flaky {
-		t.Errorf("failing = %+v", k.Failing)
+	k := kindOf(against(period(300), period(100)).Hotspots, KindMain)
+	if slower, _ := flagged(k); len(k.Repos) != 10 || slower != 10 {
+		t.Errorf("repos = %+v", k.Repos)
+	}
+	for _, r := range k.Repos {
+		if !r.Slow {
+			t.Errorf("unflagged past the top: %+v", r)
+		}
 	}
 }
 
@@ -273,7 +376,7 @@ func TestBuildsLeaveAbortedOut(t *testing.T) {
 		ds.Runs = append(ds.Runs, runs("kasse/b", 2, 3000, 2, "ABORTED")...)
 		ds.Runs = append(ds.Runs, runs("kasse/c", 1, 100, 1, "NOT_BUILT")...)
 	})
-	b := build(ds, p4(), filter{})
+	b := build(ds, p4(), filter{}, nil)
 	if len(b.Kinds) != 1 {
 		t.Fatalf("kinds = %+v", b.Kinds)
 	}
@@ -290,10 +393,8 @@ func TestBuildsLeaveAbortedOut(t *testing.T) {
 	expectNear(t, "week", k.Weekly[3], 3.0/4)
 	h := kindOf(b.Hotspots, KindMain)
 	expectNear(t, "hotspot team p50", h.Duration.P50, 100)
-	for _, d := range h.Durations {
-		if d.Repo == "kasse/b" {
-			t.Errorf("aborted runs as durations: %+v", d)
-		}
+	if r := repoOf(h, "kasse/b"); r.Repo != "missing" {
+		t.Errorf("aborted runs as a repo: %+v", r)
 	}
 	// Tekton's words: Succeeded and Completed pass, Failed fails, None says
 	// nothing.
@@ -302,12 +403,12 @@ func TestBuildsLeaveAbortedOut(t *testing.T) {
 			ds.Runs = append(ds.Runs, run(func(r *dataset.Run) { r.Source, r.RunID, r.Status = "tekton", fmt.Sprint(i), s(st) }))
 		}
 	})
-	tk := build(tekton, p4(), filter{}).Kinds[0]
+	tk := build(tekton, p4(), filter{}, nil).Kinds[0]
 	if tk.Runs != 3 || tk.Succeeded != 2 || tk.Failed != 1 || tk.NoVerdict != 1 {
 		t.Errorf("tekton = %+v", tk)
 	}
 	// Only aborted runs: the kind shows, without a rate.
-	only := build(data(func(ds *dataset.Dataset) { ds.Runs = runs("kasse/b", 2, 100, 2, "ABORTED") }), p4(), filter{})
+	only := build(data(func(ds *dataset.Dataset) { ds.Runs = runs("kasse/b", 2, 100, 2, "ABORTED") }), p4(), filter{}, nil)
 	if len(only.Kinds) != 1 || only.Kinds[0].Runs != 0 || only.Kinds[0].SuccessRate != nil {
 		t.Errorf("only aborted = %+v", only.Kinds)
 	}
@@ -340,7 +441,7 @@ func TestBuildSplitsAgentWait(t *testing.T) {
 			timed("8", 20000, -2, "SUCCESS"),    // stuck, no agent time
 		}
 	})
-	b := build(ds, p4(), filter{})
+	b := build(ds, p4(), filter{}, nil)
 	k := b.Kinds[0]
 	if k.Duration.N != 5 || k.Waiting.N != 2 || k.Building.N != 2 {
 		t.Fatalf("n: duration %d, waiting %d, building %d", k.Duration.N, k.Waiting.N, k.Building.N)
@@ -362,25 +463,33 @@ func TestBuildSplitsAgentWait(t *testing.T) {
 		}
 	}
 	// No run reports one: both empty, nulls rather than 0.
-	none := build(data(func(ds *dataset.Dataset) { ds.Runs = runs("kasse/a", 3, 100, 0, "") }), p4(), filter{})
+	none := build(data(func(ds *dataset.Dataset) { ds.Runs = runs("kasse/a", 3, 100, 0, "") }), p4(), filter{}, nil)
 	if w := none.Kinds[0].Waiting; w.N != 0 || w.P50 != nil {
 		t.Errorf("waiting without agent times = %+v", w)
 	}
 }
 
-// A team failing most of its runs still has a flaky repo: the one that
-// always fails.
+// A repo failing most of its runs can still get flaky: when it starts
+// failing them all.
 func TestFlakyAboveHalf(t *testing.T) {
 	ds := data(func(ds *dataset.Dataset) {
 		ds.Runs = append(runs("kasse/a", 20, 100, 12, "FAILURE"), runs("kasse/b", 20, 100, 20, "FAILURE")...)
 	})
-	k := kindOf(build(ds, p4(), filter{}).Hotspots, KindMain)
+	prev := data(func(ds *dataset.Dataset) {
+		ds.Runs = append(runs("kasse/a", 20, 100, 12, "FAILURE"), runs("kasse/b", 20, 100, 12, "FAILURE")...)
+	})
+	k := kindOf(against(ds, prev).Hotspots, KindMain)
 	expectNear(t, "team rate", k.FailureRate, 0.8)
-	if len(k.Failing) != 2 || k.Failing[0].Repo != "kasse/b" || !k.Failing[0].Flaky || k.Failing[1].Flaky {
-		t.Errorf("failing = %+v", k.Failing)
+	if a, b := repoOf(k, "kasse/a"), repoOf(k, "kasse/b"); a.Flaky || !b.Flaky || k.Repos[0].Repo != "kasse/b" {
+		t.Errorf("repos = %+v", k.Repos)
 	}
-	if got := flakyThreshold(0.1); !near(got, 0.2) {
-		t.Errorf("threshold at 10 %% = %v", got)
+	// The cap comes last: from 96 % red, all red still flags.
+	for _, c := range []struct{ prev, want float64 }{
+		{0.1, 0.2}, {0, FlakyMinPoints}, {0.6, 0.8}, {0.03, 0.08}, {0.96, 0.98},
+	} {
+		if got := flakyThreshold(c.prev); !near(got, c.want) {
+			t.Errorf("threshold at %v = %v, want %v", c.prev, got, c.want)
+		}
 	}
 }
 
@@ -403,13 +512,20 @@ func TestRepoOfUnseenCommits(t *testing.T) {
 		ds.Runs = append(ds.Runs, unseen("shared/master", 1)...)
 		ds.Runs = append(ds.Runs, unseen("nightly", 1)...)
 	})
-	k := kindOf(build(ds, p4(), filter{}).Hotspots, KindMain)
+	k := kindOf(build(ds, p4(), filter{}, nil).Hotspots, KindMain)
 	runsOf := map[string]int{}
-	for _, d := range k.Durations {
+	for _, d := range k.Repos {
 		runsOf[d.Repo] = d.Runs
 	}
 	if runsOf["kasse/kasse-api"] != 12 || runsOf["kasse-api"] != 0 || runsOf["shared"] != 1 || runsOf["nightly"] != 1 {
 		t.Errorf("repos = %v", runsOf)
+	}
+	// The previous period's unseen runs find their repository by the names
+	// of both periods: a commit seen only now still names last month's run.
+	prev := data(func(ds *dataset.Dataset) { ds.Runs = unseen("kasse-api/master", 12) })
+	pk := kindOf(against(ds, prev).Hotspots, KindMain)
+	if r := repoOf(pk, "kasse/kasse-api"); r.DurationChange.Prev == nil {
+		t.Errorf("unseen previous runs = %+v", r)
 	}
 }
 
@@ -424,7 +540,7 @@ func TestOutliersCapped(t *testing.T) {
 			}))
 		}
 	})
-	o := build(ds, p4(), filter{}).Hotspots.Outliers
+	o := build(ds, p4(), filter{}, nil).Hotspots.Outliers
 	if len(o) != outlierTop || o[0].DurationS != 10011 || o[9].DurationS != 10002 {
 		t.Errorf("outliers = %+v", o)
 	}

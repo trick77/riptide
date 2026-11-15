@@ -143,8 +143,22 @@ func TestCompareWithThePreviousPeriod(t *testing.T) {
 	}
 	month := 28 * 24 * time.Hour
 	c = Compute(builds(nil, 0), builds(nil, month), params).Comparison
-	if len(c.Build) != 1 || c.Build[0].Kind != KindMain || c.Build[0].Duration.Verdict != ChangeSame {
+	if len(c.Build) != 1 || c.Build[0].Kind != KindMain || c.Build[0].Success.Verdict != ChangeSame ||
+		c.Build[0].Compared != 1 || c.Build[0].Slower != 0 {
 		t.Errorf("no build type = %+v", c.Build)
+	}
+	// The repo against its own previous period, end to end: twice as slow
+	// is one slower repo, and a finding.
+	slower := builds(nil, 0)
+	for i := range slower.Runs {
+		slower.Runs[i].DurationS = n(1200)
+	}
+	sm := Compute(slower, builds(nil, month), params)
+	if c := sm.Comparison.Build; len(c) != 1 || c[0].Slower != 1 || c[0].Compared != 1 {
+		t.Errorf("slower = %+v", c)
+	}
+	if len(sm.Findings) == 0 || sm.Findings[0].Kind != FindingSlow {
+		t.Errorf("findings = %+v", sm.Findings)
 	}
 	c = Compute(builds(agoP(30), 0), builds(agoP(30), month), params).Comparison
 	if len(c.Build) != 1 || c.Build[0].Success.Reason == nil || *c.Build[0].Success.Reason != ReasonIncomplete {
@@ -272,7 +286,12 @@ func TestRepoHotspotsAndOutlierGroups(t *testing.T) {
 			r.Repo, r.PipelineName, r.RunID, r.DurationS, r.StartedAt = s("kasse/slow"), "kasse/slow/master", "y", n(30000), agoP(1)
 		}))
 	})
-	b := build(ds, p4(), filter{})
+	prev := data(func(ds *dataset.Dataset) {
+		ds.Runs = append(ds.Runs, runs("kasse/slow", 10, 400, 0, "")...)
+		ds.Runs = append(ds.Runs, runs("kasse/flaky", 10, 100, 0, "")...)
+		ds.Runs = append(ds.Runs, runs("kasse/quick", 30, 100, 1, "FAILURE")...)
+	})
+	b := against(ds, prev)
 	k := kindOf(b.Hotspots, KindMain)
 	var order []string
 	for _, h := range k.Repos {

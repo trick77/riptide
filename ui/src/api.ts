@@ -128,41 +128,25 @@ export type BuildStats = {
   weekly: (number | null)[];
 };
 
-export type RepoDuration = {
-  repo: string;
-  runs: number;
-  duration: Spread;
-  factor: number | null;
-  slow: boolean;
-};
-
-export type RepoFailures = {
-  repo: string;
-  runs: number;
-  failures: number;
-  failure_rate: number | null;
-  wasted_seconds: number;
-  flaky: boolean;
-};
-
 export type KindHotspots = {
   kind: RunKind;
   duration: Spread;
   failure_rate: number | null;
-  durations: RepoDuration[];
-  failing: RepoFailures[];
   repos: RepoHotspot[];
   outlier_threshold_s: number | null;
 };
 
+// One repo against its own runs of the kind in the previous period.
 export type RepoHotspot = {
   repo: string;
   runs: number;
   duration: Spread;
+  duration_change: Change;
   factor: number | null;
   slow: boolean;
   failures: number;
   failure_rate: number | null;
+  failure_change: Change;
   wasted_seconds: number;
   flaky: boolean;
 };
@@ -191,6 +175,8 @@ export type Hotspots = {
   min_runs: number;
   slow_factor: number;
   flaky_factor: number;
+  flaky_min_points: number;
+  flaky_min_failures: number;
   outlier_factor: number;
   outlier_min_s: number;
   outlier_repo_min_runs: number;
@@ -235,6 +221,16 @@ export type Change = {
   reason: "low_sample" | "incomplete" | "no_value" | "undirected" | null;
 };
 
+// A kind of run against the previous period: its success rate, and how
+// many of its repos got slower or flakier against their own.
+export type KindChange = {
+  kind: RunKind;
+  success: Change;
+  slower: number;
+  flakier: number;
+  compared: number;
+};
+
 export type Comparison = {
   from: string;
   to: string;
@@ -248,7 +244,7 @@ export type Comparison = {
   untracked: Change;
   cost_per_kloc: Change;
   wasted_share: Change;
-  build: { kind: RunKind; success: Change; duration: Change }[];
+  build: KindChange[];
 };
 
 export type Metrics = {

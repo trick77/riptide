@@ -6,7 +6,8 @@ import (
 )
 
 // Findings come only from the rules the page already applies (the stage
-// that takes longest, flaky and slow repos), never from new thresholds of
+// that takes longest, repos flakier or slower than in the previous
+// period), never from new thresholds of
 // their own, plus one fixed question to talk about.
 const (
 	// FindingsMax caps the findings before the question to talk about.
