@@ -105,6 +105,34 @@ function words(
       link: [t("overview.toReview"), toFlow],
     };
   }
+  if (f.kind === "open_prs") {
+    const o = m.open_prs;
+    // The backend sorts the repos: the first has the most long-open PRs.
+    const top = o.repos[0];
+    if (!top) return null;
+    return {
+      area: t("overview.area.flow"),
+      title: t("overview.openTitle", { count: o.long, days: o.long_days }),
+      body: t("overview.openBody", {
+        repo: top.repo,
+        n: top.long,
+        oldest: dur(top.oldest_s),
+        first: o.long_waiting.first_review,
+      }),
+      lever: [t("common.lever"), t("overview.openLever")],
+      rule:
+        f.tone === "attention"
+          ? t("overview.openRuleAttention", {
+              days: o.long_days,
+              prev: num(m.comparison.open_long.prev ?? 0),
+            })
+          : t("overview.openRuleHint", { days: o.long_days }),
+      link: [
+        t("overview.openPRsOf", { repo: top.repo }),
+        () => onFacts("prs", top.repo),
+      ],
+    };
+  }
   const k = h.kinds.find((x) => x.kind === f.run_kind);
   const repo = k?.repos.find((x) => x.repo === f.repo);
   if (!k || !repo) return null;

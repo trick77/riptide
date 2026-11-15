@@ -424,7 +424,7 @@ export default function App() {
         {m && (
           <>
             <Overview m={m} why={why} onWhy={onWhy} onFacts={onFacts} />
-            <Flow m={m} why={why} onWhy={onWhy} />
+            <Flow m={m} why={why} onWhy={onWhy} onFacts={onFacts} />
             <Deploys m={m} />
             <Mix m={m} />
             <Build m={m} onFacts={onFacts} />

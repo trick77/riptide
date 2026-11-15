@@ -199,9 +199,17 @@ function FactsTables({
               ? dur(p.to_prod_s)
               : t("facts.notOnProd")
             : "–",
-          <Pill tone={PR_STATE_TONE[p.state]}>
-            {t(`facts.prState.${p.state}`)}
-          </Pill>,
+          <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <Pill tone={PR_STATE_TONE[p.state]}>
+              {t(`facts.prState.${p.state}`)}
+            </Pill>
+            {p.waiting && (
+              <span className="text-[12.5px] whitespace-nowrap text-muted">
+                {t(`facts.prWaiting.${p.waiting}`)} ·{" "}
+                {t("facts.openFor", { age: dur(p.age_s) })}
+              </span>
+            )}
+          </span>,
         ])}
       />
     );
@@ -296,7 +304,11 @@ function FactsTables({
           ))}
         </div>
         <span className="text-[12.5px] text-muted">
-          {q ? t("facts.filtered", { q }) : t("facts.newest")}
+          {q
+            ? t("facts.filtered", { q })
+            : tab === "prs" && facts.prs.rows[0]?.waiting
+              ? t("facts.openFirst")
+              : t("facts.newest")}
           {counts[tab] > facts.limit
             ? t("facts.firstOf", { limit: facts.limit, count: counts[tab] })
             : ""}

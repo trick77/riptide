@@ -87,6 +87,11 @@ type Comparison struct {
 	CostPerKloc   Change       `json:"cost_per_kloc"`
 	WastedShare   Change       `json:"wasted_share"`
 	Build         []KindChange `json:"build"`
+	// OpenPRs and OpenLong are the open PRs at the period's end against
+	// those at the previous one's: more open PRs may be more work under
+	// way, more long-open ones are a queue.
+	OpenPRs  Change `json:"open_prs"`
+	OpenLong Change `json:"open_long"`
 }
 
 // direction is which way a number gets better.
@@ -196,6 +201,12 @@ func compare(cur, prev Metrics, period Period) Comparison {
 		side{pr.FirstTouchRate, pr.Approved >= lowSample}, undirected, points, bitbucket)
 	out.Untracked = judge(side{cr.UntrackedRate, cr.Merged >= lowSample},
 		side{pr.UntrackedRate, pr.Merged >= lowSample}, undirected, points, bitbucket)
+	// A count, no sample: both periods' ends count whatever is open.
+	co, po := cur.OpenPRs, prev.OpenPRs
+	out.OpenPRs = judge(side{ptr(float64(co.Open)), true}, side{ptr(float64(po.Open)), true},
+		undirected, relative, bitbucket)
+	out.OpenLong = judge(side{ptr(float64(co.Long)), true}, side{ptr(float64(po.Long)), true},
+		down, relative, bitbucket)
 	cc, pc := cur.Costs, prev.Costs
 	out.CostPerKloc = judge(side{cc.PerKloc, cc.MergedReviews >= lowSample},
 		side{pc.PerKloc, pc.MergedReviews >= lowSample}, undirected, relative, noergler)

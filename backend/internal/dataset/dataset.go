@@ -34,6 +34,8 @@ var (
 	runsSQL string
 	//go:embed sql/reviews.sql
 	reviewsSQL string
+	//go:embed sql/open_prs.sql
+	openPRsSQL string
 )
 
 // Params selects one team's window. From is inclusive, To exclusive.
@@ -69,6 +71,8 @@ type Dataset struct {
 	LeadTimes []LeadTime `json:"lead_times"`
 	Runs      []Run      `json:"runs"`
 	Reviews   []Review   `json:"reviews"`
+	// OpenPRs are the PRs open at the window's end, whenever opened.
+	OpenPRs []OpenPR `json:"open_prs"`
 }
 
 // Meta describes the window and where each source's data starts.
@@ -139,6 +143,42 @@ type PR struct {
 	Touches           []touch `json:"-" db:"touches"`
 	Opener            string  `json:"-" db:"opener"`
 	OpenerDisplayName string  `json:"-" db:"opener_display_name"`
+}
+
+// OpenPR is a pull request open at the window's end. See sql/open_prs.sql
+// for the rules.
+type OpenPR struct {
+	Repo       string    `json:"repo" db:"repo"`
+	Project    string    `json:"project" db:"project"`
+	PRID       int64     `json:"pr_id" db:"pr_id"`
+	Title      *string   `json:"title" db:"title"`
+	Bot        bool      `json:"bot" db:"bot"`
+	ChangeType *string   `json:"change_type" db:"change_type"`
+	JiraKeys   []string  `json:"jira_keys" db:"jira_keys"`
+	OpenedAt   time.Time `json:"opened_at" db:"opened_at"`
+	// ReadyAt is the pickup clock start; nil for a draft never made ready.
+	ReadyAt *time.Time `json:"ready_at" db:"ready_at"`
+	Draft   bool       `json:"draft" db:"draft"`
+	// Touched: a reviewer touched it after ready, as FirstReviewAt counts
+	// reviewers. NeedsWork and Approved are the reviewers' and other
+	// participants' status as the PR's latest event carries it, automation
+	// left out.
+	Touched   bool `json:"touched" db:"-"`
+	NeedsWork bool `json:"needs_work" db:"-"`
+	Approved  bool `json:"approved" db:"-"`
+
+	// Read for the derivations above, never sent: no handles leave the API.
+	Touches           []touch          `json:"-" db:"touches"`
+	Reviewers         []reviewerStatus `json:"-" db:"reviewers"`
+	Opener            string           `json:"-" db:"opener"`
+	OpenerDisplayName string           `json:"-" db:"opener_display_name"`
+}
+
+// reviewerStatus is a reviewer as a PR event carries it.
+type reviewerStatus struct {
+	Author      string `json:"author"`
+	DisplayName string `json:"display_name"`
+	Status      string `json:"status"`
 }
 
 // touch is a reviewer's event on a PR, as prs.sql lists them.
@@ -262,6 +302,9 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 	if d.PRs, err = all[PR](ctx, tx, "prs", prsSQL, p.Team, p.From, p.To); err != nil {
 		return nil, err
 	}
+	if d.OpenPRs, err = all[OpenPR](ctx, tx, "open_prs", openPRsSQL, p.Team, p.To); err != nil {
+		return nil, err
+	}
 	if d.Deploys, err = all[Deploy](ctx, tx, "deploys", deploysSQL, p.Team, p.From, p.To); err != nil {
 		return nil, err
 	}
@@ -289,6 +332,9 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 	}
 	for i := range d.PRs {
 		reviewed(&d.PRs[i], automated)
+	}
+	for i := range d.OpenPRs {
+		reviewedOpen(&d.OpenPRs[i], automated)
 	}
 	var merges []string
 	for _, pr := range d.PRs {
@@ -321,6 +367,7 @@ func exclude(d *Dataset, excluded func(string) bool) {
 	}
 	out := func(project *string) bool { return project != nil && excluded(*project) }
 	d.PRs = slices.DeleteFunc(d.PRs, func(x PR) bool { return excluded(x.Project) })
+	d.OpenPRs = slices.DeleteFunc(d.OpenPRs, func(x OpenPR) bool { return excluded(x.Project) })
 	d.Deploys = slices.DeleteFunc(d.Deploys, func(x Deploy) bool { return out(x.Project) })
 	d.Runs = slices.DeleteFunc(d.Runs, func(x Run) bool { return out(x.Project) })
 	d.LeadTimes = slices.DeleteFunc(d.LeadTimes, func(x LeadTime) bool { return excluded(x.Project) })
@@ -352,6 +399,10 @@ func (d *Dataset) utc() {
 		for j := range p.Environments {
 			ptrs = append(ptrs, &p.Environments[j].FirstDeployedAt)
 		}
+	}
+	for i := range d.OpenPRs {
+		o := &d.OpenPRs[i]
+		ptrs = append(ptrs, &o.OpenedAt, o.ReadyAt)
 	}
 	for i := range d.Deploys {
 		ptrs = append(ptrs, &d.Deploys[i].At)
@@ -432,6 +483,28 @@ func reviewed(pr *PR, automated func(login, displayName string) bool) {
 	pr.ApprovedOnFirstTouch = pr.ApprovedAt != nil && pr.ApprovedAt.Equal(*pr.FirstReviewAt)
 }
 
+// reviewedOpen is reviewed for an open PR: the opener and every reviewer
+// through the same automation detection, so a bot's approval (an AI
+// reviewer approves too) never reads as a person's. A touch counts as in
+// prs.sql: not the opener's, from ready on.
+func reviewedOpen(pr *OpenPR, automated func(login, displayName string) bool) {
+	pr.Bot = pr.Bot || automated(pr.Opener, pr.OpenerDisplayName)
+	pr.Touched = pr.ReadyAt != nil && slices.ContainsFunc(pr.Touches, func(t touch) bool {
+		return !strings.EqualFold(t.Author, pr.Opener) && !t.At.Before(*pr.ReadyAt) && !automated(t.Author, t.DisplayName)
+	})
+	for _, r := range pr.Reviewers {
+		if automated(r.Author, r.DisplayName) {
+			continue
+		}
+		switch r.Status {
+		case "NEEDS_WORK":
+			pr.NeedsWork = true
+		case "APPROVED":
+			pr.Approved = true
+		}
+	}
+}
+
 // attachEnvironments gives every PR its merge commit's first deploy per
 // environment. docs/metrics.md's breakdown query looks each one up in
 // lead_time_changes; here the view is read once for all of them. Both SHAs
@@ -468,6 +541,9 @@ func products(d *Dataset) []Product {
 		m[project][item] = true
 	}
 	for _, p := range d.PRs {
+		add(repos, p.Project, p.Repo)
+	}
+	for _, p := range d.OpenPRs {
 		add(repos, p.Project, p.Repo)
 	}
 	for _, l := range d.LeadTimes {

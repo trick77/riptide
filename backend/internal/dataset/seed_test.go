@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -102,6 +104,13 @@ type prEvent struct {
 	title                 string
 	jira                  []string
 	at                    time.Time
+	// The PR as the event carries it, when set: its state, creation, PR
+	// author and reviewers (login → status).
+	state        string
+	created      time.Time
+	prAuthor     string
+	reviewers    map[string]string
+	participants map[string]string
 }
 
 func (s *seeder) pr(e prEvent) {
@@ -126,6 +135,28 @@ func (s *seeder) pr(e prEvent) {
 	}
 	if e.mergeCommit != "" {
 		pull["properties"] = map[string]any{"mergeCommit": map[string]any{"id": e.mergeCommit}}
+	}
+	if e.state != "" {
+		pull["state"] = e.state
+	}
+	if !e.created.IsZero() {
+		pull["createdDate"] = e.created.UnixMilli()
+	}
+	if e.prAuthor != "" {
+		pull["author"] = map[string]any{"user": map[string]any{"name": e.prAuthor, "displayName": e.prAuthor}}
+	}
+	people := func(m map[string]string) []any {
+		var rs []any
+		for _, login := range slices.Sorted(maps.Keys(m)) {
+			rs = append(rs, map[string]any{"user": map[string]any{"name": login, "displayName": login}, "status": m[login]})
+		}
+		return rs
+	}
+	if e.reviewers != nil {
+		pull["reviewers"] = people(e.reviewers)
+	}
+	if e.participants != nil {
+		pull["participants"] = people(e.participants)
 	}
 	payload := jsonString(map[string]any{"eventKey": e.event, "pullRequest": pull})
 	var automation, changeType *string

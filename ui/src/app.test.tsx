@@ -1044,6 +1044,118 @@ describe("costs", () => {
   });
 });
 
+describe("open PRs", () => {
+  it("renders the repos the backend sent, with what they wait on", () => {
+    const onFacts = vi.fn();
+    render(
+      <Flow why={null} onWhy={() => {}} onFacts={onFacts} m={metrics()} />,
+    );
+    expect(
+      screen.getByText("Offene PRs: wo staut es sich?"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("von 3 offenen PRs")).toBeInTheDocument();
+    expect(screen.getByText("typischerweise 9.0 Tage alt")).toBeInTheDocument();
+    expect(screen.getByText("30.0 Tage")).toBeInTheDocument();
+    // In the backend's order, zero counts left out.
+    const rows = screen.getAllByText(/^(kasse\/kasse-api|portal\/portal-web)$/);
+    expect(rows.map((r) => r.textContent)).toEqual([
+      "kasse/kasse-api",
+      "portal/portal-web",
+    ]);
+    expect(screen.getAllByText("Bereit zum Merge 1")).toHaveLength(2);
+    expect(screen.queryByText(/Entwurf/)).toBeNull();
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "PRs ansehen →" })[0],
+    );
+    expect(onFacts).toHaveBeenCalledWith("prs", "kasse/kasse-api");
+  });
+
+  it("says when nothing was open", () => {
+    const m = metrics();
+    render(
+      <Flow
+        why={null}
+        onWhy={() => {}}
+        onFacts={() => {}}
+        m={{
+          ...m,
+          open_prs: {
+            ...m.open_prs,
+            open: 0,
+            long: 0,
+            age: { n: 0, p50: null, p90: null },
+            repos: [],
+          },
+        }}
+      />,
+    );
+    expect(
+      screen.getByText("Am Ende des Zeitraums war kein PR offen."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Die lang offenen warten auf:")).toBeNull();
+  });
+
+  it("words the finding and links the first repo's open PRs", async () => {
+    const calls = mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      return metrics(4, {
+        findings: [
+          {
+            kind: "open_prs",
+            tone: "attention",
+            stage: null,
+            run_kind: null,
+            repo: null,
+          },
+        ],
+      });
+    });
+    render(<App />);
+    expect(
+      await screen.findByText("2 PRs sind seit 7 Tagen oder länger offen."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Am meisten in kasse/kasse-api: 2, der älteste ist 30.0 Tage offen. Noch ohne erstes Review: 1 der lang offenen.",
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Offene PRs von kasse/kasse-api ansehen →",
+      }),
+    );
+    await waitFor(() =>
+      expect(factsCalls(calls).at(-1)).toMatch(/&q=kasse%2Fkasse-api$/),
+    );
+    expect(window.location.search).toBe("?q=kasse%2Fkasse-api");
+  });
+
+  it("shows an open PR's wait and age in the facts", async () => {
+    mockFetch();
+    render(<App />);
+    expect(
+      await screen.findByText("Wartet auf Review · 2.0 Tage offen"),
+    ).toBeInTheDocument();
+    // The first row is no open one: plain newest first.
+    expect(screen.getByText("Neueste zuerst")).toBeInTheDocument();
+  });
+
+  it("says the open PRs come first when they lead the table", async () => {
+    const rows = facts().prs.rows;
+    mockFetch((url) =>
+      url.pathname === "/api/facts"
+        ? facts({ prs: { count: 3, rows: [rows[2], rows[0], rows[1]] } })
+        : metrics(),
+    );
+    render(<App />);
+    expect(
+      await screen.findByText(
+        "Offene zuerst, die ältesten oben; dann die neuesten",
+      ),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("flow", () => {
   it("draws the shares the backend computed, no stage it left out", () => {
     const zero = { n: 1, p50: 0, p90: 0, low_sample: true, hot: false };
@@ -1052,6 +1164,7 @@ describe("flow", () => {
       <Flow
         why={null}
         onWhy={() => {}}
+        onFacts={() => {}}
         m={{
           ...m,
           delivery: { ...m.delivery, lead_time_pre: null },
