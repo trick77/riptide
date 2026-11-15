@@ -899,7 +899,8 @@ components:
         neither failure nor run. An outlier counts as a run and in failure
         rates, but in no duration or wasted time.
       additionalProperties: false
-      required: [min_runs, slow_factor, flaky_factor, outlier_factor, kinds, outliers]
+      required: [min_runs, slow_factor, flaky_factor, outlier_factor, outlier_min_s, outlier_repo_min_runs, kinds,
+                 outliers]
       properties:
         min_runs: { type: integer, description: Runs a repo needs in a kind to be flagged. }
         slow_factor: { type: number, description: A repo median this many times the team's is slow. }
@@ -909,9 +910,15 @@ components:
         outlier_factor:
           type: number
           description: |
-            A run past this many times its median is an outlier: its kind's
-            team median, or its repo's when that is longer and the repo has
-            `min_runs` runs of the kind. Medians include the outliers.
+            A run is an outlier past this many times its kind's team median
+            and past `outlier_min_s`, and, when its repo has
+            `outlier_repo_min_runs` runs with a verdict and a duration of the
+            kind, past this many times the repo's median too. Medians are over
+            runs with a verdict and a duration, outliers included.
+        outlier_min_s:
+          $ref: "#/components/schemas/Seconds"
+          description: No run shorter than this is an outlier.
+        outlier_repo_min_runs: { type: integer, description: Runs a repo needs for a median of its own in the outlier cut. }
         kinds:
           type: array
           items:
@@ -933,7 +940,9 @@ components:
                   required: [repo, runs, duration, factor, slow]
                   properties:
                     repo: { type: string }
-                    runs: { type: integer }
+                    runs:
+                      type: integer
+                      description: Runs with a verdict and a duration, outliers included; `duration` leaves them out.
                     duration: { $ref: "#/components/schemas/Spread" }
                     factor:
                       $ref: "#/components/schemas/NullableNumber"
@@ -956,8 +965,9 @@ components:
               outlier_threshold_s:
                 $ref: "#/components/schemas/NullableSeconds"
                 description: |
-                  `outlier_factor` times the team's median; null below
-                  `min_runs` runs with a duration. Higher for a slower repo.
+                  `outlier_factor` times the team's median, at least
+                  `outlier_min_s`; null without a run with a verdict and a
+                  duration. Higher for a slower repo.
         outliers:
           type: array
           description: Runs past their kind's threshold across kinds, longest first, the top 10.
@@ -973,7 +983,9 @@ components:
               started_at: { $ref: "#/components/schemas/NullableInstant" }
               duration_s: { $ref: "#/components/schemas/Seconds" }
               status: { type: [string, "null"] }
-              factor: { type: number, description: The run's duration over the median it is measured against. }
+              factor:
+                $ref: "#/components/schemas/NullableNumber"
+                description: The run's duration over its kind's team median; null when that is 0.
 
     Costs:
       type: object

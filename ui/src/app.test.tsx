@@ -337,6 +337,16 @@ describe("App", () => {
           status: "SUCCESS",
           factor: 160,
         },
+        {
+          kind: "main",
+          pipeline_name: "kasse-api/master",
+          repo: "kasse/kasse-api",
+          run_id: "8",
+          started_at: ago(3),
+          duration_s: 5 * 3600,
+          status: "SUCCESS",
+          factor: null,
+        },
       ];
       return m;
     });
@@ -347,6 +357,10 @@ describe("App", () => {
     expect(screen.getByText("8 / 20")).toBeInTheDocument();
     expect(screen.getByText("2.0 h")).toBeInTheDocument();
     expect(screen.getByText("160×")).toBeInTheDocument();
+    // A team median of 0 gives no factor.
+    expect(
+      screen.getByText("#8").parentElement?.parentElement,
+    ).toHaveTextContent(/–$/);
     expect(screen.getByText("+ 32.0 h Ausreisser")).toHaveAttribute(
       "title",
       "1 Ausreisser, nicht in der CI-Zeit",

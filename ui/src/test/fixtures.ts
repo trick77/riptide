@@ -230,7 +230,9 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
         min_runs: 10,
         slow_factor: 2,
         flaky_factor: 2,
-        outlier_factor: 3,
+        outlier_factor: 6,
+        outlier_min_s: 3600,
+        outlier_repo_min_runs: 3,
         kinds: [
           kindHotspots("release", 0),
           kindHotspots("main", 1),
