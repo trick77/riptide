@@ -71,7 +71,62 @@ function Table({ cols, rows }: { cols: Col[]; rows: ReactNode[][] }) {
   );
 }
 
+// The data section: the search, which filters only these tables, then the
+// tables once the facts are in.
 export function Facts({
+  facts,
+  failed,
+  q,
+  input,
+  onInput,
+  tab,
+  onTab,
+}: {
+  facts: FactsData | null;
+  // The facts did not load; the page's alert says why.
+  failed: boolean;
+  // q is the search the facts were asked for; input what the box holds.
+  q: string;
+  input: string;
+  onInput: (v: string) => void;
+  tab: Tab;
+  onTab: (t: Tab) => void;
+}) {
+  return (
+    <section id="daten" aria-labelledby="h-daten" className="mt-10">
+      <SectionHead
+        id="h-daten"
+        eyebrow="Einzelfakten hinter allen Zahlen"
+        title="Daten"
+        lead="Jede Zahl oben besteht aus diesen PRs, Deploys und Läufen. Die Suche filtert nur diese Tabellen."
+      />
+      <div className="no-print mb-3 max-w-[480px]">
+        <label htmlFor="search" className="sr-only">
+          Suche nach Repo, App, PR oder Jira-Key
+        </label>
+        <input
+          id="search"
+          type="search"
+          value={input}
+          onChange={(e) => onInput(e.target.value)}
+          placeholder="Repo, App, PR, Jira-Key …"
+          className="box-border h-9 w-full rounded-ui-sm border border-border bg-bg px-3 text-[13.5px] text-ink focus-visible:outline-2 focus-visible:outline-accent-strong"
+        />
+      </div>
+      {facts ? (
+        <FactsTables facts={facts} q={q} tab={tab} onTab={onTab} />
+      ) : failed ? (
+        <p className="m-0 text-[13.5px] text-muted">
+          Die Einzelfakten konnten nicht geladen werden; die Meldung steht oben.
+        </p>
+      ) : (
+        <div aria-busy="true" className="skeleton h-40 rounded-ui-lg" />
+      )}
+    </section>
+  );
+}
+
+function FactsTables({
   facts,
   q,
   tab,
@@ -185,56 +240,45 @@ export function Facts({
   }
 
   return (
-    <section id="daten" aria-labelledby="h-daten" className="mt-10">
-      <SectionHead
-        id="h-daten"
-        eyebrow="Einzelfakten hinter allen Zahlen"
-        title="Daten"
-      />
-      <div className="rounded-ui-lg border border-border bg-panel px-[18px] pt-3.5 pb-2">
-        <div className="flex flex-wrap items-center justify-between gap-2.5">
-          <div
-            role="tablist"
-            aria-label="Faktentabelle"
-            className="inline-flex gap-0.5"
-          >
-            {tabs.map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                aria-selected={tab === key}
-                onClick={() => onTab(key)}
-                className={`rounded-ui-sm border-0 px-3 py-1.5 text-[13.5px] ${
-                  tab === key
-                    ? "bg-active text-ink"
-                    : "bg-transparent text-muted"
-                }`}
-              >
-                {label}{" "}
-                <span className="text-muted tabular-nums">{counts[key]}</span>
-              </button>
-            ))}
-          </div>
-          <span className="text-[12.5px] text-muted">
-            {q
-              ? `gefiltert nach «${q}»`
-              : "Neueste zuerst · die Suche oben filtert alle Tabellen"}
-            {counts[tab] > facts.limit
-              ? ` · die ersten ${facts.limit} von ${counts[tab]}`
-              : ""}
-          </span>
+    <div className="rounded-ui-lg border border-border bg-panel px-[18px] pt-3.5 pb-2">
+      <div className="flex flex-wrap items-center justify-between gap-2.5">
+        <div
+          role="tablist"
+          aria-label="Faktentabelle"
+          className="inline-flex gap-0.5"
+        >
+          {tabs.map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={tab === key}
+              onClick={() => onTab(key)}
+              className={`rounded-ui-sm border-0 px-3 py-1.5 text-[13.5px] ${
+                tab === key ? "bg-active text-ink" : "bg-transparent text-muted"
+              }`}
+            >
+              {label}{" "}
+              <span className="text-muted tabular-nums">{counts[key]}</span>
+            </button>
+          ))}
         </div>
-        <div className="mt-2.5 overflow-x-auto">
-          {counts[tab] === 0 ? (
-            <p className="my-3.5 text-[13.5px] text-muted">
-              {q ? `Keine Treffer für «${q}».` : "Keine Einträge im Zeitraum."}
-            </p>
-          ) : (
-            table
-          )}
-        </div>
+        <span className="text-[12.5px] text-muted">
+          {q ? `gefiltert nach «${q}»` : "Neueste zuerst"}
+          {counts[tab] > facts.limit
+            ? ` · die ersten ${facts.limit} von ${counts[tab]}`
+            : ""}
+        </span>
       </div>
-    </section>
+      <div className="mt-2.5 overflow-x-auto">
+        {counts[tab] === 0 ? (
+          <p className="my-3.5 text-[13.5px] text-muted">
+            {q ? `Keine Treffer für «${q}».` : "Keine Einträge im Zeitraum."}
+          </p>
+        ) : (
+          table
+        )}
+      </div>
+    </div>
   );
 }

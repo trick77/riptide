@@ -45,9 +45,15 @@ export function dayMonth(d: Date): string {
   return d.toLocaleDateString(LOCALE, { day: "2-digit", month: "2-digit" });
 }
 
+export function clock(iso: string): string {
+  return new Date(iso).toLocaleTimeString(LOCALE, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export function dateTime(iso: string): string {
-  const d = new Date(iso);
-  return `${dayMonth(d)} ${d.toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit" })}`;
+  return `${dayMonth(new Date(iso))} ${clock(iso)}`;
 }
 
 export function fullDate(d: Date): string {

@@ -43,19 +43,22 @@ export function WeekStack({
   labels,
   series,
   values,
+  reference,
   ariaLabel,
 }: {
   labels: string[];
   // Bottom to top.
   series: Series[];
   values: Record<string, number>[];
+  // A dashed rule at a value the backend computed, labelled.
+  reference?: { value: number; label: string };
   ariaLabel: string;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const totals = values.map((v) =>
     series.reduce((a, s) => a + (v[s.key] ?? 0), 0),
   );
-  const max = niceMax(Math.max(0, ...totals));
+  const max = niceMax(Math.max(0, reference?.value ?? 0, ...totals));
   const ticks = [0, Math.round(max / 2), max];
   const every = labelEvery(labels.length);
   const gap = labels.length > 13 ? 3 : labels.length > 6 ? 6 : 14;
@@ -82,6 +85,17 @@ export function WeekStack({
               style={{ top: H - (t / max) * H }}
             />
           ))}
+          {reference && (
+            <div
+              // Above the bars, light enough to read across them.
+              className="pointer-events-none absolute inset-x-0 z-10 border-t-[1.5px] border-dashed border-ink-dim"
+              style={{ top: H - (reference.value / max) * H }}
+            >
+              <span className="absolute -top-[19px] right-0 bg-panel px-1 text-[11px] text-ink-dim">
+                {reference.label}
+              </span>
+            </div>
+          )}
           <div className="absolute inset-0 flex items-end" style={{ gap }}>
             {values.map((v, i) => {
               const present = series.filter((s) => (v[s.key] ?? 0) > 0);
@@ -143,12 +157,17 @@ export function GroupedBars({
   labels,
   series,
   values,
+  markAfter,
+  markLabel,
   ariaLabel,
 }: {
   labels: string[];
   series: Series[];
   // values[series][bucket]
   values: number[][];
+  // A dashed rule after this bucket, labelled.
+  markAfter?: number;
+  markLabel?: string;
   ariaLabel: string;
 }) {
   const [hover, setHover] = useState<number | null>(null);
@@ -156,6 +175,22 @@ export function GroupedBars({
   return (
     <div role="img" aria-label={ariaLabel}>
       <div className="relative mt-5 flex h-[170px] items-end gap-3.5 border-b border-axis">
+        {markAfter != null && (
+          <span
+            aria-hidden="true"
+            className="absolute -top-2 bottom-0 border-l-[1.5px] border-dashed border-reference"
+            // Midway in the gap after the bucket: n columns share the
+            // width plus one 14px gap (gap-3.5), each column and its gap
+            // taking an nth of it.
+            style={{
+              left: `calc((100% + 14px) * ${(markAfter + 1) / labels.length} - 7px)`,
+            }}
+          >
+            <span className="absolute top-0 left-1.5 text-[11px] whitespace-nowrap text-ink-dim">
+              {markLabel}
+            </span>
+          </span>
+        )}
         {labels.map((l, i) => (
           <div
             key={l}
