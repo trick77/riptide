@@ -71,6 +71,8 @@ function kindStats(
     duration: spread(runs, 600),
     ci_seconds: runs * 600,
     wasted_seconds: (runs - succeeded) * 600,
+    outlier_runs: 0,
+    outlier_seconds: 0,
     weekly: Array.from({ length: n }, (_, i) =>
       i === n - 1 ? succeeded / runs : null,
     ),

@@ -114,6 +114,8 @@ export type BuildStats = {
   duration: Spread;
   ci_seconds: number;
   wasted_seconds: number;
+  outlier_runs: number;
+  outlier_seconds: number;
   weekly: (number | null)[];
 };
 
