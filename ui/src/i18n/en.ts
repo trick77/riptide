@@ -440,6 +440,8 @@ export const en = {
     noCompareIncomplete: "build data of the previous period incomplete",
     noCompareLowSample: "under {{min}} runs in one of the two periods",
     fineText: "{{p50}}, {{rate}} red",
+    fineWait: " · {{wait}} waiting, {{build}} building",
+    repoWait: "Typically {{wait}} waiting for an agent, {{build}} building",
     group_one: "{{count}} run from {{repos}} repos started {{when}}",
     group_other: "{{count}} runs from {{repos}} repos started {{when}}",
     groupSameDay: "on {{day}} between {{from}} and {{to}}",
@@ -471,6 +473,14 @@ export const en = {
     colRed: "Red CI time",
     viewRuns: "View runs →",
     noneOfKind: "No runs of this kind with a result.",
+    slowestTitle: "Longest builds",
+    slowestSub:
+      "By median, outliers aside, from {{min}} runs with a result and a duration. No threshold: unremarkable repos too.",
+    colMedian: "Median",
+    colSlowest: "Slowest 10 %",
+    colWaitBuild: "Waiting / building",
+    colRuns: "Runs",
+    noAgentRepo: "None of the runs reports when it got an agent",
     hotspotsRule:
       "Got flakier: rate at least {{flaky}}× the previous period's and {{points}} points above it, at most halfway between it and 100 %, with {{failures}} red runs or more. Got slower: median at least {{slow}}× the previous period's. Both from {{min}} runs in both periods. Never against the team: a kind mixes Gradle, npm and other builds, so a UI build with smoke tests would always be slow.",
     stuckTitle: "Stuck runs",

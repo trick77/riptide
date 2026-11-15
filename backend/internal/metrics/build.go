@@ -260,7 +260,7 @@ func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
 		MinRuns: HotspotMinRuns, SlowFactor: SlowFactor, FlakyFactor: FlakyFactor,
 		FlakyMinPoints: FlakyMinPoints, FlakyMinFailures: FlakyMinFailures,
 		OutlierFactor: OutlierFactor, OutlierMinS: OutlierMinS, OutlierRepoMinRuns: OutlierRepoMinRuns,
-		Kinds: []KindHotspots{}, Outliers: []Outlier{}, OutlierGroups: []OutlierGroup{},
+		SlowestMinRuns: SlowestMinRuns, Kinds: []KindHotspots{}, Outliers: []Outlier{}, OutlierGroups: []OutlierGroup{},
 	}
 	for _, kind := range runKinds {
 		rs := by[kind]
@@ -458,7 +458,16 @@ const (
 	OutlierGroupRepos = 2
 	hotspotTop        = 8
 	outlierTop        = 10
+	// slowestTop: the longest repos per kind, flagged or not. No threshold:
+	// a feature build steady at 25 minutes is never slow against itself.
+	slowestTop = 5
 )
+
+// SlowestMinRuns are the timed runs, outliers aside, a repo's median needs
+// to rank among the longest: two runs say nothing about a repo. Its own
+// constant, so tuning the outlier cut leaves the list alone. A starting
+// value, user-chosen 2026-11-15.
+const SlowestMinRuns = 3
 
 // KindHotspots are one kind's repos, each against its own previous period.
 type KindHotspots struct {
@@ -470,6 +479,10 @@ type KindHotspots struct {
 	// slow ones by factor, then the rest by wasted time and median; the top
 	// 8 and every flagged one.
 	Repos []RepoHotspot `json:"repos"`
+	// Slowest are the slowestTop repos by median, longest first, those with
+	// SlowestMinRuns timed runs or more, outliers aside; the rows of Repos,
+	// before its cut.
+	Slowest []RepoHotspot `json:"slowest"`
 	// OutlierThresholdS is OutlierFactor times the team's median, outliers
 	// included, at least OutlierMinS; null without a run with a verdict and
 	// a duration. A repo with a longer median of its own has a higher one.
@@ -504,6 +517,7 @@ type Hotspots struct {
 	OutlierFactor      float64        `json:"outlier_factor"`
 	OutlierMinS        float64        `json:"outlier_min_s"`
 	OutlierRepoMinRuns int            `json:"outlier_repo_min_runs"`
+	SlowestMinRuns     int            `json:"slowest_min_runs"`
 	Kinds              []KindHotspots `json:"kinds"`
 	// Outliers across kinds, longest first, the top 10: runs of several
 	// repos stuck at the same time point at shared infrastructure.
@@ -523,6 +537,10 @@ type RepoHotspot struct {
 	// outliers aside.
 	Runs     int    `json:"runs"`
 	Duration Spread `json:"duration"`
+	// Waiting and Building split Duration's runs as BuildStats' do, over
+	// those whose CI reports when they got an agent.
+	Waiting  Spread `json:"waiting"`
+	Building Spread `json:"building"`
 	// DurationChange is the median against the previous period's, both
 	// over at least HotspotMinRuns runs with a verdict and a duration.
 	DurationChange Change `json:"duration_change"`
@@ -647,6 +665,9 @@ func topOrFlagged[T any](rows []T, flagged func(T) bool) []T {
 // repoRuns are one repo's runs of a kind, as the hotspots count them.
 type repoRuns struct {
 	durations []float64
+	// waits and works split the runs of durations that report their agent
+	// start.
+	waits, works []float64
 	// timed are the runs with a verdict and a duration, outliers included.
 	timed, counted, failures int
 	wasted                   float64
@@ -671,6 +692,10 @@ func (kr kindRuns) byRepo() map[string]*repoRuns {
 			rr.timed++
 			if !kr.stuck[i] {
 				rr.durations = append(rr.durations, float64(*r.DurationS))
+				if wait, work, ok := agentSplit(r); ok {
+					rr.waits = append(rr.waits, wait)
+					rr.works = append(rr.works, work)
+				}
 			}
 		}
 		rr.counted++
@@ -743,7 +768,8 @@ func kindHotspots(kind string, kr kindRuns, repos map[string]*repoRuns, base *ba
 		}
 	}
 	k = KindHotspots{
-		Kind: kind, Duration: spread(durations), FailureRate: ratio(failures, counted), Repos: []RepoHotspot{},
+		Kind: kind, Duration: spread(durations), FailureRate: ratio(failures, counted),
+		Repos: []RepoHotspot{}, Slowest: []RepoHotspot{},
 	}
 	prev := base.kinds[kind]
 	for repo, rr := range repos {
@@ -751,7 +777,8 @@ func kindHotspots(kind string, kr kindRuns, repos map[string]*repoRuns, base *ba
 			continue
 		}
 		h := RepoHotspot{
-			Repo: repo, Runs: rr.counted, Duration: spread(rr.durations), Failures: rr.failures,
+			Repo: repo, Runs: rr.counted, Duration: spread(rr.durations),
+			Waiting: spread(rr.waits), Building: spread(rr.works), Failures: rr.failures,
 			FailureRate: ratio(rr.failures, rr.counted), WastedSeconds: rr.wasted,
 		}
 		h.against(rr, prev[repo], base.incomplete)
@@ -759,7 +786,15 @@ func kindHotspots(kind string, kr kindRuns, repos map[string]*repoRuns, base *ba
 			compared++
 		}
 		k.Repos = append(k.Repos, h)
+		// Its own slice: topOrFlagged cuts Repos in place.
+		if h.Duration.N >= SlowestMinRuns {
+			k.Slowest = append(k.Slowest, h)
+		}
 	}
+	slices.SortFunc(k.Slowest, func(a, b RepoHotspot) int {
+		return cmp.Or(cmp.Compare(*b.Duration.P50, *a.Duration.P50), cmp.Compare(a.Repo, b.Repo))
+	})
+	k.Slowest = k.Slowest[:min(len(k.Slowest), slowestTop)]
 	slices.SortFunc(k.Repos, compareHotspots)
 	// Every flagged repo stays: compare counts them off this list.
 	k.Repos = topOrFlagged(k.Repos, func(h RepoHotspot) bool { return h.Flaky || h.Slow })

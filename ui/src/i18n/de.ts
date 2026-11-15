@@ -434,6 +434,8 @@ export const de = {
     noCompareIncomplete: "Build-Daten der Vorperiode unvollständig",
     noCompareLowSample: "unter {{min}} Läufen in einer der beiden Perioden",
     fineText: "{{p50}}, {{rate}} rot",
+    fineWait: " · {{wait}} Warten, {{build}} Bauen",
+    repoWait: "Typisch {{wait}} Warten auf einen Agent, {{build}} Bauen",
     group_one: "{{count}} Lauf aus {{repos}} Repos startete {{when}}",
     group_other: "{{count}} Läufe aus {{repos}} Repos starteten {{when}}",
     groupSameDay: "am {{day}} zwischen {{from}} und {{to}}",
@@ -465,6 +467,14 @@ export const de = {
     colRed: "CI-Zeit rot",
     viewRuns: "Läufe ansehen →",
     noneOfKind: "Keine Läufe dieser Art mit Ergebnis.",
+    slowestTitle: "Längste Builds",
+    slowestSub:
+      "Nach Median, ohne Ausreisser, ab {{min}} Läufen mit Ergebnis und Dauer. Ohne Schwelle: auch unauffällige Repos.",
+    colMedian: "Median",
+    colSlowest: "Langsamste 10 %",
+    colWaitBuild: "Warten / Bauen",
+    colRuns: "Läufe",
+    noAgentRepo: "Keiner der Läufe meldet, wann er einen Agent bekam",
     hotspotsRule:
       "Fehleranfälliger geworden: Quote mindestens {{flaky}}× die der Vorperiode und {{points}} Prozentpunkte darüber, höchstens halbwegs zwischen ihr und 100 %, mit mindestens {{failures}} roten Läufen. Langsamer geworden: Median mindestens {{slow}}× der der Vorperiode. Beides ab {{min}} Läufen in beiden Perioden. Nie gegen das Team: eine Lauf-Art mischt Gradle-, npm- und andere Builds, ein UI-Build mit Smoke-Tests wäre sonst immer langsam.",
     stuckTitle: "Hängende Läufe",

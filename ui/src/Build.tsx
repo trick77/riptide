@@ -264,6 +264,107 @@ function Groups({ groups }: { groups: OutlierGroup[] }) {
   );
 }
 
+// A repo row's way to its runs in the facts.
+function RunsLink({
+  repo,
+  onFacts,
+}: {
+  repo: string;
+  onFacts: (tab: Tab, q: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <button
+      type="button"
+      onClick={() => onFacts("runs", repo)}
+      className="no-print border-0 bg-transparent p-0 text-[13px] text-accent-strong hover:underline"
+    >
+      {t("build.viewRuns")}
+    </button>
+  );
+}
+
+// The kind's longest repos by median, flagged or not: a build steady at 25
+// minutes is never slow against itself. Picked and ordered by the backend.
+function SlowestTable({
+  rows,
+  minRuns,
+  onFacts,
+}: {
+  rows: RepoHotspot[];
+  minRuns: number;
+  onFacts: (tab: Tab, q: string) => void;
+}) {
+  const { t } = useTranslation();
+  if (!rows.length) return null;
+  return (
+    <div className="mt-5">
+      <div className="text-[13.5px] font-medium text-ink">
+        {t("build.slowestTitle")}
+      </div>
+      <div className="text-[12.5px] text-muted">
+        {t("build.slowestSub", { min: minRuns })}
+      </div>
+      <div className="mt-2 overflow-x-auto">
+        <div className="grid min-w-[820px] grid-cols-[minmax(150px,1.3fr)_80px_150px_150px_60px_150px] items-center gap-x-3.5">
+          {[
+            t("build.colRepo"),
+            t("build.colMedian"),
+            t("build.colSlowest"),
+            t("build.colWaitBuild"),
+            t("build.colRuns"),
+            "",
+          ].map((head, i) => (
+            <div
+              key={head || i}
+              className={`${HEAD} whitespace-nowrap ${i > 0 && i < 5 ? "text-right" : ""}`}
+            >
+              {head}
+            </div>
+          ))}
+          {rows.map((r) => (
+            <div key={r.repo} className="contents">
+              <div className={`${CELL} overflow-hidden`}>
+                <Mono className="text-[12px] whitespace-nowrap text-ink-dim">
+                  {r.repo}
+                </Mono>
+              </div>
+              <div className={`${CELL} text-right text-ink`}>
+                {dur(r.duration.p50)}
+              </div>
+              <div className={`${CELL} text-right text-ink-dim`}>
+                {dur(r.duration.p90)}
+              </div>
+              <div
+                className={`${CELL} text-right text-ink-dim`}
+                title={
+                  r.waiting.n > 0
+                    ? t("build.waitingTitle", {
+                        n: r.waiting.n,
+                        total: r.duration.n,
+                      })
+                    : t("build.noAgentRepo")
+                }
+              >
+                {r.waiting.n > 0
+                  ? `${dur(r.waiting.p50)} / ${dur(r.building.p50)}`
+                  : "–"}
+              </div>
+              {/* the runs the median is over */}
+              <div className={`${CELL} text-right text-ink-dim`}>
+                {num(r.duration.n)}
+              </div>
+              <div className={`${CELL} text-right`}>
+                <RunsLink repo={r.repo} onFacts={onFacts} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function OutlierTable({ rows }: { rows: Outlier[] }) {
   const { t } = useTranslation();
   return (
@@ -443,6 +544,20 @@ export function Build({
                                 p50: dur(r.duration.p50),
                                 rate: pct(r.failure_rate),
                               })}
+                              {r.waiting.n > 0 &&
+                                t("build.fineWait", {
+                                  wait: dur(r.waiting.p50),
+                                  build: dur(r.building.p50),
+                                })}
+                            </span>
+                          )}
+                          {/* a slow repo waiting for agents is no slower build */}
+                          {why.length > 0 && r.waiting.n > 0 && (
+                            <span className="text-[12.5px] text-muted">
+                              {t("build.repoWait", {
+                                wait: dur(r.waiting.p50),
+                                build: dur(r.building.p50),
+                              })}
                             </span>
                           )}
                         </div>
@@ -452,13 +567,7 @@ export function Build({
                           })}
                         </div>
                         <div className={`${CELL} text-right`}>
-                          <button
-                            type="button"
-                            onClick={() => onFacts("runs", r.repo)}
-                            className="no-print border-0 bg-transparent p-0 text-[13px] text-accent-strong hover:underline"
-                          >
-                            {t("build.viewRuns")}
-                          </button>
+                          <RunsLink repo={r.repo} onFacts={onFacts} />
                         </div>
                       </div>
                     );
@@ -479,6 +588,13 @@ export function Build({
                 min: h.min_runs,
               })}
             </p>
+            {k && (
+              <SlowestTable
+                rows={k.slowest}
+                minRuns={h.slowest_min_runs}
+                onFacts={onFacts}
+              />
+            )}
           </Card>
 
           <Card className="mt-3">

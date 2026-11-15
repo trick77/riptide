@@ -45,6 +45,9 @@ export const spread = (n: number, p50: number, p90 = p50): Spread => ({
   p90,
 });
 
+// No run reports its agent time: n 0, nulls rather than 0.
+export const noSpread = (): Spread => ({ n: 0, p50: null, p90: null });
+
 const none: Spread = { n: 0, p50: null, p90: null };
 
 function stage(
@@ -96,6 +99,8 @@ function kindHotspots(
         repo: "kasse/kasse-api",
         runs: 1,
         duration: spread(1, 600),
+        waiting: noSpread(),
+        building: noSpread(),
         duration_change: change("none", null, "low_sample"),
         factor: null,
         slow: false,
@@ -106,6 +111,8 @@ function kindHotspots(
         flaky: false,
       },
     ],
+    // One run: too few for the slowest list.
+    slowest: [],
     outlier_threshold_s: null,
   };
 }
@@ -249,6 +256,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
         outlier_factor: 6,
         outlier_min_s: 3600,
         outlier_repo_min_runs: 3,
+        slowest_min_runs: 3,
         kinds: [
           kindHotspots("release", 0),
           kindHotspots("main", 1),

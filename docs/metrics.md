@@ -398,7 +398,12 @@ the previous rate to 100 %, or a repo failing most runs could never get
 flaky); both from 10 runs in each period on. A repo new to the kind, or
 without enough runs, or before the run data covers the previous period, is
 not compared; the kind counts the repos that got slower or flakier instead
-of comparing its mixed median.
+of comparing its mixed median. A repo steady at 25 minutes is never slow
+against itself, so each kind also lists its 5 slowest repos by median,
+outliers aside, from 3 runs with a verdict and a duration on, flagged or
+not and without a threshold. Every repo row carries the wait for a build
+agent and the build itself, as the kind does, over the runs that report
+when they got one.
 A run of a commit Bitbucket never saw counts with the repository its
 pipeline is named after. A run succeeded on SUCCESS (Jenkins), Succeeded
 or Completed (Tekton) and failed on FAILURE, UNSTABLE or Failed; anything
