@@ -1,39 +1,47 @@
+import { useTranslation } from "react-i18next";
 import type { Metrics } from "./api";
 import { BarList } from "./charts";
 import { money, pct } from "./format";
 import { Card, CardHead, Compare, Direction, SectionHead, Tile } from "./ui";
 
 export function Costs({ m }: { m: Metrics }) {
+  const { t } = useTranslation();
   const c = m.costs;
   const cmp = m.comparison;
   return (
     <section id="kosten" aria-labelledby="h-kosten" className="mt-10">
       <SectionHead
         id="h-kosten"
-        eyebrow="FinOps · noergler"
-        title="Was kosten die KI-Reviews?"
-        lead="Ausgaben der automatischen Reviews im Zeitraum. Kein Framework misst das; die Zahlen helfen, Kosten und Nutzen der Reviews abzuwägen."
+        eyebrow={t("costs.eyebrow")}
+        title={t("costs.title")}
+        lead={t("costs.lead")}
       />
       <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3">
         <Tile
-          label="Ausgaben"
+          label={t("costs.spend")}
           value={money(c.total)}
           note={
-            `davon ${money(c.merged)} für ${c.merged_reviews} gemergte PRs` +
+            t("costs.spendNote", {
+              merged: money(c.merged),
+              count: c.merged_reviews,
+            }) +
             (c.promotion_reviews > 0
-              ? ` · ${money(c.promotion)} für ${c.promotion_reviews} Promotion-Reviews`
+              ? ` · ${t("costs.promotionNote", {
+                  promotion: money(c.promotion),
+                  count: c.promotion_reviews,
+                })}`
               : "")
           }
         />
         <Tile
-          label="Davon verworfen"
-          question="Wie viel ging an PRs, die nie gemergt wurden?"
+          label={t("costs.wasted")}
+          question={t("costs.wastedQuestion")}
           value={pct(c.wasted_share)}
           unit={money(c.wasted)}
           direction={
             <Direction
-              label="keine Richtung"
-              why="hoch heisst: viele Entwürfe werden reviewt und dann verworfen"
+              label={t("common.noDirection")}
+              why={t("costs.wastedWhy")}
             />
           }
           compare={
@@ -45,13 +53,13 @@ export function Costs({ m }: { m: Metrics }) {
           }
         />
         <Tile
-          label="Pro 1000 geänderte Zeilen"
-          question="Was kostet das Review einer gemergten Änderung?"
+          label={t("costs.perKloc")}
+          question={t("costs.perKlocQuestion")}
           value={c.per_kloc == null ? "–" : money(c.per_kloc)}
           direction={
             <Direction
-              label="nur im Verlauf lesen"
-              why="steigt der Wert, werden Reviews pro Änderung teurer"
+              label={t("costs.trendOnly")}
+              why={t("costs.perKlocWhy")}
             />
           }
           compare={
@@ -65,18 +73,18 @@ export function Costs({ m }: { m: Metrics }) {
       </div>
       <Card className="mt-3">
         <CardHead
-          title={m.product == null ? "Nach Produkt" : "Nach Repo"}
-          sub="Alle Reviews im Zeitraum, neuestes Rollup pro PR"
+          title={m.product == null ? t("costs.byProduct") : t("costs.byRepo")}
+          sub={t("costs.sub")}
         />
         {c.rows.length ? (
           <BarList rows={c.rows} format={money} />
         ) : (
           <p className="mt-3.5 mb-0 text-[13.5px] text-muted">
-            Keine noergler-Reviews im Zeitraum.
+            {t("costs.none")}
           </p>
         )}
         <div className="mt-3.5 text-xs text-muted">
-          Nur Repos, die noergler reviewt: {c.reviewed_repos} im Zeitraum.
+          {t("costs.reviewedRepos", { n: c.reviewed_repos })}
         </div>
       </Card>
     </section>

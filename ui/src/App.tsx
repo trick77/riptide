@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ApiError,
   type Metrics,
@@ -22,18 +23,20 @@ import {
   type Tab,
   type ViewState,
 } from "./state";
-import { Eyebrow, Mono } from "./ui";
+import { Eyebrow, LanguageSwitch, Mono } from "./ui";
 
-const NAV: [string, string][] = [
-  ["ueberblick", "Überblick"],
-  ["fluss", "Fluss"],
-  ["deploys", "Deploys"],
-  ["arbeitsmix", "Arbeitsmix"],
-  ["build", "Build"],
-  ["kosten", "Kosten"],
-  ["daten", "Daten"],
-  ["frameworks", "Frameworks"],
-];
+// The sections' anchors: German ids, kept in both languages so a shared
+// link lands in the same place.
+const NAV = [
+  "ueberblick",
+  "fluss",
+  "deploys",
+  "arbeitsmix",
+  "build",
+  "kosten",
+  "daten",
+  "frameworks",
+] as const;
 
 const SOURCES: [keyof Metrics["meta"]["data_end"], string][] = [
   ["bitbucket", "Bitbucket"],
@@ -90,6 +93,7 @@ function useLoad<T>(
 }
 
 export default function App() {
+  const { t } = useTranslation();
   const [state, setState] = useState<ViewState>(() =>
     parseState(window.location.search),
   );
@@ -190,23 +194,23 @@ export default function App() {
             riptide
           </h1>
           <nav
-            aria-label="Bereiche"
+            aria-label={t("nav.label")}
             className="no-print flex flex-wrap gap-0.5"
           >
-            {NAV.map(([id, label]) => (
+            {NAV.map((id) => (
               <a
                 key={id}
                 href={`#${id}`}
                 className="rounded-ui-sm px-2.5 py-1.5 text-[13.5px] text-muted no-underline hover:bg-active hover:text-ink"
               >
-                {label}
+                {t(`nav.${id}`)}
               </a>
             ))}
           </nav>
         </div>
         <div className="ml-auto flex items-center gap-3 text-[13px] text-muted">
           <label htmlFor="team" className="sr-only">
-            Team
+            {t("page.team")}
           </label>
           <select
             id="team"
@@ -215,12 +219,13 @@ export default function App() {
             disabled={!teams?.length}
             className="h-8 rounded-ui-sm border border-border bg-panel px-2 text-[13px] text-ink-dim"
           >
-            {(teams ?? []).map((t) => (
-              <option key={t} value={t}>
-                {t}
+            {(teams ?? []).map((name) => (
+              <option key={name} value={name}>
+                {name}
               </option>
             ))}
           </select>
+          <LanguageSwitch />
           <button
             type="button"
             onClick={() => window.print()}
@@ -241,7 +246,7 @@ export default function App() {
               <rect x="4" y="9" width="16" height="8" rx="2" />
               <path d="M7 14h10v7H7z" />
             </svg>
-            Drucken / PDF
+            {t("page.print")}
           </button>
         </div>
       </header>
@@ -251,38 +256,47 @@ export default function App() {
         className="mx-auto box-border w-full max-w-[1400px] px-4 pt-7 pb-16 sm:px-10"
       >
         <h2 className="m-0 font-serif text-[28px] leading-tight font-medium tracking-[-0.01em] text-ink">
-          Engineering-Metriken
+          {t("page.title")}
         </h2>
         {m && (
           <>
             <p className="mt-1.5 mb-0 max-w-[75ch] text-[14.5px] text-muted">
-              {`Team ${m.meta.team}, ${m.product ? `Produkt ${m.product}` : "alle Produkte"} · KW ${weeks[0].kw}–${
-                weeks[weeks.length - 1].kw
-              } · ${fullDate(new Date(m.period.from))} bis ${fullDate(new Date(m.period.to))} · verglichen mit den ${weeks.length} Wochen davor`}
+              {t("page.scope", {
+                team: m.meta.team,
+                product: m.product
+                  ? t("page.oneProduct", { product: m.product })
+                  : t("page.allProductsLower"),
+                from: weeks[0].kw,
+                to: weeks[weeks.length - 1].kw,
+                start: fullDate(new Date(m.period.from)),
+                end: fullDate(new Date(m.period.to)),
+                weeks: weeks.length,
+              })}
             </p>
             <p className="mt-1 mb-0 max-w-[75ch] text-[13.5px] text-ink-dim">
-              Ein Spiegel für das Team, kein Ranking zwischen Teams oder
-              Personen. Jede Zahl sagt, was sie bedeutet, welche Richtung gut
-              ist und ob sie sich gegenüber der Vorperiode verändert hat.
+              {t("page.mirror")}
             </p>
             <p className="mt-1 mb-0 text-[12.5px] text-faint">
-              Datenstand:{" "}
+              {t("page.dataAsOf")}{" "}
               {SOURCES.map(([k, label]) => {
-                const t = m.meta.data_end[k];
-                return `${label} ${t ? dateTime(t) : "keine Daten"}`;
+                const at = m.meta.data_end[k];
+                return t("page.source", {
+                  source: label,
+                  at: at ? dateTime(at) : t("page.noData"),
+                });
               }).join(" · ")}
             </p>
           </>
         )}
 
         <section
-          aria-label="Filter"
+          aria-label={t("page.filter")}
           className="no-print mt-5 flex flex-col gap-3 rounded-ui-lg border border-border bg-panel px-4 py-3.5"
         >
           <div className="flex flex-wrap items-center gap-x-[18px] gap-y-2.5">
             <div
               role="group"
-              aria-label="Zeitraum"
+              aria-label={t("page.period")}
               className="inline-flex rounded-ui-sm border border-border bg-bg p-0.5"
             >
               {WINDOWS.map((w) => (
@@ -297,19 +311,19 @@ export default function App() {
                       : "bg-transparent text-muted"
                   }`}
                 >
-                  {w} W
+                  {t("page.weeks", { n: w })}
                 </button>
               ))}
             </div>
             <div
               role="group"
-              aria-label="Produkt"
+              aria-label={t("page.product")}
               className="flex flex-wrap gap-1.5"
             >
               {[
                 {
                   key: null as string | null,
-                  label: "Alle Produkte",
+                  label: t("page.allProducts"),
                   count: `${products.length}`,
                 },
               ]
@@ -317,7 +331,7 @@ export default function App() {
                   products.map((p) => ({
                     key: p.key,
                     label: p.key,
-                    count: `${p.repos.length} Repos`,
+                    count: t("page.repos", { count: p.repos.length }),
                   })),
                 )
                 .map((c) => {
@@ -358,12 +372,12 @@ export default function App() {
                 aria-hidden="true"
                 className={`size-2 rounded-full ${state.bots ? "bg-s3" : "bg-transparent shadow-[inset_0_0_0_1.5px] shadow-faint"}`}
               />
-              Bots einbeziehen
+              {t("page.bots")}
             </button>
           </div>
           {sel && (
             <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1.5 border-t border-border-soft pt-2.5 text-[12.5px] text-muted">
-              <Eyebrow>Repos</Eyebrow>
+              <Eyebrow>{t("page.reposHead")}</Eyebrow>
               {sel.repos.map((r) => (
                 <Mono
                   key={r}
@@ -372,8 +386,8 @@ export default function App() {
                   {r}
                 </Mono>
               ))}
-              <Eyebrow className="ml-2">Argo-Apps</Eyebrow>
-              {(sel.apps.length ? sel.apps : ["keine"]).map((a) => (
+              <Eyebrow className="ml-2">{t("page.appsHead")}</Eyebrow>
+              {(sel.apps.length ? sel.apps : [t("page.none")]).map((a) => (
                 <Mono
                   key={a}
                   className="rounded-md border border-elevated-border px-[7px] text-ink-dim"
@@ -381,11 +395,7 @@ export default function App() {
                   {a}
                 </Mono>
               ))}
-              <span className="basis-full text-faint">
-                Zuordnung aus den Daten: Repos über den
-                Bitbucket-Projektschlüssel, Apps über das GitOps-Repo, dessen
-                Revision sie deployen. Keine Namensliste.
-              </span>
+              <span className="basis-full text-faint">{t("page.mapping")}</span>
             </div>
           )}
         </section>
@@ -395,16 +405,18 @@ export default function App() {
             role="alert"
             className="mt-6 rounded-ui border border-danger/40 bg-danger/10 px-4 py-3 text-[13.5px] text-danger-ink"
           >
-            Daten konnten nicht geladen werden: {failure}
+            {t("page.loadFailed", { msg: failure })}
           </div>
         )}
         {teams && teams.length === 0 && (
-          <p className="mt-6 text-[13.5px] text-muted">
-            In der Konfiguration ist kein Team eingetragen.
-          </p>
+          <p className="mt-6 text-[13.5px] text-muted">{t("page.noTeam")}</p>
         )}
         {!m && !failure && teams?.length !== 0 && (
-          <div aria-busy="true" aria-label="Lädt" className="mt-9 grid gap-3">
+          <div
+            aria-busy="true"
+            aria-label={t("page.loading")}
+            className="mt-9 grid gap-3"
+          >
             <div className="skeleton h-24 rounded-ui" />
             <div className="skeleton h-72 rounded-ui-lg" />
           </div>
@@ -431,8 +443,7 @@ export default function App() {
         )}
 
         <footer className="mt-10 border-t border-border-soft pt-3.5 text-xs text-faint">
-          Riptide liest die Rohdaten nur. Jede Zahl lässt sich über «Woher?» bis
-          zur Query zurückverfolgen.
+          {t("page.footer")}
         </footer>
       </main>
     </div>

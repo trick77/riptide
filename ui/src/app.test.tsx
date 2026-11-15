@@ -11,6 +11,7 @@ import App from "./App";
 import type { Facts, Metrics } from "./api";
 import { Costs } from "./Costs";
 import { Flow } from "./Flow";
+import { initialLanguage } from "./i18n";
 import { parseState, stateQuery } from "./state";
 import {
   ago,
@@ -105,6 +106,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("App", () => {
@@ -138,12 +140,12 @@ describe("App", () => {
     expect(
       screen.getByText(/Datenstand: Bitbucket 12\.11\./),
     ).toBeInTheDocument();
-    expect(screen.getByText("1 Releases im Zeitraum")).toBeInTheDocument();
+    expect(screen.getByText("1 Release im Zeitraum")).toBeInTheDocument();
     expect(
       screen.getByText("1 von 4 Syncs fehlgeschlagen"),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/1 Erstdeploys ohne Vergleichswert/),
+      screen.getByText(/1 Erstdeploy ohne Vergleichswert/),
     ).toBeInTheDocument();
     expect(screen.getByText(/Lead Time bis intg/)).toBeInTheDocument();
     expect(screen.getAllByText(/wenig belastbar/).length).toBeGreaterThan(0);
@@ -171,7 +173,7 @@ describe("App", () => {
       [2, "Deploy-Erfolg"],
       [3, "Review-Zeit"],
       [4, "Approval ohne Kommentar"],
-      [5, "Innert 24 h gemergt"],
+      [5, "Innert 24 h gemerged"],
     ] as const) {
       fireEvent.click(whys[i]);
       expect(
@@ -191,9 +193,9 @@ describe("App", () => {
     mockFetch();
     render(<App />);
     await screen.findByRole("heading", { name: "Was jetzt?" });
-    expect(screen.getByText("besser")).toBeInTheDocument();
-    expect(screen.getByText("schlechter")).toBeInTheDocument();
-    expect(screen.getAllByText("unverändert").length).toBeGreaterThan(0);
+    expect(screen.getByText("Besser")).toBeInTheDocument();
+    expect(screen.getByText("Schlechter")).toBeInTheDocument();
+    expect(screen.getAllByText("Unverändert").length).toBeGreaterThan(0);
     expect(screen.getByText("ohne Richtung")).toBeInTheDocument();
     expect(
       screen.getAllByText(
@@ -303,6 +305,49 @@ describe("App", () => {
       expect(factsCalls(calls).at(-1)).toMatch(/&q=kasse%2Fflaky-api$/),
     );
     fireEvent.click(screen.getByRole("button", { name: "Zum Fluss →" }));
+  });
+
+  it("switches to English and keeps the choice", async () => {
+    mockFetch();
+    const { unmount } = render(<App />);
+    await screen.findByRole("heading", { name: "Was jetzt?" });
+    await screen.findByText("KAS-1: Pay by card");
+    // A placeholder the call site names differently stays raw on screen.
+    const raw = /\{\{|\}\}/;
+    expect(document.body.textContent).not.toMatch(raw);
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Sprache: Deutsch. Auf Englisch wechseln",
+      }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "What now?" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Print/ })).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(raw);
+    expect(localStorage.getItem("lang")).toBe("en");
+    // The facts table's words come from the shared search terms.
+    expect(screen.getAllByText("Merged").length).toBeGreaterThan(0);
+    expect(screen.getByText("Promotion")).toBeInTheDocument();
+    unmount();
+
+    // A new page load reads the stored choice, not the browser (en-US
+    // here, so the stored "en" is checked against a German browser).
+    vi.spyOn(navigator, "language", "get").mockReturnValue("de-CH");
+    expect(initialLanguage()).toBe("en");
+    render(<App />);
+    expect(
+      await screen.findByRole("heading", { name: "What now?" }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Language: English. Switch to German",
+      }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Was jetzt?" }),
+    ).toBeInTheDocument();
+    expect(localStorage.getItem("lang")).toBe("de");
   });
 
   it("spells a PR's type and its way to prod", async () => {
@@ -421,7 +466,10 @@ describe("App", () => {
     expect(screen.getAllByText("kasse-api:1.1").length).toBeGreaterThan(0);
     fireEvent.click(within(tabs).getByRole("tab", { name: /Läufe/ }));
     expect(window.location.search).toBe("?q=kasse-api%3A1.1&tab=runs");
-    expect(screen.getByText("UNSTABLE")).toBeInTheDocument();
+    // The UI's word where the status plainly says it, else the CI's.
+    expect(screen.getByText("Erfolgreich")).toBeInTheDocument();
+    expect(screen.getByText("Fehlgeschlagen")).toBeInTheDocument();
+    expect(screen.getByText("Unstable")).toBeInTheDocument();
     expect(screen.getAllByText("Releases").length).toBeGreaterThan(0);
   });
 
@@ -441,7 +489,7 @@ describe("App", () => {
     expect(
       within(kinds).getByRole("button", { name: "Feature- und PR-Builds" }),
     ).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText("unauffällig")).toBeInTheDocument();
+    expect(screen.getByText("Unauffällig")).toBeInTheDocument();
     fireEvent.click(within(kinds).getByRole("button", { name: "Releases" }));
     expect(
       within(kinds).getByRole("button", { name: "Releases" }),
@@ -547,9 +595,9 @@ describe("App", () => {
     });
     render(<App />);
     await screen.findByText("Repos, die das Feedback bremsen");
-    expect(screen.getByText("fehleranfällig")).toBeInTheDocument();
+    expect(screen.getByText("Fehleranfällig")).toBeInTheDocument();
     expect(screen.getByText(/40 % rot, Team 10 %/)).toBeInTheDocument();
-    expect(screen.getByText("langsam")).toBeInTheDocument();
+    expect(screen.getByText("Langsam")).toBeInTheDocument();
     expect(screen.getByText(/Team 10 min \(3\.0×\)/)).toBeInTheDocument();
     expect(screen.getByText("2.0 h")).toBeInTheDocument();
     fireEvent.click(
@@ -731,7 +779,7 @@ describe("App", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/Build-Daten ab 09\.11\.2026/)).toBeInTheDocument();
     expect(
-      screen.getByText("Keine gemergten PRs im Zeitraum."),
+      screen.getByText("Im Zeitraum wurde kein PR gemerged."),
     ).toBeInTheDocument();
   });
 
@@ -865,7 +913,7 @@ describe("costs", () => {
     const m = metrics();
     const { unmount } = render(<Costs m={m} />);
     expect(
-      screen.getByText("davon $0.50 für 1 gemergte PRs"),
+      screen.getByText("davon $0.50 für 1 PR, der gemerged wurde"),
     ).toBeInTheDocument();
     unmount();
     render(
@@ -878,7 +926,7 @@ describe("costs", () => {
     );
     expect(
       screen.getByText(
-        "davon $0.50 für 1 gemergte PRs · $0.20 für 2 Promotion-Reviews",
+        "davon $0.50 für 1 PR, der gemerged wurde · $0.20 für 2 Promotion-Reviews",
       ),
     ).toBeInTheDocument();
   });
@@ -911,7 +959,7 @@ describe("flow", () => {
     expect(document.body.textContent).not.toMatch(/NaN/);
     expect(screen.getAllByText(/25 % der Zeit/)).toHaveLength(4);
     expect(screen.queryByText(/Bis null/)).toBeNull();
-    expect(screen.getByText("gemergt → auf prod")).toBeInTheDocument();
+    expect(screen.getByText("gemerged → auf prod")).toBeInTheDocument();
     // No stage is hot: no lever named.
     expect(screen.queryByText(/Der Hebel liegt/)).toBeNull();
   });

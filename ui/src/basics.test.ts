@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ciWord,
   dateTime,
   dayMonth,
   dur,
@@ -28,6 +29,12 @@ describe("format", () => {
     expect(dur(-5)).toBe("0 s");
     expect(durParts(8.1 * 86400)).toEqual({ value: "8.1", unit: "Tage" });
     expect(durParts(null)).toEqual({ value: "–", unit: "" });
+  });
+  it("writes a CI's word with a capital", () => {
+    expect(ciWord("UNSTABLE")).toBe("Unstable");
+    expect(ciWord("NOT_BUILT")).toBe("Not built");
+    expect(ciWord("None")).toBe("None");
+    expect(ciWord("PipelineRunTimeout")).toBe("PipelineRunTimeout");
   });
   it("shortens", () => {
     expect(shortSha("0123456789abcdef")).toBe("01234567");

@@ -2,6 +2,8 @@
 // per PR as labelled stages, then the review as a pair of numbers that only
 // read together, then how many PRs are merged within a day.
 
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 import type { LeadChain, Metrics, StageKey } from "./api";
 import { GroupedBars } from "./charts";
 import { dur, durParts, pct } from "./format";
@@ -19,40 +21,43 @@ import {
 } from "./ui";
 
 export function stageNames(
+  t: TFunction,
   c: LeadChain,
   prod: string,
 ): Record<StageKey, [string, string]> {
   const pre = c.pre_environment;
   return {
-    coding: ["Coding", "erster Commit → PR bereit"],
-    review: ["Review", "PR bereit → Approval"],
-    merge: ["Merge", "Approval → gemergt"],
-    to_pre: [`Bis ${pre}`, `gemergt → auf ${pre}`],
+    coding: [t("flow.stage.coding"), t("flow.stage.codingDesc")],
+    review: [t("flow.stage.review"), t("flow.stage.reviewDesc")],
+    merge: [t("flow.stage.merge"), t("flow.stage.mergeDesc")],
+    to_pre: [
+      t("flow.stage.toPre", { pre }),
+      t("flow.stage.toPreDesc", { pre }),
+    ],
     to_prod: [
-      `Warten auf ${prod}`,
+      t("flow.stage.toProd", { prod }),
       pre
-        ? `auf ${pre} (ohne: gemergt) → auf ${prod}`
-        : `gemergt → auf ${prod}`,
+        ? t("flow.stage.toProdDescPre", { pre, prod })
+        : t("flow.stage.toProdDesc", { prod }),
     ],
   };
 }
 
 // Wording of the backend's cycle-time buckets by upper bound in seconds;
 // a bound without one says so plainly rather than mislabel a count.
-const BUCKET_LABEL: Record<number, string> = {
-  900: "< 15 min",
-  3600: "15–60 min",
-  14400: "1–4 h",
-  86400: "4–24 h",
-  259200: "1–3 Tage",
-};
-const OPEN_LABEL: Record<number, string> = { 259200: "> 3 Tage" };
-
-function bucketLabels(bounds: number[]): string[] {
+function bucketLabels(t: TFunction, bounds: number[]): string[] {
+  const label: Record<number, string> = {
+    900: "< 15 min",
+    3600: "15–60 min",
+    14400: "1–4 h",
+    86400: "4–24 h",
+    259200: t("flow.bucket.days"),
+  };
+  const open: Record<number, string> = { 259200: t("flow.bucket.overDays") };
   const last = bounds[bounds.length - 1];
   return bounds
-    .map((b) => BUCKET_LABEL[b] ?? `bis ${dur(b)}`)
-    .concat(OPEN_LABEL[last] ?? `ab ${dur(last)}`);
+    .map((b) => label[b] ?? t("flow.bucket.upTo", { d: dur(b) }))
+    .concat(open[last] ?? t("flow.bucket.from", { d: dur(last) }));
 }
 
 type Props = {
@@ -62,9 +67,10 @@ type Props = {
 };
 
 function Chain({ m }: { m: Metrics }) {
+  const { t } = useTranslation();
   const prod = m.delivery.production_stage;
   const chain = m.lead_chain;
-  const names = stageNames(chain, prod);
+  const names = stageNames(t, chain, prod);
   const withData = chain.stages.filter((s) => s.p50 != null);
   const hot = chain.stages.find((s) => s.hot);
   const pre = m.delivery.lead_time_pre;
@@ -72,19 +78,19 @@ function Chain({ m }: { m: Metrics }) {
   return (
     <Card>
       <CardHead
-        title={`Anteil jeder Etappe an der Zeit bis ${prod}`}
-        sub={`Pro PR in App-Repos, typische Dauer je Etappe. Die Lead Time oben zählt pro Commit; die Etappen zeigen, wo die Zeit liegt.`}
+        title={t("flow.chainTitle", { prod })}
+        sub={t("flow.chainSub")}
       />
       {pre && (
         <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3">
           <div className="rounded-ui border border-border-soft px-3 py-2.5">
             <div className="text-[13.5px] text-ink-dim">
-              Lead Time bis {pre.environment}:{" "}
+              {t("flow.leadTo", { env: pre.environment })}{" "}
               <span className="font-medium text-ink tabular-nums">
                 {dur(pre.human.p50)}
               </span>{" "}
               <span className="text-xs text-muted">
-                typischer Wert · die langsamsten 10 %: über {dur(pre.human.p90)}
+                {t("flow.typicalSlowest", { p90: dur(pre.human.p90) })}
               </span>
             </div>
             {preChange && (
@@ -96,13 +102,12 @@ function Chain({ m }: { m: Metrics }) {
             )}
           </div>
           <div className="rounded-ui border border-border-soft px-3 py-2.5 text-[13.5px] text-ink-dim">
-            Lead Time bis {prod}:{" "}
+            {t("flow.leadTo", { env: prod })}{" "}
             <span className="font-medium text-ink tabular-nums">
               {dur(m.delivery.lead_time.human.p50)}
             </span>
             <div className="mt-1 text-xs text-muted">
-              Der Abstand zwischen beiden ist die Zeit vor {prod}: liegt sie
-              dort, ist die Pipeline schnell und das Release der Engpass.
+              {t("flow.gap", { prod })}
             </div>
           </div>
         </div>
@@ -111,7 +116,12 @@ function Chain({ m }: { m: Metrics }) {
         <>
           <div
             role="img"
-            aria-label={`Anteil an der Zeit bis ${prod}: ${withData.map((s) => `${names[s.key][0]} ${pct(s.share)}`).join(", ")}`}
+            aria-label={t("flow.shareAria", {
+              prod,
+              parts: withData
+                .map((s) => `${names[s.key][0]} ${pct(s.share)}`)
+                .join(", "),
+            })}
             className="mt-4 flex h-8 gap-0.5"
           >
             {withData.map((s, i) => (
@@ -144,16 +154,19 @@ function Chain({ m }: { m: Metrics }) {
                 <div className="mt-1 text-[20px] font-medium text-ink tabular-nums">
                   {dur(s.p50)}{" "}
                   <span className="text-xs font-normal text-muted">
-                    {s.share == null ? "" : `· ${pct(s.share)} der Zeit`}
+                    {s.share == null
+                      ? ""
+                      : t("flow.ofTime", { share: pct(s.share) })}
                   </span>
                 </div>
                 <div className="text-xs text-muted">
-                  die langsamsten 10 %: über {dur(s.p90)}
+                  {t("common.slowest", { p90: dur(s.p90) })}
                 </div>
                 <div
                   className={`text-xs ${s.low_sample ? "text-ochre" : "text-muted"}`}
                 >
-                  {s.n} PRs{s.low_sample ? " · wenig belastbar" : ""}
+                  {t("common.nPRs", { count: s.n })}
+                  {s.low_sample ? ` · ${t("common.lowSample")}` : ""}
                 </div>
               </li>
             ))}
@@ -161,85 +174,91 @@ function Chain({ m }: { m: Metrics }) {
           {hot && (
             <div className="mt-3 rounded-ui border border-accent-dim bg-accent/10 px-3.5 py-2.5 text-[13.5px] text-ink-dim">
               <span className="font-medium text-accent-strong">
-                Der Hebel liegt bei «{names[hot.key][0]}»
+                {t("flow.hot", { name: names[hot.key][0] })}
               </span>
-              : {pct(hot.share)} der Zeit bis {prod}. Die kurzen Etappen zu
-              beschleunigen, bringt wenig.
+              {t("flow.hotRest", { share: pct(hot.share), prod })}
             </div>
           )}
         </>
       ) : (
         <p className="mt-4 mb-0 text-[13.5px] text-muted">
-          Keine gemergten PRs im Zeitraum.
+          {t("common.noMergedPRs")}
         </p>
       )}
-      <p className="mt-2.5 mb-0 text-xs text-muted">
-        Review ist eine eigene Etappe, weil das Approval meist der erste Kontakt
-        des Reviewers ist. Die letzten zwei Etappen erreichen nur PRs, deren
-        Merge-Commit einem Deploy zugeordnet ist.
-      </p>
+      <p className="mt-2.5 mb-0 text-xs text-muted">{t("flow.chainNote")}</p>
     </Card>
   );
 }
 
 export function Flow({ m, why, onWhy }: Props) {
+  const { t } = useTranslation();
   const prod = m.delivery.production_stage;
   const r = m.review;
   const c = m.comparison;
   const rv = durParts(r.review.p50);
-  const labels = bucketLabels(r.cycle_histogram.upper_bounds_s);
+  const labels = bucketLabels(t, r.cycle_histogram.upper_bounds_s);
   const day = r.cycle_histogram.upper_bounds_s.indexOf(86400);
   const series = [
-    { key: "h", label: "Menschen", className: "bg-s1" },
-    ...(m.bots ? [{ key: "b", label: "Bots", className: "bg-s2" }] : []),
+    { key: "h", label: t("flow.people"), className: "bg-s1" },
+    ...(m.bots
+      ? [{ key: "b", label: t("flow.bots"), className: "bg-s2" }]
+      : []),
   ];
   const hist = [r.cycle_histogram.human, r.cycle_histogram.bot];
 
   const whys: Record<string, Why> = {
     review: {
-      title: "Review-Zeit",
-      means:
-        "Wie lange ein fertiger PR auf das erste Approval wartet. In dieser Zeit liegt die Arbeit still, und der Autor beginnt oft schon etwas Neues.",
-      watch:
-        "die langsamsten 10 % weit über dem typischen Wert liegen: einzelne PRs bleiben liegen, oft grosse oder solche ohne klaren Reviewer.",
-      lever:
-        "Review-Zeiten im Team vereinbaren, PRs klein halten, Reviewer gleich beim Öffnen nennen.",
-      def: "Von PR bereit (opened, bei Drafts ready_for_review) bis zum ersten Approval eines menschlichen Reviewers.",
-      basis: `${r.review.n} PRs mit Approval.`,
+      title: t("flow.review.label"),
+      means: t("flow.review.means"),
+      watch: t("flow.review.watch"),
+      lever: t("flow.review.lever"),
+      def: t("flow.review.def"),
+      basis: t("flow.review.basis", { count: r.review.n }),
       filters: [
-        "Reviewer ≠ PR-Ersteller",
+        t("flow.review.filterReviewer"),
         "non_human_identities",
-        "ohne GitOps-Repos",
+        t("common.withoutGitOps"),
       ],
-      coverage: "Vollständig für Bitbucket-Events.",
+      coverage: t("flow.review.coverage"),
       query: "README · Lead-time breakdown query",
     },
     touch: {
-      title: "Approval ohne Kommentar",
-      means:
-        "Wie oft das Approval die erste Reaktion des Reviewers ist. Hoch heisst: Review ohne sichtbare Diskussion in Bitbucket.",
-      watch:
-        "der Wert zusammen mit sehr kurzen Review-Zeiten steigt: dann wird vielleicht durchgewinkt.",
-      lever:
-        "keine Zielvorgabe. Im Team besprechen, ob grosse Änderungen anderswo diskutiert werden.",
-      def: "Anteil der approvten PRs, deren erster Reviewer-Kontakt das Approval selbst ist.",
-      basis: `${r.approved_on_first_touch} von ${r.approved} approvten PRs.`,
-      filters: ["ohne Bot-Kommentare", "ohne Bots", "ohne GitOps-Repos"],
-      coverage: "Mündliche Reviews und Pairing sieht Riptide nicht.",
+      title: t("flow.touch.label"),
+      means: t("flow.touch.means"),
+      watch: t("flow.touch.watch"),
+      lever: t("flow.touch.lever"),
+      def: t("flow.touch.def"),
+      basis: t("flow.touch.basis", {
+        n: r.approved_on_first_touch,
+        total: r.approved,
+      }),
+      filters: [
+        t("flow.touch.filterComments"),
+        t("common.withoutBots"),
+        t("common.withoutGitOps"),
+      ],
+      coverage: t("flow.touch.coverage"),
       query: "README · Lead-time breakdown query",
     },
     cycle: {
-      title: "Innert 24 h gemergt",
-      means:
-        "Wie viele PRs innert 24 Stunden nach dem Öffnen gemergt sind. Danach ist der Autor meist schon bei der nächsten Aufgabe; Rückfragen kosten dann doppelt.",
-      watch:
-        "viele PRs über drei Tage offen sind: das sind meist grosse PRs oder solche, die auf jemanden warten.",
-      lever: "PRs kleiner schneiden, Review früh anfragen.",
-      def: `pr:merged minus pr:opened pro PR, Schlüssel (repo_full_name, pr_id). Die PR-Cycle-Time ist typischerweise ${dur(r.cycle.p50)}, die langsamsten 10 % über ${dur(r.cycle.p90)}.`,
-      basis: `${r.within_day.count} von ${r.within_day.n} menschlichen PRs, gemergt im Zeitraum.`,
-      filters: ["ohne GitOps-Repos", "ohne Bots", "pr:merged im Zeitraum"],
-      coverage:
-        "PRs, die vor Datenbeginn geöffnet wurden, haben kein pr:opened und fehlen.",
+      title: t("flow.cycle.label"),
+      means: t("flow.cycle.means"),
+      watch: t("flow.cycle.watch"),
+      lever: t("flow.cycle.lever"),
+      def: t("flow.cycle.def", {
+        p50: dur(r.cycle.p50),
+        p90: dur(r.cycle.p90),
+      }),
+      basis: t("flow.cycle.basis", {
+        count: r.within_day.count,
+        n: r.within_day.n,
+      }),
+      filters: [
+        t("common.withoutGitOps"),
+        t("common.withoutBots"),
+        t("flow.cycle.filterMerged"),
+      ],
+      coverage: t("flow.cycle.coverage"),
       query: "README · PR cycle time",
     },
   };
@@ -249,11 +268,11 @@ export function Flow({ m, why, onWhy }: Props) {
     <section id="fluss" aria-labelledby="h-fluss" className="mt-10">
       <SectionHead
         id="h-fluss"
-        eyebrow={`Vom Commit nach ${prod} · nur App-Repos`}
-        title="Wo wartet eine Änderung?"
-        lead="Die Zeit bis zum Nutzer, aufgeteilt in Etappen. Wo die meiste Zeit liegt, liegt der Hebel; die kurzen Etappen zu beschleunigen, bringt wenig."
+        eyebrow={t("flow.eyebrow", { prod })}
+        title={t("flow.title")}
+        lead={t("flow.lead")}
         frameworks={[
-          ["DORA", "Change lead time, aufgeschlüsselt"],
+          ["DORA", t("flow.fwLeadTime")],
           ["Flow", "Flow efficiency"],
           ["DevEx", "Feedback loops"],
           ["SPACE", "Efficiency & flow"],
@@ -263,21 +282,28 @@ export function Flow({ m, why, onWhy }: Props) {
 
       <Card className="mt-3">
         <CardHead
-          title="Review: schnell, aber wie gründlich?"
-          sub={`Beide Zahlen zusammen lesen: wer nur auf eine optimiert, winkt durch oder bremst. Nur PRs von Menschen${m.bots ? "; Bots im Histogramm separat" : ""}.`}
+          title={t("flow.reviewTitle")}
+          sub={t("flow.reviewSub", {
+            bots: m.bots ? t("flow.reviewSubBots") : "",
+          })}
         />
         <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-3">
           <Tile
-            label="Review-Zeit"
-            question="Wie lange wartet ein PR auf das erste Approval?"
+            label={t("flow.review.label")}
+            question={t("flow.review.question")}
             value={rv.value}
-            unit={r.review.p50 == null ? "" : `${rv.unit}, typischer Wert`}
-            note={`die langsamsten 10 %: über ${dur(r.review.p90)} · ${r.review.n} PRs`}
+            unit={
+              r.review.p50 == null ? "" : t("common.typical", { unit: rv.unit })
+            }
+            note={t("flow.review.note", {
+              p90: dur(r.review.p90),
+              count: r.review.n,
+            })}
             direction={
               <Direction
                 arrow="down"
-                label="kürzer ist besser"
-                why="nur mit dem eigenen Verlauf vergleichen"
+                label={t("common.shorterBetter")}
+                why={t("common.ownHistory")}
               />
             }
             compare={
@@ -291,14 +317,17 @@ export function Flow({ m, why, onWhy }: Props) {
             onWhy={() => onWhy("review")}
           />
           <Tile
-            label="Approval ohne Kommentar"
-            question="Wie oft ist das Approval die erste Reaktion des Reviewers?"
+            label={t("flow.touch.label")}
+            question={t("flow.touch.question")}
             value={pct(r.first_touch_rate)}
-            unit={`${r.approved_on_first_touch} von ${r.approved}`}
+            unit={t("common.nOf", {
+              n: r.approved_on_first_touch,
+              total: r.approved,
+            })}
             direction={
               <Direction
-                label="keine Richtung"
-                why="Gesprächsanlass, kein Ziel"
+                label={t("common.noDirection")}
+                why={t("flow.touch.directionWhy")}
               />
             }
             compare={
@@ -314,15 +343,18 @@ export function Flow({ m, why, onWhy }: Props) {
         </div>
         <div className="mt-5 grid grid-cols-[minmax(240px,1fr)_2fr] gap-5 max-md:grid-cols-1">
           <Tile
-            label="Innert 24 h gemergt"
-            question="Wie viele PRs sind innert 24 h nach dem Öffnen gemergt?"
+            label={t("flow.cycle.label")}
+            question={t("flow.cycle.question")}
             value={pct(r.within_day.rate)}
-            unit={`${r.within_day.count} von ${r.within_day.n} PRs`}
+            unit={t("flow.cycle.unit", {
+              n: r.within_day.count,
+              count: r.within_day.n,
+            })}
             direction={
               <Direction
                 arrow="up"
-                label="mehr ist besser"
-                why="kleine PRs, schnelles Review"
+                label={t("flow.cycle.direction")}
+                why={t("flow.cycle.directionWhy")}
               />
             }
             compare={
@@ -338,8 +370,8 @@ export function Flow({ m, why, onWhy }: Props) {
           <div className="min-w-0">
             <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
               <div className="text-[12.5px] text-muted">
-                PRs nach Dauer vom Öffnen bis zum Merge
-                {day >= 0 && " · die Linie markiert 24 h"}
+                {t("flow.histHead")}
+                {day >= 0 && t("flow.histLine")}
               </div>
               {m.bots && (
                 <Legend>
@@ -359,7 +391,9 @@ export function Flow({ m, why, onWhy }: Props) {
               values={hist.slice(0, series.length)}
               markAfter={day >= 0 ? day : undefined}
               markLabel="24 h"
-              ariaLabel={`PR-Cycle-Time: ${labels.map((l, i) => `${l} ${hist[0][i]}`).join(", ")}`}
+              ariaLabel={t("flow.histAria", {
+                parts: labels.map((l, i) => `${l} ${hist[0][i]}`).join(", "),
+              })}
             />
           </div>
         </div>

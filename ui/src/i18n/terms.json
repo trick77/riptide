@@ -1,0 +1,70 @@
+{
+  "en": {
+    "prState": {
+      "merged": "Merged",
+      "open": "Open",
+      "declined": "Declined",
+      "deleted": "Deleted"
+    },
+    "deployClass": {
+      "release": "Release",
+      "first_seen": "First deploy",
+      "sync": "Sync without new images"
+    },
+    "changeType": {
+      "feature": "Feature",
+      "bugfix": "Bugfix",
+      "hotfix": "Hotfix",
+      "chore": "Chore",
+      "refactor": "Refactor",
+      "docs": "Docs",
+      "other": "Other"
+    },
+    "promotion": "Promotion",
+    "runOutcome": {
+      "succeeded": "Succeeded",
+      "failed": "Failed"
+    },
+    "runKind": {
+      "release": "Releases",
+      "main": "master builds",
+      "feature": "Feature and PR builds",
+      "other": "Other branches",
+      "unknown": "master, kind unknown"
+    }
+  },
+  "de": {
+    "prState": {
+      "merged": "Gemerged",
+      "open": "Offen",
+      "declined": "Abgelehnt",
+      "deleted": "Gelöscht"
+    },
+    "deployClass": {
+      "release": "Release",
+      "first_seen": "Erstdeploy",
+      "sync": "Sync ohne neue Images"
+    },
+    "changeType": {
+      "feature": "Feature",
+      "bugfix": "Bugfix",
+      "hotfix": "Hotfix",
+      "chore": "Chore",
+      "refactor": "Refactor",
+      "docs": "Docs",
+      "other": "Anderes"
+    },
+    "promotion": "Promotion",
+    "runOutcome": {
+      "succeeded": "Erfolgreich",
+      "failed": "Fehlgeschlagen"
+    },
+    "runKind": {
+      "release": "Releases",
+      "main": "master-Builds",
+      "feature": "Feature- und PR-Builds",
+      "other": "Andere Branches",
+      "unknown": "master, Art unbekannt"
+    }
+  }
+}

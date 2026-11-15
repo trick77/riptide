@@ -369,6 +369,7 @@ export function runFact(o: Partial<RunFact> = {}): RunFact {
     image_refs: [],
     status: "SUCCESS",
     verdict: "success",
+    outcome: "succeeded",
     ...o,
   };
 }
@@ -427,6 +428,7 @@ export function facts(o: Partial<Facts> = {}): Facts {
       run_id: "11",
       status: "FAILURE",
       verdict: "failure",
+      outcome: "failed",
       duration_s: 900,
     }),
     runFact({
@@ -435,6 +437,7 @@ export function facts(o: Partial<Facts> = {}): Facts {
       pipeline_name: "kasse-api/feature%2Fx",
       status: "UNSTABLE",
       verdict: "failure",
+      outcome: null,
     }),
   ];
   return {

@@ -301,6 +301,9 @@ export type RunFact = {
   image_refs: string[];
   status: string | null;
   verdict: "success" | "failure" | "none";
+  // The status when it plainly says so, worded by the UI; null shows the
+  // CI's own word.
+  outcome: "succeeded" | "failed" | null;
 };
 
 export type Table<T> = { count: number; rows: T[] };

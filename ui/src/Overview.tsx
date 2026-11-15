@@ -1,9 +1,10 @@
 // The page's head: what the numbers ask the team to look at, then the
 // DORA numbers Riptide measures, each against the previous period.
 
+import type { TFunction } from "i18next";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import type { Finding, Metrics } from "./api";
-import { KIND_LABEL } from "./Build";
 import { stageNames } from "./Flow";
 import { dur, durParts, fullDate, num, pct } from "./format";
 import type { Tab } from "./state";
@@ -25,10 +26,10 @@ type Props = {
   onFacts: (tab: Tab, q: string) => void;
 };
 
-const TONE: Record<Finding["tone"], [string, Tone]> = {
-  attention: ["Achtung", "warn"],
-  hint: ["Hinweis", "none"],
-  talk: ["Gesprächsanlass", "none"],
+const TONE: Record<Finding["tone"], Tone> = {
+  attention: "warn",
+  hint: "none",
+  talk: "none",
 };
 
 // A finding's words: the headline, what it rests on, what to do, the rule
@@ -42,17 +43,8 @@ type Words = {
   link: [string, () => void];
 };
 
-const STAGE_LEVER: Record<string, string> = {
-  coding:
-    "kleinere Schritte, früher einen PR öffnen, damit Review und Deploy früher beginnen",
-  review: "Review-Zeiten im Team vereinbaren, PRs kleiner schneiden",
-  merge: "nach dem Approval gleich mergen; Merge-Checks und Freigaben prüfen",
-  to_pre: "nach dem Merge automatisch auf die Vor-Umgebung deployen",
-  to_prod:
-    "kleinere, häufigere Releases; prüfen, ob prod an einen festen Termin gebunden ist",
-};
-
 function words(
+  t: TFunction,
   f: Finding,
   m: Metrics,
   onFacts: Props["onFacts"],
@@ -63,85 +55,113 @@ function words(
   if (f.kind === "stage") {
     const s = m.lead_chain.stages.find((x) => x.key === f.stage);
     if (!s) return null;
-    const [name, desc] = stageNames(m.lead_chain, prod)[s.key];
+    const [name, desc] = stageNames(t, m.lead_chain, prod)[s.key];
+    const lc = m.lead_chain;
     return {
-      area: "Fluss",
+      area: t("overview.area.flow"),
       title:
         s.key === "to_prod"
-          ? `${pct(s.share)} der Zeit bis ${prod} wartet fertiger Code auf das Deploy nach ${prod}.`
-          : `${pct(s.share)} der Zeit bis ${prod} liegt in der Etappe «${name}».`,
+          ? t("overview.stageTitleProd", { share: pct(s.share), prod })
+          : t("overview.stageTitle", { share: pct(s.share), prod, name }),
       body:
         s.key === "to_prod"
-          ? `Bis vor ${prod} braucht eine Änderung typischerweise ${dur(m.lead_chain.before_prod)}, danach wartet sie typischerweise ${dur(s.p50)}.`
-          : `${desc}: typischerweise ${dur(s.p50)}, die langsamsten 10 % über ${dur(s.p90)}.`,
-      lever: ["Hebel", STAGE_LEVER[s.key]],
+          ? t("overview.stageBodyProd", {
+              prod,
+              before: dur(lc.before_prod),
+              wait: dur(s.p50),
+            })
+          : t("overview.stageBody", {
+              desc,
+              p50: dur(s.p50),
+              p90: dur(s.p90),
+            }),
+      lever: [t("common.lever"), t(`overview.stageLever.${s.key}`)],
       rule:
         f.tone === "attention"
-          ? `Regel: Etappe mit dem längsten Median, ab ${pct(m.lead_chain.attention_share)} der Zeit und ${m.lead_chain.min_prs} PRs (Startwert)`
+          ? t("overview.ruleAttention", {
+              share: pct(lc.attention_share),
+              min: lc.min_prs,
+            })
           : s.low_sample
-            ? `Regel: Etappe mit dem längsten Median. Unter ${m.lead_chain.min_prs} PRs zu wenig belastbar für «Achtung», darum nur ein Hinweis`
-            : `Regel: Etappe mit dem längsten Median. Eine gibt es immer, darum nur ein Hinweis; «Achtung» ab ${pct(m.lead_chain.attention_share)} der Zeit und ${m.lead_chain.min_prs} PRs`,
-      link: ["Zum Fluss →", toFlow],
+            ? t("overview.ruleLowSample", { min: lc.min_prs })
+            : t("overview.ruleHint", {
+                share: pct(lc.attention_share),
+                min: lc.min_prs,
+              }),
+      link: [t("overview.toFlow"), toFlow],
     };
   }
   if (f.kind === "first_touch") {
     const r = m.review;
     return {
-      area: "Review",
-      title: `${pct(r.first_touch_rate)} der Approvals erfolgen ohne vorherigen Kommentar.`,
-      body: "Der Wert ist weder gut noch schlecht: Eingespielte Pairs approven ohne Kommentar, wer durchwinkt, ebenfalls.",
-      lever: [
-        "Frage fürs Team",
-        "Besprechen wir grosse Änderungen ausserhalb von Bitbucket?",
-      ],
-      rule: `Steht immer da: kein Grenzwert, keine Richtung · ${r.approved_on_first_touch} von ${r.approved} Approvals`,
-      link: ["Zum Review →", toFlow],
+      area: t("overview.area.review"),
+      title: t("overview.firstTouchTitle", { rate: pct(r.first_touch_rate) }),
+      body: t("overview.firstTouchBody"),
+      lever: [t("common.teamQuestion"), t("overview.firstTouchQuestion")],
+      rule: t("overview.firstTouchRule", {
+        n: r.approved_on_first_touch,
+        total: r.approved,
+      }),
+      link: [t("overview.toReview"), toFlow],
     };
   }
   const k = h.kinds.find((x) => x.kind === f.run_kind);
   const repo = k?.repos.find((x) => x.repo === f.repo);
   if (!k || !repo) return null;
-  const kind = KIND_LABEL[k.kind];
+  const kind = t(`build.kind.${k.kind}`);
   const link: [string, () => void] = [
-    `Läufe von ${repo.repo} ansehen →`,
+    t("overview.runsOf", { repo: repo.repo }),
     () => onFacts("runs", repo.repo),
   ];
   if (f.kind === "flaky")
     return {
-      area: "Build",
-      title: `${repo.repo}: ${pct(repo.failure_rate)} der ${kind} scheitern.`,
-      body: `${repo.failures} von ${repo.runs} Läufen rot, im Team ${pct(k.failure_rate)}. Das kostet ${num(repo.wasted_seconds / 3600, 1)} h CI-Zeit und jedes Mal einen Neustart.`,
-      lever: [
-        "Hebel",
-        "instabile Tests finden und isolieren, statt Läufe einfach neu zu starten",
-      ],
-      rule: `Regel: auffällig ab ${num(h.flaky_factor, 1)}× der Team-Quote, höchstens halbwegs bis 100 %, ab ${h.min_runs} Läufen (Startwert)`,
+      area: t("overview.area.build"),
+      title: t("overview.flakyTitle", {
+        repo: repo.repo,
+        rate: pct(repo.failure_rate),
+        kind,
+      }),
+      body: t("overview.flakyBody", {
+        failures: repo.failures,
+        runs: repo.runs,
+        teamRate: pct(k.failure_rate),
+        hours: num(repo.wasted_seconds / 3600, 1),
+      }),
+      lever: [t("common.lever"), t("overview.flakyLever")],
+      rule: t("overview.flakyRule", {
+        factor: num(h.flaky_factor, 1),
+        min: h.min_runs,
+      }),
       link,
     };
   return {
-    area: "Build",
-    title: `${repo.repo} liefert Feedback ${num(repo.factor ?? 0, 1)}× langsamer als das Team.`,
-    body: `${kind} dauern typischerweise ${dur(repo.duration.p50)}, im Team ${dur(k.duration.p50)}. So lange wartet, wer pusht.`,
-    lever: [
-      "Hebel",
-      "Build-Cache nutzen, Tests parallelisieren, langsame Integrationstests aus dem PR-Build nehmen",
-    ],
-    rule: `Regel: Median ab ${num(h.slow_factor, 1)}× Team, ab ${h.min_runs} Läufen (Startwert)`,
+    area: t("overview.area.build"),
+    title: t("overview.slowTitle", {
+      repo: repo.repo,
+      factor: num(repo.factor ?? 0, 1),
+    }),
+    body: t("overview.slowBody", {
+      kind,
+      p50: dur(repo.duration.p50),
+      teamP50: dur(k.duration.p50),
+    }),
+    lever: [t("common.lever"), t("overview.slowLever")],
+    rule: t("overview.slowRule", {
+      factor: num(h.slow_factor, 1),
+      min: h.min_runs,
+    }),
     link,
   };
 }
 
 function Findings({ m, onFacts }: Pick<Props, "m" | "onFacts">) {
+  const { t } = useTranslation();
   const toFlow = () => document.getElementById("fluss")?.scrollIntoView?.();
   const items = m.findings
-    .map((f) => [f, words(f, m, onFacts, toFlow)] as const)
+    .map((f) => [f, words(t, f, m, onFacts, toFlow)] as const)
     .filter((x): x is [Finding, Words] => x[1] != null);
   if (!items.length)
-    return (
-      <p className="m-0 text-[13.5px] text-muted">
-        Keine Auffälligkeiten nach den Regeln, die Riptide anwendet.
-      </p>
-    );
+    return <p className="m-0 text-[13.5px] text-muted">{t("overview.none")}</p>;
   return (
     <ul className="m-0 grid list-none grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-3 p-0">
       {items.map(([f, w], i) => (
@@ -154,8 +174,8 @@ function Findings({ m, onFacts }: Pick<Props, "m" | "onFacts">) {
           }`}
         >
           <span className="self-start">
-            <Pill tone={TONE[f.tone][1]}>
-              {TONE[f.tone][0]} · {w.area}
+            <Pill tone={TONE[f.tone]}>
+              {t(`overview.tone.${f.tone}`)} · {w.area}
             </Pill>
           </span>
           <h4 className="m-0 text-[15px] leading-snug font-medium text-ink">
@@ -181,77 +201,78 @@ function Findings({ m, onFacts }: Pick<Props, "m" | "onFacts">) {
 }
 
 export function Overview({ m, why, onWhy, onFacts }: Props) {
+  const { t } = useTranslation();
   const bots = m.bots;
   const prod = m.delivery.production_stage;
   const freq = m.delivery.frequency;
   const lt = m.delivery.lead_time;
   const c = m.comparison;
   const sinceNote = freq.since
-    ? `Argo CD meldet erst seit ${fullDate(new Date(freq.since))}: die Wochen davor sind leer, die Rate gilt ab dann.${
-        freq.low_sample ? " Weniger als eine Woche Daten: wenig belastbar." : ""
-      }`
+    ? t("overview.sinceNote", { date: fullDate(new Date(freq.since)) }) +
+      (freq.low_sample ? t("overview.sinceLow") : "")
     : null;
   const lead = durParts(lt.human.p50);
 
   const whys: Record<string, Why> = {
     freq: {
-      title: "Deploy-Frequenz",
-      means:
-        "Wie oft neuer Code bei den Nutzern ankommt. Häufige kleine Releases tragen wenig Risiko je Release und bringen Feedback früh.",
-      watch:
-        "die Wochen stark schwanken oder Releases ausbleiben: dann sammeln sich Änderungen zu grossen Releases.",
-      lever:
-        "kleinere Änderungen, automatisierte Deploys, kein fester Release-Termin für prod.",
-      def: `Erfolgreiche Deploys auf ${prod}, deren Images sich vom vorherigen Deploy derselben Argo-App unterscheiden, einmal pro GitOps-Revision gezählt, geteilt durch die Wochen im Zeitraum, in denen Argo CD meldete.`,
-      basis: `${freq.releases} Releases, ${freq.resyncs} Syncs ohne neue Images und ${freq.first_seen} Erstdeploys aus ${freq.syncs} Revisionen. Aktualisiert ein Release mehrere Apps über dieselbe GitOps-Revision, zählt es einmal.`,
+      title: t("overview.freq.label"),
+      means: t("overview.freq.means"),
+      watch: t("overview.freq.watch"),
+      lever: t("overview.freq.lever"),
+      def: t("overview.freq.def", { prod }),
+      basis: t("overview.freq.basis", {
+        releases: t("common.releases", { count: freq.releases }),
+        resyncs: t("common.resyncs", { count: freq.resyncs }),
+        firstSeen: t("common.firstDeploys", { count: freq.first_seen }),
+        syncs: t("common.revisions", { count: freq.syncs }),
+      }),
       filters: [
         "operation_phase = Succeeded",
         `environment = ${prod}`,
-        "images ≠ vorheriger Deploy",
-        "pro revision",
+        t("overview.freq.filterImages"),
+        t("overview.freq.filterRevision"),
       ],
       coverage:
         (sinceNote ? `${sinceNote} ` : "") +
         (freq.first_seen > 0
-          ? "Der erste Deploy einer App seit Datenbeginn hat keinen Vorgänger: Release oder Re-Sync ist unbekannt, er zählt nicht als Release."
-          : "Jede App hat einen Vorgänger in den Daten, alle Deploys sind vergleichbar."),
+          ? t("overview.freq.coverageFirst")
+          : t("overview.freq.coverageAll")),
       query: "README · Deployment-frequency query",
     },
     lead: {
-      title: `Lead Time bis ${prod}`,
-      means:
-        "Die Zeit, in der eine fertige Änderung noch keinem Nutzer hilft. Lang heisst: Feedback kommt spät, Fehler lassen sich schwer einer Änderung zuordnen, Releases werden gross.",
-      watch:
-        "die langsamsten 10 % weit über dem typischen Wert liegen: dann bleiben einzelne Änderungen hängen, oft hinter einem Release-Termin.",
-      lever:
-        "Wo die Zeit liegt, zeigt der Fluss darunter; dort liegt der Hebel, nicht in den kurzen Etappen.",
-      def: `Pro Commit vom Autorenzeitpunkt bis zum ersten Deploy auf ${prod}, der ihn enthält. Merge-Commits und Release-Tooling ausgenommen, Bots separat.`,
-      basis: `${lt.human.n} menschliche Commits, zuerst deployt im Zeitraum${lt.bot.n ? `, dazu ${lt.bot.n} von Bots` : ""}.`,
+      title: t("overview.lead.label", { prod }),
+      means: t("overview.lead.means"),
+      watch: t("overview.lead.watch"),
+      lever: t("overview.lead.lever"),
+      def: t("overview.lead.def", { prod }),
+      basis: t("overview.lead.basis", {
+        count: lt.human.n,
+        bots: lt.bot.n ? t("overview.lead.basisBots", { n: lt.bot.n }) : "",
+      }),
       filters: [
         "NOT is_merge",
         "NOT service account",
-        "Bots separat",
+        t("overview.lead.filterBots"),
         `environment = ${prod}`,
       ],
-      coverage:
-        "Nur Commits, die Riptide einem Deploy zuordnen kann (Image-Referenz des Builds oder Release-Notes); ein Deploy ohne Zuordnung fehlt hier.",
+      coverage: t("overview.lead.coverage"),
       query: "lead_time_changes · docs/dora-lead-time.md",
     },
     dsucc: {
-      title: "Deploy-Erfolg",
-      means:
-        "Ob das Ausrollen selbst klappt: ein abgebrochener oder fehlgeschlagener Sync heisst, jemand muss eingreifen.",
-      watch:
-        "der Wert sinkt: dann scheitern Deploys an Konfiguration, Ressourcen oder Abhängigkeiten.",
-      lever:
-        "fehlgeschlagene Syncs unter «Daten» ansehen; meist ist es dieselbe App oder dieselbe Ursache.",
-      def: `Anteil der Syncs auf ${prod} mit operation_phase Succeeded an allen abgeschlossenen Syncs. Keine DORA-Metrik: die Change fail rate zählt Deploys, nach denen jemand eingreifen muss, auch wenn der Sync gelang.`,
-      basis: `${freq.finished} abgeschlossene Syncs, davon ${freq.failed} Failed.`,
+      title: t("overview.dsucc.label"),
+      means: t("overview.dsucc.means"),
+      watch: t("overview.dsucc.watch"),
+      lever: t("overview.dsucc.lever"),
+      def: t("overview.dsucc.def", { prod }),
+      basis: t("overview.dsucc.basis", {
+        finished: freq.finished,
+        failed: freq.failed,
+      }),
       filters: [
         "operation_phase IN (Succeeded, Failed)",
         `environment = ${prod}`,
       ],
-      coverage: "Vollständig: Argo CD meldet jeden abgeschlossenen Sync.",
+      coverage: t("overview.dsucc.coverage"),
       query: "argocd_events",
     },
   };
@@ -261,46 +282,45 @@ export function Overview({ m, why, onWhy, onFacts }: Props) {
     <section id="ueberblick" aria-labelledby="h-ueberblick" className="mt-9">
       <SectionHead
         id="h-ueberblick"
-        eyebrow="Überblick"
-        title="Was jetzt?"
-        lead="Befunde aus den Regeln, die Riptide anwendet, dazu ein fester Gesprächsanlass. Jeder nennt Regel und Zahl und führt zu den Fakten dahinter."
+        eyebrow={t("overview.eyebrow")}
+        title={t("overview.title")}
+        lead={t("overview.intro")}
       />
       <Findings m={m} onFacts={onFacts} />
 
       <div className="mt-7 flex flex-wrap items-baseline gap-x-3.5 gap-y-1">
         <h4 className="m-0 font-serif text-[19px] font-medium text-ink">
-          Throughput und Instability
+          {t("overview.throughput")}
         </h4>
         <span className="text-[13px] text-muted">
-          So gliedert DORA die fünf Metriken. Beide Seiten gehören zusammen:
-          mehr Throughput bei steigender Instability ist kein Fortschritt.
+          {t("overview.throughputText")}
         </span>
       </div>
       <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3">
         <Tile
-          label="Deploy-Frequenz"
-          dora="DORA · Deployment frequency · Throughput"
-          question={`Wie oft geht neuer Code nach ${prod}?`}
+          label={t("overview.freq.label")}
+          dora={t("overview.freq.dora")}
+          question={t("overview.freq.question", { prod })}
           value={freq.syncs ? num(freq.per_week, 1) : "–"}
-          unit={freq.syncs ? "Releases pro Woche" : ""}
+          unit={freq.syncs ? t("overview.freq.unit") : ""}
           note={
             freq.syncs
-              ? `${freq.releases} Releases im Zeitraum`
+              ? t("overview.freq.note", { count: freq.releases })
               : freq.argo_reporting
-                ? "keine Deploys im Zeitraum"
-                : "Argo CD meldet für das Team noch nicht"
+                ? t("overview.freq.noDeploys")
+                : t("overview.freq.notReporting")
           }
           direction={
             <Direction
               arrow="up"
-              label="öfter ist besser"
-              why="kleinere Releases, weniger Risiko pro Release"
+              label={t("overview.freq.direction")}
+              why={t("overview.freq.directionWhy")}
             />
           }
           warn={
             sinceNote ??
             (freq.first_seen > 0
-              ? `${freq.first_seen} Erstdeploys ohne Vergleichswert, nicht gezählt`
+              ? t("overview.freq.firstSeen", { count: freq.first_seen })
               : undefined)
           }
           compare={
@@ -314,31 +334,32 @@ export function Overview({ m, why, onWhy, onFacts }: Props) {
           onWhy={() => onWhy("freq")}
         />
         <Tile
-          label={`Lead Time bis ${prod}`}
-          dora="DORA · Change lead time · Throughput"
-          question={`Wie lange braucht eine Änderung vom Commit bis ${prod}?`}
+          label={t("overview.lead.label", { prod })}
+          dora={t("overview.lead.dora")}
+          question={t("overview.lead.question", { prod })}
           value={lead.value}
-          unit={lt.human.p50 == null ? "" : `${lead.unit}, typischer Wert`}
+          unit={
+            lt.human.p50 == null ? "" : t("common.typical", { unit: lead.unit })
+          }
           note={
             (lt.human.n === 0
-              ? "keine menschlichen Commits zugeordnet"
-              : `die langsamsten 10 %: über ${dur(lt.human.p90)} · ${lt.human.n} Commits von Menschen`) +
+              ? t("overview.lead.noHuman")
+              : t("overview.lead.slowest", {
+                  p90: dur(lt.human.p90),
+                  count: lt.human.n,
+                })) +
             (bots && lt.bot.n > 0
-              ? ` · Bots typischerweise ${dur(lt.bot.p50)} (${lt.bot.n})`
+              ? t("overview.lead.bots", { p50: dur(lt.bot.p50), n: lt.bot.n })
               : "")
           }
           direction={
             <Direction
               arrow="down"
-              label="kürzer ist besser"
-              why="schnelleres Feedback von echten Nutzern"
+              label={t("common.shorterBetter")}
+              why={t("overview.lead.directionWhy")}
             />
           }
-          warn={
-            lt.low_sample
-              ? "Weniger als 10 Commits: wenig belastbar"
-              : undefined
-          }
+          warn={lt.low_sample ? t("overview.lead.lowSample") : undefined}
           compare={
             <Compare
               change={c.lead_time}
@@ -350,17 +371,20 @@ export function Overview({ m, why, onWhy, onFacts }: Props) {
           onWhy={() => onWhy("lead")}
         />
         <Tile
-          label="Deploy-Erfolg"
-          dora="keine DORA-Metrik"
-          question="Klappt das Ausrollen selbst?"
+          label={t("overview.dsucc.label")}
+          dora={t("overview.dsucc.dora")}
+          question={t("overview.dsucc.question")}
           value={pct(freq.success_rate)}
-          unit={freq.finished ? "der Argo-Syncs" : ""}
-          note={`${freq.failed} von ${freq.finished} Syncs fehlgeschlagen`}
+          unit={freq.finished ? t("overview.dsucc.unit") : ""}
+          note={t("overview.dsucc.note", {
+            failed: freq.failed,
+            count: freq.finished,
+          })}
           direction={
             <Direction
               arrow="up"
-              label="höher ist besser"
-              why="nur mit dem eigenen Verlauf vergleichen"
+              label={t("overview.dsucc.direction")}
+              why={t("common.ownHistory")}
             />
           }
           compare={
@@ -375,22 +399,19 @@ export function Overview({ m, why, onWhy, onFacts }: Props) {
         />
         <div className="flex flex-col gap-1 rounded-ui border border-dashed border-border px-3.5 py-3">
           <span className="text-[11px] font-medium tracking-[.12em] text-muted uppercase">
-            Instability
+            {t("overview.instability.label")}
           </span>
           <div className="-mt-1 text-[11px] text-faint">
-            DORA · Change fail rate · Deployment rework rate · Failed deployment
-            recovery time
+            {t("overview.instability.dora")}
           </div>
           <div className="text-[13px] text-ink-dim">
-            Wie oft macht ein Deploy Ärger, und wie schnell ist er behoben?
+            {t("overview.instability.question")}
           </div>
           <div className="text-[22px] font-medium text-faint">
-            nicht gemessen
+            {t("overview.instability.value")}
           </div>
           <div className="text-xs text-muted">
-            Dafür braucht es eine Incident-Quelle. Ohne sie zeigt Riptide nur
-            Throughput; die Instability-Seite fehlt. Hotfix-Anteil oder
-            Deploy-Erfolg ersetzen sie nicht.
+            {t("overview.instability.text")}
           </div>
         </div>
       </div>

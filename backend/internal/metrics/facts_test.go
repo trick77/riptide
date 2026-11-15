@@ -1,12 +1,12 @@
 package metrics
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
+	"slices"
 	"testing"
 
 	"github.com/trick77/riptide/internal/dataset"
@@ -111,10 +111,20 @@ func TestFactsSearch(t *testing.T) {
 		{"erstdeploy", 0, 1, 0},
 		{"anderes", 1, 0, 0},   // the UI's word for change type "other"
 		{"Promotion", 1, 0, 0}, // a GitOps PR's Typ
-		{"Feature", 3, 0, 0},   // the change type itself, case-insensitive
+		{"Feature", 2, 0, 0},   // the Typ column's word; the promotion's hidden type is not searched
+		{"master builds", 0, 0, 4},
+		{"master-builds", 0, 0, 4}, // the Art column's word, either language
+		// both UI languages, whichever the viewer reads
+		{"merged", 3, 0, 0},
+		{"gemerged", 3, 0, 0},
+		{"gemergt", 3, 0, 0}, // the word before, for links shared back then
+		{"first deploy", 0, 1, 0},
+		{"Other", 1, 0, 0},
+		{"fehlgeschlagen", 0, 0, 1}, // FAILURE in the UI's words
+		{"erfolgreich", 0, 0, 3},    // SUCCESS, the fixture's default
 		{"portal-web:9", 0, 1, 0},
 		{"fail", 0, 1, 1},  // the failed sync's phase, the broken run
-		{"BUILD", 0, 0, 3}, // build_type, case-insensitive
+		{"BUILD", 0, 0, 4}, // build_type and the Art column's "master builds", case-insensitive
 		{"nothing like it", 0, 0, 0},
 	} {
 		f := ComputeFacts(ds, all(), c.q)
@@ -145,46 +155,107 @@ func TestFactsLimit(t *testing.T) {
 	}
 }
 
-// uiEntry is one `key: ["Label", tone]` entry, the key bare or quoted, the
-// label in either quote, across lines as prettier may break it.
-var uiEntry = regexp.MustCompile(`(?m)^\s*["']?(\w+)["']?\s*:\s*\[\s*(?:"([^"]*)"|'([^']*)')`)
-
-// uiLabels reads one label map of ui/src/Facts.tsx, up to the line that
-// closes it; a null label, a failed sync's, is left out.
-func uiLabels(t *testing.T, src, name string) map[string]string {
-	t.Helper()
-	_, block, ok := strings.Cut(src, "const "+name)
-	if !ok {
-		t.Fatalf("Facts.tsx has no %s", name)
+// Only a status that plainly says succeeded or failed gets the UI's word;
+// UNSTABLE is red but keeps the CI's word.
+func TestRunOutcome(t *testing.T) {
+	for status, want := range map[string]string{
+		"SUCCESS": "succeeded", "Succeeded": "succeeded", "Completed": "succeeded",
+		"FAILURE": "failed", "Failed": "failed",
+		"UNSTABLE": "", "ABORTED": "", "NOT_BUILT": "", "None": "",
+	} {
+		got := ""
+		if o := runOutcome(run(func(r *dataset.Run) { r.Status = s(status) })); o != nil {
+			got = *o
+		}
+		if got != want {
+			t.Errorf("%s: %q, want %q", status, got, want)
+		}
 	}
-	block, _, _ = strings.Cut(block, "\n};")
-	out := map[string]string{}
-	for _, m := range uiEntry.FindAllStringSubmatch(block, -1) {
-		out[m[1]] = m[2] + m[3]
-	}
-	return out
-}
-
-func TestUILabelsParse(t *testing.T) {
-	src := "const X: R = {\n  a: [\"Eins\", \"ok\"],\n  'b': [\n    'Zwei };',\n    \"none\",\n  ],\n  \"c\": [null, \"fail\"],\n};\n"
-	if got := uiLabels(t, src, "X"); !maps.Equal(got, map[string]string{"a": "Eins", "b": "Zwei };"}) {
-		t.Errorf("parsed %v", got)
+	if runOutcome(run(func(r *dataset.Run) { r.Status = nil })) != nil {
+		t.Error("no status has an outcome")
 	}
 }
 
-// The backend searches the words the UI shows: a label reworded in one
-// place only would make a search for what is on screen find nothing.
+// A search for the pill's words finds the run, whichever words they are.
+func TestRunStatusTerms(t *testing.T) {
+	for status, want := range map[string]string{
+		"SUCCESS":   "Erfolgreich Succeeded",
+		"FAILURE":   "Fehlgeschlagen Failed",
+		"UNSTABLE":  "UNSTABLE",
+		"NOT_BUILT": "NOT BUILT",
+	} {
+		if got := runStatusTerms(run(func(r *dataset.Run) { r.Status = s(status) })); got != want {
+			t.Errorf("%s: %q, want %q", status, got, want)
+		}
+	}
+	if got := runStatusTerms(run(func(r *dataset.Run) { r.Status = nil })); got != "" {
+		t.Errorf("no status: %q", got)
+	}
+}
+
+// uiTerms is ui/src/i18n/terms.json in one language.
+type uiTerms struct {
+	PRState     map[string]string `json:"prState"`
+	DeployClass map[string]string `json:"deployClass"`
+	ChangeType  map[string]string `json:"changeType"`
+	Promotion   string            `json:"promotion"`
+	RunOutcome  map[string]string `json:"runOutcome"`
+	RunKind     map[string]string `json:"runKind"`
+}
+
+// The backend searches the words the UI shows, in both languages: a label
+// reworded in one place only would make a search for what is on screen
+// find nothing.
 func TestSearchTermsMatchTheUI(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "ui", "src", "Facts.tsx"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "ui", "src", "i18n", "terms.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	src := string(raw)
-	if got := uiLabels(t, src, "PR_STATE"); !maps.Equal(got, prStateTerm) {
-		t.Errorf("PR_STATE %v, prStateTerm %v", got, prStateTerm)
+	var ui map[string]uiTerms
+	if err := json.Unmarshal(raw, &ui); err != nil {
+		t.Fatal(err)
 	}
-	if got := uiLabels(t, src, "DEPLOY_CLASS"); !maps.Equal(got, deployTerm) {
-		t.Errorf("DEPLOY_CLASS %v, deployTerm %v", got, deployTerm)
+	// A group the struct does not name would be dropped by Unmarshal and
+	// never compared: the file's groups must be exactly these.
+	var groups map[string]map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &groups); err != nil {
+		t.Fatal(err)
+	}
+	for code, g := range groups {
+		got := slices.Sorted(maps.Keys(g))
+		if want := []string{"changeType", "deployClass", "prState", "promotion", "runKind", "runOutcome"}; !slices.Equal(got, want) {
+			t.Errorf("terms.json %s groups %v, compared %v", code, got, want)
+		}
+	}
+	if len(groups) != 2 {
+		t.Errorf("terms.json languages %d, want de and en", len(groups))
+	}
+	lang := func(m map[string]uiTerm, de bool) map[string]string {
+		out := map[string]string{}
+		for k, v := range m {
+			out[k] = map[bool]string{true: v.De, false: v.En}[de]
+		}
+		return out
+	}
+	for code, de := range map[string]bool{"de": true, "en": false} {
+		u, ok := ui[code]
+		if !ok {
+			t.Fatalf("terms.json has no %q", code)
+		}
+		for name, c := range map[string][2]map[string]string{
+			"prState":     {u.PRState, lang(prStateTerm, de)},
+			"deployClass": {u.DeployClass, lang(deployTerm, de)},
+			"changeType":  {u.ChangeType, lang(changeTypeTerm, de)},
+			"runOutcome":  {u.RunOutcome, lang(runOutcomeTerm, de)},
+			"runKind":     {u.RunKind, lang(runKindTerm, de)},
+		} {
+			if !maps.Equal(c[0], c[1]) {
+				t.Errorf("%s %s: ui %v, backend %v", code, name, c[0], c[1])
+			}
+		}
+		if want := map[bool]string{true: promotionTerm.De, false: promotionTerm.En}[de]; u.Promotion != want {
+			t.Errorf("%s promotion: ui %q, backend %q", code, u.Promotion, want)
+		}
 	}
 }
 
