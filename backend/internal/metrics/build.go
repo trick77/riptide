@@ -88,6 +88,18 @@ func seconds(r dataset.Run) float64 {
 	return float64(*r.DurationS)
 }
 
+// agentSplit splits a run at the moment it got its build agent: the wait
+// for one, and the build itself. ok is false when the CI did not report
+// that moment, or reported one outside the run (clock skew); such a run has
+// neither, never a wait of 0.
+func agentSplit(r dataset.Run) (wait, work float64, ok bool) {
+	a, s, f := r.AgentStartedAt, r.StartedAt, r.FinishedAt
+	if a == nil || s == nil || f == nil || a.Before(*s) || a.After(*f) {
+		return 0, 0, false
+	}
+	return a.Sub(*s).Seconds(), f.Sub(*a).Seconds(), true
+}
+
 // repoNamer names a run's repository: the one Bitbucket saw its commit in,
 // else the one whose name its pipeline starts with, else that segment
 // itself. A run of an unseen commit thus counts with its repository's
@@ -138,6 +150,12 @@ type BuildStats struct {
 	// Duration is over Runs, outliers aside: an aborted run's is no build
 	// time, nor is a day spent waiting for an agent.
 	Duration Spread `json:"duration"`
+	// Waiting and Building split Duration's runs at the moment each got its
+	// build agent: the wait for one, which grows with cluster load, and the
+	// build itself. Only over the runs whose CI reports that moment, so
+	// their N may be well below Duration's.
+	Waiting  Spread `json:"waiting"`
+	Building Spread `json:"building"`
 	// CISeconds is every run's time, those without a verdict included,
 	// outliers aside.
 	CISeconds float64 `json:"ci_seconds"`
@@ -227,7 +245,7 @@ func build(ds *dataset.Dataset, p Period, f filter) Build {
 		kr := newKindRuns(rs, repoKey)
 		b := BuildStats{Kind: kind}
 		var t tally
-		var durations []float64
+		var durations, waits, works []float64
 		for i, r := range rs {
 			v := t.count(kr.verdicts[i])
 			if kr.stuck[i] {
@@ -244,11 +262,16 @@ func build(ds *dataset.Dataset, p Period, f filter) Build {
 			}
 			if r.DurationS != nil {
 				durations = append(durations, float64(*r.DurationS))
+				if wait, work, ok := agentSplit(r); ok {
+					waits = append(waits, wait)
+					works = append(works, work)
+				}
 			}
 		}
 		b.Runs, b.Succeeded, b.Failed, b.NoVerdict = t.runs, t.succeeded, t.failed, t.none
 		b.SuccessRate = ratio(b.Succeeded, b.Runs)
 		b.Duration = spread(durations)
+		b.Waiting, b.Building = spread(waits), spread(works)
 		for _, w := range bucket(p, rs, runAt) {
 			var wt tally
 			for _, r := range w {
@@ -448,6 +471,9 @@ type Outlier struct {
 	// Factor is the run's duration over its kind's team median; null when
 	// that is 0.
 	Factor *float64 `json:"factor"`
+	// WaitS is the part of DurationS spent waiting for a build agent; null
+	// when the CI did not report when the run got one.
+	WaitS *float64 `json:"wait_s"`
 }
 
 // Hotspots are the builds worth a look: slow or failing repos against the
@@ -506,11 +532,15 @@ func kindHotspots(kind string, kr kindRuns) (KindHotspots, []Outlier) {
 		// Runs without a verdict too: a run stuck for a day and then
 		// cancelled is what an outlier is there to show.
 		if out {
-			outliers = append(outliers, Outlier{
+			o := Outlier{
 				Kind: kind, PipelineName: r.PipelineName, Repo: key, RunID: r.RunID,
 				StartedAt: r.StartedAt, DurationS: float64(*r.DurationS), Status: r.Status,
 				Factor: kr.cut.factor(r),
-			})
+			}
+			if wait, _, ok := agentSplit(r); ok {
+				o.WaitS = ptr(wait)
+			}
+			outliers = append(outliers, o)
 		}
 		// A run without a verdict is no run here either, nor its duration.
 		v := kr.verdicts[i]

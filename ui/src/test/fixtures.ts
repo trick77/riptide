@@ -69,6 +69,9 @@ function kindStats(
     no_verdict: 0,
     success_rate: succeeded / runs,
     duration: spread(runs, 600),
+    // No run reports its agent time: the split stays hidden.
+    waiting: { n: 0, p50: null, p90: null },
+    building: { n: 0, p50: null, p90: null },
     ci_seconds: runs * 600,
     wasted_seconds: (runs - succeeded) * 600,
     outlier_runs: 0,

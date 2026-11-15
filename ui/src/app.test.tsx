@@ -302,6 +302,8 @@ describe("App", () => {
         ...m.build.kinds[1],
         outlier_runs: 1,
         outlier_seconds: 32 * 3600,
+        waiting: spread(4, 7 * 60),
+        building: spread(4, 3 * 60),
       };
       const h = m.build.hotspots;
       h.kinds[1] = {
@@ -336,6 +338,7 @@ describe("App", () => {
           duration_s: 32 * 3600,
           status: "SUCCESS",
           factor: 160,
+          wait_s: 20 * 3600,
         },
         {
           kind: "main",
@@ -346,6 +349,7 @@ describe("App", () => {
           duration_s: 5 * 3600,
           status: "SUCCESS",
           factor: null,
+          wait_s: null,
         },
       ];
       return m;
@@ -366,6 +370,17 @@ describe("App", () => {
       "1 Ausreisser, nicht in der CI-Zeit",
     );
     expect(screen.getByText("#7")).toBeInTheDocument();
+    // The agent wait, beside the duration, only where runs report it.
+    expect(screen.getByTitle(/^Median über 4 der /)).toHaveTextContent(
+      /Bau 3 minWarten 7 min/,
+    );
+    expect(screen.getAllByText(/^Bau /)).toHaveLength(1);
+    expect(
+      screen.getByText("#7").parentElement?.parentElement,
+    ).toHaveTextContent("20.0 h");
+    expect(
+      screen.getByTitle("Der Lauf meldet nicht, wann er einen Agent bekam"),
+    ).toHaveTextContent("–");
   });
 
   it("asks for the facts of the product the metrics resolved", async () => {

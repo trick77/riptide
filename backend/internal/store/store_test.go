@@ -494,6 +494,100 @@ func TestMigrationBuildTypeBackfill(t *testing.T) {
 	check(false, map[string]string{"old-pod": "hotfix", "new-pod": "build", "old-pod-tab": "hotfix", "old-pod-newline": "release"})
 }
 
+// 0006 copies an agent_started_at senders posted before riptide read it into
+// the new column, without touching modified_at. A value that does not cast
+// is absent and fails neither the backfill nor an old pod's insert: the
+// field arrived unchecked, and a failed migration crash-loops the init
+// container.
+func TestMigrationAgentStartedAtBackfill(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.Pool(t, testdb.DSN(t))
+	apply := func(name string) {
+		t.Helper()
+		body, err := migrationFS.ReadFile("migrations/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, string(body)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	for _, m := range []string{"0001_initial.sql", "0002_noergler_pr_rollups.sql", "0003_pipeline_image_refs.sql",
+		"0004_pipeline_build_type.sql", "0005_read_api_indexes.sql"} {
+		apply(m)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO pipeline_events
+		(delivery_id, source, pipeline_name, run_id, phase, occurred_at, modified_at, payload) VALUES
+		('utc',     'jenkins', 'p', '1', 'COMPLETED', now(), '2000-01-01', '{"agent_started_at": "2026-04-28T10:05:30Z"}'),
+		('naive',   'jenkins', 'p', '2', 'COMPLETED', now(), '2000-01-01', '{"agent_started_at": " 2026-04-28T10:05:30 "}'),
+		('offset',  'jenkins', 'p', '3', 'COMPLETED', now(), '2000-01-01', '{"agent_started_at": "2026-04-28T12:05:30+02:00"}'),
+		('garbage', 'jenkins', 'p', '4', 'COMPLETED', now(), '2000-01-01', '{"agent_started_at": "soon"}'),
+		('bad-day', 'jenkins', 'p', '5', 'COMPLETED', now(), '2000-01-01', '{"agent_started_at": "2026-02-30T10:00:00Z"}'),
+		('number',  'jenkins', 'p', '6', 'COMPLETED', now(), '2000-01-01', '{"agent_started_at": 1777370730}'),
+		('blank',   'jenkins', 'p', '7', 'COMPLETED', now(), '2000-01-01', '{"agent_started_at": ""}'),
+		('none',    'jenkins', 'p', '8', 'COMPLETED', now(), '2000-01-01', '{}'),
+		('lower-t', 'jenkins', 'p', '12', 'COMPLETED', now(), '2000-01-01', '{"agent_started_at": "2026-04-28t10:05:30"}'),
+		('infinity','jenkins', 'p', '13', 'COMPLETED', now(), '2000-01-01', '{"agent_started_at": "infinity"}'),
+		('now',     'jenkins', 'p', '14', 'COMPLETED', now(), '2000-01-01', '{"agent_started_at": "now"}'),
+		('date',    'jenkins', 'p', '15', 'COMPLETED', now(), '2000-01-01', '{"agent_started_at": "2026-04-28"}'),
+		('prose',   'jenkins', 'p', '16', 'COMPLETED', now(), '2000-01-01', '{"agent_started_at": "Apr 28 2026 10:05:30"}')`); err != nil {
+		t.Fatal(err)
+	}
+	apply("0006_pipeline_agent_started_at.sql")
+
+	want := time.Date(2026, 4, 28, 10, 5, 30, 0, time.UTC)
+	check := func(backfilled bool, cases map[string]bool) {
+		t.Helper()
+		for id, set := range cases {
+			var got *time.Time
+			var untouched bool
+			if err := pool.QueryRow(ctx, `SELECT agent_started_at, modified_at = '2000-01-01' FROM pipeline_events WHERE delivery_id = $1`, id).
+				Scan(&got, &untouched); err != nil {
+				t.Fatal(err)
+			}
+			if set != (got != nil) || (got != nil && !got.Equal(want)) {
+				t.Errorf("%s: agent_started_at = %v, want set %v", id, got, set)
+			}
+			if backfilled && !untouched {
+				t.Errorf("%s: modified_at bumped by the backfill", id)
+			}
+		}
+	}
+	// Only ISO 8601 date and time: timestamptz's own words ('infinity',
+	// 'now') and free-form dates stay NULL, an infinite time would break
+	// every read of the runs.
+	check(true, map[string]bool{"utc": true, "naive": true, "offset": true, "garbage": false, "bad-day": false,
+		"number": false, "blank": false, "none": false, "lower-t": true, "infinity": false, "now": false,
+		"date": false, "prose": false})
+
+	if _, err := pool.Exec(ctx, `INSERT INTO pipeline_events (delivery_id, source, pipeline_name, run_id, phase, occurred_at, payload) VALUES
+		('old-pod',     'jenkins', 'p', '9',  'COMPLETED', now(), '{"agent_started_at": "2026-04-28T10:05:30Z"}'),
+		('old-pod-bad', 'jenkins', 'p', '10', 'COMPLETED', now(), '{"agent_started_at": "soon"}'),
+		('old-pod-inf', 'jenkins', 'p', '17', 'COMPLETED', now(), '{"agent_started_at": "-infinity"}')`); err != nil {
+		t.Fatalf("old-pod insert: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO pipeline_events (delivery_id, source, pipeline_name, run_id, phase, occurred_at, agent_started_at, payload)
+		VALUES ('new-pod', 'jenkins', 'p', '11', 'COMPLETED', now(), '2026-04-28T10:05:30Z', '{"agent_started_at": "2000-01-01T00:00:00Z"}')`); err != nil {
+		t.Fatalf("new-pod insert: %v", err)
+	}
+	check(false, map[string]bool{"old-pod": true, "old-pod-bad": false, "old-pod-inf": false, "new-pod": true})
+}
+
+func TestInsertPipelineAgentStartedAt(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	at := time.Date(2026, 4, 28, 10, 5, 30, 0, time.UTC)
+	d := &parse.PipelineDraft{DeliveryID: "x", Source: "jenkins", PipelineName: "p", RunID: "1", Phase: "STARTED",
+		CommitSHA: "abc1234", StartedAt: at.Add(-time.Minute), AgentStartedAt: &at, OccurredAt: at, Payload: []byte(`{}`)}
+	if _, err := s.InsertPipeline(ctx, d, "t"); err != nil {
+		t.Fatal(err)
+	}
+	var got time.Time
+	if err := pool.QueryRow(ctx, `SELECT agent_started_at FROM pipeline_events`).Scan(&got); err != nil || !got.Equal(at) {
+		t.Errorf("agent_started_at = %v, %v", got, err)
+	}
+}
+
 // 0005 builds the read API's indexes inside kit's transaction: CONCURRENTLY
 // deadlocks against a second migrator waiting for kit's advisory lock.
 func TestReadAPIIndexes(t *testing.T) {

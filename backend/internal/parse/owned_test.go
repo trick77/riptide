@@ -171,6 +171,25 @@ func TestPipelineFields(t *testing.T) {
 			t.Errorf("absent: build type = %v, %v", d.BuildType, err)
 		}
 	})
+	t.Run("agent started at read, blank or absent is nil", func(t *testing.T) {
+		b := base()
+		b["agent_started_at"] = "2026-04-28T10:05:30"
+		d, err := Pipeline(encode(t, b))
+		if err != nil || d.AgentStartedAt == nil || !d.AgentStartedAt.Equal(time.Date(2026, 4, 28, 10, 5, 30, 0, time.UTC)) {
+			t.Errorf("agent started at = %v, %v", d.AgentStartedAt, err)
+		}
+		for _, v := range []any{"", nil} {
+			b := base()
+			b["agent_started_at"] = v
+			d, err := Pipeline(encode(t, b))
+			if err != nil || d.AgentStartedAt != nil {
+				t.Errorf("%q: agent started at = %v, %v", v, d.AgentStartedAt, err)
+			}
+		}
+		if d, err := Pipeline(encode(t, base())); err != nil || d.AgentStartedAt != nil {
+			t.Errorf("absent: agent started at = %v, %v", d.AgentStartedAt, err)
+		}
+	})
 	t.Run("extra fields allowed", func(t *testing.T) {
 		b := base()
 		b["build_url"] = "https://jenkins/job/1"
@@ -194,6 +213,7 @@ func TestPipelineFields(t *testing.T) {
 		{"missing started_at", "body.started_at", "missing", func(b map[string]any) { delete(b, "started_at") }},
 		{"bad started_at", "body.started_at", "datetime_from_date_parsing", func(b map[string]any) { b["started_at"] = "yesterday" }},
 		{"bool started_at", "body.started_at", "datetime_type", func(b map[string]any) { b["started_at"] = true }},
+		{"bad agent_started_at", "body.agent_started_at", "datetime_from_date_parsing", func(b map[string]any) { b["agent_started_at"] = "soon" }},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			b := base()

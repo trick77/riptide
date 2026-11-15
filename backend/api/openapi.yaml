@@ -4,7 +4,7 @@ info:
   title: riptide API
   # The CONTRACT's version, not the binary's. The two move independently:
   # a release that changes no route leaves this alone.
-  version: 2.1.0
+  version: 2.2.0
   description: |
     DevOps delivery-metrics ingestion. Senders post raw events from Bitbucket
     Data Center, CI pipelines (Jenkins, Tekton, ...), Argo CD and noergler;
@@ -507,7 +507,18 @@ components:
             What kind of build the run was, as the pipeline reports it
             (`release`, `hotfix`, `build`, ...). Sent on COMPLETED. Free text,
             stored trimmed and lowercased; "" is absent.
-        started_at: { $ref: "#/components/schemas/Timestamp" }
+        started_at:
+          $ref: "#/components/schemas/Timestamp"
+          description: When the CI started the run, before it waited for a build agent.
+        agent_started_at:
+          description: |
+            When the run got its build agent. `started_at` to here is the
+            wait for one, which grows with cluster load and is no build time;
+            the metrics show it apart from the build. Optional; on STARTED
+            is enough, a COMPLETED without it takes the run's STARTED value.
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
         finished_at:
           oneOf:
             - $ref: "#/components/schemas/Timestamp"
@@ -864,8 +875,8 @@ components:
         and `ci_seconds` only, so `runs` = `succeeded` + `failed`. An
         outlier (see Hotspots) keeps its verdict but none of its time: it
         counts in `outlier_runs` and `outlier_seconds` instead.
-      required: [kind, runs, succeeded, failed, no_verdict, success_rate, duration, ci_seconds, wasted_seconds,
-                 outlier_runs, outlier_seconds, weekly]
+      required: [kind, runs, succeeded, failed, no_verdict, success_rate, duration, waiting, building, ci_seconds,
+                 wasted_seconds, outlier_runs, outlier_seconds, weekly]
       properties:
         kind: { $ref: "#/components/schemas/RunKind" }
         runs: { type: integer, description: Runs with a verdict. }
@@ -876,6 +887,16 @@ components:
         duration:
           $ref: "#/components/schemas/Spread"
           description: Over `runs`, those without a verdict and outliers left out.
+        waiting:
+          $ref: "#/components/schemas/Spread"
+          description: |
+            The wait for a build agent, from `started_at` to `agent_started_at`,
+            over the runs of `duration` whose CI reports `agent_started_at`
+            (one outside the run is left out). Its `n` may be well below
+            `duration`'s; a run without one has no wait, never a wait of 0.
+        building:
+          $ref: "#/components/schemas/Spread"
+          description: The rest of the same runs, from `agent_started_at` to `finished_at`.
         ci_seconds:
           $ref: "#/components/schemas/Seconds"
           description: Every run's time, those without a verdict included, outliers left out.
@@ -974,7 +995,7 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [kind, pipeline_name, repo, run_id, started_at, duration_s, status, factor]
+            required: [kind, pipeline_name, repo, run_id, started_at, duration_s, status, factor, wait_s]
             properties:
               kind: { $ref: "#/components/schemas/RunKind" }
               pipeline_name: { type: string }
@@ -986,6 +1007,11 @@ components:
               factor:
                 $ref: "#/components/schemas/NullableNumber"
                 description: The run's duration over its kind's team median; null when that is 0.
+              wait_s:
+                $ref: "#/components/schemas/NullableSeconds"
+                description: |
+                  The part of `duration_s` spent waiting for a build agent; null
+                  when the CI did not report `agent_started_at`.
 
     Costs:
       type: object

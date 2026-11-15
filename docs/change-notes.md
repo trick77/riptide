@@ -7,6 +7,17 @@ repository.
 Real account handles, hostnames and tokens belong in the mounted
 `riptide.json` / team-keys Secret, never in this file: the repository is public.
 
+## 2026-11-15 — the wait for a build agent
+
+**Migration 0006** adds `pipeline_events.agent_started_at` and fills it from
+the payload of rows that already carry the field; a value that does not
+parse stays NULL. Nothing to configure.
+
+**CI senders may send `agent_started_at`** (when the run got its build agent,
+see [setup-jenkins-notification.md](setup-jenkins-notification.md)). The
+build section then shows the wait for an agent and the build apart, over the
+runs that send it; a run without it keeps one duration, wait included.
+
 ## 2026-11-15 — the image runs from /
 
 **The image's working directory is `/`**, no longer the distroless
