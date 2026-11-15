@@ -183,20 +183,27 @@ export default function App() {
   return (
     <div className="flex min-h-screen flex-col bg-bg text-ink">
       <header className="flex min-h-14 flex-wrap items-center gap-x-[22px] gap-y-1.5 border-b border-border bg-panel px-6 py-2.5">
-        <h1 className="m-0 font-serif text-[21px] leading-7 font-medium whitespace-nowrap text-wordmark">
-          Riptide
-        </h1>
-        <nav aria-label="Bereiche" className="no-print flex flex-wrap gap-0.5">
-          {NAV.map(([id, label]) => (
-            <a
-              key={id}
-              href={`#${id}`}
-              className="rounded-ui-sm px-2.5 py-1.5 text-[13.5px] text-muted no-underline hover:bg-active hover:text-ink"
-            >
-              {label}
-            </a>
-          ))}
-        </nav>
+        {/* On one baseline: centred boxes leave the 21px serif mark, its
+            descender included, 3px below the 13.5px links' text. */}
+        <div className="flex flex-wrap items-baseline gap-x-[22px] gap-y-1.5">
+          <h1 className="m-0 font-serif text-[21px] leading-7 font-medium whitespace-nowrap text-wordmark">
+            riptide
+          </h1>
+          <nav
+            aria-label="Bereiche"
+            className="no-print flex flex-wrap gap-0.5"
+          >
+            {NAV.map(([id, label]) => (
+              <a
+                key={id}
+                href={`#${id}`}
+                className="rounded-ui-sm px-2.5 py-1.5 text-[13.5px] text-muted no-underline hover:bg-active hover:text-ink"
+              >
+                {label}
+              </a>
+            ))}
+          </nav>
+        </div>
         <div className="ml-auto flex items-center gap-3 text-[13px] text-muted">
           <label htmlFor="team" className="sr-only">
             Team

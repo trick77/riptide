@@ -20,12 +20,13 @@ func factsData() *dataset.Dataset {
 			pr(func(p *dataset.PR) { p.PRID, p.State, p.MergedAt, p.OpenedAt = 2, "open", nil, agoP(0.5) }),
 			pr(func(p *dataset.PR) { p.PRID, p.Bot, p.MergedAt = 3, true, agoP(1) }),
 			pr(func(p *dataset.PR) {
-				p.PRID, p.Project, p.Repo, p.MergedAt = 4, "portal", "portal/portal-web", agoP(2)
+				p.PRID, p.Project, p.Repo, p.MergedAt, p.ChangeType = 4, "portal", "portal/portal-web", agoP(2), s("other")
 				p.Environments = []dataset.EnvironmentDeploy{{Environment: "prod", FirstDeployedAt: ago(1)}}
 			}),
 			// approved before it was ready: the wait is unknown, not negative
 			pr(func(p *dataset.PR) {
 				p.PRID, p.OpenedAt, p.ReadyAt, p.ApprovedAt, p.MergedAt = 5, agoP(5), agoP(2), agoP(3), agoP(4)
+				p.GitOps = true
 			}),
 		}
 		ds.Deploys = []dataset.Deploy{
@@ -108,6 +109,9 @@ func TestFactsSearch(t *testing.T) {
 		{"#4", 1, 0, 0},
 		{"offen", 1, 0, 0},
 		{"erstdeploy", 0, 1, 0},
+		{"anderes", 1, 0, 0},   // the UI's word for change type "other"
+		{"Promotion", 1, 0, 0}, // a GitOps PR's Typ
+		{"Feature", 3, 0, 0},   // the change type itself, case-insensitive
 		{"portal-web:9", 0, 1, 0},
 		{"fail", 0, 1, 1},  // the failed sync's phase, the broken run
 		{"BUILD", 0, 0, 3}, // build_type, case-insensitive

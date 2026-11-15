@@ -25,6 +25,18 @@ const DEPLOY_CLASS: Record<DeployFact["class"], [string | null, Tone]> = {
   sync: ["Sync ohne neue Images", "none"],
 };
 
+// A PR's change type, from its branch prefix (parse.ChangeType). "Anderes" is
+// searched by the backend too (changeTypeTerm); the others match the code.
+const CHANGE_TYPE: Record<string, string> = {
+  feature: "Feature",
+  bugfix: "Bugfix",
+  hotfix: "Hotfix",
+  chore: "Chore",
+  refactor: "Refactor",
+  docs: "Docs",
+  other: "Anderes",
+};
+
 // By the backend's verdict, whichever CI's words the status is in.
 const RUN_TONE: Record<RunFact["verdict"], Tone> = {
   success: "ok",
@@ -171,12 +183,16 @@ function FactsTables({
           </>,
           <Mono className="whitespace-nowrap">{p.repo}</Mono>,
           <span className="text-muted">
-            {p.gitops ? "Promotion" : (p.change_type ?? "–")}
+            {p.gitops
+              ? "Promotion"
+              : p.change_type
+                ? (CHANGE_TYPE[p.change_type] ?? p.change_type)
+                : "–"}
             {p.bot ? " · Bot" : ""}
           </span>,
           dur(p.review_s),
           dur(p.cycle_s),
-          p.merged_at ? (p.prod_at ? dur(p.to_prod_s) : "noch nicht") : "–",
+          p.merged_at ? (p.prod_at ? dur(p.to_prod_s) : "Nein") : "–",
           <Pill tone={PR_STATE[p.state][1]}>{PR_STATE[p.state][0]}</Pill>,
         ])}
       />

@@ -61,10 +61,10 @@ export function Deploys({ m }: { m: Metrics }) {
 }
 
 const MIX: [keyof Metrics["review"]["mix_total"], string, string][] = [
-  ["feature", "feature", "bg-s1"],
-  ["bugfix", "bugfix", "bg-s2"],
-  ["hotfix", "hotfix", "bg-s3"],
-  ["other", "anderes / ohne Präfix", "bg-other"],
+  ["feature", "Feature", "bg-s1"],
+  ["bugfix", "Bugfix", "bg-s2"],
+  ["hotfix", "Hotfix", "bg-s3"],
+  ["other", "Anderes / ohne Präfix", "bg-other"],
 ];
 
 export function Mix({ m }: { m: Metrics }) {
