@@ -1,7 +1,7 @@
-# Lead time for changes (DORA), per commit
+# Change lead time (DORA), per commit
 
 **How long from a developer committing to that change running in production.**
-One row per change, not per release: DORA's second key metric.
+One row per change, not per release: one of DORA's three throughput metrics.
 
 Riptide ships three views for it. Query `lead_time_changes`; the two below it
 exist so the fragile part stays swappable.
