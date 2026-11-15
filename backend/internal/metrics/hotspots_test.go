@@ -49,24 +49,26 @@ func TestHotspots(t *testing.T) {
 	// 7 broken of 32 counted runs: ABORTED is no run.
 	expectNear(t, "team failure rate", k.FailureRate, 7.0/32)
 
-	if len(k.Durations) != 3 {
+	// The stuck repo's runs are outliers: no build time of it is left.
+	if len(k.Durations) != 2 {
 		t.Fatalf("durations = %+v", k.Durations)
 	}
-	stuck, slow, quick := k.Durations[0], k.Durations[1], k.Durations[2]
-	if stuck.Repo != "kasse/stuck" || slow.Repo != "kasse/slow" || quick.Repo != "kasse/quick" {
+	slow, quick := k.Durations[0], k.Durations[1]
+	if slow.Repo != "kasse/slow" || quick.Repo != "kasse/quick" {
 		t.Errorf("order = %+v", k.Durations)
 	}
 	expectNear(t, "slow factor", slow.Factor, 10)
-	if !slow.Slow || stuck.Slow || quick.Slow {
-		t.Errorf("slow flags = %v %v %v", stuck.Slow, slow.Slow, quick.Slow)
+	if !slow.Slow || quick.Slow {
+		t.Errorf("slow flags = %v %v", slow.Slow, quick.Slow)
 	}
 
-	// By wasted CI time; the quick repo broke nothing.
-	if len(k.Failing) != 2 || k.Failing[0].Repo != "kasse/stuck" || k.Failing[1].Repo != "kasse/slow" {
+	// By wasted CI time; the quick repo broke nothing, the stuck one's
+	// failures count but not their time.
+	if len(k.Failing) != 2 || k.Failing[0].Repo != "kasse/slow" || k.Failing[1].Repo != "kasse/stuck" {
 		t.Fatalf("failing = %+v", k.Failing)
 	}
-	stuckF, slowF := k.Failing[0], k.Failing[1]
-	if stuckF.WastedSeconds != 10000 || slowF.WastedSeconds != 5000 || slowF.Runs != 10 || slowF.Failures != 5 {
+	slowF, stuckF := k.Failing[0], k.Failing[1]
+	if stuckF.WastedSeconds != 0 || stuckF.Failures != 2 || slowF.WastedSeconds != 5000 || slowF.Runs != 10 || slowF.Failures != 5 {
 		t.Errorf("failing = %+v", k.Failing)
 	}
 	expectNear(t, "slow repo rate", slowF.FailureRate, 0.5)
@@ -74,10 +76,80 @@ func TestHotspots(t *testing.T) {
 		t.Errorf("flaky flags = %v %v", slowF.Flaky, stuckF.Flaky)
 	}
 
-	// p90 of the team is 1000 s: the stuck runs are 5 times past it.
-	expectNear(t, "outlier threshold", k.OutlierThresholdS, 3000)
-	if len(h.Outliers) != 2 || h.Outliers[0].Repo != "kasse/stuck" || h.Outliers[0].Factor != 5 || h.Outliers[0].Kind != KindMain {
+	// The team's median is 100 s. The slow repo is measured against its
+	// own 1000 s, so none of its runs is an outlier; the stuck runs, too few
+	// for a median of their own, are 50 times the team's.
+	expectNear(t, "outlier threshold", k.OutlierThresholdS, 600)
+	if len(h.Outliers) != 2 || h.Outliers[0].Repo != "kasse/stuck" || h.Outliers[0].Factor != 50 || h.Outliers[0].Kind != KindMain {
 		t.Errorf("outliers = %+v", h.Outliers)
+	}
+}
+
+// A Jenkins outage stalls many runs at once. A quarter of them stuck pulls
+// the p90 up to the stuck runs themselves; the median holds, and they leave
+// every duration and CI time, shown on their own instead.
+func TestStuckRunsLeaveBuildTime(t *testing.T) {
+	ds := data(func(ds *dataset.Dataset) {
+		ds.Runs = runs("kasse/a", 30, 100, 3, "FAILURE")
+		for i := range 10 {
+			ds.Runs = append(ds.Runs, run(func(r *dataset.Run) {
+				r.Repo, r.PipelineName, r.RunID, r.DurationS = s("kasse/b"), "kasse-b/master", fmt.Sprint(100+i), n(100000)
+				switch i {
+				case 0:
+					r.Status = s("FAILURE")
+				case 1:
+					r.Status = s("ABORTED")
+				}
+			}))
+		}
+		// Not stuck: a run 5 times the median.
+		ds.Runs = append(ds.Runs, runs("kasse/c", 1, 500, 0, "")...)
+	})
+	b := build(ds, p4(), filter{})
+	k := b.Kinds[0]
+	// kasse/b has 9 runs with a verdict, too few for a median of its own:
+	// measured against the team's 100 s, the aborted one too.
+	if k.OutlierRuns != 10 || k.OutlierSeconds != 1000000 || k.CISeconds != 30*100+500 || k.WastedSeconds != 300 {
+		t.Errorf("kind = %+v", k)
+	}
+	// Runs and the success rate keep them: 41 runs, 1 aborted.
+	if k.Runs != 40 || k.Failed != 4 || k.NoVerdict != 1 {
+		t.Errorf("counts = %+v", k)
+	}
+	expectNear(t, "p90 without outliers", k.Duration.P90, 100)
+	h := kindOf(b.Hotspots, KindMain)
+	expectNear(t, "hotspot p90", h.Duration.P90, 100)
+	for _, d := range h.Durations {
+		if d.Repo == "kasse/b" {
+			t.Errorf("outliers as durations: %+v", d)
+		}
+	}
+	if len(b.Hotspots.Outliers) != 10 || b.Hotspots.Outliers[0].Factor != 1000 {
+		t.Errorf("outliers = %+v", b.Hotspots.Outliers)
+	}
+}
+
+// A repo always slower than the rest is no outlier: with runs enough for a
+// median of its own, a run is measured against the longer of the two.
+func TestSlowRepoIsNoOutlier(t *testing.T) {
+	ds := data(func(ds *dataset.Dataset) {
+		ds.Runs = runs("kasse/lib", 40, 100, 0, "")
+		ds.Runs = append(ds.Runs, runs("kasse/mono", 10, 2000, 0, "")...)
+		ds.Runs = append(ds.Runs, run(func(r *dataset.Run) {
+			r.Repo, r.PipelineName, r.RunID, r.DurationS = s("kasse/mono"), "kasse-mono/master", "stuck", n(20000)
+		}))
+	})
+	b := build(ds, p4(), filter{})
+	k := b.Kinds[0]
+	if k.OutlierRuns != 1 || k.OutlierSeconds != 20000 || k.CISeconds != 40*100+10*2000 {
+		t.Errorf("kind = %+v", k)
+	}
+	o := b.Hotspots.Outliers
+	if len(o) != 1 || o[0].RunID != "stuck" || o[0].Factor != 10 {
+		t.Errorf("outliers = %+v", o)
+	}
+	if !kindOf(b.Hotspots, KindMain).Durations[0].Slow {
+		t.Errorf("mono not slow: %+v", kindOf(b.Hotspots, KindMain).Durations)
 	}
 }
 
@@ -127,7 +199,7 @@ func TestFlaggedReposStayListed(t *testing.T) {
 	ds := data(func(ds *dataset.Dataset) {
 		ds.Runs = runs("kasse/bulk", 200, 100, 20, "FAILURE")
 		for i := range 9 {
-			ds.Runs = append(ds.Runs, runs(fmt.Sprintf("kasse/few-%d", i), 2, 5000, 2, "FAILURE")...)
+			ds.Runs = append(ds.Runs, runs(fmt.Sprintf("kasse/few-%d", i), 2, 500, 2, "FAILURE")...)
 		}
 		ds.Runs = append(ds.Runs, runs("kasse/slow", 12, 300, 0, "")...)
 		ds.Runs = append(ds.Runs, runs("kasse/flaky", 12, 10, 6, "FAILURE")...)
@@ -157,9 +229,11 @@ func TestBuildsLeaveAbortedOut(t *testing.T) {
 		t.Fatalf("kinds = %+v", b.Kinds)
 	}
 	// NOT_BUILT says nothing about the build either: runs = succeeded +
-	// failed.
+	// failed. Below HotspotMinRuns nothing is an outlier, the long aborted
+	// runs stay CI time.
 	k := b.Kinds[0]
-	if k.Runs != 4 || k.Succeeded != 3 || k.Failed != 1 || k.NoVerdict != 3 || k.WastedSeconds != 100 || k.CISeconds != 10500 {
+	if k.Runs != 4 || k.Succeeded != 3 || k.Failed != 1 || k.NoVerdict != 3 || k.WastedSeconds != 100 || k.CISeconds != 10500 ||
+		k.OutlierRuns != 0 {
 		t.Errorf("kind = %+v", k)
 	}
 	expectNear(t, "success rate", k.SuccessRate, 3.0/4)
@@ -241,6 +315,7 @@ func TestOutliersCapped(t *testing.T) {
 		ds.Runs = runs("kasse/a", 200, 100, 0, "")
 		for i := range 12 {
 			ds.Runs = append(ds.Runs, run(func(r *dataset.Run) {
+				r.Repo, r.PipelineName = s("kasse/a"), "kasse-a/master"
 				r.RunID, r.DurationS = fmt.Sprint(1000+i), n(int64(10000+i))
 			}))
 		}
