@@ -59,6 +59,16 @@ describe("language", () => {
     expect(i18n.language).toBe("en");
   });
 
+  it("follows a switch made in another tab", () => {
+    setLanguage("en");
+    localStorage.setItem("lang", "de");
+    window.dispatchEvent(new StorageEvent("storage", { key: "lang" }));
+    expect(i18n.language).toBe("de");
+    localStorage.setItem("lang", "en");
+    window.dispatchEvent(new StorageEvent("storage", { key: "other" }));
+    expect(i18n.language).toBe("de");
+  });
+
   it("translates the unit words, never the number format", () => {
     expect(dur(8.1 * 86400)).toBe("8.1 Tage");
     setLanguage("en");

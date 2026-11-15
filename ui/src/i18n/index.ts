@@ -65,4 +65,15 @@ const syncLang = (lng: string) => {
 syncLang(i18n.language);
 i18n.on("languageChanged", syncLang);
 
+// A switch in another tab: follow it, or this tab's button would offer the
+// language the other tab already stored.
+function followOtherTab(e: StorageEvent) {
+  if (e.key !== STORAGE_KEY) return;
+  const lng = storedLanguage();
+  if (lng !== null && lng !== i18n.language) void i18n.changeLanguage(lng);
+}
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", followOtherTab);
+}
+
 export default i18n;
