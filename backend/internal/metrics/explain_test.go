@@ -293,10 +293,7 @@ func TestRepoHotspotsAndOutlierGroups(t *testing.T) {
 	})
 	b := against(ds, prev)
 	k := kindOf(b.Hotspots, KindMain)
-	var order []string
-	for _, h := range k.Repos {
-		order = append(order, h.Repo)
-	}
+	order := repoNames(k.Repos)
 	if fmt.Sprint(order) != "[kasse/flaky kasse/slow kasse/quick]" {
 		t.Errorf("repos = %v", order)
 	}

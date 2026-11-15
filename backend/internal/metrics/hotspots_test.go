@@ -529,6 +529,103 @@ func TestRepoOfUnseenCommits(t *testing.T) {
 	}
 }
 
+func repoNames(rows []RepoHotspot) []string {
+	var out []string
+	for _, h := range rows {
+		out = append(out, h.Repo)
+	}
+	return out
+}
+
+// A repo steady at 25 minutes is never slow against itself, and without a
+// failure ranks below every repo that wasted CI time: the slowest list
+// still names it, by median, without a threshold.
+func TestSlowestRepos(t *testing.T) {
+	ds := data(func(ds *dataset.Dataset) {
+		for i := range 9 {
+			ds.Runs = append(ds.Runs, runs(fmt.Sprintf("kasse/red-%d", i), 12, 100, 1, "FAILURE")...)
+		}
+		ds.Runs = append(ds.Runs, runs("kasse/steady", 12, 1500, 0, "")...)
+	})
+	k := kindOf(build(ds, p4(), filter{}, nil).Hotspots, KindMain)
+	if r := repoOf(k, "kasse/steady"); r.Repo != "missing" {
+		t.Errorf("steady repo not cut from the hotspots: %+v", repoNames(k.Repos))
+	}
+	if got := repoNames(k.Slowest); !slices.Equal(got,
+		[]string{"kasse/steady", "kasse/red-0", "kasse/red-1", "kasse/red-2", "kasse/red-3"}) {
+		t.Errorf("slowest = %v", got)
+	}
+	expectNear(t, "steady p50", k.Slowest[0].Duration.P50, 1500)
+
+	// One stuck run is no slow repo: the median leaves it aside. Two runs
+	// say nothing about a repo, however long.
+	mixed := data(func(ds *dataset.Dataset) {
+		ds.Runs = runs("kasse/burst", 5, 100, 0, "")
+		ds.Runs = append(ds.Runs, run(func(r *dataset.Run) {
+			r.Repo, r.PipelineName, r.RunID, r.DurationS = s("kasse/burst"), "kasse/burst/master", "stuck", n(50000)
+		}))
+		ds.Runs = append(ds.Runs, runs("kasse/mid", 5, 300, 0, "")...)
+		ds.Runs = append(ds.Runs, runs("kasse/few", 2, 3000, 0, "")...)
+		// three runs, one stuck: a median over two
+		ds.Runs = append(ds.Runs, runs("kasse/two-left", 2, 3000, 0, "")...)
+		ds.Runs = append(ds.Runs, run(func(r *dataset.Run) {
+			r.Repo, r.PipelineName, r.RunID, r.DurationS = s("kasse/two-left"), "kasse/two-left/master", "stuck", n(50000)
+		}))
+	})
+	mk := kindOf(build(mixed, p4(), filter{}, nil).Hotspots, KindMain)
+	if got := repoNames(mk.Slowest); !slices.Equal(got, []string{"kasse/mid", "kasse/burst"}) {
+		t.Errorf("slowest with an outlier = %v", got)
+	}
+	if b := mk.Slowest[1]; b.Runs != 6 || b.Duration.N != 5 {
+		t.Errorf("burst = %+v", b)
+	}
+
+	// Each kind its own list: long releases never push a main build out.
+	kinds := data(func(ds *dataset.Dataset) {
+		ds.Runs = runs("kasse/a", 12, 100, 0, "")
+		for _, r := range runs("kasse/b", 12, 3000, 0, "") {
+			r.BuildType = s("release")
+			ds.Runs = append(ds.Runs, r)
+		}
+	})
+	h := build(kinds, p4(), filter{}, nil).Hotspots
+	if m, r := repoNames(kindOf(h, KindMain).Slowest), repoNames(kindOf(h, KindRelease).Slowest); !slices.Equal(m,
+		[]string{"kasse/a"}) || !slices.Equal(r, []string{"kasse/b"}) {
+		t.Errorf("slowest main %v, release %v", m, r)
+	}
+}
+
+// Each repo splits its runs at the agent start as the kind does; a repo
+// whose CI never reports it has neither, nulls rather than 0.
+func TestRepoSplitsAgentWait(t *testing.T) {
+	start := ago(1)
+	at := func(s float64) *time.Time { return ptr(start.Add(time.Duration(s * float64(time.Second)))) }
+	ds := data(func(ds *dataset.Dataset) {
+		for i, agent := range []float64{60, 120, 90} {
+			ds.Runs = append(ds.Runs, run(func(r *dataset.Run) {
+				r.Repo, r.PipelineName, r.RunID = s("kasse/agent"), "kasse/agent/master", fmt.Sprint(i)
+				r.StartedAt, r.FinishedAt, r.AgentStartedAt, r.DurationS = at(0), at(600), at(agent), n(600)
+			}))
+		}
+		ds.Runs = append(ds.Runs, runs("kasse/plain", 3, 600, 0, "")...)
+	})
+	k := kindOf(build(ds, p4(), filter{}, nil).Hotspots, KindMain)
+	a, p := repoOf(k, "kasse/agent"), repoOf(k, "kasse/plain")
+	if a.Waiting.N != 3 || a.Building.N != 3 {
+		t.Fatalf("agent = %+v", a)
+	}
+	expectNear(t, "repo wait p50", a.Waiting.P50, 90)
+	expectNear(t, "repo build p50", a.Building.P50, 510)
+	if p.Waiting.N != 0 || p.Waiting.P50 != nil || p.Building.P50 != nil {
+		t.Errorf("plain = %+v", p)
+	}
+	// The slowest list carries the same rows.
+	i := slices.IndexFunc(k.Slowest, func(h RepoHotspot) bool { return h.Repo == "kasse/agent" })
+	if i < 0 || k.Slowest[i].Waiting.N != 3 || k.Slowest[i].Building.N != 3 {
+		t.Errorf("slowest = %+v", k.Slowest)
+	}
+}
+
 // Outliers across kinds, longest first, ten at most.
 func TestOutliersCapped(t *testing.T) {
 	ds := data(func(ds *dataset.Dataset) {

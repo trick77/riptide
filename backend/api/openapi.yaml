@@ -1051,7 +1051,8 @@ components:
         failure rates, but in no duration or wasted time.
       additionalProperties: false
       required: [min_runs, slow_factor, flaky_factor, flaky_min_points, flaky_min_failures, outlier_factor,
-                 outlier_min_s, outlier_repo_min_runs, kinds, outliers, outlier_count, outlier_groups]
+                 outlier_min_s, outlier_repo_min_runs, slowest_min_runs, kinds, outliers, outlier_count,
+                 outlier_groups]
       properties:
         min_runs: { type: integer, description: "Runs a repo needs in a kind, in both periods, to be flagged." }
         slow_factor: { type: number, description: A repo median this many times its previous one is slow. }
@@ -1078,12 +1079,15 @@ components:
           $ref: "#/components/schemas/Seconds"
           description: No run shorter than this is an outlier.
         outlier_repo_min_runs: { type: integer, description: Runs a repo needs for a median of its own in the outlier cut. }
+        slowest_min_runs:
+          type: integer
+          description: Runs with a verdict and a duration, outliers aside, a repo needs to rank in `slowest`.
         kinds:
           type: array
           items:
             type: object
             additionalProperties: false
-            required: [kind, duration, failure_rate, repos, outlier_threshold_s]
+            required: [kind, duration, failure_rate, repos, slowest, outlier_threshold_s]
             properties:
               kind: { $ref: "#/components/schemas/RunKind" }
               duration:
@@ -1096,35 +1100,16 @@ components:
                   A row per repo with a counted run: the flaky ones by wasted
                   CI time, then the slow ones by factor, then the rest by
                   wasted time and median; the top 8 and every flagged one.
-                items:
-                  type: object
-                  additionalProperties: false
-                  required: [repo, runs, duration, duration_change, factor, slow, failures, failure_rate,
-                             failure_change, wasted_seconds, flaky]
-                  properties:
-                    repo: { type: string }
-                    runs: { type: integer, description: Runs with a verdict. }
-                    duration:
-                      $ref: "#/components/schemas/Spread"
-                      description: Over the runs with a verdict and a duration, outliers left out.
-                    duration_change:
-                      $ref: "#/components/schemas/Change"
-                      description: |
-                        The median against the repo's previous one, both over
-                        `min_runs` runs with a verdict and a duration or more.
-                        `no_value`: no runs of the kind under this repo's name
-                        then, or no median (every run an outlier).
-                    factor:
-                      $ref: "#/components/schemas/NullableNumber"
-                      description: The median over the previous one; null without a comparison or at a previous 0.
-                    slow: { type: boolean, description: "`factor` at least `slow_factor`." }
-                    failures: { type: integer }
-                    failure_rate: { $ref: "#/components/schemas/NullableNumber" }
-                    failure_change:
-                      $ref: "#/components/schemas/Change"
-                      description: The failure rate against the repo's previous one, both over `min_runs` runs or more.
-                    wasted_seconds: { $ref: "#/components/schemas/Seconds" }
-                    flaky: { type: boolean }
+                items: { $ref: "#/components/schemas/RepoHotspot" }
+              slowest:
+                type: array
+                description: |
+                  The 5 repos of the kind with the longest median `duration`,
+                  longest first, ties by name; only those with
+                  `slowest_min_runs` runs with a verdict and a duration,
+                  outliers aside, or more. Flagged or not, no threshold: a repo steady at 25
+                  minutes is never slow against itself.
+                items: { $ref: "#/components/schemas/RepoHotspot" }
               outlier_threshold_s:
                 $ref: "#/components/schemas/NullableSeconds"
                 description: |
@@ -1174,6 +1159,46 @@ components:
               runs: { type: integer }
               repos: { type: array, items: { type: string } }
               shared: { type: boolean }
+
+    RepoHotspot:
+      type: object
+      description: One repo of a kind against its own runs of the kind in the previous period.
+      additionalProperties: false
+      required: [repo, runs, duration, waiting, building, duration_change, factor, slow, failures, failure_rate,
+                 failure_change, wasted_seconds, flaky]
+      properties:
+        repo: { type: string }
+        runs: { type: integer, description: Runs with a verdict. }
+        duration:
+          $ref: "#/components/schemas/Spread"
+          description: Over the runs with a verdict and a duration, outliers left out.
+        waiting:
+          $ref: "#/components/schemas/Spread"
+          description: |
+            The wait for a build agent over the runs of `duration` whose CI
+            reports `agent_started_at`, as BuildStats' `waiting`; `n` 0 and
+            nulls when none does.
+        building:
+          $ref: "#/components/schemas/Spread"
+          description: The rest of the same runs, from `agent_started_at` to `finished_at`.
+        duration_change:
+          $ref: "#/components/schemas/Change"
+          description: |
+            The median against the repo's previous one, both over
+            `min_runs` runs with a verdict and a duration or more.
+            `no_value`: no runs of the kind under this repo's name
+            then, or no median (every run an outlier).
+        factor:
+          $ref: "#/components/schemas/NullableNumber"
+          description: The median over the previous one; null without a comparison or at a previous 0.
+        slow: { type: boolean, description: "`factor` at least `slow_factor`." }
+        failures: { type: integer }
+        failure_rate: { $ref: "#/components/schemas/NullableNumber" }
+        failure_change:
+          $ref: "#/components/schemas/Change"
+          description: The failure rate against the repo's previous one, both over `min_runs` runs or more.
+        wasted_seconds: { $ref: "#/components/schemas/Seconds" }
+        flaky: { type: boolean }
 
     Costs:
       type: object

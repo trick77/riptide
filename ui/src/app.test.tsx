@@ -19,6 +19,7 @@ import {
   deployFact,
   facts,
   metrics,
+  noSpread,
   prFact,
   spread,
 } from "./test/fixtures";
@@ -227,6 +228,8 @@ describe("App", () => {
           failure_change: change("worse", 0.1),
           wasted_seconds: 7200,
           duration: spread(20, 600),
+          waiting: noSpread(),
+          building: noSpread(),
           duration_change: change("same", 600),
           factor: 1,
           slow: false,
@@ -240,6 +243,8 @@ describe("App", () => {
           failure_change: change("same", 0),
           wasted_seconds: 0,
           duration: spread(12, 1800),
+          waiting: noSpread(),
+          building: noSpread(),
           duration_change: change("worse", 600),
           factor: 3,
           slow: true,
@@ -546,6 +551,8 @@ describe("App", () => {
             failure_change: change("worse", 0.1),
             wasted_seconds: 7200,
             duration: spread(20, 600),
+            waiting: noSpread(),
+            building: noSpread(),
             duration_change: change("same", 600),
             factor: 1,
             slow: false,
@@ -559,6 +566,8 @@ describe("App", () => {
             failure_change: change("same", 0),
             wasted_seconds: 0,
             duration: spread(12, 1800, 2400),
+            waiting: noSpread(),
+            building: noSpread(),
             duration_change: change("worse", 600),
             factor: 3,
             slow: true,
@@ -572,6 +581,8 @@ describe("App", () => {
             failure_change: change("none", null, "no_value"),
             wasted_seconds: 0,
             duration: spread(12, 300),
+            waiting: noSpread(),
+            building: noSpread(),
             duration_change: change("none", null, "no_value"),
             factor: null,
             slow: false,
@@ -693,6 +704,52 @@ describe("App", () => {
     expect(
       screen.getByTitle("Der Lauf meldet nicht, wann er einen Agent bekam"),
     ).toHaveTextContent("–");
+  });
+
+  it("lists the longest builds as the backend picked them", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      const m = metrics();
+      const k = m.build.hotspots.kinds[2];
+      const row = k.repos[0];
+      k.repos = [{ ...row, waiting: spread(1, 60), building: spread(1, 540) }];
+      k.slowest = [
+        {
+          ...row,
+          repo: "kasse/steady-web",
+          runs: 12,
+          duration: spread(12, 1500, 1800),
+          waiting: spread(6, 120),
+          building: spread(6, 1380),
+        },
+        { ...row, repo: "kasse/mono", runs: 4, duration: spread(4, 900) },
+      ];
+      return m;
+    });
+    render(<App />);
+    await screen.findByText("Längste Builds");
+    expect(
+      screen.getByText(/ab 3 Läufen mit Ergebnis und Dauer/),
+    ).toBeInTheDocument();
+    // The wait beside the build, in the hotspots row too.
+    expect(screen.getByText(/· 1 min Warten, 9 min Bauen/)).toBeInTheDocument();
+    const steady = screen.getByText("kasse/steady-web").closest(".contents");
+    expect(steady).toHaveTextContent(/25 min30 min2 min \/ 23 min12/);
+    expect(
+      screen.getByTitle(
+        "Median über 6 der 12 Läufe, die melden, wann sie einen Agent bekamen",
+      ),
+    ).toBeInTheDocument();
+    const mono = screen.getByText("kasse/mono").closest(".contents");
+    expect(
+      within(mono as HTMLElement).getByTitle(
+        "Keiner der Läufe meldet, wann er einen Agent bekam",
+      ),
+    ).toHaveTextContent("–");
+    // In the backend's order, its link last.
+    const links = screen.getAllByRole("button", { name: "Läufe ansehen →" });
+    fireEvent.click(links[links.length - 1]);
+    expect(window.location.search).toBe("?q=kasse%2Fmono&tab=runs");
   });
 
   it("asks for the facts of the product the metrics resolved", async () => {

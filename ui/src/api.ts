@@ -133,6 +133,9 @@ export type KindHotspots = {
   duration: Spread;
   failure_rate: number | null;
   repos: RepoHotspot[];
+  // The longest repos by median, flagged or not; cut and ordered by the
+  // backend.
+  slowest: RepoHotspot[];
   outlier_threshold_s: number | null;
 };
 
@@ -141,6 +144,8 @@ export type RepoHotspot = {
   repo: string;
   runs: number;
   duration: Spread;
+  waiting: Spread;
+  building: Spread;
   duration_change: Change;
   factor: number | null;
   slow: boolean;
@@ -180,6 +185,7 @@ export type Hotspots = {
   outlier_factor: number;
   outlier_min_s: number;
   outlier_repo_min_runs: number;
+  slowest_min_runs: number;
   kinds: KindHotspots[];
   outliers: Outlier[];
   outlier_count: number;
