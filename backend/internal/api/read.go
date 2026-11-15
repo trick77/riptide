@@ -12,6 +12,7 @@ import (
 
 	"github.com/trick77/ship/kit/logging"
 
+	"github.com/trick77/riptide/internal/config"
 	"github.com/trick77/riptide/internal/dataset"
 	"github.com/trick77/riptide/internal/httpapi"
 	"github.com/trick77/riptide/internal/metrics"
@@ -86,32 +87,35 @@ func loadZone(name string) (*time.Location, error) {
 // view is a read request's parsed query: whose data, which period, which
 // product and bots.
 type view struct {
-	team   string
+	team string
+	now  time.Time
+	// cfg is the config as the request found it: both periods read under
+	// one, whatever a hot reload does meanwhile.
+	cfg    *config.Config
 	params metrics.Params
 }
 
-// readView parses the query the read endpoints share and loads the
-// team's dataset for the period. On failure it has written the response.
-// No authentication here: the UI listener is reached through the auth
-// proxy only.
-func (d Deps) readView(w http.ResponseWriter, r *http.Request, factsOnly bool) (view, *dataset.Dataset, bool) {
+// readView parses the query the read endpoints share. On failure it has
+// written the response. No authentication here: the UI listener is reached
+// through the auth proxy only.
+func (d Deps) readView(w http.ResponseWriter, r *http.Request) (view, bool) {
 	q := r.URL.Query()
 	team := strings.TrimSpace(q.Get("team"))
 	if team == "" {
 		httpapi.WriteDetail(w, http.StatusUnprocessableEntity, "query parameter team is required")
-		return view{}, nil, false
+		return view{}, false
 	}
 	cfg := d.Runtime.Config()
 	if _, ok := cfg.Teams[team]; !ok {
 		httpapi.WriteDetail(w, http.StatusNotFound, "unknown team")
-		return view{}, nil, false
+		return view{}, false
 	}
 	weeks := defaultWeeks
 	if v := strings.TrimSpace(q.Get("weeks")); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || !metrics.ValidWindow(n) {
 			httpapi.WriteDetail(w, http.StatusUnprocessableEntity, badWeeks)
-			return view{}, nil, false
+			return view{}, false
 		}
 		weeks = n
 	}
@@ -122,7 +126,7 @@ func (d Deps) readView(w http.ResponseWriter, r *http.Request, factsOnly bool) (
 		l, err := loadZone(v)
 		if err != nil {
 			httpapi.WriteDetail(w, http.StatusUnprocessableEntity, "tz must be an IANA time zone")
-			return view{}, nil, false
+			return view{}, false
 		}
 		loc = l
 	}
@@ -133,39 +137,68 @@ func (d Deps) readView(w http.ResponseWriter, r *http.Request, factsOnly bool) (
 		bots = true
 	default:
 		httpapi.WriteDetail(w, http.StatusUnprocessableEntity, "bots must be 0 or 1")
-		return view{}, nil, false
+		return view{}, false
 	}
 	now := d.now().UTC().Truncate(time.Second)
-	period := metrics.NewPeriod(weeks, now, loc)
-	ds, err := d.Reader.Dataset(r.Context(), dataset.Params{
-		Team: team, From: period.From, To: period.To, ProductionStage: cfg.Environments.ProductionStage,
+	return view{team: team, now: now, cfg: cfg, params: metrics.Params{
+		Period: metrics.NewPeriod(weeks, now, loc), Previous: metrics.PreviousPeriod(weeks, now, loc),
+		Product: strings.TrimSpace(q.Get("product")), Bots: bots,
+	}}, true
+}
+
+// load reads the team's dataset over the period.
+func (d Deps) load(ctx context.Context, v view, p metrics.Period, factsOnly bool) (*dataset.Dataset, error) {
+	cfg := v.cfg
+	return d.Reader.Dataset(ctx, dataset.Params{
+		Team: v.team, From: p.From, To: p.To, ProductionStage: cfg.Environments.ProductionStage,
 		// The detection a webhook's author gets at ingest, so a commit and a
 		// PR by the same bot agree. A commit on master has no branch to
 		// match a prefix against, and the SERVICE flag is the view's.
 		Automated: func(author, displayName string) bool {
 			return cfg.DetectAutomationSource(author, displayName, "", false) != ""
 		},
-		Now:       now,
+		Now:       v.now,
 		FactsOnly: factsOnly,
 	})
-	if err != nil {
-		d.Log.ErrorContext(r.Context(), "dataset_failed", "team", team, logging.Err(err))
-		httpapi.WriteDetail(w, http.StatusInternalServerError, "Internal Server Error")
-		return view{}, nil, false
-	}
-	return view{team: team, params: metrics.Params{
-		Period: period, Product: strings.TrimSpace(q.Get("product")), Bots: bots,
-	}}, ds, true
+}
+
+// failed logs a dataset that would not load and answers 500.
+func (d Deps) failed(w http.ResponseWriter, r *http.Request, team string, err error) {
+	d.Log.ErrorContext(r.Context(), "dataset_failed", "team", team, logging.Err(err))
+	httpapi.WriteDetail(w, http.StatusInternalServerError, "Internal Server Error")
 }
 
 // metrics serves every number of the page for one team and period.
 func (d Deps) metrics(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
-	v, ds, ok := d.readView(w, r, false)
+	v, ok := d.readView(w, r)
 	if !ok {
 		return
 	}
-	m := metrics.Compute(ds, v.params)
+	// The period and the previous one, to compare with: two reads of the
+	// same size, side by side; the first to fail cancels the other.
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	var ds, prev *dataset.Dataset
+	var errs [2]error
+	var wg sync.WaitGroup
+	read := func(p metrics.Period, out **dataset.Dataset, err *error) func() {
+		return func() {
+			if *out, *err = d.load(ctx, v, p, false); *err != nil {
+				cancel()
+			}
+		}
+	}
+	wg.Go(read(v.params.Period, &ds, &errs[0]))
+	wg.Go(read(v.params.Previous, &prev, &errs[1]))
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			d.failed(w, r, v.team, err)
+			return
+		}
+	}
+	m := metrics.Compute(ds, prev, v.params)
 	d.Log.InfoContext(r.Context(), "metrics_served", "team", v.team, "from", v.params.Period.From,
 		"to", v.params.Period.To, "duration_ms", time.Since(started).Milliseconds())
 	httpapi.WriteJSON(w, http.StatusOK, m)
@@ -174,8 +207,13 @@ func (d Deps) metrics(w http.ResponseWriter, r *http.Request) {
 // facts serves the facts tables for one team and period, searched.
 func (d Deps) facts(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
-	v, ds, ok := d.readView(w, r, true)
+	v, ok := d.readView(w, r)
 	if !ok {
+		return
+	}
+	ds, err := d.load(r.Context(), v, v.params.Period, true)
+	if err != nil {
+		d.failed(w, r, v.team, err)
 		return
 	}
 	f := metrics.ComputeFacts(ds, v.params, r.URL.Query().Get("q"))
