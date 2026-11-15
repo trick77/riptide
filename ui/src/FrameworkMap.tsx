@@ -75,7 +75,7 @@ const ROWS: [string, Cell[]][] = [
       "Impact: Näherung für «Zeit für Neues», zählt PRs statt Zeit",
       null,
       null,
-      "Flow distribution: feature und bugfix, ohne Debt und Risk",
+      "Flow distribution: Feature und Bugfix, ohne Debt und Risk",
     ],
   ],
   [

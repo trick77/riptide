@@ -305,6 +305,29 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Zum Fluss →" }));
   });
 
+  it("spells a PR's type and its way to prod", async () => {
+    const rows = [
+      prFact({ pr_id: 11, title: "a", prod_at: null, to_prod_s: null }),
+      prFact({ pr_id: 12, title: "b", change_type: "other" }),
+      prFact({ pr_id: 13, title: "c", change_type: null }),
+      prFact({ pr_id: 14, title: "d", change_type: "spike" }),
+    ];
+    mockFetch((url) =>
+      url.pathname === "/api/facts"
+        ? facts({ prs: { count: rows.length, rows } })
+        : metrics(4),
+    );
+    render(<App />);
+    const row = async (title: string) =>
+      within((await screen.findByText(title)).closest("tr")!);
+    expect((await row("a")).getByText("Feature")).toBeInTheDocument();
+    expect((await row("a")).getByText("Nein")).toBeInTheDocument();
+    expect((await row("b")).getByText("Anderes")).toBeInTheDocument();
+    expect((await row("c")).getAllByText("–").length).toBeGreaterThan(0);
+    // a prefix the UI does not know yet shows as the backend sent it
+    expect((await row("d")).getByText("spike")).toBeInTheDocument();
+  });
+
   it("says so when no rule fires", async () => {
     mockFetch((url) =>
       url.pathname === "/api/facts" ? facts() : metrics(4, { findings: [] }),

@@ -25,6 +25,18 @@ var prStateTerm = map[string]string{
 	"deleted":  "Gelöscht",
 }
 
+// prTypeTerm is the Typ column's word where it is not the change type
+// itself (CHANGE_TYPE in ui/src/Facts.tsx): a promotion, and "other".
+func prTypeTerm(pr dataset.PR) string {
+	switch {
+	case pr.GitOps:
+		return "Promotion"
+	case pr.ChangeType != nil && *pr.ChangeType == "other":
+		return "Anderes"
+	}
+	return ""
+}
+
 // Deploy classes in the facts table.
 const (
 	DeployFailed    = "failed"
@@ -209,10 +221,10 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 		ProductionStage: prod,
 		Limit:           FactsLimit,
 		PRs: table(prs, func(pr dataset.PR) bool {
-			term := prStateTerm[pr.State]
+			term, typ := prStateTerm[pr.State], prTypeTerm(pr)
 			id := fmt.Sprintf("#%d", pr.PRID)
 			return f.inKey(pr.Project) && (f.bots || !pr.Bot) &&
-				m.match(append([]*string{&pr.Repo, pr.Title, pr.ChangeType, &id}, append(strs(pr.JiraKeys), &term)...)...)
+				m.match(append([]*string{&pr.Repo, pr.Title, pr.ChangeType, &typ, &id}, append(strs(pr.JiraKeys), &term)...)...)
 		}, func(pr dataset.PR) PRFact {
 			prodAt := firstDeploy(pr, prod)
 			return PRFact{
