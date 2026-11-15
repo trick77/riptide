@@ -9,19 +9,30 @@ import {
 } from "./api";
 import { Build } from "./Build";
 import { Costs } from "./Costs";
-import { Delivery } from "./Delivery";
+import { Deploys, Mix } from "./Deploys";
 import { Facts } from "./Facts";
+import { Flow } from "./Flow";
 import { dateTime, fullDate } from "./format";
-import { Review } from "./Review";
-import { WINDOWS, parseState, stateQuery, type ViewState } from "./state";
+import { FrameworkMap } from "./FrameworkMap";
+import { Overview } from "./Overview";
+import {
+  WINDOWS,
+  parseState,
+  stateQuery,
+  type Tab,
+  type ViewState,
+} from "./state";
 import { Eyebrow, Mono } from "./ui";
 
 const NAV: [string, string][] = [
-  ["delivery", "Delivery"],
-  ["review", "Code-Review"],
+  ["ueberblick", "Überblick"],
+  ["fluss", "Fluss"],
+  ["deploys", "Deploys"],
+  ["arbeitsmix", "Arbeitsmix"],
   ["build", "Build"],
   ["kosten", "Kosten"],
   ["daten", "Daten"],
+  ["landkarte", "Landkarte"],
 ];
 
 const SOURCES: [keyof Metrics["meta"]["data_end"], string][] = [
@@ -162,6 +173,11 @@ export default function App() {
     (k: string) => setWhy((w) => (w === k ? null : k)),
     [],
   );
+  // A link from a finding or a hotspot: the facts behind it, searched.
+  const onFacts = useCallback((tab: Tab, q: string) => {
+    setState((s) => ({ ...s, tab, q }));
+    document.getElementById("daten")?.scrollIntoView?.({ behavior: "smooth" });
+  }, []);
   const weeks = m?.period.weeks ?? [];
 
   return (
@@ -181,19 +197,6 @@ export default function App() {
             </a>
           ))}
         </nav>
-        <div className="no-print max-w-[320px] min-w-[200px] flex-[1_1_240px]">
-          <label htmlFor="search" className="sr-only">
-            Suche nach Repo, App, PR oder Jira-Key
-          </label>
-          <input
-            id="search"
-            type="search"
-            value={state.q}
-            onChange={(e) => set({ q: e.target.value })}
-            placeholder="Repo, App, PR, Jira-Key …"
-            className="box-border h-8 w-full rounded-ui-sm border border-border bg-bg px-2.5 text-[13px] text-ink focus-visible:outline-2 focus-visible:outline-accent-strong"
-          />
-        </div>
         <div className="ml-auto flex items-center gap-3 text-[13px] text-muted">
           <label htmlFor="team" className="sr-only">
             Team
@@ -248,7 +251,12 @@ export default function App() {
             <p className="mt-1.5 mb-0 max-w-[75ch] text-[14.5px] text-muted">
               {`Team ${m.meta.team}, ${m.product ? `Produkt ${m.product}` : "alle Produkte"} · KW ${weeks[0].kw}–${
                 weeks[weeks.length - 1].kw
-              } · ${fullDate(new Date(m.period.from))} bis ${fullDate(new Date(m.period.to))} · Rohdaten aus Bitbucket, CI, Argo CD und noergler`}
+              } · ${fullDate(new Date(m.period.from))} bis ${fullDate(new Date(m.period.to))} · verglichen mit den ${weeks.length} Wochen davor`}
+            </p>
+            <p className="mt-1 mb-0 max-w-[75ch] text-[13.5px] text-ink-dim">
+              Ein Spiegel für das Team, kein Ranking zwischen Teams oder
+              Personen. Jede Zahl sagt, was sie bedeutet, welche Richtung gut
+              ist und ob sie sich gegenüber der Vorperiode verändert hat.
             </p>
             <p className="mt-1 mb-0 text-[12.5px] text-faint">
               Datenstand:{" "}
@@ -396,18 +404,22 @@ export default function App() {
         )}
         {m && (
           <>
-            <Delivery m={m} why={why} onWhy={onWhy} />
-            <Review m={m} why={why} onWhy={onWhy} />
-            <Build m={m} />
+            <Overview m={m} why={why} onWhy={onWhy} onFacts={onFacts} />
+            <Flow m={m} why={why} onWhy={onWhy} />
+            <Deploys m={m} />
+            <Mix m={m} />
+            <Build m={m} onFacts={onFacts} />
             <Costs m={m} />
-            {shownFacts && (
-              <Facts
-                facts={shownFacts}
-                q={search}
-                tab={state.tab}
-                onTab={(tab) => set({ tab })}
-              />
-            )}
+            <Facts
+              facts={shownFacts}
+              failed={facts.failure != null && facts.failure.key === factsKey}
+              q={search}
+              input={state.q}
+              onInput={(q) => set({ q })}
+              tab={state.tab}
+              onTab={(tab) => set({ tab })}
+            />
+            <FrameworkMap />
           </>
         )}
 

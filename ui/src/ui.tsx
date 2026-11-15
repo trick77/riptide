@@ -2,6 +2,7 @@
 // only, through the generated utilities.
 
 import type { ReactNode } from "react";
+import type { Change } from "./api";
 
 export function Eyebrow({
   children,
@@ -19,14 +20,22 @@ export function Eyebrow({
   );
 }
 
+// A framework a section maps to, and the metric of it.
+export type Framework = [name: string, metric: string];
+
 export function SectionHead({
   id,
   eyebrow,
   title,
+  lead,
+  frameworks,
 }: {
   id: string;
   eyebrow: ReactNode;
   title: string;
+  // One sentence on what the section answers and how to read it.
+  lead?: ReactNode;
+  frameworks?: Framework[];
 }) {
   return (
     <>
@@ -37,7 +46,78 @@ export function SectionHead({
       >
         {title}
       </h3>
+      {lead && (
+        <p className="-mt-1.5 mb-3 max-w-[80ch] text-[14px] text-ink-dim">
+          {lead}
+        </p>
+      )}
+      {frameworks && (
+        <ul
+          aria-label="Einordnung"
+          className="m-0 mb-3.5 flex list-none flex-wrap gap-1.5 p-0"
+        >
+          {frameworks.map(([name, metric]) => (
+            <li key={name + metric}>
+              <a
+                href="#landkarte"
+                className="inline-block rounded-md border border-elevated-border px-2 py-px text-[11.5px] text-ink-dim no-underline hover:bg-active"
+              >
+                <span className="mr-1 font-medium text-muted">{name}</span>
+                {metric}
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
     </>
+  );
+}
+
+const VERDICT: Record<Change["verdict"], [string, Tone] | null> = {
+  better: ["besser", "ok"],
+  worse: ["schlechter", "warn"],
+  same: ["unverändert", "none"],
+  none: null,
+};
+
+const REASON: Record<NonNullable<Change["reason"]>, string> = {
+  low_sample: "kein Vergleich: zu wenig Daten in einer der beiden Perioden",
+  incomplete:
+    "kein Vergleich: die Daten der Vorperiode sind nicht vollständig, oder Erstdeploys überwiegen",
+  no_value: "kein Vergleich: ein Wert fehlt",
+  undirected: "",
+};
+
+// A number against the previous period: before → now and the backend's
+// verdict, or why there is none.
+export function Compare({
+  change,
+  now,
+  format,
+}: {
+  change: Change;
+  now: string;
+  format: (v: number) => string;
+}) {
+  const v = VERDICT[change.verdict];
+  if (change.prev == null)
+    return (
+      <div className="mt-1 border-t border-border-soft pt-2 text-xs text-muted">
+        {change.reason ? REASON[change.reason] : "kein Vergleich"}
+      </div>
+    );
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 border-t border-border-soft pt-2 text-[12.5px] text-ink-dim">
+      {v && <Pill tone={v[1]}>{v[0]}</Pill>}
+      <span>
+        Vorperiode{" "}
+        <span className="text-ink tabular-nums">{format(change.prev)}</span> →
+        jetzt <span className="text-ink tabular-nums">{now}</span>
+      </span>
+      {change.reason === "undirected" && (
+        <span className="text-muted">ohne Richtung</span>
+      )}
+    </div>
   );
 }
 
@@ -115,7 +195,15 @@ export type TileProps = {
   unit?: string;
   note?: ReactNode;
   warn?: ReactNode;
-  // When set, the tile has a "Woher?" toggle.
+  // The DORA name, or that it is none, in small print under the label.
+  dora?: string;
+  // The question the number answers, in plain words.
+  question?: string;
+  // Which way is better, and why; or that there is no better way.
+  direction?: ReactNode;
+  // The number against the previous period (Compare).
+  compare?: ReactNode;
+  // When set, the tile has a "Was heisst das?" toggle.
   open?: boolean;
   onWhy?: () => void;
 };
@@ -126,14 +214,18 @@ export function Tile({
   unit,
   note,
   warn,
+  dora,
+  question,
+  direction,
+  compare,
   open,
   onWhy,
 }: TileProps) {
   return (
     <div
-      className={`rounded-ui border px-3.5 py-3 ${open ? "border-accent-fill bg-active" : "border-border bg-panel"}`}
+      className={`flex flex-col gap-1 rounded-ui border px-3.5 py-3 ${open ? "border-accent-fill bg-active" : "border-border bg-panel"}`}
     >
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-start justify-between gap-2">
         <span className="text-[11px] font-medium tracking-[.12em] text-muted uppercase">
           {label}
         </span>
@@ -142,28 +234,57 @@ export function Tile({
             type="button"
             aria-expanded={open}
             onClick={onWhy}
-            className="no-print rounded-md border-0 bg-transparent px-[7px] py-px text-xs text-muted hover:bg-active hover:text-ink"
+            className="no-print rounded-md border-0 bg-transparent px-[7px] py-px text-xs whitespace-nowrap text-muted hover:bg-active hover:text-ink"
           >
-            Woher?
+            Was heisst das?
           </button>
         )}
       </div>
-      <div className="mt-0.5 flex items-baseline gap-1.5">
+      {dora && <div className="-mt-1 text-[11px] text-faint">{dora}</div>}
+      {question && <div className="text-[13px] text-ink-dim">{question}</div>}
+      <div className="flex flex-wrap items-baseline gap-x-1.5">
         <span className="text-[26px] font-medium text-ink tabular-nums">
           {value}
         </span>
         {unit && <span className="text-[13px] text-muted">{unit}</span>}
       </div>
       {note && <div className="text-xs text-muted">{note}</div>}
+      {direction && <div className="text-xs text-muted">{direction}</div>}
       {warn && <WarnLine>{warn}</WarnLine>}
+      {compare}
     </div>
   );
 }
 
-// Why is the provenance of one number: what it counts, from how much, with
-// which filters, and how complete the data behind it is.
+// Direction is a tile's line on which way is better.
+export function Direction({
+  arrow,
+  label,
+  why,
+}: {
+  arrow?: "up" | "down";
+  label: string;
+  why: string;
+}) {
+  return (
+    <>
+      <span className="font-medium text-ink-dim">
+        {arrow === "up" ? "↑ " : arrow === "down" ? "↓ " : ""}
+        {label}
+      </span>
+      {why && <>: {why}</>}
+    </>
+  );
+}
+
+// Why is what one number means and where it comes from: how to read it,
+// when to look closer, what moves it; then what it counts, from how much,
+// with which filters, and how complete the data behind it is.
 export type Why = {
   title: string;
+  means?: ReactNode;
+  watch?: ReactNode;
+  lever?: ReactNode;
   def: ReactNode;
   basis: ReactNode;
   filters: string[];
@@ -172,14 +293,27 @@ export type Why = {
 };
 
 export function WhyPanel({ why }: { why: Why }) {
+  const reading: [string, ReactNode][] = (
+    [
+      [`Was heisst das? · ${why.title}`, why.means],
+      ["Genauer hinschauen, wenn", why.watch],
+      ["Hebel", why.lever],
+    ] as [string, ReactNode][]
+  ).filter(([, v]) => v != null);
   return (
     <div
       role="region"
-      aria-label={`Woher · ${why.title}`}
+      aria-label={`Was heisst das? · ${why.title}`}
       className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-x-7 gap-y-4 rounded-ui-lg border border-elevated-border bg-active px-[18px] py-4"
     >
+      {reading.map(([head, text]) => (
+        <div key={head}>
+          <Eyebrow>{head}</Eyebrow>
+          <p className="mt-1.5 mb-0 text-[13.5px] text-ink-dim">{text}</p>
+        </div>
+      ))}
       <div>
-        <Eyebrow>Definition · {why.title}</Eyebrow>
+        <Eyebrow>Woher · Definition</Eyebrow>
         <p className="mt-1.5 mb-0 text-[13.5px] text-ink-dim">{why.def}</p>
       </div>
       <div>

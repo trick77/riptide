@@ -55,6 +55,7 @@ cd backend && go test -race ./...    # DB tests skip without SHIP_TEST_DSN (comp
 ## UI (`ui/`, embedded)
 
 - **Build numbers never across run kinds.** User: releases skip tests, feature builds fail more.
+- **Compare a team with its previous period only**, never DORA levels, survey distributions or other teams: DORA dropped its levels in 2025, survey numbers go stale (user: outdated "wollen wir auf keinen fall"). DORA terms as dora.dev names them now.
 - Screenshots or numbers from a real import never into the repo or a PR.
 
 ## Out of v1
