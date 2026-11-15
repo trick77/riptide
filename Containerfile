@@ -32,6 +32,11 @@ RUN CGO_ENABLED=0 go build -trimpath \
 FROM gcr.io/distroless/static-debian13:nonroot
 COPY --from=builder /out/riptide /riptide
 USER 65532:65532
+# riptide reads an optional ./.env. The base image's workdir /home/nonroot is
+# 0700 for 65532: OpenShift's random uid cannot even look into it, so the
+# read failed with "permission denied" instead of finding nothing, and the
+# binary refused to start. / is searchable and holds no .env.
+WORKDIR /
 # Soft heap ceiling under the pod's 512Mi limit: the runtime collects harder
 # as it approaches this. Raise it together with the limit.
 ENV GOMEMLIMIT=400MiB
