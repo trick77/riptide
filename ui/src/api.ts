@@ -112,6 +112,8 @@ export type BuildStats = {
   no_verdict: number;
   success_rate: number | null;
   duration: Spread;
+  waiting: Spread;
+  building: Spread;
   ci_seconds: number;
   wasted_seconds: number;
   outlier_runs: number;
@@ -154,6 +156,7 @@ export type Outlier = {
   duration_s: number;
   status: string | null;
   factor: number | null;
+  wait_s: number | null;
 };
 
 export type Hotspots = {

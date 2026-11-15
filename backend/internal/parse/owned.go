@@ -28,11 +28,14 @@ type PipelineDraft struct {
 	ActorAccountKind *string
 	// BuildType is what kind of build the pipeline says the run was
 	// (release, hotfix, build, ...), trimmed and lowercased; nil when absent.
-	BuildType  *string
-	StartedAt  time.Time
-	FinishedAt *time.Time
-	OccurredAt time.Time
-	Payload    []byte
+	BuildType *string
+	StartedAt time.Time
+	// AgentStartedAt is when the run got its build agent; StartedAt to it
+	// is the wait for one. nil when the sender did not say.
+	AgentStartedAt *time.Time
+	FinishedAt     *time.Time
+	OccurredAt     time.Time
+	Payload        []byte
 }
 
 // Pipeline validates a pipeline body. Unknown fields are allowed and
@@ -43,18 +46,19 @@ func Pipeline(raw []byte) (*PipelineDraft, error) {
 		return nil, err
 	}
 	d := &PipelineDraft{
-		Source:       o.requiredString("source", 1),
-		PipelineName: o.requiredString("pipeline_name", 1),
-		RunID:        o.requiredString("run_id", 1),
-		Phase:        o.requiredString("phase", 1),
-		Status:       o.optionalString("status", 0),
-		CommitSHA:    strings.ToLower(o.requiredString("commit_sha", 7)),
-		ImageRefs:    imageRefs(o),
-		ActorHandle:  o.optionalTrimmed("actor_handle"),
-		BuildType:    lowered(o.optionalTrimmed("build_type")),
-		StartedAt:    o.requiredTime("started_at"),
-		FinishedAt:   o.optionalTime("finished_at", false),
-		Payload:      raw,
+		Source:         o.requiredString("source", 1),
+		PipelineName:   o.requiredString("pipeline_name", 1),
+		RunID:          o.requiredString("run_id", 1),
+		Phase:          o.requiredString("phase", 1),
+		Status:         o.optionalString("status", 0),
+		CommitSHA:      strings.ToLower(o.requiredString("commit_sha", 7)),
+		ImageRefs:      imageRefs(o),
+		ActorHandle:    o.optionalTrimmed("actor_handle"),
+		BuildType:      lowered(o.optionalTrimmed("build_type")),
+		StartedAt:      o.requiredTime("started_at"),
+		AgentStartedAt: o.optionalTime("agent_started_at", false),
+		FinishedAt:     o.optionalTime("finished_at", false),
+		Payload:        raw,
 	}
 	kind := o.literal("actor_account_kind", "service", accountKinds...)
 	o.checkSpan("finished_at", &d.StartedAt, d.FinishedAt)

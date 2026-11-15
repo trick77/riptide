@@ -205,11 +205,13 @@ func (s *Store) InsertPipeline(ctx context.Context, d *parse.PipelineDraft, team
 	}
 	return s.insert(ctx, `INSERT INTO pipeline_events (
 		delivery_id, source, pipeline_name, run_id, phase, status, commit_sha, image_refs,
-		actor_handle, actor_account_kind, build_type, started_at, finished_at, occurred_at, team, payload
-	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb)
+		actor_handle, actor_account_kind, build_type, started_at, agent_started_at, finished_at, occurred_at, team,
+		payload
+	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb)
 	ON CONFLICT (delivery_id) DO NOTHING RETURNING delivery_id`,
 		d.DeliveryID, d.Source, d.PipelineName, d.RunID, d.Phase, d.Status, d.CommitSHA, images,
-		d.ActorHandle, d.ActorAccountKind, d.BuildType, d.StartedAt, d.FinishedAt, d.OccurredAt, team, string(d.Payload))
+		d.ActorHandle, d.ActorAccountKind, d.BuildType, d.StartedAt, d.AgentStartedAt, d.FinishedAt, d.OccurredAt,
+		team, string(d.Payload))
 }
 
 // InsertArgoCD stores an Argo CD sync notification.

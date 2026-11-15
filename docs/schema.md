@@ -140,6 +140,7 @@ Indexes:
 | `actor_account_kind` | character varying | yes |  |  |
 | `image_refs` | character varying[] | no | `'{}'::character varying[]` |  |
 | `build_type` | character varying | yes |  |  |
+| `agent_started_at` | timestamp with time zone | yes |  |  |
 
 Indexes:
 
@@ -269,5 +270,6 @@ erDiagram
         character_varying actor_account_kind
         character_varying[] image_refs
         character_varying build_type
+        timestamp_with_time_zone agent_started_at
     }
 ```
