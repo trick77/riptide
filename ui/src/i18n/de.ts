@@ -161,6 +161,17 @@ export const de = {
     firstTouchRule:
       "Steht immer da: kein Grenzwert, keine Richtung · {{n}} von {{total}} Approvals",
     toReview: "Zum Review →",
+    openTitle_one: "{{count}} PR ist seit {{days}} Tagen oder länger offen.",
+    openTitle_other:
+      "{{count}} PRs sind seit {{days}} Tagen oder länger offen.",
+    openBody:
+      "Am meisten in {{repo}}: {{n}}, der älteste ist {{oldest}} offen. Noch ohne erstes Review: {{first}} der lang offenen.",
+    openLever: "alte PRs im Daily ansprechen: reviewen, mergen oder schliessen",
+    openRuleAttention:
+      "Regel: «Achtung», wenn mehr PRs ab {{days}} Tagen offen sind als am Ende der Vorperiode ({{prev}}), sonst ein Hinweis",
+    openRuleHint:
+      "Regel: jeder PR ab {{days}} Tagen offen; «Achtung», wenn es mehr sind als am Ende der Vorperiode",
+    openPRsOf: "Offene PRs von {{repo}} ansehen →",
     runsOf: "Läufe von {{repo}} ansehen →",
     flakyTitle: "{{repo}}: {{rate}} der {{kind}} scheitern.",
     flakyBody:
@@ -365,6 +376,47 @@ export const de = {
     histLine: " · die Linie markiert 24 h",
     histAria: "PR-Cycle-Time: {{parts}}",
   },
+  open: {
+    title: "Offene PRs: wo staut es sich?",
+    sub: "Stand {{at}}, egal wann geöffnet. Ab {{days}} Tagen offen gilt ein PR als lang offen. Ohne GitOps-Repos{{bots}}.",
+    subBots: ", Bots mitgezählt",
+    long: {
+      label: "Lang offen",
+      question: "Wie viele PRs sind seit {{days}} Tagen oder länger offen?",
+      unit_one: "von {{count}} offenen PR",
+      unit_other: "von {{count}} offenen PRs",
+      direction: "weniger ist besser",
+      directionWhy: "ein lang offener PR ist liegengebliebene Arbeit",
+    },
+    all: {
+      label: "Offene PRs",
+      question: "Wie viele PRs sind gerade offen?",
+      unit: "typischerweise {{p50}} alt",
+      note: "die ältesten 10 %: über {{p90}}",
+      directionWhy: "mehr offene PRs kann auch mehr Arbeit im Gang heissen",
+    },
+    longWaitOn: "Die lang offenen warten auf:",
+    colRepo: "Repo",
+    colOpen: "Offen",
+    colLong: "≥ {{days}} T.",
+    colOldest: "Ältester",
+    colWaiting: "Wartet auf",
+    viewPRs: "PRs ansehen →",
+    none: "Am Ende des Zeitraums war kein PR offen.",
+    why: {
+      means:
+        "Jede andere PR-Zahl zählt einen PR erst, wenn er gemerged ist. Ein PR, der seit Wochen offen ist, fehlt dort ganz; hier zeigt er sich, pro Repo und mit dem, worauf er wartet.",
+      watch:
+        "mehrere lang offene PRs im selben Repo auf ein erstes Review warten: dort fehlt ein Reviewer, oder die PRs sind zu gross.",
+      lever:
+        "Reviewer beim Öffnen nennen, alte PRs im Daily ansprechen, PRs schliessen, die niemand mehr braucht.",
+      def: "PRs, die am Ende des Zeitraums offen waren: geöffnet davor, weder gemerged, abgelehnt noch gelöscht. Alter ab dem Erstelldatum des PRs, lang offen ab {{days}} Tagen.",
+      basis_one: "{{count}} offener PR, Stand {{at}}.",
+      basis_other: "{{count}} offene PRs, Stand {{at}}.",
+      coverage:
+        "Ein PR, dessen Merge oder Schliessen Bitbucket nie gemeldet hat, bleibt offen; ein PR ohne jedes Event seit Datenbeginn fehlt.",
+    },
+  },
   deploys: {
     eyebrow: "Ausrollen",
     title: "Wie gleichmässig kommt Code nach {{prod}}?",
@@ -525,6 +577,8 @@ export const de = {
     tabRuns: "Läufe",
     filtered: "gefiltert nach «{{q}}»",
     newest: "Neueste zuerst",
+    openFirst: "Offene zuerst, die ältesten oben; dann die neuesten",
+    openFor: "{{age}} offen",
     firstOf: " · die ersten {{limit}} von {{count}}",
     noHits: "Keine Treffer für «{{q}}».",
     empty: "Keine Einträge im Zeitraum.",

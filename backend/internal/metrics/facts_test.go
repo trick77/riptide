@@ -196,6 +196,7 @@ func TestRunStatusTerms(t *testing.T) {
 // uiTerms is ui/src/i18n/terms.json in one language.
 type uiTerms struct {
 	PRState     map[string]string `json:"prState"`
+	PRWaiting   map[string]string `json:"prWaiting"`
 	DeployClass map[string]string `json:"deployClass"`
 	ChangeType  map[string]string `json:"changeType"`
 	Promotion   string            `json:"promotion"`
@@ -223,7 +224,7 @@ func TestSearchTermsMatchTheUI(t *testing.T) {
 	}
 	for code, g := range groups {
 		got := slices.Sorted(maps.Keys(g))
-		if want := []string{"changeType", "deployClass", "prState", "promotion", "runKind", "runOutcome"}; !slices.Equal(got, want) {
+		if want := []string{"changeType", "deployClass", "prState", "prWaiting", "promotion", "runKind", "runOutcome"}; !slices.Equal(got, want) {
 			t.Errorf("terms.json %s groups %v, compared %v", code, got, want)
 		}
 	}
@@ -244,6 +245,7 @@ func TestSearchTermsMatchTheUI(t *testing.T) {
 		}
 		for name, c := range map[string][2]map[string]string{
 			"prState":     {u.PRState, lang(prStateTerm, de)},
+			"prWaiting":   {u.PRWaiting, lang(waitTerm, de)},
 			"deployClass": {u.DeployClass, lang(deployTerm, de)},
 			"changeType":  {u.ChangeType, lang(changeTypeTerm, de)},
 			"runOutcome":  {u.RunOutcome, lang(runOutcomeTerm, de)},

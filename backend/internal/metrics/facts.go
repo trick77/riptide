@@ -51,6 +51,15 @@ var changeTypeTerm = map[string]uiTerm{
 	"other":    {"Anderes", "Other"},
 }
 
+// waitTerm is what an open PR waits on, in the PR table's state column.
+var waitTerm = map[string]uiTerm{
+	WaitDraft:       {"Entwurf", "Draft"},
+	WaitFirstReview: {"Wartet auf Review", "Awaiting review"},
+	WaitReview:      {"In Review", "In review"},
+	WaitChanges:     {"Änderungen verlangt", "Changes requested"},
+	WaitMerge:       {"Bereit zum Merge", "Ready to merge"},
+}
+
 // promotionTerm is a GitOps PR's type.
 var promotionTerm = uiTerm{"Promotion", "Promotion"}
 
@@ -141,6 +150,10 @@ type PRFact struct {
 	MergedAt *time.Time `json:"merged_at"`
 	ProdAt   *time.Time `json:"prod_at"`
 	ToProdS  *float64   `json:"to_prod_s"`
+	// AgeS and Waiting are a PR open at the period's end: its age then and
+	// what it waits on; null for every other PR.
+	AgeS    *float64 `json:"age_s"`
+	Waiting *string  `json:"waiting"`
 }
 
 // DeployFact is one row of the deploy table.
@@ -295,6 +308,59 @@ func table[S, T any](rows []S, keep func(S) bool, row func(S) T) Table[T] {
 	return t
 }
 
+// factPR is a PR table row's PR, with its age and what it waits on when it
+// was open at the period's end.
+type factPR struct {
+	pr      dataset.PR
+	age     *float64
+	waiting *string
+}
+
+// factPRs are the PRs open at the period's end first, oldest first: the
+// ones waiting, and the open PRs' link lands on them. Then the window's
+// other PRs, newest first. An open PR the window has its row from the
+// window, with the review times read there.
+func factPRs(ds *dataset.Dataset) []factPR {
+	at := ds.Meta.To
+	type key struct {
+		repo string
+		id   int64
+	}
+	window := map[key]dataset.PR{}
+	for _, pr := range ds.PRs {
+		window[key{pr.Repo, pr.PRID}] = pr
+	}
+	open := slices.Clone(ds.OpenPRs)
+	slices.SortStableFunc(open, func(a, b dataset.OpenPR) int { return a.OpenedAt.Compare(b.OpenedAt) })
+	out := make([]factPR, 0, len(open)+len(ds.PRs))
+	seen := map[key]bool{}
+	for _, o := range open {
+		k := key{o.Repo, o.PRID}
+		seen[k] = true
+		pr, ok := window[k]
+		if !ok {
+			opened := o.OpenedAt
+			pr = dataset.PR{
+				Repo: o.Repo, Project: o.Project, PRID: o.PRID, Title: o.Title, Bot: o.Bot,
+				ChangeType: o.ChangeType, JiraKeys: o.JiraKeys, OpenedAt: &opened, ReadyAt: o.ReadyAt,
+				Environments: []dataset.EnvironmentDeploy{},
+			}
+		}
+		// Open then, whatever happened to it after the period's end, and
+		// filtered as the open-PR numbers count it.
+		pr.State = "open"
+		pr.Bot, pr.Title, pr.JiraKeys = o.Bot, o.Title, o.JiraKeys
+		out = append(out, factPR{pr: pr, age: ptr(openAge(o, at)), waiting: ptr(waitsOn(o))})
+	}
+	rest := newestFirst(ds.PRs, func(pr dataset.PR) *time.Time { return cmp.Or(pr.MergedAt, pr.OpenedAt) })
+	for _, pr := range rest {
+		if !seen[key{pr.Repo, pr.PRID}] {
+			out = append(out, factPR{pr: pr})
+		}
+	}
+	return out
+}
+
 // ComputeFacts is the facts tables for the search q. The product filters as
 // given: the facts read no lead times or reviews, so their products are not
 // all of the page's; the UI sends the product /api/metrics resolved.
@@ -303,7 +369,7 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 	m := newMatcher(q)
 	prod := ds.Meta.ProductionStage
 
-	prs := newestFirst(ds.PRs, func(pr dataset.PR) *time.Time { return cmp.Or(pr.MergedAt, pr.OpenedAt) })
+	prs := factPRs(ds)
 	deploys := newestFirst(ds.Deploys, func(d dataset.Deploy) *time.Time { return &d.At })
 	runs := newestFirst(ds.Runs, runAt)
 
@@ -313,7 +379,8 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 		// The search reads the words on screen, never a hidden code: a
 		// promotion's change type is not searched. The words are built only
 		// when there is a search.
-		PRs: table(prs, func(pr dataset.PR) bool {
+		PRs: table(prs, func(x factPR) bool {
+			pr := x.pr
 			if !f.inKey(pr.Project) || (!f.bots && pr.Bot) {
 				return false
 			}
@@ -321,9 +388,13 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 				return true
 			}
 			term, typ := prStateTerms(pr.State), prTypeTerm(pr)
+			if x.waiting != nil {
+				term += " " + waitTerm[*x.waiting].both()
+			}
 			id := fmt.Sprintf("#%d", pr.PRID)
 			return m.match(append([]*string{&pr.Repo, pr.Title, &typ, &id}, append(strs(pr.JiraKeys), &term)...)...)
-		}, func(pr dataset.PR) PRFact {
+		}, func(x factPR) PRFact {
+			pr := x.pr
 			prodAt := firstDeploy(pr, prod)
 			return PRFact{
 				Repo: pr.Repo, PRID: pr.PRID, Title: pr.Title, JiraPrefix: jiraPrefix(pr),
@@ -331,6 +402,7 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 				State:   pr.State,
 				ReviewS: wait(pr.ReadyAt, pr.ApprovedAt), CycleS: wait(pr.OpenedAt, pr.MergedAt),
 				MergedAt: pr.MergedAt, ProdAt: prodAt, ToProdS: wait(pr.MergedAt, prodAt),
+				AgeS: x.age, Waiting: x.waiting,
 			}
 		}),
 		// Every image a deploy ran, not only the new ones: a search for an

@@ -6,6 +6,13 @@
       "declined": "Declined",
       "deleted": "Deleted"
     },
+    "prWaiting": {
+      "draft": "Draft",
+      "first_review": "Awaiting review",
+      "review": "In review",
+      "changes": "Changes requested",
+      "merge": "Ready to merge"
+    },
     "deployClass": {
       "release": "Release",
       "first_seen": "First deploy",
@@ -39,6 +46,13 @@
       "open": "Offen",
       "declined": "Abgelehnt",
       "deleted": "Gelöscht"
+    },
+    "prWaiting": {
+      "draft": "Entwurf",
+      "first_review": "Wartet auf Review",
+      "review": "In Review",
+      "changes": "Änderungen verlangt",
+      "merge": "Bereit zum Merge"
     },
     "deployClass": {
       "release": "Release",

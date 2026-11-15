@@ -674,8 +674,8 @@ components:
     Metrics:
       type: object
       additionalProperties: false
-      required: [meta, period, products, product, bots, delivery, lead_chain, review, build, costs, findings,
-                 comparison]
+      required: [meta, period, products, product, bots, delivery, lead_chain, review, open_prs, build, costs,
+                 findings, comparison]
       properties:
         meta: { $ref: "#/components/schemas/Meta" }
         period: { $ref: "#/components/schemas/Period" }
@@ -689,6 +689,7 @@ components:
         delivery: { $ref: "#/components/schemas/Delivery" }
         lead_chain: { $ref: "#/components/schemas/LeadChain" }
         review: { $ref: "#/components/schemas/Review" }
+        open_prs: { $ref: "#/components/schemas/OpenPRs" }
         build: { $ref: "#/components/schemas/Build" }
         costs: { $ref: "#/components/schemas/Costs" }
         findings:
@@ -697,9 +698,11 @@ components:
             What the numbers ask the team to look at: attention first (a
             stage taking half the time to production or more, on 10 PRs or
             more, flaky repos by
-            wasted CI time, slow repos by factor, a repo once), a stage hint
-            after them, at most 3; then the first-touch rate to talk about,
-            when any PR was approved.
+            wasted CI time, slow repos by factor, a repo once, more PRs open
+            a week or longer than at the previous period's end), the hints
+            after them (the stage, PRs open a week or longer), at most 3;
+            then the first-touch rate to talk about, when any PR was
+            approved.
           items: { $ref: "#/components/schemas/Finding" }
         comparison: { $ref: "#/components/schemas/Comparison" }
 
@@ -709,7 +712,10 @@ components:
       additionalProperties: false
       required: [kind, tone, stage, run_kind, repo]
       properties:
-        kind: { type: string, enum: [stage, flaky, slow, first_touch] }
+        kind:
+          type: string
+          enum: [stage, flaky, slow, first_touch, open_prs]
+          description: "`open_prs`: PRs open a week or longer; its numbers are `open_prs`'."
         tone: { type: string, enum: [attention, hint, talk] }
         stage:
           type: [string, "null"]
@@ -749,7 +755,7 @@ components:
       description: The page's numbers against the same number of whole weeks right before the period.
       additionalProperties: false
       required: [from, to, deploy_frequency, deploy_success, lead_time, lead_time_pre, review_time, within_day,
-                 first_touch, untracked, cost_per_kloc, wasted_share, build]
+                 first_touch, untracked, cost_per_kloc, wasted_share, build, open_prs, open_long]
       properties:
         from: { $ref: "#/components/schemas/Instant" }
         to: { $ref: "#/components/schemas/Instant" }
@@ -784,6 +790,73 @@ components:
               compared:
                 type: integer
                 description: Repos of the kind with enough runs in both periods to compare, every one, not only the listed.
+        open_prs:
+          $ref: "#/components/schemas/Change"
+          description: PRs open at the period's end against those at the previous one's end; undirected.
+        open_long:
+          $ref: "#/components/schemas/Change"
+          description: PRs open a week or longer at the period's end against the previous one's end; fewer is better.
+
+    PRWaiting:
+      type: string
+      enum: [draft, first_review, review, changes, merge]
+      description: |
+        What an open PR waits on, the first that applies: `draft` still a
+        draft; `changes` a reviewer asked for changes (Bitbucket's status
+        on its latest event); `merge` approved, not merged; `review` a
+        reviewer touched it; `first_review` nobody did yet. Bots' reviews
+        do not count.
+
+    WaitingCounts:
+      type: object
+      description: Open PRs by what they wait on.
+      additionalProperties: false
+      required: [draft, first_review, review, changes, merge]
+      properties:
+        draft: { type: integer }
+        first_review: { type: integer }
+        review: { type: integer }
+        changes: { type: integer }
+        merge: { type: integer }
+
+    OpenRepo:
+      type: object
+      additionalProperties: false
+      required: [repo, open, long, oldest_s, age, waiting]
+      properties:
+        repo: { type: string }
+        open: { type: integer }
+        long: { type: integer, description: Open `long_days` or longer. }
+        oldest_s: { $ref: "#/components/schemas/Seconds" }
+        age: { $ref: "#/components/schemas/Spread" }
+        waiting: { $ref: "#/components/schemas/WaitingCounts" }
+
+    OpenPRs:
+      type: object
+      description: |
+        The PRs open at the period's end, whenever opened (every other PR
+        number counts a PR once merged), GitOps promotions left out, bots'
+        only with `bots=1`. Read from the events before `at` only: the
+        previous period's end reads what was open then, plus the PRs open
+        all along that riptide heard of only later. Age from the PR's
+        creation date as Bitbucket sends it.
+      additionalProperties: false
+      required: [at, long_days, open, long, age, waiting, long_waiting, repos]
+      properties:
+        at: { $ref: "#/components/schemas/Instant" }
+        long_days: { type: integer, description: "Open this many days or more is long open (7)." }
+        open: { type: integer }
+        long: { type: integer }
+        age: { $ref: "#/components/schemas/Spread" }
+        waiting: { $ref: "#/components/schemas/WaitingCounts" }
+        long_waiting: { $ref: "#/components/schemas/WaitingCounts" }
+        repos:
+          type: array
+          description: |
+            Repos with a long-open PR by how many, then by the oldest; then
+            the rest the same way. The top 8, and every repo with a
+            long-open PR past them.
+          items: { $ref: "#/components/schemas/OpenRepo" }
 
     Share:
       type: object
@@ -1262,10 +1335,12 @@ components:
 
     PRFact:
       type: object
-      description: A PR opened or merged in the period, newest merge or opening first.
+      description: |
+        A PR open at the period's end, whenever opened, oldest first; then
+        a PR opened or merged in the period, newest merge or opening first.
       additionalProperties: false
       required: [repo, pr_id, title, jira_prefix, gitops, bot, change_type, state, review_s, cycle_s, merged_at,
-                 prod_at, to_prod_s]
+                 prod_at, to_prod_s, age_s, waiting]
       properties:
         repo: { type: string }
         pr_id: { type: integer }
@@ -1282,6 +1357,14 @@ components:
           $ref: "#/components/schemas/NullableInstant"
           description: The merge commit's first production deploy.
         to_prod_s: { $ref: "#/components/schemas/NullableSeconds" }
+        age_s:
+          $ref: "#/components/schemas/NullableSeconds"
+          description: A PR open at the period's end, its age then; null for every other PR.
+        waiting:
+          oneOf:
+            - { $ref: "#/components/schemas/PRWaiting" }
+            - { type: "null" }
+          description: A PR open at the period's end, what it waits on; null for every other PR.
 
     DeployFact:
       type: object

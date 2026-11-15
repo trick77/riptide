@@ -267,6 +267,51 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
         outlier_groups: [],
       },
     },
+    open_prs: {
+      at: w[w.length - 1].end,
+      long_days: 7,
+      open: 3,
+      long: 2,
+      age: { n: 3, p50: 9 * 86400, p90: 28 * 86400 },
+      waiting: { draft: 0, first_review: 2, review: 0, changes: 0, merge: 1 },
+      long_waiting: {
+        draft: 0,
+        first_review: 1,
+        review: 0,
+        changes: 0,
+        merge: 1,
+      },
+      repos: [
+        {
+          repo: "kasse/kasse-api",
+          open: 2,
+          long: 2,
+          oldest_s: 30 * 86400,
+          age: { n: 2, p50: 19.5 * 86400, p90: 28 * 86400 },
+          waiting: {
+            draft: 0,
+            first_review: 1,
+            review: 0,
+            changes: 0,
+            merge: 1,
+          },
+        },
+        {
+          repo: "portal/portal-web",
+          open: 1,
+          long: 0,
+          oldest_s: 2 * 86400,
+          age: { n: 1, p50: 2 * 86400, p90: 2 * 86400 },
+          waiting: {
+            draft: 0,
+            first_review: 1,
+            review: 0,
+            changes: 0,
+            merge: 0,
+          },
+        },
+      ],
+    },
     costs: {
       total: 0.75,
       merged: 0.5,
@@ -308,6 +353,8 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       untracked: lowSample,
       cost_per_kloc: change("none", null, "incomplete"),
       wasted_share: lowSample,
+      open_prs: change("same", 3),
+      open_long: change("same", 2),
       build: [
         {
           kind: "release",
@@ -351,6 +398,8 @@ export function prFact(o: Partial<PRFact> = {}): PRFact {
     merged_at: ago(1.8),
     prod_at: ago(1),
     to_prod_s: 0.8 * 86400,
+    age_s: null,
+    waiting: null,
     ...o,
   };
 }
@@ -402,6 +451,8 @@ export function facts(o: Partial<Facts> = {}): Facts {
       merged_at: null,
       prod_at: null,
       to_prod_s: null,
+      age_s: 2 * 86400,
+      waiting: "first_review",
     }),
   ];
   const deploys = [

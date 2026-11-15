@@ -6,7 +6,9 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import type { LeadChain, Metrics, StageKey } from "./api";
 import { GroupedBars } from "./charts";
-import { dur, durParts, pct } from "./format";
+import { dateTime, dur, durParts, pct } from "./format";
+import { OpenPRs } from "./OpenPRs";
+import type { Tab } from "./state";
 import {
   Card,
   CardHead,
@@ -64,6 +66,7 @@ type Props = {
   m: Metrics;
   why: string | null;
   onWhy: (key: string) => void;
+  onFacts: (tab: Tab, q: string) => void;
 };
 
 function Chain({ m }: { m: Metrics }) {
@@ -190,7 +193,7 @@ function Chain({ m }: { m: Metrics }) {
   );
 }
 
-export function Flow({ m, why, onWhy }: Props) {
+export function Flow({ m, why, onWhy, onFacts }: Props) {
   const { t } = useTranslation();
   const prod = m.delivery.production_stage;
   const r = m.review;
@@ -260,6 +263,24 @@ export function Flow({ m, why, onWhy }: Props) {
       ],
       coverage: t("flow.cycle.coverage"),
       query: "docs/metrics.md · PR cycle time",
+    },
+    open: {
+      title: t("open.long.label"),
+      means: t("open.why.means"),
+      watch: t("open.why.watch"),
+      lever: t("open.why.lever"),
+      def: t("open.why.def", { days: m.open_prs.long_days }),
+      basis: t("open.why.basis", {
+        count: m.open_prs.open,
+        at: dateTime(m.open_prs.at),
+      }),
+      filters: [
+        t("common.withoutGitOps"),
+        t("common.withoutBots"),
+        "non_human_identities",
+      ],
+      coverage: t("open.why.coverage"),
+      query: "docs/metrics.md · Open PR age",
     },
   };
   const open = why && whys[why] ? whys[why] : null;
@@ -398,7 +419,15 @@ export function Flow({ m, why, onWhy }: Props) {
           </div>
         </div>
       </Card>
-      {open && <WhyPanel why={open} />}
+      {open && why !== "open" && <WhyPanel why={open} />}
+
+      <OpenPRs
+        m={m}
+        open={why === "open"}
+        onWhy={() => onWhy("open")}
+        onFacts={onFacts}
+      />
+      {open && why === "open" && <WhyPanel why={open} />}
     </section>
   );
 }

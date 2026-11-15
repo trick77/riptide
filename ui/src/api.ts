@@ -213,8 +213,34 @@ export type Costs = {
   reviewed_repos: number;
 };
 
+export type PRWaiting =
+  "draft" | "first_review" | "review" | "changes" | "merge";
+
+export type WaitingCounts = Record<PRWaiting, number>;
+
+export type OpenRepo = {
+  repo: string;
+  open: number;
+  long: number;
+  oldest_s: number;
+  age: Spread;
+  waiting: WaitingCounts;
+};
+
+// The PRs open at the period's end, whenever opened.
+export type OpenPRs = {
+  at: string;
+  long_days: number;
+  open: number;
+  long: number;
+  age: Spread;
+  waiting: WaitingCounts;
+  long_waiting: WaitingCounts;
+  repos: OpenRepo[];
+};
+
 export type Finding = {
-  kind: "stage" | "flaky" | "slow" | "first_touch";
+  kind: "stage" | "flaky" | "slow" | "first_touch" | "open_prs";
   tone: "attention" | "hint" | "talk";
   stage: StageKey | null;
   run_kind: RunKind | null;
@@ -251,6 +277,8 @@ export type Comparison = {
   cost_per_kloc: Change;
   wasted_share: Change;
   build: KindChange[];
+  open_prs: Change;
+  open_long: Change;
 };
 
 export type Metrics = {
@@ -262,6 +290,7 @@ export type Metrics = {
   delivery: Delivery;
   lead_chain: LeadChain;
   review: Review;
+  open_prs: OpenPRs;
   build: Build;
   costs: Costs;
   findings: Finding[];
@@ -282,6 +311,9 @@ export type PRFact = {
   merged_at: string | null;
   prod_at: string | null;
   to_prod_s: number | null;
+  // A PR open at the period's end: its age then, what it waits on.
+  age_s: number | null;
+  waiting: PRWaiting | null;
 };
 
 export type DeployFact = {

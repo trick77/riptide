@@ -58,6 +58,7 @@ type Metrics struct {
 	Delivery  Delivery `json:"delivery"`
 	LeadChain Chain    `json:"lead_chain"`
 	Review    Review   `json:"review"`
+	OpenPRs   OpenPRs  `json:"open_prs"`
 	Build     Build    `json:"build"`
 	Costs     Costs    `json:"costs"`
 	// Findings are what the numbers ask the team to look at.
@@ -81,8 +82,8 @@ func Compute(ds, prev *dataset.Dataset, p Params) Metrics {
 	pm := compute(prev, p.Previous, f, &baseline{repos: names})
 	base := &baseline{repos: names, kinds: pm.Build.repos, incomplete: buildsIncomplete(ds.Meta, p.Previous.From)}
 	m := compute(ds, p.Period, f, base)
-	m.Findings = findings(m.LeadChain, m.Build, m.Review)
 	m.Comparison = compare(m, pm, p.Previous)
+	m.Findings = findings(m.LeadChain, m.Build, m.Review, m.OpenPRs, m.Comparison.OpenLong)
 	return m
 }
 
@@ -98,6 +99,7 @@ func compute(ds *dataset.Dataset, period Period, f filter, base *baseline) Metri
 		Delivery:  delivery(ds, period, f, ch),
 		LeadChain: leadChain(ch),
 		Review:    review(humans, mergedPRs(ds, period, f, f.bots), period, ch),
+		OpenPRs:   openSection(ds, f),
 		Build:     build(ds, period, f, base),
 		Costs:     costs(ds, f),
 	}
