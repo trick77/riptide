@@ -1,5 +1,5 @@
 -- The window's merged PRs' merge commits, first deploy per environment, from
--- lead_time_changes (README, lead-time breakdown query). No upper time
+-- lead_time_changes (docs/metrics.md, lead-time breakdown query). No upper time
 -- bound: a PR merged in the window that reached production after it still
 -- has a production stage. The team filter is on a grouping column of the
 -- view, so it applies before the per-commit aggregation.

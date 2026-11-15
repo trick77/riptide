@@ -4,7 +4,7 @@
 -- its kind are read off pipeline_name in Go.
 --
 -- The run's repository is the one Bitbucket saw its commit in: pipeline and
--- Bitbucket rows join on the App-repo commit SHA (README). One repository
+-- Bitbucket rows join on the App-repo commit SHA (docs/metrics.md). One repository
 -- per run, however many events carry the SHA (a push and the PR's events).
 --
 -- $1 team, $2 window start (inclusive), $3 window end (exclusive).

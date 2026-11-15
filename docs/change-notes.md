@@ -242,7 +242,8 @@ config entry.
 
 Rows already ingested keep the `is_automated` they were written with — the
 tables are append-only. Read-time queries filter historical rows through the
-`non_human_identities` CTE in the README's pickup-time query.
+`non_human_identities` CTE in the pickup-time query in
+[metrics.md](metrics.md#pickup-time-query).
 
 **Redeploy the collector.** Anything older than the draft→ready parser fix
 stores raw `pr:modified` rows and emits no `pr:ready_for_review`, so PRs opened

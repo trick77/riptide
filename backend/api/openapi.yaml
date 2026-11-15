@@ -271,7 +271,7 @@ paths:
         Delivery, lead-time breakdown, code review, builds with their
         hotspots, and noergler costs of the team over the period: whole
         calendar weeks in the viewer's zone, the current one running to now.
-        The rules are the README's metric queries. Product = Bitbucket
+        The rules are the metric queries in docs/metrics.md. Product = Bitbucket
         project key, the part of a repository's name before `/`; an App's
         product is that of the GitOps repo its revision is a commit of.
 

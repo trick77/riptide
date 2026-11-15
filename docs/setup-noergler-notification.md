@@ -101,7 +101,8 @@ actor working on its own), `service` (a technical account a system acts through)
 or `human` (a person, counted as one).
 
 Read-time queries exclude declared-automation accounts — see the
-`bot_identities` CTE in the pickup-time query in the README. Undeclared, the bot
+`non_human_identities` CTE in the pickup-time query in
+[metrics.md](metrics.md#pickup-time-query). Undeclared, the bot
 counts as a human reviewer and drives code-review pickup time toward zero.
 Adding the handle to the `automation` config as well is still worthwhile: that
 tags new rows `is_automated` at ingest.

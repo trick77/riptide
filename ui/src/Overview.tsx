@@ -239,7 +239,7 @@ export function Overview({ m, why, onWhy, onFacts }: Props) {
         (freq.first_seen > 0
           ? t("overview.freq.coverageFirst")
           : t("overview.freq.coverageAll")),
-      query: "README · Deployment-frequency query",
+      query: "docs/metrics.md · Deployment-frequency query",
     },
     lead: {
       title: t("overview.lead.label", { prod }),

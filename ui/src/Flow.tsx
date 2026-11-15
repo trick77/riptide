@@ -220,7 +220,7 @@ export function Flow({ m, why, onWhy }: Props) {
         t("common.withoutGitOps"),
       ],
       coverage: t("flow.review.coverage"),
-      query: "README · Lead-time breakdown query",
+      query: "docs/metrics.md · Lead-time breakdown query",
     },
     touch: {
       title: t("flow.touch.label"),
@@ -238,7 +238,7 @@ export function Flow({ m, why, onWhy }: Props) {
         t("common.withoutGitOps"),
       ],
       coverage: t("flow.touch.coverage"),
-      query: "README · Lead-time breakdown query",
+      query: "docs/metrics.md · Lead-time breakdown query",
     },
     cycle: {
       title: t("flow.cycle.label"),
@@ -259,7 +259,7 @@ export function Flow({ m, why, onWhy }: Props) {
         t("flow.cycle.filterMerged"),
       ],
       coverage: t("flow.cycle.coverage"),
-      query: "README · PR cycle time",
+      query: "docs/metrics.md · PR cycle time",
     },
   };
   const open = why && whys[why] ? whys[why] : null;

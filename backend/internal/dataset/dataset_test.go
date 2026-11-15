@@ -594,25 +594,25 @@ func TestDatasetExcludedProject(t *testing.T) {
 	}
 }
 
-// The metrics computed from the facts reproduce the README's reference
+// The metrics computed from the facts reproduce docs/metrics.md's reference
 // queries run on the same data: the weekly counts of the
 // deployment-frequency query and every stage of the lead-time breakdown.
-// UTC weeks, as date_trunc('week') in the README. The period ends with the
-// seed's window: the README counts a revision re-synced in a later week in
+// UTC weeks, as date_trunc('week') in the doc. The period ends with the
+// seed's window: the doc query counts a revision re-synced in a later week in
 // that week too, the metrics once, in the week it first deployed.
-func TestMetricsMatchTheREADMEQueries(t *testing.T) {
+func TestMetricsMatchTheDocumentedQueries(t *testing.T) {
 	st, pool := migrated(t)
 	seed(t, pool)
 	period := metrics.NewPeriod(26, days(28), time.UTC)
 	m := metrics.Compute(load(t, st, period.From, period.To), nil, metrics.Params{Period: period})
 
 	t.Run("deployment frequency", func(t *testing.T) {
-		rows := readmeRows(t, pool, "#### Deployment-frequency query",
+		rows := docRows(t, pool, "#### Deployment-frequency query",
 			`SELECT week, releases, first_seen, syncs FROM (%s) q WHERE team = 'checkout'`)
-		readme := map[string][3]int64{}
+		doc := map[string][3]int64{}
 		for _, r := range rows {
 			if week := r[0].(time.Time); week.Before(period.To) {
-				readme[week.Format(time.DateOnly)] = [3]int64{r[1].(int64), r[2].(int64), r[3].(int64)}
+				doc[week.Format(time.DateOnly)] = [3]int64{r[1].(int64), r[2].(int64), r[3].(int64)}
 			}
 		}
 		// The same counts from the metrics: distinct revisions per week.
@@ -622,49 +622,49 @@ func TestMetricsMatchTheREADMEQueries(t *testing.T) {
 				facts[period.Weeks[i].Start.Format(time.DateOnly)] = [3]int64{int64(w.Release), int64(w.FirstSeen), int64(n)}
 			}
 		}
-		if len(readme) != len(facts) || m.Delivery.Frequency.Releases != 1 {
-			t.Fatalf("weeks: readme %v, metrics %v (releases %d)", readme, facts, m.Delivery.Frequency.Releases)
+		if len(doc) != len(facts) || m.Delivery.Frequency.Releases != 1 {
+			t.Fatalf("weeks: doc %v, metrics %v (releases %d)", doc, facts, m.Delivery.Frequency.Releases)
 		}
-		for wk, want := range readme {
+		for wk, want := range doc {
 			if facts[wk] != want {
-				t.Errorf("week %s: metrics %v, readme %v", wk, facts[wk], want)
+				t.Errorf("week %s: metrics %v, doc %v", wk, facts[wk], want)
 			}
 		}
 	})
 
 	t.Run("lead-time breakdown", func(t *testing.T) {
-		rows := readmeRows(t, pool, "#### Lead-time breakdown query",
+		rows := docRows(t, pool, "#### Lead-time breakdown query",
 			`SELECT step, prs, extract(epoch FROM p50)::float8, approved_on_first_touch FROM (%s) q`)
 		if len(rows) != 5 || len(m.LeadChain.Stages) != 5 {
-			t.Fatalf("readme stages = %v, metrics %+v", rows, m.LeadChain.Stages)
+			t.Fatalf("doc stages = %v, metrics %+v", rows, m.LeadChain.Stages)
 		}
 		for _, r := range rows {
 			step, prs, p50 := r[0].(int32), r[1].(int64), r[2].(float64)
 			got := m.LeadChain.Stages[step-1]
 			if int64(got.N) != prs || got.P50 == nil || math.Abs(*got.P50-p50) > 1 {
-				t.Errorf("stage %d (%s): metrics %d PRs p50 %v, readme %d PRs p50 %.0fs", step, got.Key, got.N, got.P50, prs, p50)
+				t.Errorf("stage %d (%s): metrics %d PRs p50 %v, doc %d PRs p50 %.0fs", step, got.Key, got.N, got.P50, prs, p50)
 			}
 			if step == 2 {
 				first := int64(m.Review.ApprovedOnFirstTouch)
 				if r[3] == nil || r[3].(int64) != first || first != 1 {
-					t.Errorf("approved on first touch: metrics %d, readme %v", first, r[3])
+					t.Errorf("approved on first touch: metrics %d, doc %v", first, r[3])
 				}
 			}
 		}
 	})
 }
 
-// readmeRows runs the first SQL block under heading in the README, wrapped
-// by outer (a %s for the README query), in UTC.
-func readmeRows(t *testing.T, pool *pgxpool.Pool, heading, outer string) [][]any {
+// docRows runs the first SQL block under heading in docs/metrics.md,
+// wrapped by outer (a %s for the doc's query), in UTC.
+func docRows(t *testing.T, pool *pgxpool.Pool, heading, outer string) [][]any {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "README.md"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "docs", "metrics.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, after, ok := strings.Cut(string(raw), heading)
 	if !ok {
-		t.Fatalf("README has no %q", heading)
+		t.Fatalf("docs/metrics.md has no %q", heading)
 	}
 	_, after, ok = strings.Cut(after, "```sql\n")
 	if !ok {
@@ -683,7 +683,7 @@ func readmeRows(t *testing.T, pool *pgxpool.Pool, heading, outer string) [][]any
 	}
 	rows, err := tx.Query(ctx, strings.Replace(outer, "%s", query, 1))
 	if err != nil {
-		t.Fatalf("README query under %q: %v", heading, err)
+		t.Fatalf("docs/metrics.md query under %q: %v", heading, err)
 	}
 	defer rows.Close()
 	var out [][]any
