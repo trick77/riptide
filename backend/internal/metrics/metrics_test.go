@@ -329,7 +329,6 @@ func TestChain(t *testing.T) {
 	for _, s := range c.Stages {
 		total += *s.P50
 	}
-	expectNear(t, "sum", c.SumP50, total)
 	expectNear(t, "to prod share", stage(c, StageToProd).Share, 20*h/total)
 	if !stage(c, StageCoding).Hot || stage(c, StageToProd).Hot {
 		t.Errorf("hot = %+v", c.Stages)
@@ -358,7 +357,7 @@ func TestChainWithoutAStageBeforeProduction(t *testing.T) {
 
 	// No PR at all: nothing to sum, no shares.
 	empty := leadChain(chainOf(data(), p4(), filter{}))
-	if empty.SumP50 != nil || stage(empty, StageCoding).Share != nil || stage(empty, StageCoding).Hot {
+	if stage(empty, StageCoding).Share != nil || stage(empty, StageCoding).Hot {
 		t.Errorf("empty = %+v", empty)
 	}
 	// All medians zero: equal shares, never NaN.
@@ -542,13 +541,13 @@ func TestCosts(t *testing.T) {
 
 func TestCompute(t *testing.T) {
 	ds := prData()
-	m := Compute(ds, Params{Period: p4(), Product: "portal", Bots: true})
+	m := Compute(ds, nil, Params{Period: p4(), Product: "portal", Bots: true})
 	if m.Product == nil || *m.Product != "portal" || !m.Bots || m.Review.Merged != 1 || len(m.Period.Weeks) != 4 ||
 		len(m.Review.CycleHistogram.UpperBoundsS) != len(m.Review.CycleHistogram.Human)-1 {
 		t.Errorf("portal = %+v", m)
 	}
 	// A product without data is all of them.
-	if m := Compute(ds, Params{Period: p4(), Product: "nope"}); m.Product != nil || m.Review.Merged != 3 {
+	if m := Compute(ds, nil, Params{Period: p4(), Product: "nope"}); m.Product != nil || m.Review.Merged != 3 {
 		t.Errorf("unknown product = %+v", m.Review)
 	}
 }

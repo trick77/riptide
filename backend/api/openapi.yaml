@@ -674,7 +674,8 @@ components:
     Metrics:
       type: object
       additionalProperties: false
-      required: [meta, period, products, product, bots, delivery, lead_chain, review, build, costs]
+      required: [meta, period, products, product, bots, delivery, lead_chain, review, build, costs, findings,
+                 comparison]
       properties:
         meta: { $ref: "#/components/schemas/Meta" }
         period: { $ref: "#/components/schemas/Period" }
@@ -690,6 +691,101 @@ components:
         review: { $ref: "#/components/schemas/Review" }
         build: { $ref: "#/components/schemas/Build" }
         costs: { $ref: "#/components/schemas/Costs" }
+        findings:
+          type: array
+          description: |
+            What the numbers ask the team to look at: attention first (a
+            stage taking half the time to production or more, on 10 PRs or
+            more, flaky repos by
+            wasted CI time, slow repos by factor, a repo once), a stage hint
+            after them, at most 3; then the first-touch rate to talk about,
+            when any PR was approved.
+          items: { $ref: "#/components/schemas/Finding" }
+        comparison: { $ref: "#/components/schemas/Comparison" }
+
+    Finding:
+      type: object
+      description: The UI words a finding from `kind` and reads its numbers off the section it names.
+      additionalProperties: false
+      required: [kind, tone, stage, run_kind, repo]
+      properties:
+        kind: { type: string, enum: [stage, flaky, slow, first_touch] }
+        tone: { type: string, enum: [attention, hint, talk] }
+        stage:
+          type: [string, "null"]
+          enum: [coding, review, merge, to_pre, to_prod, null]
+          description: The lead chain's hot stage, for `stage`.
+        run_kind:
+          oneOf:
+            - { $ref: "#/components/schemas/RunKind" }
+            - { type: "null" }
+          description: The kind whose hotspots name the repo, for `flaky` and `slow`.
+        repo: { type: [string, "null"] }
+
+    Change:
+      type: object
+      description: |
+        A number against the previous period. Durations and rates count as
+        the same within 10 % of the previous value, shares within 3 points.
+      additionalProperties: false
+      required: [prev, verdict, reason]
+      properties:
+        prev:
+          $ref: "#/components/schemas/NullableNumber"
+          description: The previous period's value; null when the periods do not compare.
+        verdict: { type: string, enum: [better, worse, same, none] }
+        reason:
+          type: [string, "null"]
+          enum: [low_sample, incomplete, no_value, undirected, null]
+          description: |
+            Why the verdict is none. `low_sample`: too few in one of the
+            periods. `incomplete`: the previous period starts before its
+            source's data, or a period has more first deploys than releases.
+            `no_value`: a value missing. `undirected`: no better direction;
+            `prev` is set.
+
+    Comparison:
+      type: object
+      description: The page's numbers against the same number of whole weeks right before the period.
+      additionalProperties: false
+      required: [from, to, deploy_frequency, deploy_success, lead_time, lead_time_pre, review_time, within_day,
+                 first_touch, untracked, cost_per_kloc, wasted_share, build]
+      properties:
+        from: { $ref: "#/components/schemas/Instant" }
+        to: { $ref: "#/components/schemas/Instant" }
+        deploy_frequency: { $ref: "#/components/schemas/Change" }
+        deploy_success: { $ref: "#/components/schemas/Change" }
+        lead_time: { $ref: "#/components/schemas/Change" }
+        lead_time_pre:
+          oneOf:
+            - { $ref: "#/components/schemas/Change" }
+            - { type: "null" }
+        review_time: { $ref: "#/components/schemas/Change" }
+        within_day: { $ref: "#/components/schemas/Change" }
+        first_touch: { $ref: "#/components/schemas/Change" }
+        untracked: { $ref: "#/components/schemas/Change" }
+        cost_per_kloc: { $ref: "#/components/schemas/Change" }
+        wasted_share: { $ref: "#/components/schemas/Change" }
+        build:
+          type: array
+          description: Per kind of run of the period, against the previous period's runs of the same kind.
+          items:
+            type: object
+            additionalProperties: false
+            required: [kind, success, duration]
+            properties:
+              kind: { $ref: "#/components/schemas/RunKind" }
+              success: { $ref: "#/components/schemas/Change" }
+              duration: { $ref: "#/components/schemas/Change" }
+
+    Share:
+      type: object
+      additionalProperties: false
+      required: [count, n, rate]
+      properties:
+        count: { type: integer }
+        n: { type: integer }
+        rate: { $ref: "#/components/schemas/NullableNumber" }
 
     Period:
       type: object
@@ -731,7 +827,7 @@ components:
       description: Successful production syncs in the period, counted once per GitOps revision.
       additionalProperties: false
       required: [releases, syncs, first_seen, resyncs, per_week, low_sample, since, weeks, succeeded, failed,
-                 finished, success_rate, argo_reporting]
+                 finished, success_rate, argo_reporting, median_week]
       properties:
         releases: { type: integer, description: Revisions that brought new images. }
         syncs: { type: integer, description: All revisions. }
@@ -764,6 +860,11 @@ components:
         argo_reporting:
           type: boolean
           description: Argo CD reported for the team before the period's end.
+        median_week:
+          $ref: "#/components/schemas/NullableNumber"
+          description: |
+            Median of the releases per week over the whole weeks Argo CD
+            reported all of, the running week left out.
 
     LeadTimes:
       type: object
@@ -780,7 +881,7 @@ components:
       type: object
       description: The lead-time breakdown per human PR merged in the period.
       additionalProperties: false
-      required: [stages, pre_environment, sum_p50, before_prod]
+      required: [stages, pre_environment, attention_share, min_prs, before_prod]
       properties:
         stages:
           type: array
@@ -800,9 +901,12 @@ components:
                 description: The stage's part of the summed medians, 0..1; equal parts when all medians are 0.
               hot: { type: boolean, description: The stage with the largest median. }
         pre_environment: { type: [string, "null"] }
-        sum_p50:
-          $ref: "#/components/schemas/NullableNumber"
-          description: Sum of the stage medians; null when no stage has data.
+        attention_share:
+          type: number
+          description: The hot stage's share from which it is a finding to attend to, not a hint.
+        min_prs:
+          type: integer
+          description: The PRs the hot stage needs for that, as for `low_sample`.
         before_prod:
           type: number
           description: Sum of the medians before the last stage.
@@ -811,7 +915,7 @@ components:
       type: object
       additionalProperties: false
       required: [cycle, review, approved, approved_on_first_touch, first_touch_rate, merged, untracked,
-                 untracked_rate, cycle_histogram, change_mix]
+                 untracked_rate, cycle_histogram, within_day, change_mix, mix_total, mix_share]
       properties:
         cycle:
           $ref: "#/components/schemas/Spread"
@@ -837,18 +941,36 @@ components:
               items: { type: number }
             human: { type: array, items: { type: integer } }
             bot: { type: array, items: { type: integer } }
+        within_day:
+          $ref: "#/components/schemas/Share"
+          description: Of the PRs in `cycle`, those merged under 24 h after opening (exclusive, as the histogram's bounds).
         change_mix:
           type: array
           description: Merged PRs per week by branch prefix.
-          items:
-            type: object
-            additionalProperties: false
-            required: [feature, bugfix, hotfix, other]
-            properties:
-              feature: { type: integer }
-              bugfix: { type: integer }
-              hotfix: { type: integer }
-              other: { type: integer }
+          items: { $ref: "#/components/schemas/MixCounts" }
+        mix_total:
+          $ref: "#/components/schemas/MixCounts"
+          description: "`change_mix` over the period."
+        mix_share:
+          type: object
+          description: Each prefix's part of `mix_total`, 0..1; null without merged PRs.
+          additionalProperties: false
+          required: [feature, bugfix, hotfix, other]
+          properties:
+            feature: { $ref: "#/components/schemas/NullableNumber" }
+            bugfix: { $ref: "#/components/schemas/NullableNumber" }
+            hotfix: { $ref: "#/components/schemas/NullableNumber" }
+            other: { $ref: "#/components/schemas/NullableNumber" }
+
+    MixCounts:
+      type: object
+      additionalProperties: false
+      required: [feature, bugfix, hotfix, other]
+      properties:
+        feature: { type: integer }
+        bugfix: { type: integer }
+        hotfix: { type: integer }
+        other: { type: integer }
 
     Build:
       type: object
@@ -921,7 +1043,7 @@ components:
         rates, but in no duration or wasted time.
       additionalProperties: false
       required: [min_runs, slow_factor, flaky_factor, outlier_factor, outlier_min_s, outlier_repo_min_runs, kinds,
-                 outliers]
+                 outliers, outlier_count, outlier_groups]
       properties:
         min_runs: { type: integer, description: Runs a repo needs in a kind to be flagged. }
         slow_factor: { type: number, description: A repo median this many times the team's is slow. }
@@ -945,7 +1067,7 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [kind, duration, failure_rate, durations, failing, outlier_threshold_s]
+            required: [kind, duration, failure_rate, durations, failing, repos, outlier_threshold_s]
             properties:
               kind: { $ref: "#/components/schemas/RunKind" }
               duration:
@@ -983,6 +1105,29 @@ components:
                     failure_rate: { $ref: "#/components/schemas/NullableNumber" }
                     wasted_seconds: { $ref: "#/components/schemas/Seconds" }
                     flaky: { type: boolean }
+              repos:
+                type: array
+                description: |
+                  Both lists in one, a row per repo with a counted run: the
+                  flaky ones by wasted CI time, then the slow ones by factor,
+                  then the rest by wasted time and median; the top 8 and every
+                  flagged one.
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [repo, runs, duration, factor, slow, failures, failure_rate, wasted_seconds, flaky]
+                  properties:
+                    repo: { type: string }
+                    runs: { type: integer, description: Runs with a verdict. }
+                    duration:
+                      $ref: "#/components/schemas/Spread"
+                      description: Over the runs with a verdict and a duration, outliers left out.
+                    factor: { $ref: "#/components/schemas/NullableNumber" }
+                    slow: { type: boolean }
+                    failures: { type: integer }
+                    failure_rate: { $ref: "#/components/schemas/NullableNumber" }
+                    wasted_seconds: { $ref: "#/components/schemas/Seconds" }
+                    flaky: { type: boolean }
               outlier_threshold_s:
                 $ref: "#/components/schemas/NullableSeconds"
                 description: |
@@ -1012,12 +1157,32 @@ components:
                 description: |
                   The part of `duration_s` spent waiting for a build agent; null
                   when the CI did not report `agent_started_at`.
+        outlier_count:
+          type: integer
+          description: Every outlier of the period, before the cut to the top 10.
+        outlier_groups:
+          type: array
+          description: |
+            Outliers of all kinds, before the cut to the top 10, chained by
+            start: one started within 30 min of a group's last joins it. Two
+            runs or more, the largest first. Shared: two repos or more, so the
+            build agents, not a repo.
+          items:
+            type: object
+            additionalProperties: false
+            required: [from, to, runs, repos, shared]
+            properties:
+              from: { $ref: "#/components/schemas/Instant" }
+              to: { $ref: "#/components/schemas/Instant" }
+              runs: { type: integer }
+              repos: { type: array, items: { type: string } }
+              shared: { type: boolean }
 
     Costs:
       type: object
       description: noergler spend, final rollups closed in the period, in USD.
       additionalProperties: false
-      required: [total, merged, merged_reviews, per_kloc, wasted, rows, reviewed_repos]
+      required: [total, merged, merged_reviews, per_kloc, wasted, wasted_share, rows, reviewed_repos]
       properties:
         total: { type: number }
         merged: { type: number }
@@ -1026,6 +1191,9 @@ components:
           $ref: "#/components/schemas/NullableNumber"
           description: Per 1000 changed lines of merged PRs.
         wasted: { type: number, description: Spent on PRs declined or deleted. }
+        wasted_share:
+          $ref: "#/components/schemas/NullableNumber"
+          description: "`wasted` over `total`, 0..1; null when `total` is 0."
         rows:
           type: array
           description: By product (all products) or by repo (one product), largest first.

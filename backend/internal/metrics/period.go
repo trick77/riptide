@@ -41,7 +41,19 @@ func weekStart(t time.Time, loc *time.Location) time.Time {
 // NewPeriod is the period of the given number of weeks ending now. Calendar
 // arithmetic, so a week across a DST switch is 167 or 169 hours.
 func NewPeriod(weeks int, now time.Time, loc *time.Location) Period {
-	first := weekStart(now, loc).AddDate(0, 0, -7*(weeks-1))
+	return periodFrom(weekStart(now, loc).AddDate(0, 0, -7*(weeks-1)), weeks, now)
+}
+
+// PreviousPeriod is the period the one NewPeriod gives is compared with:
+// the same number of weeks right before it, every one of them whole.
+func PreviousPeriod(weeks int, now time.Time, loc *time.Location) Period {
+	end := weekStart(now, loc).AddDate(0, 0, -7*(weeks-1))
+	return periodFrom(end.AddDate(0, 0, -7*weeks), weeks, end)
+}
+
+// periodFrom is the given number of calendar weeks from first (a Monday
+// 00:00 in the viewer's zone), the period ending at to.
+func periodFrom(first time.Time, weeks int, to time.Time) Period {
 	list := make([]Week, weeks)
 	for i := range list {
 		start := first.AddDate(0, 0, 7*i)
@@ -50,9 +62,9 @@ func NewPeriod(weeks int, now time.Time, loc *time.Location) Period {
 	}
 	return Period{
 		From:  first.UTC(),
-		To:    now.UTC(),
+		To:    to.UTC(),
 		Weeks: list,
-		Span:  float64(now.Sub(first)) / float64(7*24*time.Hour),
+		Span:  float64(to.Sub(first)) / float64(7*24*time.Hour),
 	}
 }
 
