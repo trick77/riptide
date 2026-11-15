@@ -130,11 +130,11 @@ function Td({ cell }: { cell: Cell }) {
 
 export function FrameworkMap() {
   return (
-    <section id="landkarte" aria-labelledby="h-landkarte" className="mt-10">
+    <section id="frameworks" aria-labelledby="h-frameworks" className="mt-10">
       <SectionHead
-        id="h-landkarte"
+        id="h-frameworks"
         eyebrow="Einordnung"
-        title="Welche Metrik-Sets Riptide abdeckt"
+        title="Welche Frameworks Riptide abdeckt"
         lead="Riptide misst aus den Daten der Tools, was ohne Umfrage messbar ist: von den fünf DORA-Metriken zwei, DX Core 4 teilweise. SPACE und DevEx brauchen zusätzlich Befragungen."
       />
       <div className="overflow-x-auto rounded-ui-lg border border-border bg-panel px-5 pt-4 pb-3">
