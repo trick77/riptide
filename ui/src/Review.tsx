@@ -72,7 +72,7 @@ export function Review({ m, why, onWhy }: Props) {
       def: "Anteil der approvten PRs, deren erster Reviewer-Kontakt das Approval selbst ist. Hoch heisst: Review ohne sichtbare Diskussion in Bitbucket.",
       basis: `${r.approved_on_first_touch} von ${r.approved} approvten PRs.`,
       filters: ["ohne Bot-Kommentare", "ohne Bots", "ohne GitOps-Repos"],
-      coverage: "Mündliche Reviews sieht riptide nicht.",
+      coverage: "Mündliche Reviews sieht Riptide nicht.",
       query: "README · Lead-time breakdown query",
     },
     untracked: {
