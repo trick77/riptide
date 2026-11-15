@@ -282,7 +282,7 @@ func TestDataset(t *testing.T) {
 			t.Fatalf("reviews = %+v", d.Reviews)
 		}
 		r := d.Reviews[0]
-		if r.PRKey != kasseAPI+"#7" || str(r.Repo) != kasseAPI || str(r.Project) != "kasse" || str(r.Outcome) != "merged" ||
+		if r.PRKey != kasseAPI+"#7" || str(r.Repo) != kasseAPI || str(r.Project) != "kasse" || r.GitOps || str(r.Outcome) != "merged" ||
 			str(r.CostUSD) != "0.123456" || *r.LinesAdded != 10 || *r.LinesRemoved != 2 || *r.FilesChanged != 3 ||
 			*r.FindingsCount != 4 || *r.TotalRuns != 2 || !r.ClosedAt.Equal(days(1).Add(5*time.Hour)) {
 			t.Errorf("review = %+v", r)
@@ -444,6 +444,23 @@ func TestDatasetEnvironmentsAfterTheWindow(t *testing.T) {
 	}
 	if len(d.LeadTimes) != 0 {
 		t.Errorf("lead times past the window: %d", len(d.LeadTimes))
+	}
+}
+
+// A noergler review of a stage promotion is flagged gitops, as the PR is:
+// teams let noergler review them, on purpose or not.
+func TestDatasetReviewOfPromotion(t *testing.T) {
+	st, pool := migrated(t)
+	seed(t, pool)
+	s := &seeder{t: t, pool: pool, n: 1000}
+	s.rollup(team, kasseOps+"#3", "merged", days(2))
+	d := load(t, st, t0, days(28))
+	gitops := map[string]bool{}
+	for _, r := range d.Reviews {
+		gitops[r.PRKey] = r.GitOps
+	}
+	if len(gitops) != 2 || !gitops[kasseOps+"#3"] || gitops[kasseAPI+"#7"] {
+		t.Errorf("reviews gitops = %v", gitops)
 	}
 }
 

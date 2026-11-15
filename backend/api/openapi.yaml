@@ -1182,18 +1182,21 @@ components:
       type: object
       description: noergler spend, final rollups closed in the period, in USD.
       additionalProperties: false
-      required: [total, merged, merged_reviews, per_kloc, wasted, wasted_share, rows, reviewed_repos]
+      required: [total, merged, merged_reviews, per_kloc, wasted, wasted_share, promotion, promotion_reviews,
+                 rows, reviewed_repos]
       properties:
-        total: { type: number }
-        merged: { type: number }
-        merged_reviews: { type: integer }
+        total: { type: number, description: "Every outcome, stage promotions included." }
+        merged: { type: number, description: "Merged PRs, GitOps repos out." }
+        merged_reviews: { type: integer, description: "Merged PRs, GitOps repos out." }
         per_kloc:
           $ref: "#/components/schemas/NullableNumber"
-          description: Per 1000 changed lines of merged PRs.
-        wasted: { type: number, description: Spent on PRs declined or deleted. }
+          description: Per 1000 changed lines of merged PRs, GitOps repos out.
+        wasted: { type: number, description: "Spent on PRs declined or deleted, GitOps repos out." }
         wasted_share:
           $ref: "#/components/schemas/NullableNumber"
-          description: "`wasted` over `total`, 0..1; null when `total` is 0."
+          description: "`wasted` over `total` less `promotion`, 0..1; null when that is 0."
+        promotion: { type: number, description: "Spent on stage-promotion PRs (GitOps repos), every outcome." }
+        promotion_reviews: { type: integer, description: "Stage-promotion PRs reviewed." }
         rows:
           type: array
           description: By product (all products) or by repo (one product), largest first.

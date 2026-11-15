@@ -4,10 +4,23 @@
 -- window filter applies after the view picked the newest rollup, so a PR is
 -- counted in the window its final outcome landed in.
 --
+-- `gitops` flags a stage promotion, as in prs.sql: teams let noergler review
+-- them too. Flagged, not dropped: the spend is real, only its per-change
+-- figures leave it out.
+--
 -- $1 team, $2 window start (inclusive), $3 window end (exclusive).
+WITH gitops_repos AS (
+  -- GitOps repos: their commits are what argocd_events.revision points at
+  -- (README, "Reading the event tables"). Over all data, not the window.
+  SELECT DISTINCT repo_full_name
+  FROM bitbucket_events
+  WHERE commit_sha IN (SELECT revision FROM argocd_events)
+    AND repo_full_name IS NOT NULL
+)
 SELECT r.pr_key,
        r.repo,
        split_part(r.repo, '/', 1) AS project,
+       coalesce(r.repo IN (SELECT repo_full_name FROM gitops_repos), false) AS gitops,
        r.outcome,
        r.cost_usd::text AS cost_usd,
        r.lines_added,
