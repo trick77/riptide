@@ -168,7 +168,7 @@ export default function App() {
     <div className="flex min-h-screen flex-col bg-bg text-ink">
       <header className="flex min-h-14 flex-wrap items-center gap-x-[22px] gap-y-1.5 border-b border-border bg-panel px-6 py-2.5">
         <h1 className="m-0 font-serif text-[21px] leading-7 font-medium whitespace-nowrap text-wordmark">
-          riptide
+          Riptide
         </h1>
         <nav aria-label="Bereiche" className="no-print flex flex-wrap gap-0.5">
           {NAV.map(([id, label]) => (
@@ -412,7 +412,7 @@ export default function App() {
         )}
 
         <footer className="mt-10 border-t border-border-soft pt-3.5 text-xs text-faint">
-          riptide liest die Rohdaten nur. Jede Zahl lässt sich über «Woher?» bis
+          Riptide liest die Rohdaten nur. Jede Zahl lässt sich über «Woher?» bis
           zur Query zurückverfolgen.
         </footer>
       </main>

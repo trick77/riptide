@@ -78,7 +78,7 @@ export function Delivery({ m, why, onWhy }: Props) {
         `environment = ${prod}`,
       ],
       coverage:
-        "Nur Commits, die riptide einem Deploy zuordnen kann (Image-Referenz des Builds oder Release-Notes); ein Deploy ohne Zuordnung fehlt hier.",
+        "Nur Commits, die Riptide einem Deploy zuordnen kann (Image-Referenz des Builds oder Release-Notes); ein Deploy ohne Zuordnung fehlt hier.",
       query: "lead_time_changes · docs/dora-lead-time.md",
     },
     leadPre: {

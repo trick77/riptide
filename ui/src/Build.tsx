@@ -258,7 +258,7 @@ export function Build({ m }: { m: Metrics }) {
       {b.starts_inside && b.data_from && (
         <Note>
           Build-Daten ab {fullDate(new Date(b.data_from))}: der erste Lauf, den
-          riptide für das Team erhalten hat. Ältere Wochen bleiben leer statt
+          Riptide für das Team erhalten hat. Ältere Wochen bleiben leer statt
           falsch.
         </Note>
       )}
