@@ -1,5 +1,5 @@
 -- One row per Argo CD sync of the team in the window that finished
--- (Succeeded or Failed), with its kind per the README's deployment-frequency
+-- (Succeeded or Failed), with its kind per docs/metrics.md's deployment-frequency
 -- query:
 --   release     a successful deploy whose images differ from the same App's
 --               previous successful deploy
@@ -10,7 +10,7 @@
 --   NULL        a failed sync: it deployed nothing
 -- The previous deploy is looked up over the App's whole history, not the
 -- window, so the window start does not turn every App's first deploy in it
--- into first_seen. Partitioned by team, App and environment: the README's
+-- into first_seen. Partitioned by team, App and environment: the doc query's
 -- per-App lag after its environment filter, and another team's App of the
 -- same name never decides this team's kinds. A release reconciles every App
 -- sharing its GitOps revision: count releases as distinct revisions.

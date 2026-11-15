@@ -1,6 +1,6 @@
 // Package dataset reads the per-team facts package metrics computes every
 // number from: one row per PR, deploy, shipped commit, CI run and noergler
-// review in a window, never an aggregate. The rules are the README's metric
+// review in a window, never an aggregate. The rules are docs/metrics.md's
 // queries, one embedded .sql file per section; product, GitOps and bot
 // derivations come from the data, never from name lists. HTTP, parameters
 // and config belong to package api.
@@ -433,7 +433,7 @@ func reviewed(pr *PR, automated func(login, displayName string) bool) {
 }
 
 // attachEnvironments gives every PR its merge commit's first deploy per
-// environment. The README's breakdown query looks each one up in
+// environment. docs/metrics.md's breakdown query looks each one up in
 // lead_time_changes; here the view is read once for all of them. Both SHAs
 // arrive lowercased from SQL.
 func attachEnvironments(prs []PR, shipped []shippedCommit) {

@@ -11,7 +11,7 @@
 -- $1 team, $2 window start (inclusive), $3 window end (exclusive).
 WITH gitops_repos AS (
   -- GitOps repos: their commits are what argocd_events.revision points at
-  -- (README, "Reading the event tables"). Over all data, not the window.
+  -- (docs/metrics.md, "Reading the event tables"). Over all data, not the window.
   SELECT DISTINCT repo_full_name
   FROM bitbucket_events
   WHERE commit_sha IN (SELECT revision FROM argocd_events)

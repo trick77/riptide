@@ -12,7 +12,7 @@ import (
 )
 
 // Percentile is Postgres' percentile_cont: linear interpolation between the
-// two nearest ranks, so the numbers match the README's queries. Nil on no
+// two nearest ranks, so the numbers match docs/metrics.md's queries. Nil on no
 // values; values is left unsorted.
 func Percentile(values []float64, p float64) *float64 {
 	if len(values) == 0 {

@@ -3,7 +3,7 @@
 -- falls in it; its timestamps then come from its whole history, so a PR
 -- opened before the window keeps its opened_at.
 --
--- The README's lead-time breakdown and pickup-time queries, per PR instead of
+-- docs/metrics.md's lead-time breakdown and pickup-time queries, per PR instead of
 -- aggregated, and with their WHERE filters turned into flags: `gitops` (a
 -- stage promotion, not work) and `bot`. The UI drops what it does not count.
 -- `bot` here is the ingest-time flag and sender declarations; Go adds
@@ -12,7 +12,7 @@
 --
 -- $1 team, $2 window start (inclusive), $3 window end (exclusive).
 WITH non_human_identities AS (
-  -- Accounts senders declared as non-human (README, pickup-time query):
+  -- Accounts senders declared as non-human (docs/metrics.md, pickup-time query):
   -- is_automated is decided at ingest, so rows written before an identity
   -- was declared are caught here.
   SELECT DISTINCT lower(reviewer_handle) AS handle
@@ -25,7 +25,7 @@ WITH non_human_identities AS (
 ),
 gitops_repos AS (
   -- GitOps repos: their commits are what argocd_events.revision points at
-  -- (README, "Reading the event tables"). Over all data, not the window.
+  -- (docs/metrics.md, "Reading the event tables"). Over all data, not the window.
   SELECT DISTINCT repo_full_name
   FROM bitbucket_events
   WHERE commit_sha IN (SELECT revision FROM argocd_events)
@@ -55,11 +55,11 @@ prs AS (
          (array_agg(e.payload->'pullRequest'->>'title' ORDER BY e.occurred_at DESC, e.id DESC)
              FILTER (WHERE e.payload->'pullRequest'->>'title' IS NOT NULL))[1] AS title,
          bool_or(e.is_automated) FILTER (WHERE e.event_type IN ('pr:opened', 'pr:merged')) AS automated,
-         -- change_type means something only on these two (README).
+         -- change_type means something only on these two (docs/metrics.md).
          coalesce(max(e.change_type) FILTER (WHERE e.event_type = 'pr:opened'),
                   max(e.change_type) FILTER (WHERE e.event_type = 'pr:merged')) AS change_type,
          min(e.occurred_at) FILTER (WHERE e.event_type = 'pr:opened') AS opened_at,
-         -- Pickup clock start (README, pickup-time query): the draft->ready
+         -- Pickup clock start (docs/metrics.md, pickup-time query): the draft->ready
          -- flip, else the opening of a PR not opened as a draft. A draft never
          -- made ready has none.
          coalesce(min(e.occurred_at) FILTER (WHERE e.event_type = 'pr:ready_for_review'),
@@ -77,7 +77,7 @@ prs AS (
   JOIN window_prs w ON w.repo_full_name = e.repo_full_name AND w.pr_id = e.pr_id
   GROUP BY e.repo_full_name, e.pr_id
 ),
--- Oldest commit pushed to the PR's branch; a rebase resets it (README,
+-- Oldest commit pushed to the PR's branch; a rebase resets it (docs/metrics.md,
 -- lead-time breakdown query). A branch name is reused (a long-lived
 -- source branch, measured in a month: up to 138 pushes on one branch, up to
 -- 12 PRs from one branch), so only the pushes of this PR's own life count:
@@ -128,7 +128,7 @@ first_commits AS (
 chain AS (
   SELECT p.*, fc.first_commit_at,
          -- Reviewer touches after the clock start, the opener, bots and
-         -- declared non-humans excluded (README, pickup-time query), oldest
+         -- declared non-humans excluded (docs/metrics.md, pickup-time query), oldest
          -- first. Go drops the authors riptide's automation detection
          -- recognises today and takes first_review_at and approved_at from
          -- what is left, so both count the same reviewers.
