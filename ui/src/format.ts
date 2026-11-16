@@ -17,6 +17,19 @@ export function pct(x: number | null): string {
   return x == null ? "–" : `${num(x * 100, 0)} %`;
 }
 
+// A part of a whole: as pct, but a part that is there never reads 0 %.
+export function partPct(x: number): string {
+  return x > 0 && x < 0.005 ? "< 1 %" : pct(x);
+}
+
+// CI time in hours as the build section shows it, to a tenth; time that is
+// there never reads 0.0 h.
+export function ciHours(seconds: number): string {
+  return seconds > 0 && seconds < 180
+    ? i18n.t("common.hours", { n: `< ${num(0.1, 1)}` })
+    : i18n.t("common.hours", { n: num(seconds / 3600, 1) });
+}
+
 export function money(x: number): string {
   return `$${num(x, 2)}`;
 }

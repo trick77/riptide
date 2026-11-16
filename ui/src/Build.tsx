@@ -7,6 +7,9 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   BuildStats,
+  CIFlow,
+  Hotspots,
+  FlowOutcome,
   KindChange,
   Metrics,
   Outlier,
@@ -14,8 +17,19 @@ import type {
   RepoHotspot,
   RunKind,
 } from "./api";
-import { clock, dateTime, dayMonth, dur, fullDate, num, pct } from "./format";
+import {
+  ciHours,
+  clock,
+  dateTime,
+  dayMonth,
+  dur,
+  fullDate,
+  num,
+  partPct,
+  pct,
+} from "./format";
 import { Quiver } from "./quiver";
+import { Sankey, type SankeyLink, type SankeyNode } from "./sankey";
 import type { Tab } from "./state";
 import { Card, CardHead, Compare, Mono, Note, Pill, SectionHead } from "./ui";
 
@@ -415,6 +429,103 @@ function OutlierTable({ rows }: { rows: Outlier[] }) {
   );
 }
 
+// Where each kind's CI hours went: a failed stream stands out without
+// setting kinds against each other, each share is of its own kind's time.
+const OUTCOME_LOOK: Record<
+  FlowOutcome,
+  Pick<SankeyNode, "color" | "linkOpacity" | "hatch" | "danger" | "solid">
+> = {
+  succeeded: { color: "var(--color-ink-3)", linkOpacity: 0.45 },
+  failed: {
+    color: "var(--color-danger)",
+    linkOpacity: 0.85,
+    danger: true,
+    solid: true,
+  },
+  no_verdict: { color: "var(--color-faint)", linkOpacity: 0.45, hatch: true },
+  outlier: { color: "var(--color-ochre)", linkOpacity: 0.45 },
+};
+
+// The kinds in this chart: the remainder kinds grey, so no pink stream
+// reads as a second red next to the failed one.
+const FLOW_KIND: Record<RunKind, string> = {
+  ...KIND_STROKE,
+  other: "var(--color-other)",
+  unknown: "var(--color-axis)",
+};
+
+// A middot between parts of a heading, an en space either side.
+const EN = String.fromCharCode(0x2002);
+const SEP = `${EN}·${EN}`;
+
+function FlowCard({ f, h }: { f: CIFlow; h: Hotspots }) {
+  const { t } = useTranslation();
+  // The one place that decides: nothing to draw, no card.
+  if (!f.links.length) return null;
+  const kindLabel = (k: RunKind) => t(`build.kind.${k}`);
+  const outcomeLabel = (o: FlowOutcome) => t(`build.flow.outcome.${o}`);
+  // The cards above count CI time without outliers; a kind's node here
+  // says so when it holds some.
+  const stuck = new Set(
+    f.links.filter((l) => l.outcome === "outlier").map((l) => l.kind),
+  );
+  const left: SankeyNode[] = f.kinds.map((k) => ({
+    key: k.kind,
+    label: kindLabel(k.kind),
+    value: stuck.has(k.kind)
+      ? t("build.flow.withOutliers", { h: ciHours(k.seconds) })
+      : ciHours(k.seconds),
+    color: FLOW_KIND[k.kind],
+    linkOpacity: 0.5,
+  }));
+  const right: SankeyNode[] = f.outcomes.map((o) => ({
+    key: o.outcome,
+    label: `${o.outcome === "failed" ? "▼ " : ""}${outcomeLabel(o.outcome)}`,
+    value: `${ciHours(o.seconds)} · ${partPct(o.share)}`,
+    ...OUTCOME_LOOK[o.outcome],
+  }));
+  const links: SankeyLink[] = f.links.map((l) => ({
+    from: l.kind,
+    to: l.outcome,
+    seconds: l.seconds,
+    title: `${kindLabel(l.kind)} → ${outcomeLabel(l.outcome)}`,
+    rows: [
+      [t("build.flow.tipHours"), ciHours(l.seconds)],
+      [
+        t("build.flow.tipOfKind", { kind: kindLabel(l.kind) }),
+        partPct(l.share_of_kind),
+      ],
+      [t("build.flow.tipOfAll"), partPct(l.share)],
+    ],
+  }));
+  return (
+    <Card className="mt-3">
+      <CardHead
+        title={t("build.flow.title")}
+        sub={t("build.flow.sub", { sep: SEP })}
+      />
+      <Sankey
+        left={left}
+        right={right}
+        links={links}
+        ariaLabel={t("build.flow.aria", {
+          parts: links
+            .map((l) => `${l.title}: ${ciHours(l.seconds)}`)
+            .join(", "),
+        })}
+      />
+      <p className="mt-2.5 mb-0 text-xs text-muted">
+        {t("build.flow.rule", {
+          outliers: t("build.stuckSub", {
+            factor: num(h.outlier_factor, 0),
+            min: dur(h.outlier_min_s),
+          }),
+        })}
+      </p>
+    </Card>
+  );
+}
+
 export function Build({
   m,
   onFacts,
@@ -469,6 +580,8 @@ export function Build({
             ))}
           </div>
           <p className="mt-2 mb-0 text-xs text-muted">{t("build.legend")}</p>
+
+          <FlowCard f={b.ci_flow} h={h} />
 
           <Card className="mt-3">
             <CardHead

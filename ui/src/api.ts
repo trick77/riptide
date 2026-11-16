@@ -128,6 +128,31 @@ export type BuildStats = {
   weekly: (number | null)[];
 };
 
+export type FlowOutcome = "succeeded" | "failed" | "no_verdict" | "outlier";
+
+export type FlowKind = { kind: RunKind; seconds: number; share: number };
+
+export type FlowOutcomeShare = {
+  outcome: FlowOutcome;
+  seconds: number;
+  share: number;
+};
+
+export type FlowLink = {
+  kind: RunKind;
+  outcome: FlowOutcome;
+  seconds: number;
+  share_of_kind: number;
+  share: number;
+};
+
+export type CIFlow = {
+  total_seconds: number;
+  kinds: FlowKind[];
+  outcomes: FlowOutcomeShare[];
+  links: FlowLink[];
+};
+
 export type KindHotspots = {
   kind: RunKind;
   duration: Spread;
@@ -209,6 +234,7 @@ export type Build = {
   starts_inside: boolean;
   gap_weeks: number;
   kinds: BuildStats[];
+  ci_flow: CIFlow;
   hotspots: Hotspots;
 };
 

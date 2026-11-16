@@ -81,6 +81,8 @@ func verdict(r dataset.Run) string {
 	return VerdictNone
 }
 
+// seconds is r's CI time, none without a duration (teamRuns drops a
+// negative one).
 func seconds(r dataset.Run) float64 {
 	if r.DurationS == nil {
 		return 0
@@ -168,6 +170,12 @@ type BuildStats struct {
 	OutlierSeconds float64 `json:"outlier_seconds"`
 	// Weekly is the success rate per week, null for a week without runs.
 	Weekly []*float64 `json:"weekly"`
+
+	// The kind's time split by outcome without overlap, an outlier only
+	// ever counting as an outlier whatever its verdict: succeeded +
+	// WastedSeconds + noVerdict = CISeconds, plus OutlierSeconds = total.
+	// Sent once, as Build.CIFlow.
+	total, succeeded, noVerdict float64
 }
 
 // tally counts runs by verdict; runs are those with one.
@@ -201,7 +209,9 @@ type Build struct {
 	// wrong; all of them without any run data.
 	GapWeeks int          `json:"gap_weeks"`
 	Kinds    []BuildStats `json:"kinds"`
-	Hotspots Hotspots     `json:"hotspots"`
+	// CIFlow is Kinds' CI time from kind to outcome.
+	CIFlow   CIFlow   `json:"ci_flow"`
+	Hotspots Hotspots `json:"hotspots"`
 	// repos are every repo's runs per kind, the next period's baseline;
 	// compared the repos per kind with a previous period to compare with.
 	// Both before the hotspots' cut to the top.
@@ -216,6 +226,11 @@ func teamRuns(ds *dataset.Dataset, f filter) map[string][]dataset.Run {
 	for _, r := range ds.Runs {
 		if r.Status == nil || !f.in(r.Project) {
 			continue
+		}
+		// A finish before the start (clock skew) is no duration: read once
+		// here, so CI time, its split, medians and outliers all agree.
+		if r.DurationS != nil && *r.DurationS < 0 {
+			r.DurationS = nil
 		}
 		k := RunKind(r, ds.Meta.BuildTypeFrom)
 		by[k] = append(by[k], r)
@@ -281,9 +296,12 @@ func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
 			b.CISeconds += seconds(r)
 			switch v {
 			case VerdictNone:
+				b.noVerdict += seconds(r)
 				continue
 			case VerdictFailure:
 				b.WastedSeconds += seconds(r)
+			default:
+				b.succeeded += seconds(r)
 			}
 			if r.DurationS != nil {
 				durations = append(durations, float64(*r.DurationS))
@@ -293,6 +311,7 @@ func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
 				}
 			}
 		}
+		b.total = b.CISeconds + b.OutlierSeconds
 		b.Runs, b.Succeeded, b.Failed, b.NoVerdict = t.runs, t.succeeded, t.failed, t.none
 		b.SuccessRate = ratio(b.Succeeded, b.Runs)
 		b.Duration = spread(durations)
@@ -312,6 +331,7 @@ func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
 		out.Hotspots.Kinds = append(out.Hotspots.Kinds, k)
 		out.Hotspots.Outliers = append(out.Hotspots.Outliers, outliers...)
 	}
+	out.CIFlow = ciFlow(out.Kinds)
 	o := out.Hotspots.Outliers
 	// Grouped before the cut to the longest: a short stuck run still tells
 	// that the agents were gone.
@@ -320,6 +340,107 @@ func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
 	slices.SortStableFunc(o, func(a, b Outlier) int { return cmp.Compare(b.DurationS, a.DurationS) })
 	out.Hotspots.Outliers = o[:min(len(o), outlierTop)]
 	return out
+}
+
+// Flow outcomes (the spec's FlowOutcome): where a run's CI time went, each
+// second in exactly one. Not the facts' run outcomes: UNSTABLE is failed CI
+// time here.
+const (
+	FlowSucceeded = "succeeded"
+	// FlowFailed is BuildStats.WastedSeconds: FAILURE, UNSTABLE, Failed.
+	FlowFailed = "failed"
+	// FlowNoVerdict: ABORTED, NOT_BUILT, Tekton's None, a Jenkins
+	// timeout().
+	FlowNoVerdict = "no_verdict"
+	// FlowOutlier: a run past its kind's outlier threshold, whatever its
+	// verdict.
+	FlowOutlier = "outlier"
+)
+
+// CIFlow is the CI time of every kind by outcome, outliers included. Hours
+// add up across kinds, so the outcomes total them; a share of a kind is of
+// that kind's own time only, never compared with another kind's.
+type CIFlow struct {
+	// TotalSeconds is every kind's time, outliers included.
+	TotalSeconds float64 `json:"total_seconds"`
+	// Kinds are those with time, in Build.Kinds' order: the left nodes,
+	// each its CISeconds plus OutlierSeconds.
+	Kinds []FlowKind `json:"kinds"`
+	// Outcomes are those with time, in the order succeeded, failed,
+	// no_verdict, outlier: the right nodes.
+	Outcomes []FlowOutcomeShare `json:"outcomes"`
+	// Links are the kinds' outcomes with time, by kind as Kinds, then by
+	// outcome as Outcomes.
+	Links []FlowLink `json:"links"`
+}
+
+// FlowKind is one kind's time, all its outcomes.
+type FlowKind struct {
+	Kind    string  `json:"kind"`
+	Seconds float64 `json:"seconds"`
+	// Share is of CIFlow.TotalSeconds.
+	Share float64 `json:"share"`
+}
+
+// FlowOutcomeShare is one outcome's time across kinds.
+type FlowOutcomeShare struct {
+	Outcome string  `json:"outcome"`
+	Seconds float64 `json:"seconds"`
+	// Share is of CIFlow.TotalSeconds.
+	Share float64 `json:"share"`
+}
+
+// FlowLink is one kind's time with one outcome.
+type FlowLink struct {
+	Kind    string  `json:"kind"`
+	Outcome string  `json:"outcome"`
+	Seconds float64 `json:"seconds"`
+	// ShareOfKind is of the kind's FlowKind.Seconds.
+	ShareOfKind float64 `json:"share_of_kind"`
+	// Share is of CIFlow.TotalSeconds.
+	Share float64 `json:"share"`
+}
+
+// outcomeSeconds is b's total split by outcome, in CIFlow's order.
+func outcomeSeconds(b BuildStats) [4]float64 {
+	return [4]float64{b.succeeded, b.WastedSeconds, b.noVerdict, b.OutlierSeconds}
+}
+
+var flowOutcomes = [4]string{FlowSucceeded, FlowFailed, FlowNoVerdict, FlowOutlier}
+
+func ciFlow(kinds []BuildStats) CIFlow {
+	f := CIFlow{Kinds: []FlowKind{}, Outcomes: []FlowOutcomeShare{}, Links: []FlowLink{}}
+	var sums [4]float64
+	for _, b := range kinds {
+		f.TotalSeconds += b.total
+		for i, s := range outcomeSeconds(b) {
+			sums[i] += s
+		}
+	}
+	// No time to split: no run with a duration.
+	if f.TotalSeconds <= 0 {
+		return f
+	}
+	for i, s := range sums {
+		if s > 0 {
+			f.Outcomes = append(f.Outcomes, FlowOutcomeShare{Outcome: flowOutcomes[i], Seconds: s, Share: s / f.TotalSeconds})
+		}
+	}
+	for _, b := range kinds {
+		if b.total <= 0 {
+			continue
+		}
+		f.Kinds = append(f.Kinds, FlowKind{Kind: b.Kind, Seconds: b.total, Share: b.total / f.TotalSeconds})
+		for i, s := range outcomeSeconds(b) {
+			if s > 0 {
+				f.Links = append(f.Links, FlowLink{
+					Kind: b.Kind, Outcome: flowOutcomes[i], Seconds: s,
+					ShareOfKind: s / b.total, Share: s / f.TotalSeconds,
+				})
+			}
+		}
+	}
+	return f
 }
 
 // kindRuns are one kind's runs, each with its repo, its verdict and whether

@@ -264,6 +264,41 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
         kindStats("main", 1, 0, n),
         kindStats("feature", 1, 0, n),
       ],
+      ci_flow: {
+        total_seconds: 1800,
+        kinds: [
+          { kind: "release", seconds: 600, share: 1 / 3 },
+          { kind: "main", seconds: 600, share: 1 / 3 },
+          { kind: "feature", seconds: 600, share: 1 / 3 },
+        ],
+        outcomes: [
+          { outcome: "succeeded", seconds: 600, share: 1 / 3 },
+          { outcome: "failed", seconds: 1200, share: 2 / 3 },
+        ],
+        links: [
+          {
+            kind: "release",
+            outcome: "succeeded",
+            seconds: 600,
+            share_of_kind: 1,
+            share: 1 / 3,
+          },
+          {
+            kind: "main",
+            outcome: "failed",
+            seconds: 600,
+            share_of_kind: 1,
+            share: 1 / 3,
+          },
+          {
+            kind: "feature",
+            outcome: "failed",
+            seconds: 600,
+            share_of_kind: 1,
+            share: 1 / 3,
+          },
+        ],
+      },
       hotspots: {
         min_runs: 10,
         slow_factor: 1.5,

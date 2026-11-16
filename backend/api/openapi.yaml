@@ -1090,7 +1090,7 @@ components:
     Build:
       type: object
       additionalProperties: false
-      required: [data_from, starts_inside, gap_weeks, kinds, hotspots]
+      required: [data_from, starts_inside, gap_weeks, kinds, ci_flow, hotspots]
       properties:
         data_from:
           $ref: "#/components/schemas/NullableInstant"
@@ -1101,7 +1101,75 @@ components:
           type: array
           description: Per kind of run with runs, never averaged across kinds.
           items: { $ref: "#/components/schemas/BuildStats" }
+        ci_flow: { $ref: "#/components/schemas/CIFlow" }
         hotspots: { $ref: "#/components/schemas/Hotspots" }
+
+    FlowOutcome:
+      type: string
+      enum: [succeeded, failed, no_verdict, outlier]
+      description: |
+        Where a run's CI time went, each second in exactly one: `succeeded`,
+        `failed` (FAILURE, UNSTABLE, Failed: BuildStats' `wasted_seconds`),
+        `no_verdict` (ABORTED, NOT_BUILT, Tekton's None, a Jenkins timeout),
+        each outliers aside; `outlier`, any verdict.
+
+    CIFlow:
+      type: object
+      additionalProperties: false
+      description: |
+        Build's `kinds`' CI time from kind to outcome, outliers included,
+        no second twice: per kind, succeeded + failed + no_verdict =
+        `ci_seconds` and outlier = `outlier_seconds`. Hours add up across
+        kinds; a share of a kind is of its own time only. A negative
+        duration (clock skew) is no duration, here and everywhere else.
+      required: [total_seconds, kinds, outcomes, links]
+      properties:
+        total_seconds:
+          $ref: "#/components/schemas/Seconds"
+          description: Every kind's time, outliers included; 0 without a duration.
+        kinds:
+          type: array
+          description: Kinds with time, in Build's `kinds` order; their `seconds` sum to `total_seconds`.
+          items: { $ref: "#/components/schemas/FlowKind" }
+        outcomes:
+          type: array
+          description: Outcomes with time, in FlowOutcome's order; their `seconds` sum to `total_seconds`.
+          items: { $ref: "#/components/schemas/FlowOutcomeShare" }
+        links:
+          type: array
+          description: A kind's outcomes with time, by kind as `kinds`, then by outcome.
+          items: { $ref: "#/components/schemas/FlowLink" }
+
+    FlowKind:
+      type: object
+      additionalProperties: false
+      required: [kind, seconds, share]
+      properties:
+        kind: { $ref: "#/components/schemas/RunKind" }
+        seconds:
+          $ref: "#/components/schemas/Seconds"
+          description: "The kind's `ci_seconds` + `outlier_seconds`."
+        share: { type: number, description: "Of CIFlow's `total_seconds`." }
+
+    FlowOutcomeShare:
+      type: object
+      additionalProperties: false
+      required: [outcome, seconds, share]
+      properties:
+        outcome: { $ref: "#/components/schemas/FlowOutcome" }
+        seconds: { $ref: "#/components/schemas/Seconds" }
+        share: { type: number, description: "Of CIFlow's `total_seconds`." }
+
+    FlowLink:
+      type: object
+      additionalProperties: false
+      required: [kind, outcome, seconds, share_of_kind, share]
+      properties:
+        kind: { $ref: "#/components/schemas/RunKind" }
+        outcome: { $ref: "#/components/schemas/FlowOutcome" }
+        seconds: { $ref: "#/components/schemas/Seconds" }
+        share_of_kind: { type: number, description: "Of the kind's FlowKind `seconds`." }
+        share: { type: number, description: "Of CIFlow's `total_seconds`." }
 
     BuildStats:
       type: object
@@ -1111,7 +1179,8 @@ components:
         a failure nor a run, as in the hotspots: it counts in `no_verdict`
         and `ci_seconds` only, so `runs` = `succeeded` + `failed`. An
         outlier (see Hotspots) keeps its verdict but none of its time: it
-        counts in `outlier_runs` and `outlier_seconds` instead.
+        counts in `outlier_runs` and `outlier_seconds` instead. The time
+        split by outcome is Build's `ci_flow`.
       required: [kind, runs, succeeded, failed, no_verdict, success_rate, duration, waiting, building, ci_seconds,
                  wasted_seconds, outlier_runs, outlier_seconds, weekly]
       properties:
