@@ -7,6 +7,18 @@ repository.
 Real account handles, hostnames and tokens belong in the mounted
 `riptide.json` / team-keys Secret, never in this file: the repository is public.
 
+## 2026-11-16 — Jira keys link to their tickets
+
+**`riptide.json` takes `jira.base_url`**, the Jira instance's root URL. Every
+Jira key in the PR table, in the title or before it, links to
+`<base_url>/browse/<KEY>`. Bitbucket payloads name no Jira instance, so set it
+in the production `riptide.json`; it is hot-reloaded. Unset, the keys are
+shown without a link.
+
+```json
+"jira": { "base_url": "https://jira.example.com" }
+```
+
 ## 2026-11-15 — projects left out of the metrics
 
 **`riptide.json` takes a top-level `excluded_projects`**, a list of

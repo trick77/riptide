@@ -397,12 +397,29 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
   };
 }
 
+// The parts the backend splits a fixture title into: a plain title is one
+// part, the default one starts with its linked key.
+function titleParts(title: string | null): PRFact["title_parts"] {
+  if (title === null) return [];
+  if (title !== "KAS-1: Pay by card") return [{ text: title, jira: null }];
+  return [
+    {
+      text: "KAS-1",
+      jira: { key: "KAS-1", url: "https://jira.example.com/browse/KAS-1" },
+    },
+    { text: ": Pay by card", jira: null },
+  ];
+}
+
 export function prFact(o: Partial<PRFact> = {}): PRFact {
+  const title = o.title === undefined ? "KAS-1: Pay by card" : o.title;
   return {
     repo: "kasse/kasse-api",
     pr_id: 1,
-    title: "KAS-1: Pay by card",
-    jira_prefix: "",
+    title,
+    title_parts: titleParts(title),
+    jira_prefix: [],
+    jira_more: 0,
     gitops: false,
     bot: false,
     change_type: "feature",
@@ -455,7 +472,12 @@ export function facts(o: Partial<Facts> = {}): Facts {
       repo: "kasse/kasse-gitops",
       gitops: true,
       title: "kasse PROD 1.1",
-      jira_prefix: "KAS-2 KAS-3 KAS-4",
+      jira_prefix: [
+        { key: "KAS-2", url: null },
+        { key: "KAS-3", url: null },
+        { key: "KAS-4", url: null },
+      ],
+      jira_more: 2,
     }),
     prFact({
       pr_id: 4,

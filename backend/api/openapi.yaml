@@ -1347,6 +1347,28 @@ components:
             count: { type: integer }
             rows: { type: array, items: { $ref: "#/components/schemas/RunFact" } }
 
+    JiraRef:
+      type: object
+      additionalProperties: false
+      required: [key, url]
+      properties:
+        key: { type: string, example: KAS-7 }
+        url:
+          type: [string, "null"]
+          description: The ticket, `<jira.base_url>/browse/<key>`; null when the config sets no `jira.base_url`.
+
+    TitlePart:
+      type: object
+      additionalProperties: false
+      required: [text, jira]
+      properties:
+        text: { type: string }
+        jira:
+          description: Set when the text is a Jira key.
+          oneOf:
+            - { $ref: "#/components/schemas/JiraRef" }
+            - { type: "null" }
+
     PRFact:
       type: object
       description: |
@@ -1354,13 +1376,21 @@ components:
         inactive ones after them; then a PR opened or merged in the period,
         newest merge or opening first.
       additionalProperties: false
-      required: [repo, pr_id, title, jira_prefix, gitops, bot, change_type, state, review_s, cycle_s, merged_at,
-                 prod_at, to_prod_s, age_s, waiting, idle_s]
+      required: [repo, pr_id, title, title_parts, jira_prefix, jira_more, gitops, bot, change_type, state, review_s,
+                 cycle_s, merged_at, prod_at, to_prod_s, age_s, waiting, idle_s]
       properties:
         repo: { type: string }
         pr_id: { type: integer }
         title: { type: [string, "null"] }
-        jira_prefix: { type: string, description: "The Jira keys the title does not show, three at most." }
+        title_parts:
+          type: array
+          description: The title split at its Jira keys; empty without a title.
+          items: { $ref: "#/components/schemas/TitlePart" }
+        jira_prefix:
+          type: array
+          description: The Jira keys the title does not show, three at most.
+          items: { $ref: "#/components/schemas/JiraRef" }
+        jira_more: { type: integer, minimum: 0, description: "Keys the title does not show beyond jira_prefix." }
         gitops: { type: boolean, description: A GitOps repo's promotion PR. }
         bot: { type: boolean }
         change_type: { type: [string, "null"] }

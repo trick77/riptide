@@ -326,7 +326,7 @@ describe("App", () => {
     mockFetch();
     const { unmount } = render(<App />);
     await screen.findByRole("heading", { name: "Was jetzt?" });
-    await screen.findByText("KAS-1: Pay by card");
+    await screen.findByText(": Pay by card");
     // A placeholder the call site names differently stays raw on screen.
     const raw = /\{\{|\}\}/;
     expect(document.body.textContent).not.toMatch(raw);
@@ -456,8 +456,21 @@ describe("App", () => {
       "aria-selected",
       "true",
     );
-    expect(screen.getByText("KAS-1: Pay by card")).toBeInTheDocument();
-    expect(screen.getByText("KAS-2 KAS-3 KAS-4")).toBeInTheDocument();
+    // A key in the title is orange and links to its ticket; one the title
+    // does not show is orange too, unlinked without a URL.
+    const key = screen.getByRole("link", { name: "KAS-1" });
+    expect(key).toHaveAttribute(
+      "href",
+      "https://jira.example.com/browse/KAS-1",
+    );
+    expect(key).toHaveAttribute("target", "_blank");
+    expect(key.parentElement).toHaveClass("text-accent-strong");
+    expect(key.closest("td")).toHaveTextContent("KAS-1: Pay by card");
+    for (const k of ["KAS-2", "KAS-3", "KAS-4"]) {
+      expect(screen.getByText(k)).toHaveClass("text-accent-strong");
+      expect(screen.queryByRole("link", { name: k })).toBeNull();
+    }
+    expect(screen.getByText("+2")).toBeInTheDocument();
     expect(screen.getByText("Promotion")).toBeInTheDocument();
     expect(screen.getByText("#4")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/Suche nach/), {
@@ -923,7 +936,7 @@ describe("App", () => {
         : metrics(),
     );
     render(<App />);
-    const row = (await screen.findByText("KAS-1: Pay by card")).closest("tr")!;
+    const row = (await screen.findByText(": Pay by card")).closest("tr")!;
     expect(within(row).getAllByText("–").length).toBeGreaterThan(0);
     expect(within(row).queryByText("0 s")).toBeNull();
   });

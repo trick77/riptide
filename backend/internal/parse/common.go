@@ -44,23 +44,33 @@ func isWord(r rune) bool {
 	return r == '_' || unicode.IsLetter(r) || unicode.IsNumber(r)
 }
 
-// JiraKeys returns the distinct Jira keys in first-seen order across texts.
+// JiraKeySpans returns the byte ranges of the Jira keys in s, in order.
 // A key must stand on word boundaries: `XABC-1` and `ABC-1x` are not keys.
+func JiraKeySpans(s string) [][2]int {
+	var out [][2]int
+	for _, loc := range jiraKeyRE.FindAllStringIndex(s, -1) {
+		if loc[0] > 0 {
+			if r, _ := utf8.DecodeLastRuneInString(s[:loc[0]]); isWord(r) {
+				continue
+			}
+		}
+		if loc[1] < len(s) {
+			if r, _ := utf8.DecodeRuneInString(s[loc[1]:]); isWord(r) {
+				continue
+			}
+		}
+		out = append(out, [2]int{loc[0], loc[1]})
+	}
+	return out
+}
+
+// JiraKeys returns the distinct Jira keys in first-seen order across texts,
+// found by JiraKeySpans.
 func JiraKeys(texts ...string) []string {
 	seen := map[string]bool{}
 	out := []string{}
 	for _, s := range texts {
-		for _, loc := range jiraKeyRE.FindAllStringIndex(s, -1) {
-			if loc[0] > 0 {
-				if r, _ := utf8.DecodeLastRuneInString(s[:loc[0]]); isWord(r) {
-					continue
-				}
-			}
-			if loc[1] < len(s) {
-				if r, _ := utf8.DecodeRuneInString(s[loc[1]:]); isWord(r) {
-					continue
-				}
-			}
+		for _, loc := range JiraKeySpans(s) {
 			key := s[loc[0]:loc[1]]
 			if !seen[key] {
 				seen[key] = true

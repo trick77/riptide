@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/mail"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -47,6 +48,9 @@ type Config struct {
 	// leave out: shared libraries and tooling, not a team's product. Applied
 	// on read, so the rows stay and the exclusion is retroactive.
 	ExcludedProjects map[string]bool
+	// JiraBaseURL is `jira.base_url` without a trailing slash; a key links
+	// to <JiraBaseURL>/browse/<KEY>. Empty: keys are shown, not linked.
+	JiraBaseURL string
 }
 
 // ExcludedProject reports whether the metrics leave the project key out.
@@ -157,7 +161,42 @@ func Parse(data []byte) (*Config, error) {
 		}
 		cfg.ExcludedProjects[k] = true
 	}
+
+	jira, err := parseJiraBaseURL(top["jira"])
+	if err != nil {
+		return nil, err
+	}
+	cfg.JiraBaseURL = jira
 	return cfg, nil
+}
+
+// parseJiraBaseURL reads the optional `jira` block. Bitbucket payloads name
+// no Jira instance, so the link target has to be configured.
+func parseJiraBaseURL(raw json.RawMessage) (string, error) {
+	if raw == nil || isNull(raw) {
+		return "", nil
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil || obj == nil {
+		return "", errors.New("`jira` must be an object")
+	}
+	rawURL, ok := obj["base_url"]
+	if !ok || isNull(rawURL) {
+		return "", nil
+	}
+	var s string
+	if err := json.Unmarshal(rawURL, &s); err != nil {
+		return "", errors.New("`jira.base_url` must be a string")
+	}
+	s = strings.TrimRight(strings.TrimSpace(s), "/")
+	u, err := url.Parse(s)
+	// A bare `?` or `#` parses as an empty query or fragment and would
+	// swallow /browse/<KEY>; userinfo would land in every href.
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" ||
+		strings.ContainsAny(s, "?#") || u.User != nil {
+		return "", fmt.Errorf("`jira.base_url` must be an absolute http(s) URL without credentials, query or fragment, got %q", s)
+	}
+	return u.String(), nil
 }
 
 func parseEnvironments(raw json.RawMessage) (Environments, error) {
