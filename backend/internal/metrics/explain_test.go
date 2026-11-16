@@ -352,6 +352,19 @@ func TestFindings(t *testing.T) {
 // Jammed repos: attention when more than at the previous period's end,
 // after the repos; else a hint after the stage's. Long-open PRs in no
 // jammed repo: nothing.
+func TestFindingsTieGoesToFeature(t *testing.T) {
+	// Flaky as release and feature with the same waste: one finding, the
+	// feature build's, as build() orders the kinds.
+	same := []RepoHotspot{{Repo: "kasse/web", Flaky: true, WastedSeconds: 900}}
+	b := Build{Hotspots: Hotspots{Kinds: []KindHotspots{
+		{Kind: KindFeature, Repos: same}, {Kind: KindRelease, Repos: same},
+	}}}
+	fs := findings(Chain{}, b, Review{}, OpenPRs{}, Change{Verdict: ChangeNone})
+	if len(fs) != 1 || *fs[0].RunKind != KindFeature {
+		t.Errorf("findings = %+v", fs)
+	}
+}
+
 func TestFindingsOpenPRs(t *testing.T) {
 	hint := Chain{Stages: []Stage{{Key: StageReview, Share: ptr(0.4), Hot: true}}}
 	kinds := func(fs []Finding) string {

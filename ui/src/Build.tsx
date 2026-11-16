@@ -6,6 +6,7 @@ import type { TFunction } from "i18next";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
+  BranchPrefix,
   BuildStats,
   CIFlow,
   Hotspots,
@@ -116,9 +117,22 @@ function KindCard({ b, low, m }: { b: BuildStats; low: number; m: Metrics }) {
   const { t } = useTranslation();
   const c = m.comparison.build.find((x) => x.kind === b.kind);
   const weeks = m.period.weeks;
+  // Feature builds are what developers wait on: first, twice as wide.
+  const lead = b.kind === "feature";
+  const big = lead ? "text-[26px]" : "text-[20px]";
   return (
-    <div className="flex min-w-0 flex-col gap-1 rounded-ui border border-border bg-panel px-4 py-3.5">
-      <div className="flex items-center gap-2 text-[13.5px] text-ink-dim">
+    <div
+      className={`flex min-w-0 flex-col gap-1 rounded-ui border bg-panel px-4 py-3.5 ${
+        lead ? "border-accent-dim md:col-span-2" : "border-border"
+      }`}
+    >
+      <div
+        className={`flex items-center gap-2 ${
+          lead
+            ? "text-[15px] font-medium text-ink"
+            : "text-[13.5px] text-ink-dim"
+        }`}
+      >
         <span
           aria-hidden="true"
           className="size-2.5 rounded-[3px]"
@@ -129,26 +143,43 @@ function KindCard({ b, low, m }: { b: BuildStats; low: number; m: Metrics }) {
       <div className="text-[11.5px] text-muted">
         {t(`build.kindNote.${b.kind}`)}
       </div>
+      {lead && (
+        <div className="text-xs text-accent-strong">
+          {t("build.featureWhy")}
+        </div>
+      )}
       <div className="mt-1 flex flex-wrap gap-x-5 gap-y-1">
         <div className="text-xs text-muted">
-          <div className="text-[20px] font-medium text-ink tabular-nums">
+          <div className={`${big} font-medium text-ink tabular-nums`}>
             {pct(b.success_rate)}
           </div>
           {t("build.successful")}
         </div>
         <div className="text-xs text-muted">
-          <div className="text-[20px] font-medium text-ink tabular-nums">
+          <div className={`${big} font-medium text-ink tabular-nums`}>
             {dur(b.duration.p50)}
           </div>
           {t("build.typicalDuration")}
         </div>
         <div className="text-xs text-muted">
-          <div className="text-[20px] font-medium text-ink tabular-nums">
+          <div className={`${big} font-medium text-ink tabular-nums`}>
             {t("common.hours", { n: num(b.wasted_seconds / 3600, 1) })}
           </div>
           {t("build.redRuns", { h: num(b.ci_seconds / 3600, 1) })}
         </div>
       </div>
+      {/* With the feature hint, the hint card lists them. */}
+      {b.prefixes.length > 0 && !m.build.feature_hint && (
+        <div className="text-xs text-muted">
+          {t("build.prefixes")}:{" "}
+          {b.prefixes.map((p, i) => (
+            <span key={p.prefix}>
+              {i > 0 && ", "}
+              <Prefix p={p} />
+            </span>
+          ))}
+        </div>
+      )}
       {b.waiting.n > 0 && (
         <div
           className="text-xs text-muted"
@@ -163,10 +194,13 @@ function KindCard({ b, low, m }: { b: BuildStats; low: number; m: Metrics }) {
           })}
         </div>
       )}
-      <Spark b={b} low={low} />
-      <div className="flex justify-between text-[10.5px] text-faint">
-        <span>{t("build.scale", { kw: weeks[0]?.kw, low: pct(low) })}</span>
-        <span>{t("common.cw", { kw: weeks[weeks.length - 1]?.kw })}</span>
+      {/* A normal card's width on the wide one: the line keeps its shape. */}
+      <div className={lead ? "max-w-[320px]" : ""}>
+        <Spark b={b} low={low} />
+        <div className="flex justify-between text-[10.5px] text-faint">
+          <span>{t("build.scale", { kw: weeks[0]?.kw, low: pct(low) })}</span>
+          <span>{t("common.cw", { kw: weeks[weeks.length - 1]?.kw })}</span>
+        </div>
       </div>
       <div className="text-xs text-muted">
         {t("build.runs", { count: b.runs })}
@@ -181,6 +215,59 @@ function KindCard({ b, low, m }: { b: BuildStats; low: number; m: Metrics }) {
         <>
           <Compare change={c.success} now={pct(b.success_rate)} format={pct} />
           <RepoChanges c={c} />
+        </>
+      )}
+    </div>
+  );
+}
+
+// A branch scheme and its runs: "nightly (6)", so a number in the scheme
+// ("feat-1") never reads as the count.
+function Prefix({ p }: { p: BranchPrefix }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      {p.prefix ? <Mono>{p.prefix}</Mono> : t("build.noBranch")}{" "}
+      <span className="text-muted tabular-nums">({p.runs})</span>
+    </>
+  );
+}
+
+// The backend's feature hint: no feature build recognised, while other
+// branches that look like work in progress ran. In the feature card's place,
+// so the empty slot says where to look.
+function FeatureMissing({
+  hint,
+  stats,
+}: {
+  hint: Metrics["build"]["feature_hint"];
+  stats: BuildStats[];
+}) {
+  const { t } = useTranslation();
+  const other = stats.find((s) => s.kind === "other");
+  if (!hint) return null;
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5 self-start rounded-ui border border-dashed border-ochre bg-ochre-wash px-4 py-3.5 md:col-span-2">
+      <div className="flex items-center gap-2 text-[15px] font-medium text-ochre">
+        <span aria-hidden="true" className="size-2.5 rounded-[3px] bg-ochre" />
+        {t("build.featureMissingTitle")}
+      </div>
+      <p className="m-0 text-[13px] text-ink-dim">
+        {t("build.featureMissing", { count: hint.runs })}
+      </p>
+      {other && other.prefixes.length > 0 && (
+        <>
+          <div className="text-xs text-muted">{t("build.prefixes")}</div>
+          <ul className="m-0 flex list-none flex-wrap gap-1.5 p-0">
+            {other.prefixes.map((p) => (
+              <li
+                key={p.prefix}
+                className="rounded-md border border-border px-2 py-0.5 text-xs text-ink-dim tabular-nums"
+              >
+                <Prefix p={p} />
+              </li>
+            ))}
+          </ul>
         </>
       )}
     </div>
@@ -539,9 +626,16 @@ export function Build({
   const h = b.hotspots;
   const stats = b.kinds;
   const [kind, setKind] = useState<RunKind>("feature");
+  // Feature builds by default: developers wait on them, the default branch
+  // only gets what they merged. Without one recognised, the other branches
+  // when the backend hints that the feature builds hide there.
+  const fallback =
+    b.feature_hint && stats.some((s) => s.kind === "other")
+      ? "other"
+      : stats[0]?.kind;
   const shown = stats.some((s) => s.kind === kind)
     ? kind
-    : (stats[0]?.kind ?? "feature");
+    : (fallback ?? "feature");
   const k = h.kinds.find((x) => x.kind === shown);
   // One scale for every card, so a dip reads the same in each: from the
   // lowest week, rounded down to 10 %, to 100 %.
@@ -576,6 +670,7 @@ export function Build({
       ) : (
         <>
           <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-3">
+            <FeatureMissing hint={b.feature_hint} stats={stats} />
             {stats.map((s) => (
               <KindCard key={s.kind} b={s} low={low} m={m} />
             ))}

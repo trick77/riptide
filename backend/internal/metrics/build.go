@@ -20,7 +20,96 @@ const (
 	KindUnknown = "unknown"
 )
 
-var runKinds = []string{KindRelease, KindMain, KindFeature, KindOther, KindUnknown}
+// runKinds in the order the UI shows them: feature first, the builds
+// developers wait on, where their time goes.
+var runKinds = []string{KindFeature, KindMain, KindRelease, KindOther, KindUnknown}
+
+// PrefixTop is how many branch prefixes the other kind lists.
+const PrefixTop = 5
+
+// BranchPrefix is a branch scheme among the other kind's runs, so a team
+// sees which of its feature builds riptide does not recognise.
+type BranchPrefix struct {
+	// Prefix is up to the first '/' ("release/"), else up to the first '-'
+	// ("kas-…", a Jira key's project or a person's name), else the branch
+	// ("nightly"), lowercased; "" for a pipeline name without a branch.
+	Prefix string `json:"prefix"`
+	Runs   int    `json:"runs"`
+}
+
+// branchPrefix is a branch's scheme: kas-12-login and KAS-13-cart are one.
+// Leading separators are no scheme: /kas-1-x is kas-….
+func branchPrefix(branch string) string {
+	b := strings.TrimLeft(strings.ToLower(branch), "/-")
+	if i := strings.Index(b, "/"); i > 0 {
+		return b[:i+1]
+	}
+	if i := strings.Index(b, "-"); i > 0 {
+		return b[:i] + "-…"
+	}
+	return b
+}
+
+// notFeatureStems are schemes that are no developer's work in progress,
+// with a '/' or a '-' alike: release/1.2 and release-1.2, the dependency
+// bots, a long-lived integration branch.
+var notFeatureStems = map[string]bool{
+	"release": true, "renovate": true, "dependabot": true, "snyk": true,
+	"develop": true, "development": true,
+}
+
+// notFeature: an other-kind scheme whose runs are no sign of unrecognised
+// feature builds. A pipeline name without a branch (Tekton) says nothing
+// either way.
+func notFeature(prefix string) bool {
+	stem := strings.TrimSuffix(strings.TrimSuffix(prefix, "/"), "-…")
+	return stem == "" || notFeatureStems[stem] || strings.Contains(stem, "nightly")
+}
+
+// FeatureHint says no run counted as a feature build, while other runs on
+// branches that look like work in progress did. Their scheme is most likely
+// one BranchKind does not know; the other kind's prefixes name it.
+type FeatureHint struct {
+	// Runs are those other runs, with a verdict.
+	Runs int `json:"runs"`
+}
+
+// hint fills in what only the shown period needs: the other kind's
+// prefixes and the feature hint, both over runs with a verdict. A feature
+// kind of aborted runs only is no recognised feature build.
+func (b *Build) hint(by map[string][]dataset.Run) {
+	n := map[string]int{}
+	candidates := 0
+	for _, r := range by[KindOther] {
+		if verdict(r) == VerdictNone {
+			continue
+		}
+		p := branchPrefix(r.Branch)
+		n[p]++
+		if !notFeature(p) {
+			candidates++
+		}
+	}
+	out := []BranchPrefix{}
+	for p, c := range n {
+		out = append(out, BranchPrefix{Prefix: p, Runs: c})
+	}
+	slices.SortFunc(out, func(a, b BranchPrefix) int {
+		return cmp.Or(cmp.Compare(b.Runs, a.Runs), cmp.Compare(a.Prefix, b.Prefix))
+	})
+	featureRuns := 0
+	for i := range b.Kinds {
+		switch b.Kinds[i].Kind {
+		case KindOther:
+			b.Kinds[i].Prefixes = out[:min(len(out), PrefixTop)]
+		case KindFeature:
+			featureRuns = b.Kinds[i].Runs
+		}
+	}
+	if featureRuns == 0 && candidates > 0 {
+		b.FeatureHint = &FeatureHint{Runs: candidates}
+	}
+}
 
 // runAt is when a run happened: its end, else its start.
 func runAt(r dataset.Run) *time.Time {
@@ -170,6 +259,9 @@ type BuildStats struct {
 	OutlierSeconds float64 `json:"outlier_seconds"`
 	// Weekly is the success rate per week, null for a week without runs.
 	Weekly []*float64 `json:"weekly"`
+	// Prefixes are the other kind's PrefixTop most frequent branch schemes
+	// over Runs; empty for every other kind and in the previous period.
+	Prefixes []BranchPrefix `json:"prefixes"`
 
 	// The kind's time split by outcome without overlap, an outlier only
 	// ever counting as an outlier whatever its verdict: succeeded +
@@ -212,6 +304,8 @@ type Build struct {
 	// CIFlow is Kinds' CI time from kind to outcome.
 	CIFlow   CIFlow   `json:"ci_flow"`
 	Hotspots Hotspots `json:"hotspots"`
+	// FeatureHint is nil unless feature builds look unrecognised.
+	FeatureHint *FeatureHint `json:"feature_hint"`
 	// repos are every repo's runs per kind, the next period's baseline;
 	// compared the repos per kind with a previous period to compare with.
 	// Both before the hotspots' cut to the top.
@@ -287,7 +381,7 @@ func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
 			continue
 		}
 		kr := newKindRuns(rs, base.repos)
-		b := BuildStats{Kind: kind}
+		b := BuildStats{Kind: kind, Prefixes: []BranchPrefix{}}
 		var t tally
 		var durations, waits, works []float64
 		for i, r := range rs {
@@ -340,6 +434,9 @@ func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
 		out.Hotspots.Outliers = append(out.Hotspots.Outliers, outliers...)
 	}
 	out.CIFlow = ciFlow(out.Kinds)
+	if !base.previous {
+		out.hint(by)
+	}
 	o := out.Hotspots.Outliers
 	// Grouped before the cut to the longest: a short stuck run still tells
 	// that the agents were gone.

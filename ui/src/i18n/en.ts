@@ -552,18 +552,27 @@ export const en = {
     kind: terms.en.runKind,
     kindNote: {
       release: "build_type release or hotfix",
-      main: "main branch, no release",
-      feature: "feature/…, bugfix/…, PR-…",
-      other: "release/… without a release, nightlies",
+      main: "master or main, no release",
+      feature: "feature/…, feat/…, bugfix/…, fix/…, hotfix/…, PR builds",
+      other:
+        "no known prefix: release/… without a release, nightlies, other naming schemes",
       unknown: "before the first build_type report",
     },
+    featureWhy: "Developers wait on these before they can carry on",
+    prefixes: "Most frequent prefixes",
+    noBranch: "no branch in the pipeline name",
+    featureMissingTitle: "Feature and bugfix builds: no run recognised",
+    featureMissing_one:
+      "Recognised are branches starting feature/, feat/, bugfix/, fix/, hotfix/ and PR builds. {{count}} run on a branch without a known prefix is under “Other branches” (release/, nightlies and bots not counted), likely a feature build of the team.",
+    featureMissing_other:
+      "Recognised are branches starting feature/, feat/, bugfix/, fix/, hotfix/ and PR builds. {{count}} runs on branches without a known prefix are under “Other branches” (release/, nightlies and bots not counted), likely the team's feature builds.",
     sparkAria: "Success rate per week, {{kind}}: {{parts}}",
     successful: "successful",
     typicalDuration: "typical duration, all repos",
     repos:
       "Of {{compared}} repos, {{slower}} got slower and {{flakier}} flakier than in the previous period",
     reposNone: "Repos: no comparison with the previous period",
-    redRuns: "red runs, of {{h}} h CI time",
+    redRuns: "in red runs, of {{h}} h CI time",
     waitingTitle:
       "Median over {{n}} of the {{total}} runs that report when they got an agent",
     waiting:
@@ -600,7 +609,7 @@ export const en = {
     noAgent: "The run does not report when it got an agent",
     eyebrow: "CI · Jenkins · Tekton · each kind of run on its own",
     title: "How fast and reliable is the feedback?",
-    lead: "Releases skip tests, feature builds fail more often. So there is no total across kinds: each card stands on its own.",
+    lead: "Developers wait on feature and bugfix builds before they can carry on: that is where their time goes, so these come first. Releases skip tests, feature builds fail more often, so there is no total across kinds: each card stands on its own.",
     fwEffectiveness: "Effectiveness, driver",
     dataFrom:
       "Build data from {{date}}: the first run Riptide received for the team. Older weeks stay empty rather than wrong.",

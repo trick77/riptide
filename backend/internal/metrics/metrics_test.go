@@ -652,9 +652,25 @@ func TestBuilds(t *testing.T) {
 	for _, k := range b.Kinds {
 		got = append(got, row{k.Kind, k.Runs, k.Succeeded})
 	}
-	want := []row{{KindRelease, 2, 2}, {KindMain, 2, 1}, {KindFeature, 2, 1}, {KindOther, 1, 1}, {KindUnknown, 1, 1}}
+	want := []row{{KindFeature, 2, 1}, {KindMain, 2, 1}, {KindRelease, 2, 2}, {KindOther, 1, 1}, {KindUnknown, 1, 1}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("kinds = %+v", got)
+	}
+	// the previous period: no prefixes, no hint, nobody shows them
+	prev := build(buildData(), p4(), filter{}, &baseline{repos: newRepoNamer(nil), previous: true})
+	if p := prev.Kinds[3].Prefixes; p == nil || len(p) != 0 || prev.FeatureHint != nil {
+		t.Errorf("previous period prefixes = %#v, hint %+v", p, prev.FeatureHint)
+	}
+	for _, k := range b.Kinds {
+		if k.Kind != KindOther && len(k.Prefixes) != 0 {
+			t.Errorf("%s prefixes = %+v", k.Kind, k.Prefixes)
+		}
+	}
+	if p := b.Kinds[3].Prefixes; len(p) != 1 || p[0] != (BranchPrefix{"master", 1}) {
+		t.Errorf("other prefixes = %+v", p)
+	}
+	if b.FeatureHint != nil {
+		t.Errorf("hint with feature runs = %+v", b.FeatureHint)
 	}
 	main := b.Kinds[1]
 	expectNear(t, "main p50", main.Duration.P50, 750)
@@ -673,6 +689,74 @@ func TestBuilds(t *testing.T) {
 	none := build(data(func(ds *dataset.Dataset) { ds.Meta.BuildDataFrom = nil }), p4(), filter{}, nil)
 	if none.StartsInside || none.GapWeeks != 4 || len(none.Kinds) != 0 {
 		t.Errorf("no data = %+v", none)
+	}
+}
+
+// otherRuns are runs on the given branches, none a feature build.
+func otherRuns(status string, branches ...string) []dataset.Run {
+	var rs []dataset.Run
+	for _, b := range branches {
+		rs = append(rs, run(func(r *dataset.Run) {
+			r.Branch, r.BranchKind, r.BuildType, r.Status = b, dataset.BranchOther, nil, s(status)
+		}))
+	}
+	return rs
+}
+
+func hinted(rs ...[]dataset.Run) Build {
+	ds := data(func(ds *dataset.Dataset) { ds.Runs = slices.Concat(rs...) })
+	return build(ds, p4(), filter{}, nil)
+}
+
+func TestBranchPrefixes(t *testing.T) {
+	b := hinted(
+		otherRuns("SUCCESS", "Release/1.1", "release/1.2", "release/2.0", "KAS-12-login", "kas-7-cart",
+			"nightly", "nightly", "", "zzz", "Renovate/lib", "jan-topic", "/KAS-9-x"),
+		// aborted: no run, no prefix
+		otherRuns("ABORTED", "aaa", "aaa", "aaa"),
+	)
+	// a leading '/' is no scheme: /KAS-9-x is kas-…
+	want := []BranchPrefix{{"kas-…", 3}, {"release/", 3}, {"nightly", 2}, {"", 1}, {"jan-…", 1}}
+	if got := b.Kinds[0].Prefixes; !reflect.DeepEqual(got, want) {
+		t.Errorf("prefixes = %+v", got)
+	}
+	// kas-… (3), jan-… and zzz look like work in progress
+	if b.FeatureHint == nil || b.FeatureHint.Runs != 5 {
+		t.Errorf("hint = %+v", b.FeatureHint)
+	}
+}
+
+func TestFeatureHint(t *testing.T) {
+	// Only release branches, nightlies, bots, Tekton and aborted runs: no
+	// sign of unrecognised feature builds.
+	none := hinted(
+		otherRuns("SUCCESS", "release/1.1", "release-1.2", "nightly", "nightly-full", "renovate/x",
+			"dependabot/y", "snyk-fix-1", "", "develop"),
+		otherRuns("ABORTED", "kas-1-x"),
+	)
+	if none.FeatureHint != nil {
+		t.Errorf("hint = %+v", none.FeatureHint)
+	}
+	// recognised feature builds: nothing to hint at
+	feat := otherRuns("SUCCESS", "feat/x")
+	feat[0].BranchKind = dataset.BranchFeature
+	if b := hinted(feat, otherRuns("FAILURE", "kas-1-x")); b.FeatureHint != nil {
+		t.Errorf("hint with feature runs = %+v", b.FeatureHint)
+	}
+	// feature runs that all aborted are no recognised feature build
+	aborted := otherRuns("ABORTED", "PR-3", "PR-4")
+	for i := range aborted {
+		aborted[i].BranchKind = dataset.BranchPR
+	}
+	if b := hinted(aborted, otherRuns("SUCCESS", "kas-1-x")); b.FeatureHint == nil || b.FeatureHint.Runs != 1 {
+		t.Errorf("hint with aborted feature runs = %+v", b.FeatureHint)
+	}
+	if b := hinted(otherRuns("FAILURE", "kas-1-x")); b.FeatureHint == nil || b.FeatureHint.Runs != 1 {
+		t.Errorf("hint = %+v", b.FeatureHint)
+	}
+	// no runs at all
+	if b := hinted(); b.FeatureHint != nil || len(b.Kinds) != 0 {
+		t.Errorf("empty = %+v", b)
 	}
 }
 

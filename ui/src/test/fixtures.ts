@@ -110,6 +110,7 @@ function kindStats(
     weekly: Array.from({ length: n }, (_, i) =>
       i === n - 1 ? succeeded / runs : null,
     ),
+    prefixes: [],
   };
 }
 
@@ -311,17 +312,18 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       data_from: ago(60),
       starts_inside: false,
       gap_weeks: 0,
+      // the backend's order: feature first
       kinds: [
-        kindStats("release", 1, 1, n),
-        kindStats("main", 1, 0, n),
         kindStats("feature", 1, 0, n),
+        kindStats("main", 1, 0, n),
+        kindStats("release", 1, 1, n),
       ],
       ci_flow: {
         total_seconds: 1800,
         kinds: [
-          { kind: "release", seconds: 600, share: 1 / 3 },
-          { kind: "main", seconds: 600, share: 1 / 3 },
           { kind: "feature", seconds: 600, share: 1 / 3 },
+          { kind: "main", seconds: 600, share: 1 / 3 },
+          { kind: "release", seconds: 600, share: 1 / 3 },
         ],
         outcomes: [
           { outcome: "succeeded", seconds: 600, share: 1 / 3 },
@@ -329,8 +331,8 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
         ],
         links: [
           {
-            kind: "release",
-            outcome: "succeeded",
+            kind: "feature",
+            outcome: "failed",
             seconds: 600,
             share_of_kind: 1,
             share: 1 / 3,
@@ -343,14 +345,15 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
             share: 1 / 3,
           },
           {
-            kind: "feature",
-            outcome: "failed",
+            kind: "release",
+            outcome: "succeeded",
             seconds: 600,
             share_of_kind: 1,
             share: 1 / 3,
           },
         ],
       },
+      feature_hint: null,
       hotspots: {
         min_runs: 10,
         slow_factor: 1.5,
@@ -371,9 +374,9 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
           { step: 4, from: 0.4, to: null },
         ],
         kinds: [
-          kindHotspots("release", 0),
-          kindHotspots("main", 1),
           kindHotspots("feature", 1),
+          kindHotspots("main", 1),
+          kindHotspots("release", 0),
         ],
         outliers: [],
         outlier_count: 0,

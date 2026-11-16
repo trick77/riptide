@@ -114,8 +114,9 @@ func TestFactsSearch(t *testing.T) {
 		{"anderes", 1, 0, 0},   // the UI's word for change type "other"
 		{"Promotion", 1, 0, 0}, // a GitOps PR's Typ
 		{"Feature", 2, 0, 0},   // the Typ column's word; the promotion's hidden type is not searched
-		{"master builds", 0, 0, 4},
-		{"master-builds", 0, 0, 4}, // the Art column's word, either language
+		{"default branch builds", 0, 0, 4},
+		{"default-branch-builds", 0, 0, 4}, // the Art column's word, either language
+		{"master-builds", 0, 0, 4},         // the word before, for links shared back then
 		// both UI languages, whichever the viewer reads
 		{"merged", 3, 0, 0},
 		{"gemerged", 3, 0, 0},
@@ -126,7 +127,7 @@ func TestFactsSearch(t *testing.T) {
 		{"erfolgreich", 0, 0, 3},    // SUCCESS, the fixture's default
 		{"portal-web:9", 0, 1, 0},
 		{"fail", 0, 1, 1},  // the failed sync's phase, the broken run
-		{"BUILD", 0, 0, 4}, // build_type and the Art column's "master builds", case-insensitive
+		{"BUILD", 0, 0, 4}, // build_type and the Art column's "Default branch builds", case-insensitive
 		{"nothing like it", 0, 0, 0},
 	} {
 		f := ComputeFacts(ds, all(), c.q)
