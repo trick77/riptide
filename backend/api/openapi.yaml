@@ -1760,7 +1760,7 @@ components:
       type: object
       description: A finished CI run in the period, newest first.
       additionalProperties: false
-      required: [pipeline_name, run_id, kind, commit_sha, duration_s, image_refs, status, verdict, outcome]
+      required: [pipeline_name, run_id, kind, commit_sha, duration_s, image_refs, status, verdict, outcome, gitops]
       properties:
         pipeline_name: { type: string }
         run_id: { type: string }
@@ -1778,6 +1778,7 @@ components:
             (SUCCESS, Succeeded, Completed) or failed (FAILURE, Failed);
             null for any other word (UNSTABLE, ABORTED, …), which the UI
             shows as the CI sent it.
+        gitops: { type: boolean, description: "A run in a GitOps repo, a stage promotion's check: listed, counted in no build number." }
 
     RunVerdict:
       type: string

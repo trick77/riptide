@@ -589,6 +589,7 @@ export function runFact(o: Partial<RunFact> = {}): RunFact {
     status: "SUCCESS",
     verdict: "success",
     outcome: "succeeded",
+    gitops: false,
     ...o,
   };
 }
@@ -665,6 +666,11 @@ export function facts(o: Partial<Facts> = {}): Facts {
       status: "UNSTABLE",
       verdict: "failure",
       outcome: null,
+    }),
+    runFact({
+      run_id: "13",
+      pipeline_name: "kasse-gitops/master",
+      gitops: true,
     }),
   ];
   return {

@@ -656,6 +656,23 @@ func TestBuilds(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("kinds = %+v", got)
 	}
+	// A GitOps repo's run, a stage promotion's check, counts nowhere.
+	promo := buildData()
+	promo.Runs = append(promo.Runs,
+		run(func(r *dataset.Run) {
+			r.GitOps, r.Repo, r.PipelineName = true, s("kasse/kasse-gitops"), "kasse-gitops/master"
+		}),
+		// its commit unseen by Bitbucket: no flag, known by its name
+		run(func(r *dataset.Run) { r.Repo, r.Project, r.PipelineName = nil, s("kasse"), "kasse-gitops/master" }))
+	pb := build(promo, p4(), filter{}, nil)
+	if !reflect.DeepEqual(pb.Kinds, b.Kinds) {
+		t.Errorf("gitops run counted: %+v", pb.Kinds)
+	}
+	for kind, repos := range pb.repos {
+		if repos["kasse/kasse-gitops"] != nil {
+			t.Errorf("gitops repo active in %s", kind)
+		}
+	}
 	// the previous period: no prefixes, no hint, nobody shows them
 	prev := build(buildData(), p4(), filter{}, &baseline{repos: newRepoNamer(nil), previous: true})
 	if p := prev.Kinds[3].Prefixes; p == nil || len(p) != 0 || prev.FeatureHint != nil {

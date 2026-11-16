@@ -664,6 +664,11 @@ describe("App", () => {
     }
     expect(screen.getByText("+2")).toBeInTheDocument();
     expect(screen.getByText("Promotion")).toBeInTheDocument();
+    // A stage promotion is listed faded, the people's PRs are not.
+    expect(screen.getByText("Promotion").closest("tr")).toHaveAttribute(
+      "data-dim",
+    );
+    expect(key.closest("tr")).not.toHaveAttribute("data-dim");
     expect(screen.getByText("#4")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/Suche nach/), {
       target: { value: "portal" },
@@ -688,8 +693,15 @@ describe("App", () => {
     expect(window.location.search).toBe("?q=kasse-api%3A1.1&tab=runs");
     // The UI's word where the status plainly says it, else the CI's.
     const runs = screen.getByText("Unstable").closest("table")!;
-    expect(within(runs).getByText("Erfolgreich")).toBeInTheDocument();
+    expect(within(runs).getAllByText("Erfolgreich")).toHaveLength(2);
     expect(within(runs).getByText("Fehlgeschlagen")).toBeInTheDocument();
+    // A GitOps repo's run, a stage promotion's check, is listed faded.
+    expect(within(runs).getByText("#13").closest("tr")).toHaveAttribute(
+      "data-dim",
+    );
+    expect(within(runs).getByText("#12").closest("tr")).not.toHaveAttribute(
+      "data-dim",
+    );
     expect(screen.getAllByText("Releases").length).toBeGreaterThan(0);
   });
 

@@ -464,6 +464,23 @@ func TestDatasetReviewOfPromotion(t *testing.T) {
 	}
 }
 
+// A CI run in a GitOps repo is flagged gitops, as its PRs are: a stage
+// promotion's check, not the team's build.
+func TestDatasetRunOfPromotion(t *testing.T) {
+	st, pool := migrated(t)
+	seed(t, pool)
+	s := &seeder{t: t, pool: pool, n: 1000}
+	s.run(run{pipeline: "kasse-gitops/master", runID: "1", status: "SUCCESS", commit: sha("c"), started: days(2)})
+	d := load(t, st, t0, days(28))
+	gitops := map[string]bool{}
+	for _, r := range d.Runs {
+		gitops[r.PipelineName] = r.GitOps
+	}
+	if !gitops["kasse-gitops/master"] || gitops["kasse-api/master"] || gitops["nightly"] {
+		t.Errorf("runs gitops = %v", gitops)
+	}
+}
+
 // approved_at counts reviewers as first_review_at does: a bot's approval
 // (recognised now, not at ingest) is neither, so a human approving on their
 // first touch is approved_on_first_touch.

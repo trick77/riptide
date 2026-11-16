@@ -316,12 +316,37 @@ type Build struct {
 	compared map[string]int
 }
 
+// gitopsRun tells a run in a GitOps repo, a stage promotion's check: flagged
+// by its commit, or, without one Bitbucket saw, named after a repo the
+// window's PRs, reviews or flagged runs show is one.
+func gitopsRun(ds *dataset.Dataset) func(dataset.Run) bool {
+	repos := map[string]bool{}
+	for _, pr := range ds.PRs {
+		if pr.GitOps {
+			repos[pr.Repo] = true
+		}
+	}
+	for _, r := range ds.Reviews {
+		if r.GitOps && r.Repo != nil {
+			repos[*r.Repo] = true
+		}
+	}
+	for _, r := range ds.Runs {
+		if r.GitOps && r.Repo != nil {
+			repos[*r.Repo] = true
+		}
+	}
+	name := newRepoNamer(ds.Runs)
+	return func(r dataset.Run) bool { return r.GitOps || repos[name(r)] }
+}
+
 // teamRuns are the runs the build section counts: with a status, in the
-// product.
+// product, GitOps repos' runs left out (stage promotions, mechanical).
 func teamRuns(ds *dataset.Dataset, f filter) map[string][]dataset.Run {
 	by := map[string][]dataset.Run{}
+	gitops := gitopsRun(ds)
 	for _, r := range ds.Runs {
-		if r.Status == nil || !f.in(r.Project) {
+		if r.Status == nil || gitops(r) || !f.in(r.Project) {
 			continue
 		}
 		// A finish before the start (clock skew) is no duration: read once

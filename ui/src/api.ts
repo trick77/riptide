@@ -467,6 +467,8 @@ export type RunFact = {
   // The status when it plainly says so, worded by the UI; null shows the
   // CI's own word.
   outcome: "succeeded" | "failed" | null;
+  // A stage promotion's check: listed faded, counted in no build number.
+  gitops: boolean;
 };
 
 export type Table<T> = { count: number; rows: T[] };
