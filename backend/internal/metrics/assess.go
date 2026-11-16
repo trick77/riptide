@@ -11,11 +11,11 @@ import (
 )
 
 // The assessment is the overview's "what now": the patterns the numbers
-// raise over closed weeks, the few repos that move most, where the CI time
-// goes. Every number and every class of it is decided here; an LLM may word
-// it, never compute or judge it. It reads the same rules the page applies
-// (jam, flaky, the tolerance), plus the starting values below, user-chosen
-// 2026-11-16 and not measured.
+// raise over closed weeks, the few repos that move most. Every number and
+// every class of it is decided here; an LLM may word it, never compute or
+// judge it. It reads the same rules the page applies (jam, flaky, the
+// tolerance), plus the starting values below, user-chosen 2026-11-16 and
+// not measured.
 const (
 	// FocusMinWeight is the weight a repo's signals need for it to be a
 	// focus candidate: one attention signal, or a hint and a notable change.
@@ -43,8 +43,6 @@ const (
 	// DriverShare: a repo carrying this part of a notable worsening or more
 	// is its driver, and counts toward the focus.
 	DriverShare = 0.5
-	// CITop are the repos the CI split names; the rest fold into one.
-	CITop = 3
 	// StageAttention: a stage that takes this part of the time to
 	// production or more needs attention; below it the longest stage is
 	// only a hint, as some stage always takes longest. A starting value.
@@ -162,25 +160,6 @@ type FocusRepo struct {
 	Waiting *Waiting `json:"waiting"`
 }
 
-// CIRepo is one repo's CI time over the period, across kinds.
-type CIRepo struct {
-	Repo    string  `json:"repo"`
-	Seconds float64 `json:"seconds"`
-	Wasted  float64 `json:"wasted"`
-}
-
-// CISplit is where the CI time went: the top repos, the rest folded.
-// No verdict: more CI time can be more work.
-type CISplit struct {
-	Seconds      float64  `json:"seconds"`
-	Wasted       float64  `json:"wasted"`
-	Change       Change   `json:"change"`
-	Repos        []CIRepo `json:"repos"`
-	OtherRepos   int      `json:"other_repos"`
-	OtherSeconds float64  `json:"other_seconds"`
-	OtherWasted  float64  `json:"other_wasted"`
-}
-
 // History is what earlier assessments of the same window raised: how many
 // times in a row each signal ID, and the latest one's signals by ID with
 // their tone.
@@ -209,7 +188,6 @@ type Assessment struct {
 	Team []Fact `json:"team"`
 	// Question is the one number to talk about.
 	Question *Signal `json:"question"`
-	CI       CISplit `json:"ci"`
 	// Compared: an assessment of the view for an earlier week was there to
 	// tell what is resolved; without one, nothing can be.
 	Compared bool `json:"compared"`
@@ -240,7 +218,6 @@ const (
 	wipWeeksMetric
 	waitShareMetric
 	featureShareMetric
-	ciTimeMetric
 )
 
 func (id metricID) judgeX(cur, prev side, incomplete bool) Change {
@@ -249,7 +226,6 @@ func (id metricID) judgeX(cur, prev side, incomplete bool) Change {
 		wipWeeksMetric:      {down, relative},
 		waitShareMetric:     {down, points},
 		featureShareMetric:  {undirected, points},
-		ciTimeMetric:        {undirected, relative},
 	}[id]
 	return def.judge(cur, prev, incomplete)
 }
@@ -299,7 +275,7 @@ func (a *assessor) run() Assessment {
 	})
 	out := Assessment{
 		Period: a.p.Period, Previous: a.p.Previous, Gaps: append([]string{}, slices.Sorted(maps.Keys(a.gaps))...),
-		Signals: a.out, Question: a.question(), CI: a.ciSplit(), Compared: a.h.Runs > 0,
+		Signals: a.out, Question: a.question(), Compared: a.h.Runs > 0,
 	}
 	out.Focus, out.Active, out.Calm = a.focus()
 	out.Team = []Fact{}
@@ -920,49 +896,6 @@ func (a *assessor) activeRepos() map[string]bool {
 		for repo := range repos {
 			out[repo] = true
 		}
-	}
-	return out
-}
-
-// ---- CI time ---------------------------------------------------------------
-
-// ciSplit is the period's CI time by repo across kinds, outliers aside, the
-// top CITop named.
-func (a *assessor) ciSplit() CISplit {
-	sum := func(m Metrics) (float64, map[string]*CIRepo) {
-		by := map[string]*CIRepo{}
-		total := 0.0
-		for _, repos := range m.Build.repos {
-			for repo, rr := range repos {
-				if by[repo] == nil {
-					by[repo] = &CIRepo{Repo: repo}
-				}
-				by[repo].Seconds += rr.ci
-				by[repo].Wasted += rr.wasted
-				total += rr.ci
-			}
-		}
-		return total, by
-	}
-	total, by := sum(a.m)
-	ptotal, _ := sum(a.pm)
-	out := CISplit{Seconds: total, Repos: []CIRepo{}}
-	pipe := before(a.m.Meta.DataStart.Pipeline, a.p.Previous.From)
-	out.Change = ciTimeMetric.judgeX(side{ptr(total), total > 0}, side{ptr(ptotal), ptotal > 0}, pipe)
-	all := make([]CIRepo, 0, len(by))
-	for _, r := range by {
-		all = append(all, *r)
-		out.Wasted += r.Wasted
-	}
-	slices.SortFunc(all, func(x, y CIRepo) int { return cmp.Or(cmp.Compare(y.Seconds, x.Seconds), cmp.Compare(x.Repo, y.Repo)) })
-	for i, r := range all {
-		if i < CITop {
-			out.Repos = append(out.Repos, r)
-			continue
-		}
-		out.OtherRepos++
-		out.OtherSeconds += r.Seconds
-		out.OtherWasted += r.Wasted
 	}
 	return out
 }

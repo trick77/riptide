@@ -360,6 +360,14 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
             share: 1 / 3,
           },
         ],
+        repos: [
+          { repo: "kasse/kasse-web", seconds: 900, failed: 600 },
+          { repo: "kasse/kasse-api", seconds: 500, failed: 400 },
+          { repo: "kasse/policy", seconds: 200, failed: 0 },
+        ],
+        other_repos: 2,
+        other_seconds: 200,
+        other_failed: 200,
       },
       feature_hint: null,
       hotspots: {
@@ -858,26 +866,6 @@ export function assessment(): Assessment {
       metric: "first_touch",
       facts: [fact("question:first_touch.value", "first_touch", "share", 0.64)],
     }),
-    ci: {
-      seconds: 82 * 3600,
-      wasted: 12 * 3600,
-      change: {
-        prev: 64 * 3600,
-        verdict: "none",
-        reason: "undirected",
-        directed: false,
-        score: null,
-        magnitude: "notable",
-      },
-      repos: [
-        { repo: "kasse/kasse-web", seconds: 31 * 3600, wasted: 8 * 3600 },
-        { repo: "kasse/kasse-api", seconds: 18 * 3600, wasted: 2 * 3600 },
-        { repo: "kasse/policy", seconds: 11 * 3600, wasted: 3600 },
-      ],
-      other_repos: 8,
-      other_seconds: 22 * 3600,
-      other_wasted: 3600,
-    },
     compared: true,
   };
 }
@@ -921,7 +909,6 @@ export function analysisText(): AnalysisText {
         lever: "name_what_helped",
       },
     ],
-    ci: "Mehr als ein Drittel der CI-Zeit geht in kasse-web.",
     question: "Besprechen wir grosse Änderungen ausserhalb von Bitbucket?",
   };
 }

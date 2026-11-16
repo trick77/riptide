@@ -220,7 +220,7 @@ func TestAliasesTouchOnlyRepos(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := string(raw)
-	for _, want := range []string{`"ci":{`, `"other_seconds"`, `"pr_jam:repo_a"`, `"repo":"repo_a"`, `"pr_jam:repo_a.long"`} {
+	for _, want := range []string{`"pr_jam:repo_a"`, `"repo":"repo_a"`, `"pr_jam:repo_a.long"`} {
 		if !strings.Contains(d, want) {
 			t.Errorf("digest lacks %s", want)
 		}

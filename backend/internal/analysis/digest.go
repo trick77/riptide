@@ -29,8 +29,6 @@ type Text struct {
 	Trend string      `json:"trend"`
 	Focus []FocusText `json:"focus"`
 	Cards []CardText  `json:"cards"`
-	// CI words where the CI time goes; empty when there is none.
-	CI string `json:"ci"`
 	// Question is the one question for the team.
 	Question string `json:"question"`
 }
@@ -78,7 +76,6 @@ type Digest struct {
 	Focus     []metrics.FocusRepo `json:"focus_candidates"`
 	Active    int                 `json:"active_repos"`
 	Calm      int                 `json:"calm_repos"`
-	CI        metrics.CISplit     `json:"ci"`
 	Question  *metrics.Signal     `json:"question"`
 	Labels    map[string]string   `json:"labels"`
 	Levers    map[string]string   `json:"levers"`
@@ -122,9 +119,6 @@ func newAliases(a metrics.Assessment) *aliases {
 		for _, d := range s.Drivers {
 			add(&d.Repo)
 		}
-	}
-	for _, r := range a.CI.Repos {
-		add(&r.Repo)
 	}
 	return al
 }
@@ -268,12 +262,6 @@ func buildDigest(a metrics.Assessment) ([]byte, *aliases, error) {
 	for i, id := range mand {
 		mand[i] = al.hideID(id)
 	}
-	ci := a.CI
-	ci.Repos = make([]metrics.CIRepo, len(a.CI.Repos))
-	for i, r := range a.CI.Repos {
-		r.Repo = al.hideRepo(r.Repo)
-		ci.Repos[i] = r
-	}
 	focus := make([]metrics.FocusRepo, len(a.Focus))
 	for i, f := range a.Focus {
 		f.Repo = al.hideRepo(f.Repo)
@@ -286,7 +274,7 @@ func buildDigest(a metrics.Assessment) ([]byte, *aliases, error) {
 	}
 	d := Digest{
 		WindowWeeks: len(a.Period.Weeks), Weeks: weekRange(a.Period), Mandatory: mand,
-		Gaps: a.Gaps, Team: a.Team, Focus: focus, Active: a.Active, Calm: a.Calm, CI: ci,
+		Gaps: a.Gaps, Team: a.Team, Focus: focus, Active: a.Active, Calm: a.Calm,
 		Question: a.Question, Labels: labels, Levers: leverText, Stages: stageText,
 	}
 	for _, s := range a.Signals {

@@ -323,11 +323,8 @@ describe("App", () => {
     expect(
       p.getByText("PRs gemerged pro Woche: deutlich besser"),
     ).toBeInTheDocument();
-    expect(
-      p.getByText(
-        "kasse/kasse-web: 31.0 h von 82.0 h CI-Zeit, davon 8.0 h in roten Läufen.",
-      ),
-    ).toBeInTheDocument();
+    // Where the CI time goes is the build section's, not an assessment.
+    expect(panel.textContent).not.toMatch(/CI-Zeit/);
     // The question to talk about, no retro questions of a model.
     expect(
       p.getByText(
@@ -560,7 +557,6 @@ describe("App", () => {
             signals: [],
             focus: [],
             question: null,
-            ci: { ...a.ci, seconds: 0, repos: [], other_repos: 0 },
           },
         });
       }
@@ -576,7 +572,6 @@ describe("App", () => {
     ).toBeInTheDocument();
     expect(p.queryByText("Im Fokus")).toBeNull();
     expect(p.queryByText("Für die nächste Retro")).toBeNull();
-    expect(p.queryByText("Wohin die CI-Zeit geht")).toBeNull();
   });
 
   it("asks for a product, keeps it in the URL", async () => {
@@ -2303,11 +2298,31 @@ describe("CI hours", () => {
                 link("feature", "no_verdict", 40, 40 / 420),
                 link("feature", "outlier", 25, 25 / 420),
               ],
+              repos: [
+                { repo: "kasse/kasse-web", seconds: 200 * h, failed: 100 * h },
+                { repo: "kasse/kasse-api", seconds: 120 * h, failed: 30 * h },
+                { repo: "kasse/policy", seconds: 80 * h, failed: 0 },
+              ],
+              other_repos: 4,
+              other_seconds: 60 * h,
+              other_failed: 20 * h,
             },
           },
         }}
       />,
     );
+    // The same hours by repo, outliers in: the top three and the rest.
+    const byRepo = screen.getByRole("img", { name: /^CI-Zeit nach Repo/ });
+    expect(byRepo.getAttribute("aria-label")).toBe(
+      "CI-Zeit nach Repo: kasse/kasse-web: 200.0 h, davon 100.0 h fehlgeschlagen; kasse/kasse-api: 120.0 h, davon 30.0 h fehlgeschlagen; kasse/policy: 80.0 h; 4 weitere: 60.0 h, davon 20.0 h fehlgeschlagen",
+    );
+    // The failed part as a number, not by hatching alone.
+    expect(
+      screen.getByText(/kasse\/kasse-web 200\.0 h · 100\.0 h rot/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Nach Repo, über alle Lauf-Arten"),
+    ).toBeInTheDocument();
     const chart = screen.getByRole("img", {
       name: /^CI-Zeit von der Lauf-Art zum Ausgang/,
     });
@@ -2380,6 +2395,10 @@ describe("CI hours", () => {
                   share: 1 - 36 / total,
                 },
               ],
+              repos: [],
+              other_repos: 0,
+              other_seconds: 0,
+              other_failed: 0,
             },
           },
         }}
@@ -2400,7 +2419,16 @@ describe("CI hours", () => {
           ...m,
           build: {
             ...m.build,
-            ci_flow: { total_seconds: 0, kinds: [], outcomes: [], links: [] },
+            ci_flow: {
+              total_seconds: 0,
+              kinds: [],
+              outcomes: [],
+              links: [],
+              repos: [],
+              other_repos: 0,
+              other_seconds: 0,
+              other_failed: 0,
+            },
           },
         }}
       />,

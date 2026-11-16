@@ -481,7 +481,9 @@ verdict and outlier, no second twice: an outlier counts as one whatever its
 verdict, so the first three sum to the kind's CI time and all four to its
 time in `ci_flow`; a negative duration (clock skew) is no duration. Hours
 add up across kinds; each share is of the kind's own time or of all of it,
-never one kind's rate against another's. The thresholds are starting
+never one kind's rate against another's. The same total splits by repo
+across kinds, the 3 largest named and the rest folded, without a verdict:
+more CI time can be more work. The thresholds are starting
 values, not measured. The shapes are in
 [`backend/api/openapi.yaml`](../backend/api/openapi.yaml).
 
@@ -513,8 +515,7 @@ A source silent for 7 days at the end is a gap: its signals are left out.
 The repos are ranked by their signals' weight; a jam or a steady slow build
 alone makes a candidate, and repos without a signal stay out of it. The
 undirected number that moved most is the question, else the approvals
-without a comment. Where the CI time went is a split by repo without a
-verdict. Starting values, user-chosen 2026-11-16, not measured.
+without a comment. Starting values, user-chosen 2026-11-16, not measured.
 
 The model (`BACKEND_ANALYSIS_MODEL`) words this and nothing else:
 

@@ -23,16 +23,7 @@ import {
   type WaitingCounts,
 } from "./api";
 import { stageNames } from "./Flow";
-import {
-  ciHours,
-  clock,
-  dayMonth,
-  dur,
-  money,
-  num,
-  pct,
-  stage,
-} from "./format";
+import { clock, dayMonth, dur, money, num, pct, stage } from "./format";
 import type { Tab } from "./state";
 
 const POLL_MS = 3000;
@@ -63,9 +54,6 @@ const WAIT_COLOR: Record<PRWaiting, string> = {
   merge: "bg-seq-1",
   draft: "bg-other",
 };
-// The repos ranked by CI time: the same ramp, the largest brightest; the
-// series ramp's fixed order would put no rank in the colours.
-const CI_COLOR = ["bg-seq-4", "bg-seq-3", "bg-seq-2"];
 
 const VERDICT_TEXT: Record<Fact["verdict"], string> = {
   better: "text-online",
@@ -479,73 +467,6 @@ function Card({ c }: { c: CardView }) {
   );
 }
 
-function CIBlock({
-  a,
-  sentence,
-}: {
-  a: AssessmentData;
-  sentence: string | null;
-}) {
-  const { t } = useTranslation();
-  const ci = a.ci;
-  if (ci.seconds <= 0) return null;
-  const rows = ci.repos.map((r, i) => ({ ...r, color: CI_COLOR[i] }));
-  if (ci.other_repos > 0)
-    rows.push({
-      repo: t("overview.assess.ciOther", { count: ci.other_repos }),
-      seconds: ci.other_seconds,
-      wasted: ci.other_wasted,
-      color: "bg-other",
-    });
-  const top = ci.repos[0];
-  const rule = top
-    ? t("overview.assess.ciRule", {
-        repo: top.repo,
-        time: ciHours(top.seconds),
-        total: ciHours(ci.seconds),
-        wasted: ciHours(top.wasted),
-      })
-    : "";
-  return (
-    <div>
-      <SubHead
-        title={t("overview.assess.ci")}
-        aside={t("overview.assess.ciMeta", {
-          total: ciHours(ci.seconds),
-          weeks: a.period.weeks.length,
-          wasted: ciHours(ci.wasted),
-        })}
-      />
-      <div className="flex h-3 gap-0.5">
-        {rows.map((r) => (
-          <span
-            key={r.repo}
-            title={`${r.repo}: ${ciHours(r.seconds)}`}
-            className={`relative block h-full overflow-hidden rounded-sm ${r.color}`}
-            style={{ flex: r.seconds }}
-          >
-            {r.wasted > 0 && (
-              <i
-                className="texture-wasted absolute inset-y-0 right-0"
-                style={{ width: `${(r.wasted / r.seconds) * 100}%` }}
-              />
-            )}
-          </span>
-        ))}
-      </div>
-      <div className="mt-1.5 flex flex-wrap gap-x-3 font-mono text-[11px] text-muted">
-        {rows.map((r) => (
-          <span key={r.repo}>
-            <i className={`mr-1 inline-block size-2 rounded-sm ${r.color}`} />
-            {r.repo} {ciHours(r.seconds)}
-          </span>
-        ))}
-      </div>
-      <p className="mt-2 mb-0 text-sm text-ink-dim">{sentence || rule}</p>
-    </div>
-  );
-}
-
 // The view's words: the LLM's where an analysis is shown, the rules'
 // otherwise. Both from the same assessment.
 type Words = {
@@ -553,7 +474,6 @@ type Words = {
   trend: string | null;
   focus: FocusView[];
   cards: CardView[];
-  ci: string | null;
   question: string | null;
 };
 
@@ -625,7 +545,6 @@ function words(
     trend: text?.trend ? fill(t, text.trend, facts) : null,
     focus,
     cards,
-    ci: text?.ci ? fill(t, text.ci, facts) : null,
     question: text?.question ? fill(t, text.question, facts) : question,
   };
 }
@@ -852,8 +771,6 @@ function Panel({
           {rest.join(SEP)}.
         </p>
       )}
-
-      <CIBlock a={a} sentence={w.ci} />
 
       {(retros.length > 0 || w.question) && (
         <div className="mt-6 rounded-ui border border-border bg-bg/40 px-4 py-3">

@@ -541,6 +541,82 @@ const FLOW_KIND: Record<RunKind, string> = {
 const EN = String.fromCharCode(0x2002);
 const SEP = `${EN}·${EN}`;
 
+// The repos ranked by CI time: the sequential ramp, the largest brightest;
+// the series ramp's fixed order would put no rank in the colours. More
+// repos named than shades keep the dimmest.
+const REPO_COLOR = ["bg-seq-4", "bg-seq-3", "bg-seq-2"];
+
+// FlowRepos is the flow's total once more, split by repo: the same hours,
+// outliers included, the failed part hatched as the flow's failed outcome
+// counts it, so without the outliers.
+function FlowRepos({ f }: { f: CIFlow }) {
+  const { t } = useTranslation();
+  if (!f.repos.length) return null;
+  const rows = f.repos.map((r, i) => ({
+    ...r,
+    color: REPO_COLOR[Math.min(i, REPO_COLOR.length - 1)],
+  }));
+  if (f.other_repos > 0)
+    rows.push({
+      repo: t("build.flow.reposOther", { count: f.other_repos }),
+      seconds: f.other_seconds,
+      failed: f.other_failed,
+      color: "bg-other",
+    });
+  // Hours, and the failed part as a number too, never by hatching alone.
+  const label = (r: (typeof rows)[number]) =>
+    r.failed > 0
+      ? t("build.flow.repoFailed", {
+          repo: r.repo,
+          h: ciHours(r.seconds),
+          failed: ciHours(r.failed),
+        })
+      : `${r.repo}: ${ciHours(r.seconds)}`;
+  return (
+    <div className="mt-3">
+      <div className="mb-1.5 flex flex-wrap items-baseline gap-x-3 text-xs">
+        <span className="font-medium text-ink-dim">
+          {t("build.flow.repos")}
+        </span>
+        <span className="text-muted">{t("build.flow.reposMeta")}</span>
+      </div>
+      <div
+        role="img"
+        aria-label={t("build.flow.reposAria", {
+          parts: rows.map(label).join("; "),
+        })}
+        className="flex h-3 gap-0.5"
+      >
+        {rows.map((r) => (
+          <span
+            key={r.repo}
+            title={label(r)}
+            className={`relative block h-full overflow-hidden rounded-sm ${r.color}`}
+            style={{ flex: r.seconds }}
+          >
+            {r.failed > 0 && (
+              <i
+                className="texture-wasted absolute inset-y-0 right-0"
+                style={{ width: `${(r.failed / r.seconds) * 100}%` }}
+              />
+            )}
+          </span>
+        ))}
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-x-3 font-mono text-[11px] text-muted">
+        {rows.map((r) => (
+          <span key={r.repo}>
+            <i className={`mr-1 inline-block size-2 rounded-sm ${r.color}`} />
+            {r.repo} {ciHours(r.seconds)}
+            {r.failed > 0 &&
+              t("build.flow.repoFailedShort", { h: ciHours(r.failed) })}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function FlowCard({ f, h }: { f: CIFlow; h: Hotspots }) {
   const { t } = useTranslation();
   // The one place that decides: nothing to draw, no card.
@@ -597,6 +673,7 @@ function FlowCard({ f, h }: { f: CIFlow; h: Hotspots }) {
             .join(", "),
         })}
       />
+      <FlowRepos f={f} />
       <p className="mt-2.5 mb-0 text-xs text-muted">
         {t("build.flow.rule", {
           outliers: t("build.stuckSub", {

@@ -1234,7 +1234,7 @@ components:
         `ci_seconds` and outlier = `outlier_seconds`. Hours add up across
         kinds; a share of a kind is of its own time only. A negative
         duration (clock skew) is no duration, here and everywhere else.
-      required: [total_seconds, kinds, outcomes, links]
+      required: [total_seconds, kinds, outcomes, links, repos, other_repos, other_seconds, other_failed]
       properties:
         total_seconds:
           $ref: "#/components/schemas/Seconds"
@@ -1251,6 +1251,24 @@ components:
           type: array
           description: A kind's outcomes with time, by kind as `kinds`, then by outcome.
           items: { $ref: "#/components/schemas/FlowLink" }
+        repos:
+          type: array
+          description: |
+            The 3 repos with the most time across kinds, outliers included,
+            most first; with the folded rest their `seconds` sum to
+            `total_seconds`, their `failed` to the failed outcome. No better
+            direction: more CI time can be more work.
+          items:
+            type: object
+            additionalProperties: false
+            required: [repo, seconds, failed]
+            properties:
+              repo: { type: string }
+              seconds: { $ref: "#/components/schemas/Seconds" }
+              failed: { $ref: "#/components/schemas/Seconds" }
+        other_repos: { type: integer, description: The repos with time past the 3 named. }
+        other_seconds: { $ref: "#/components/schemas/Seconds" }
+        other_failed: { $ref: "#/components/schemas/Seconds" }
 
     FlowKind:
       type: object
@@ -1926,7 +1944,7 @@ components:
         The analysis in one language. Numbers appear only as `{{fact id}}`
         placeholders; a lever is a key the page words.
       additionalProperties: false
-      required: [headline, trend, focus, cards, ci, question]
+      required: [headline, trend, focus, cards, question]
       properties:
         headline: { type: string }
         trend: { type: string }
@@ -1952,17 +1970,16 @@ components:
               take: { type: string }
               retro: { type: [string, "null"] }
               lever: { type: string }
-        ci: { type: string }
         question: { type: string }
 
     Assessment:
       type: object
       description: |
         The overview's assessment over closed weeks: signals ranked (gates
-        first), the focus candidates by weight, the team numbers, where the
-        CI time went. Every number and verdict computed by riptide.
+        first), the focus candidates by weight, the team numbers. Every
+        number and verdict computed by riptide.
       additionalProperties: false
-      required: [period, previous, gaps, signals, focus, active, calm, team, question, ci, compared]
+      required: [period, previous, gaps, signals, focus, active, calm, team, question, compared]
       properties:
         period: { $ref: "#/components/schemas/Period" }
         previous: { $ref: "#/components/schemas/Period" }
@@ -1995,28 +2012,6 @@ components:
           oneOf:
             - $ref: "#/components/schemas/Signal"
             - type: "null"
-        ci:
-          type: object
-          description: The period's CI time by repo across kinds, outliers aside; no better direction.
-          additionalProperties: false
-          required: [seconds, wasted, change, repos, other_repos, other_seconds, other_wasted]
-          properties:
-            seconds: { type: number }
-            wasted: { type: number, description: Time of failed runs. }
-            change: { $ref: "#/components/schemas/Change" }
-            repos:
-              type: array
-              items:
-                type: object
-                additionalProperties: false
-                required: [repo, seconds, wasted]
-                properties:
-                  repo: { type: string }
-                  seconds: { type: number }
-                  wasted: { type: number }
-            other_repos: { type: integer }
-            other_seconds: { type: number }
-            other_wasted: { type: number }
         compared:
           type: boolean
           description: An assessment of the view for an earlier week was there to tell what is resolved.

@@ -182,6 +182,12 @@ export type CIFlow = {
   kinds: FlowKind[];
   outcomes: FlowOutcomeShare[];
   links: FlowLink[];
+  // The top repos across kinds, outliers included, the rest folded: with
+  // it they sum to total_seconds, their failed to the failed outcome.
+  repos: { repo: string; seconds: number; failed: number }[];
+  other_repos: number;
+  other_seconds: number;
+  other_failed: number;
 };
 
 export type KindHotspots = {
@@ -612,16 +618,6 @@ export type FocusRepo = {
   waiting: WaitingCounts | null;
 };
 
-export type CISplit = {
-  seconds: number;
-  wasted: number;
-  change: Change;
-  repos: { repo: string; seconds: number; wasted: number }[];
-  other_repos: number;
-  other_seconds: number;
-  other_wasted: number;
-};
-
 export type Assessment = {
   period: Period;
   previous: Period;
@@ -632,7 +628,6 @@ export type Assessment = {
   calm: number;
   team: Fact[];
   question: Signal | null;
-  ci: CISplit;
   // An assessment of the view for an earlier week was there.
   compared: boolean;
 };
@@ -656,7 +651,6 @@ export type AnalysisText = {
   trend: string;
   focus: FocusText[];
   cards: CardText[];
-  ci: string;
   question: string;
 };
 

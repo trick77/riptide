@@ -257,13 +257,6 @@ export const de = {
           "Besprechen wir grosse Änderungen ausserhalb von Bitbucket?",
       },
       also: "Ausserdem erkannt:",
-      ci: "Wohin die CI-Zeit geht",
-      ciMeta:
-        "{{total}} in {{weeks}} Wochen · schraffiert: rote Läufe, {{wasted}}",
-      ciOther_one: "{{count}} weiteres",
-      ciOther_other: "{{count}} weitere",
-      ciRule:
-        "{{repo}}: {{time}} von {{total}} CI-Zeit, davon {{wasted}} in roten Läufen.",
       weeksUnit: "{{n}} Wochen",
       lever: {
         walk_prs:
@@ -771,6 +764,13 @@ export const de = {
       tipOfAll: "Anteil an aller CI-Zeit",
       aria: "CI-Zeit von der Lauf-Art zum Ausgang: {{parts}}",
       withOutliers: "{{h}} inkl. Ausreisser",
+      repos: "Nach Repo, über alle Lauf-Arten",
+      reposMeta: "schraffiert: fehlgeschlagen, ohne Ausreisser",
+      repoFailed: "{{repo}}: {{h}}, davon {{failed}} fehlgeschlagen",
+      repoFailedShort: " · {{h}} rot",
+      reposOther_one: "{{count}} weiteres",
+      reposOther_other: "{{count}} weitere",
+      reposAria: "CI-Zeit nach Repo: {{parts}}",
       rule: "Fehlgeschlagen: FAILURE, UNSTABLE, Failed. Ohne Ergebnis: ABORTED, NOT_BUILT, Tekton None, Jenkins-Timeouts eingeschlossen. Ausreisser: {{outliers}} (ein Repo mit genug eigenen Läufen zudem über seinem eigenen Median). Ein Ausreisser zählt nur als Ausreisser, egal mit welchem Ergebnis; darum sind hier die Stunden der Ausreisser dabei, die die Karten oben weglassen. Die Bänder jeder Art zeigen ihre eigene Aufteilung, die Höhe eines Knotens nur die Menge: kein Vergleich zwischen den Arten.",
     },
   },

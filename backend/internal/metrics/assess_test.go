@@ -165,12 +165,6 @@ func TestAssessSignals(t *testing.T) {
 	if a.Calm < 2 || a.Active < 4 {
 		t.Errorf("active %d calm %d", a.Active, a.Calm)
 	}
-	if a.CI.Seconds <= 0 || len(a.CI.Repos) != 3 || a.CI.Repos[0].Repo != "kasse/kasse-web" {
-		t.Errorf("ci = %+v", a.CI)
-	}
-	if a.CI.Change.Directed {
-		t.Errorf("CI time has no better direction")
-	}
 }
 
 func TestAssessHistory(t *testing.T) {
