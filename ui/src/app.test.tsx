@@ -140,14 +140,35 @@ describe("App", () => {
       "Gegen die Vorperiode",
       "Throughput und Instability",
       "Wo wartet eine Änderung?",
+      "Wie schnell und verlässlich ist das Feedback?",
       "Wie gleichmässig kommt Code nach PROD?",
       "Woran arbeitet das Team?",
-      "Wie schnell und verlässlich ist das Feedback?",
       "Was kosten die KI-Reviews?",
       "Welche Frameworks Riptide abdeckt",
     ]) {
       expect(screen.getByRole("heading", { name: h })).toBeInTheDocument();
     }
+    // The sections in a change's order, builds before rollout, and the nav
+    // in the same order as the page.
+    const sections = [...document.querySelectorAll("section[id]")].map(
+      (s) => s.id,
+    );
+    expect(sections).toEqual([
+      "ueberblick",
+      "fluss",
+      "build",
+      "deploys",
+      "arbeitsmix",
+      "kosten",
+      "daten",
+      "frameworks",
+    ]);
+    const nav = screen.getByRole("navigation", { name: "Bereiche" });
+    expect(
+      within(nav)
+        .getAllByRole("link")
+        .map((a) => a.getAttribute("href")),
+    ).toEqual(sections.map((id) => `#${id}`));
     // The viewer's zone goes along: the backend cuts the weeks there.
     expect(metricsCalls(calls)[0]).toBe(
       "/api/metrics?team=team-a&weeks=4&tz=Europe%2FZurich",

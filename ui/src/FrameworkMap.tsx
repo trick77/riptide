@@ -32,8 +32,8 @@ const ROWS: [RowKey, Cell[]][] = [
     [null, ["not", "diffsNot"], "effWait", "feedbackReview", "flowTimeApprox"],
   ],
   ["touch", [null, null, "collaboration", null, null]],
-  ["mix", [null, "impact", null, null, "distribution"]],
   ["build", [null, "effectiveness", "effWait", "feedbackBuild", null]],
+  ["mix", [null, "impact", null, null, "distribution"]],
   ["costs", [null, null, null, null, null]],
   [
     "missingCfr",
