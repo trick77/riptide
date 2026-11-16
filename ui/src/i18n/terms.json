@@ -35,10 +35,10 @@
     },
     "runKind": {
       "release": "Releases",
-      "main": "master builds",
-      "feature": "Feature and PR builds",
+      "main": "Default branch builds",
+      "feature": "Feature and bugfix builds",
       "other": "Other branches",
-      "unknown": "master, kind unknown"
+      "unknown": "Default branch, kind unknown"
     }
   },
   "de": {
@@ -77,10 +77,10 @@
     },
     "runKind": {
       "release": "Releases",
-      "main": "master-Builds",
-      "feature": "Feature- und PR-Builds",
-      "other": "Andere Branches",
-      "unknown": "master, Art unbekannt"
+      "main": "Default-Branch-Builds",
+      "feature": "Feature- und Bugfix-Builds",
+      "other": "Übrige Branches",
+      "unknown": "Default-Branch, Art unbekannt"
     }
   }
 }

@@ -546,18 +546,27 @@ export const de = {
     kind: terms.de.runKind,
     kindNote: {
       release: "build_type release oder hotfix",
-      main: "Hauptbranch, kein Release",
-      feature: "feature/…, bugfix/…, PR-…",
-      other: "release/… ohne Release, Nightlies",
+      main: "master oder main, kein Release",
+      feature: "feature/…, feat/…, bugfix/…, fix/…, hotfix/…, PR-Builds",
+      other:
+        "kein bekanntes Präfix: release/… ohne Release, Nightlies, eigene Namensschemas",
       unknown: "vor der ersten build_type-Meldung",
     },
+    featureWhy: "Darauf warten Developer, bevor sie weiterarbeiten können",
+    prefixes: "Häufigste Präfixe",
+    noBranch: "ohne Branch im Pipeline-Namen",
+    featureMissingTitle: "Feature- und Bugfix-Builds: kein Lauf erkannt",
+    featureMissing_one:
+      "Erkannt werden Branches mit feature/, feat/, bugfix/, fix/, hotfix/ und PR-Builds. {{count}} Lauf auf einem Branch ohne bekanntes Präfix steht unter «Übrige Branches» (release/, Nightlies und Bots nicht mitgezählt), vermutlich ein Feature-Build des Teams.",
+    featureMissing_other:
+      "Erkannt werden Branches mit feature/, feat/, bugfix/, fix/, hotfix/ und PR-Builds. {{count}} Läufe auf Branches ohne bekanntes Präfix stehen unter «Übrige Branches» (release/, Nightlies und Bots nicht mitgezählt), vermutlich die Feature-Builds des Teams.",
     sparkAria: "Erfolgsquote pro Woche, {{kind}}: {{parts}}",
     successful: "erfolgreich",
     typicalDuration: "typische Dauer, alle Repos",
     repos:
       "Von {{compared}} Repos sind {{slower}} langsamer, {{flakier}} fehleranfälliger geworden als in der Vorperiode",
     reposNone: "Repos: kein Vergleich mit der Vorperiode",
-    redRuns: "rote Läufe, von {{h}} h CI-Zeit",
+    redRuns: "in roten Läufen, von {{h}} h CI-Zeit",
     waitingTitle:
       "Median über {{n}} der {{total}} Läufe, die melden, wann sie einen Agent bekamen",
     waiting:
@@ -594,7 +603,7 @@ export const de = {
     noAgent: "Der Lauf meldet nicht, wann er einen Agent bekam",
     eyebrow: "CI · Jenkins · Tekton · jede Lauf-Art für sich",
     title: "Wie schnell und verlässlich ist das Feedback?",
-    lead: "Releases überspringen Tests, Feature-Builds scheitern öfter. Darum gibt es keine Summe über alle Arten: jede Karte steht für sich.",
+    lead: "Auf Feature- und Bugfix-Builds warten Developer, bevor sie weiterarbeiten können: Dort geht ihre Zeit verloren, darum stehen sie zuerst. Releases überspringen Tests, Feature-Builds scheitern öfter, deshalb gibt es keine Summe über alle Arten: jede Karte steht für sich.",
     fwEffectiveness: "Effectiveness, Treiber",
     dataFrom:
       "Build-Daten ab {{date}}: der erste Lauf, den Riptide für das Team erhalten hat. Ältere Wochen bleiben leer statt falsch.",

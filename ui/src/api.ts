@@ -152,7 +152,13 @@ export type BuildStats = {
   outlier_runs: number;
   outlier_seconds: number;
   weekly: (number | null)[];
+  // Kind other only: its most frequent branch schemes.
+  prefixes: BranchPrefix[];
 };
+
+// A branch scheme and its runs; prefix "" for a pipeline name without a
+// branch.
+export type BranchPrefix = { prefix: string; runs: number };
 
 export type FlowOutcome = "succeeded" | "failed" | "no_verdict" | "outlier";
 
@@ -287,6 +293,9 @@ export type Build = {
   gap_weeks: number;
   kinds: BuildStats[];
   ci_flow: CIFlow;
+  // Set when feature builds look unrecognised: other runs on branches that
+  // look like work in progress, no feature run.
+  feature_hint: { runs: number } | null;
   hotspots: Hotspots;
 };
 

@@ -82,6 +82,9 @@ func findings(c Chain, b Build, r Review, o OpenPRs, openJammed Change) []Findin
 	}
 	slices.SortStableFunc(flaky, func(a, b repo) int { return cmp.Compare(b.h.WastedSeconds, a.h.WastedSeconds) })
 	slices.SortStableFunc(slow, func(a, b repo) int { return cmp.Compare(*b.h.Factor, *a.h.Factor) })
+	// A repo flagged in several kinds is named once: the first after the
+	// sort, on a tie the first in runKinds' order. Feature first: the builds
+	// developers wait on.
 	seen := map[string]bool{}
 	add := func(kind string, rs []repo) {
 		for _, x := range rs {

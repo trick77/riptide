@@ -226,7 +226,7 @@ describe("App", () => {
       if (url.pathname === "/api/facts") return facts();
       const m = metrics();
       m.lead_chain.stages[0].share = 0.6;
-      m.build.hotspots.kinds[2].repos = [
+      m.build.hotspots.kinds[0].repos = [
         {
           repo: "kasse/flaky-api",
           runs: 20,
@@ -310,7 +310,7 @@ describe("App", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "kasse/flaky-api: 40 % der Feature- und PR-Builds scheitern.",
+        "kasse/flaky-api: 40 % der Feature- und Bugfix-Builds scheitern.",
       ),
     ).toBeInTheDocument();
     expect(
@@ -530,7 +530,7 @@ describe("App", () => {
     const kinds = screen.getByRole("group", { name: "Lauf-Art" });
     // feature builds first: kasse-api broke one run, too few to compare
     expect(
-      within(kinds).getByRole("button", { name: "Feature- und PR-Builds" }),
+      within(kinds).getByRole("button", { name: "Feature- und Bugfix-Builds" }),
     ).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("Kein Vergleich")).toBeInTheDocument();
     expect(
@@ -567,10 +567,10 @@ describe("App", () => {
         building: spread(4, 3 * 60),
       };
       // The circles' base: the rows hold most of the kind's CI time.
-      m.build.kinds[2] = { ...m.build.kinds[2], ci_seconds: 60_000 };
+      m.build.kinds[0] = { ...m.build.kinds[0], ci_seconds: 60_000 };
       const h = m.build.hotspots;
-      h.kinds[2] = {
-        ...h.kinds[2],
+      h.kinds[0] = {
+        ...h.kinds[0],
         failure_rate: 0.1,
         unplotted: 2,
         repos: [
@@ -714,7 +714,7 @@ describe("App", () => {
     const quiver = screen.getByTestId("quiver");
     expect(
       within(quiver).getByRole("group", {
-        name: /^Feature- und PR-Builds: jedes Repo von der Vorperiode/,
+        name: /^Feature- und Bugfix-Builds: jedes Repo von der Vorperiode/,
       }),
     ).toBeInTheDocument();
     expect(quiver).toHaveTextContent(
@@ -820,7 +820,7 @@ describe("App", () => {
     mockFetch((url) => {
       if (url.pathname === "/api/facts") return facts();
       const m = metrics();
-      const k = m.build.hotspots.kinds[2];
+      const k = m.build.hotspots.kinds[0];
       k.repos = [{ ...k.repos[0], plotted: false }];
       k.unplotted = 3;
       return m;
@@ -837,7 +837,7 @@ describe("App", () => {
     mockFetch((url) => {
       if (url.pathname === "/api/facts") return facts();
       const m = metrics();
-      const k = m.build.hotspots.kinds[2];
+      const k = m.build.hotspots.kinds[0];
       const row = k.repos[0];
       k.repos = [{ ...row, waiting: spread(1, 60), building: spread(1, 540) }];
       k.slowest = [
@@ -921,7 +921,7 @@ describe("App", () => {
     await screen.findByText("Fehlerquote pro Repo und Woche");
     // The numbers as a table for assistive tech, the grid hidden from it.
     const table = screen.getByRole("table", {
-      name: "Fehlerquote pro Repo und Woche, Feature- und PR-Builds",
+      name: "Fehlerquote pro Repo und Woche, Feature- und Bugfix-Builds",
     });
     expect(
       within(table).getByRole("row", { name: /^übrige Repos/ }),
@@ -941,7 +941,7 @@ describe("App", () => {
     const tipNow = () => screen.getByRole("tooltip", { hidden: true });
     const tip = tipNow();
     expect(tip.firstElementChild?.textContent).toBe(
-      "kasse/kasse-api · KW 46 · Feature- und PR-Builds",
+      "kasse/kasse-api · KW 46 · Feature- und Bugfix-Builds",
     );
     expect(tip).toHaveTextContent("2 von 5 Läufen fehlgeschlagen (40 %)");
     fireEvent.mouseLeave(cells[4]);
@@ -1081,6 +1081,104 @@ describe("App", () => {
       fireEvent.click(screen.getByRole("button", { name: /Drucken/ }));
     });
     expect(print).toHaveBeenCalled();
+  });
+
+  it("says where the feature builds hide when none is recognised", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      const m = metrics();
+      const other = {
+        ...m.build.kinds[1],
+        kind: "other" as const,
+        runs: 70,
+        prefixes: [
+          { prefix: "feat/", runs: 31 },
+          { prefix: "KAS-…", runs: 13 },
+          { prefix: "", runs: 2 },
+        ],
+      };
+      return {
+        ...m,
+        build: {
+          ...m.build,
+          kinds: [m.build.kinds[1], other],
+          feature_hint: { runs: 44 },
+        },
+      };
+    });
+    render(<App />);
+    expect(
+      await screen.findByText("Feature- und Bugfix-Builds: kein Lauf erkannt"),
+    ).toBeInTheDocument();
+    // the backend's count, not the other card's 70 runs
+    expect(
+      screen.getByText(
+        /44 Läufe auf Branches ohne bekanntes Präfix stehen unter «Übrige Branches»/,
+      ),
+    ).toBeInTheDocument();
+    // the chips in the hint only, not again on the other card
+    expect(screen.getAllByText("feat/")).toHaveLength(1);
+    expect(screen.getAllByText(/ohne Branch im Pipeline-Namen/)).toHaveLength(
+      1,
+    );
+    expect(screen.queryByText(/^Häufigste Präfixe:/)).toBeNull();
+    expect(
+      screen.queryByText(
+        "Darauf warten Developer, bevor sie weiterarbeiten können",
+      ),
+    ).toBeNull();
+    // the repos that slow the feedback down: where the feature builds hide,
+    // never the default branch
+    const kinds = screen.getByRole("group", { name: "Lauf-Art" });
+    expect(
+      within(kinds).getByRole("button", { name: "Übrige Branches" }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("shows no hint the backend did not send", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      const m = metrics();
+      const other = {
+        ...m.build.kinds[1],
+        kind: "other" as const,
+        prefixes: [{ prefix: "nightly", runs: 3 }],
+      };
+      return { ...m, build: { ...m.build, kinds: [m.build.kinds[1], other] } };
+    });
+    render(<App />);
+    await screen.findAllByText("Übrige Branches");
+    expect(screen.queryByText(/kein Lauf erkannt/)).toBeNull();
+    // the prefixes on the other card instead
+    expect(screen.getByText(/^Häufigste Präfixe:/)).toBeInTheDocument();
+    // no feature builds, none hiding: the first kind
+    const kinds = screen.getByRole("group", { name: "Lauf-Art" });
+    expect(
+      within(kinds).getByRole("button", { name: "Default-Branch-Builds" }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("puts the feature card first with why it matters", async () => {
+    mockFetch();
+    render(<App />);
+    expect(
+      await screen.findByText(
+        "Darauf warten Developer, bevor sie weiterarbeiten können",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/kein Lauf erkannt/)).toBeNull();
+    // the cards in the backend's order, before the hotspots' kind buttons
+    const names = screen
+      .getAllByText(
+        /^(Feature- und Bugfix-Builds|Default-Branch-Builds|Releases)$/,
+      )
+      .slice(0, 3)
+      .map((e) => e.textContent);
+    expect(names).toEqual([
+      "Feature- und Bugfix-Builds",
+      "Default-Branch-Builds",
+      "Releases",
+    ]);
   });
 
   it("explains a build section with only unknown runs", async () => {
@@ -1896,8 +1994,10 @@ describe("CI hours", () => {
     const hits = screen.getAllByTestId("sankey-hit");
     fireEvent.mouseEnter(hits[2]);
     const tip = screen.getByRole("tooltip");
-    expect(tip).toHaveTextContent("Feature- und PR-Builds → Fehlgeschlagen");
-    expect(tip).toHaveTextContent("Anteil an Feature- und PR-Builds36 %");
+    expect(tip).toHaveTextContent(
+      "Feature- und Bugfix-Builds → Fehlgeschlagen",
+    );
+    expect(tip).toHaveTextContent("Anteil an Feature- und Bugfix-Builds36 %");
     expect(tip).toHaveTextContent("Anteil an aller CI-Zeit33 %");
     fireEvent.mouseLeave(hits[2]);
     expect(screen.queryByRole("tooltip")).toBeNull();

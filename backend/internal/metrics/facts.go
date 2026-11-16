@@ -83,10 +83,24 @@ func prTypeTerm(pr dataset.PR) string {
 // runKindTerm is a run kind's words in the runs table's Art column.
 var runKindTerm = map[string]uiTerm{
 	KindRelease: {"Releases", "Releases"},
-	KindMain:    {"master-Builds", "master builds"},
-	KindFeature: {"Feature- und PR-Builds", "Feature and PR builds"},
-	KindOther:   {"Andere Branches", "Other branches"},
-	KindUnknown: {"master, Art unbekannt", "master, kind unknown"},
+	KindMain:    {"Default-Branch-Builds", "Default branch builds"},
+	KindFeature: {"Feature- und Bugfix-Builds", "Feature and bugfix builds"},
+	KindOther:   {"Übrige Branches", "Other branches"},
+	KindUnknown: {"Default-Branch, Art unbekannt", "Default branch, kind unknown"},
+}
+
+// runKindAlias is a kind's words the UI showed before 2026-11-17, still
+// searched, as prStateAlias.
+var runKindAlias = map[string]string{
+	KindMain:    "master-Builds master builds",
+	KindFeature: "Feature- und PR-Builds Feature and PR builds",
+	KindOther:   "Andere Branches",
+	KindUnknown: "master, Art unbekannt master, kind unknown",
+}
+
+// runKindTerms is a run kind's search words.
+func runKindTerms(kind string) string {
+	return strings.TrimSpace(runKindTerm[kind].both() + " " + runKindAlias[kind])
 }
 
 // Deploy classes in the facts table.
@@ -502,7 +516,7 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 			if m == "" {
 				return true
 			}
-			status, kind := runStatusTerms(r), runKindTerm[RunKind(r, ds.Meta.BuildTypeFrom)].both()
+			status, kind := runStatusTerms(r), runKindTerms(RunKind(r, ds.Meta.BuildTypeFrom))
 			return m.match(append([]*string{&r.PipelineName, r.Repo, r.CommitSHA, r.Status, &status, &kind, r.BuildType}, strs(r.ImageRefs)...)...)
 		}, func(r dataset.Run) RunFact {
 			return RunFact{

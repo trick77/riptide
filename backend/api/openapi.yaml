@@ -666,10 +666,11 @@ components:
       type: string
       enum: [release, main, feature, other, unknown]
       description: |
-        `release`: build_type release or hotfix; `main`: main branch, no
-        release; `feature`: feature/…, bugfix/…, PR-…; `other`: any other
-        branch; `unknown`: a main-branch run before the team's first
-        build_type, release or not.
+        `release`: build_type release or hotfix; `main`: the default branch
+        (master or main), no release; `feature`: feature/…, feat/…,
+        bugfix/…, fix/…, hotfix/…, PR-<n>; `other`: any other branch;
+        `unknown`: a default-branch run before the team's first build_type,
+        release or not.
 
     Metrics:
       type: object
@@ -1146,7 +1147,7 @@ components:
     Build:
       type: object
       additionalProperties: false
-      required: [data_from, starts_inside, gap_weeks, kinds, ci_flow, hotspots]
+      required: [data_from, starts_inside, gap_weeks, kinds, ci_flow, hotspots, feature_hint]
       properties:
         data_from:
           $ref: "#/components/schemas/NullableInstant"
@@ -1155,10 +1156,25 @@ components:
         gap_weeks: { type: integer, description: Leading weeks that ended before `data_from`. }
         kinds:
           type: array
-          description: Per kind of run with runs, never averaged across kinds.
+          description: |
+            Per kind of run with runs, never averaged across kinds; in the
+            order feature, main, release, other, unknown.
           items: { $ref: "#/components/schemas/BuildStats" }
         ci_flow: { $ref: "#/components/schemas/CIFlow" }
         hotspots: { $ref: "#/components/schemas/Hotspots" }
+        feature_hint:
+          type: [object, "null"]
+          additionalProperties: false
+          description: |
+            Not null when no run counted as a feature build while `other` runs
+            did on branches that look like work in progress: not release,
+            renovate, dependabot or snyk (with `/` or `-`), develop, nightly
+            or a pipeline name without a branch. Feature runs without a
+            verdict count as none. Their scheme is most likely one riptide
+            does not recognise; `other`'s `prefixes` name it.
+          required: [runs]
+          properties:
+            runs: { type: integer, description: "Those `other` runs, with a verdict." }
 
     FlowOutcome:
       type: string
@@ -1238,7 +1254,7 @@ components:
         counts in `outlier_runs` and `outlier_seconds` instead. The time
         split by outcome is Build's `ci_flow`.
       required: [kind, runs, succeeded, failed, no_verdict, success_rate, duration, waiting, building, ci_seconds,
-                 wasted_seconds, outlier_runs, outlier_seconds, weekly]
+                 wasted_seconds, outlier_runs, outlier_seconds, weekly, prefixes]
       properties:
         kind: { $ref: "#/components/schemas/RunKind" }
         runs: { type: integer, description: Runs with a verdict. }
@@ -1273,6 +1289,27 @@ components:
           type: array
           description: Success rate per week; null for a week without runs.
           items: { $ref: "#/components/schemas/NullableNumber" }
+        prefixes:
+          type: array
+          description: |
+            Kind `other` only, empty for every other kind: its five most
+            frequent branch schemes over `runs`, most runs first.
+            Computed for the shown period only, never the previous one.
+          items: { $ref: "#/components/schemas/BranchPrefix" }
+
+    BranchPrefix:
+      type: object
+      additionalProperties: false
+      required: [prefix, runs]
+      properties:
+        prefix:
+          type: string
+          description: |
+            The branch lowercased, up to the first `/` (`release/`), else up
+            to the first `-` (`kas-…`, a Jira key's project or a person's
+            name), else whole (`nightly`); empty for a pipeline name without
+            a branch.
+        runs: { type: integer }
 
     Hotspots:
       type: object

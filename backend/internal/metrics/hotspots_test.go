@@ -496,7 +496,7 @@ func TestCIFlowSplitsWithoutOverlap(t *testing.T) {
 	if len(b.Kinds) != 3 || b.Kinds[2].Kind != KindOther || b.Kinds[2].total != 0 {
 		t.Fatalf("kinds = %+v", b.Kinds)
 	}
-	main, feature := b.Kinds[0], b.Kinds[1]
+	feature, main := b.Kinds[0], b.Kinds[1]
 	if main.succeeded != 2700 || main.WastedSeconds != 300 || main.noVerdict != 400 ||
 		main.OutlierSeconds != 300000 || main.CISeconds != 3400 || main.total != 303400 {
 		t.Errorf("main = %+v", main)
@@ -530,7 +530,7 @@ func TestCIFlowSplitsWithoutOverlap(t *testing.T) {
 	if !slices.Equal(f.Outcomes, want) {
 		t.Errorf("outcomes = %+v", f.Outcomes)
 	}
-	if !slices.Equal(f.Kinds, []FlowKind{{KindMain, 303400, 303400.0 / 303900}, {KindFeature, 500, 500.0 / 303900}}) {
+	if !slices.Equal(f.Kinds, []FlowKind{{KindFeature, 500, 500.0 / 303900}, {KindMain, 303400, 303400.0 / 303900}}) {
 		t.Errorf("kind nodes = %+v", f.Kinds)
 	}
 	// Each side of the flow reconciles with the total.
@@ -553,8 +553,8 @@ func TestCIFlowSplitsWithoutOverlap(t *testing.T) {
 		sum += l.Seconds
 		ofKind[l.Kind] += l.ShareOfKind
 	}
-	if !slices.Equal(got, []string{"main>succeeded", "main>failed", "main>no_verdict", "main>outlier",
-		"feature>succeeded", "feature>failed"}) {
+	if !slices.Equal(got, []string{"feature>succeeded", "feature>failed",
+		"main>succeeded", "main>failed", "main>no_verdict", "main>outlier"}) {
 		t.Errorf("links = %v", got)
 	}
 	if sum != f.TotalSeconds {
@@ -563,7 +563,7 @@ func TestCIFlowSplitsWithoutOverlap(t *testing.T) {
 	for kind, share := range ofKind {
 		expectNear(t, kind+" shares", &share, 1)
 	}
-	if l := f.Links[5]; l.ShareOfKind != 0.5 || l.Share != 250.0/303900 {
+	if l := f.Links[1]; l.ShareOfKind != 0.5 || l.Share != 250.0/303900 {
 		t.Errorf("feature failed = %+v", l)
 	}
 
