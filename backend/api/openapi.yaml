@@ -1195,7 +1195,7 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [kind, duration, failure_rate, repos, slowest, outlier_threshold_s]
+            required: [kind, duration, failure_rate, repos, slowest, outlier_threshold_s, unplotted]
             properties:
               kind: { $ref: "#/components/schemas/RunKind" }
               duration:
@@ -1224,6 +1224,12 @@ components:
                   `outlier_factor` times the team's median, at least
                   `outlier_min_s`; null without a run with a verdict and a
                   duration. Higher for a slower repo.
+              unplotted:
+                type: integer
+                description: |
+                  The kind's repos without a median and a failure rate in
+                  `repos`: past its cut, without a run with a verdict, or
+                  every timed run an outlier.
         outliers:
           type: array
           description: Runs past their kind's threshold across kinds, longest first, the top 10.
@@ -1273,7 +1279,8 @@ components:
       description: One repo of a kind against its own runs of the kind in the previous period.
       additionalProperties: false
       required: [repo, runs, duration, waiting, building, duration_change, factor, slow, failures, failure_rate,
-                 failure_change, wasted_seconds, flaky]
+                 failure_change, wasted_seconds, flaky, ci_seconds, compared, prev_complete,
+                 plotted]
       properties:
         repo: { type: string }
         runs: { type: integer, description: Runs with a verdict. }
@@ -1307,6 +1314,16 @@ components:
           description: The failure rate against the repo's previous one, both over `min_runs` runs or more.
         wasted_seconds: { $ref: "#/components/schemas/Seconds" }
         flaky: { type: boolean }
+        ci_seconds:
+          $ref: "#/components/schemas/Seconds"
+          description: |
+            Every run's time of the kind, those without a verdict included,
+            outliers left out. The rows add up to at most the kind's
+            `ci_seconds`: a repo without a run with a verdict has no row,
+            and `repos` is cut.
+        compared: { type: boolean, description: "`duration_change` or `failure_change` has a `prev`." }
+        prev_complete: { type: boolean, description: "Both have a `prev`: a previous median and failure rate." }
+        plotted: { type: boolean, description: "A median and a failure rate: a position to draw the repo at." }
 
     Costs:
       type: object

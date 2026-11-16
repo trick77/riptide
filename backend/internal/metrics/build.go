@@ -487,6 +487,10 @@ type KindHotspots struct {
 	// included, at least OutlierMinS; null without a run with a verdict and
 	// a duration. A repo with a longer median of its own has a higher one.
 	OutlierThresholdS *float64 `json:"outlier_threshold_s"`
+	// Unplotted are the kind's repos without a median and a failure rate in
+	// Repos: past its cut, without a run with a verdict, or every timed run
+	// an outlier.
+	Unplotted int `json:"unplotted"`
 }
 
 // Outlier is a run far longer than its kind usually takes.
@@ -560,6 +564,19 @@ type RepoHotspot struct {
 	// Flaky: a failure rate of at least flakyThreshold of the previous
 	// period's and FlakyMinPoints above it.
 	Flaky bool `json:"flaky"`
+	// CISeconds is every run's time, those without a verdict included,
+	// outliers aside, counted as BuildStats.CISeconds. The rows add up to
+	// at most the kind's: a repo without a run with a verdict has no row,
+	// and Repos is cut to the top.
+	CISeconds float64 `json:"ci_seconds"`
+	// Compared: either previous value is there, DurationChange's or
+	// FailureChange's.
+	Compared bool `json:"compared"`
+	// PrevComplete: both are, so the repo has a previous position on the
+	// median and the failure rate alike.
+	PrevComplete bool `json:"prev_complete"`
+	// Plotted: a median and a failure rate, a position to draw the repo at.
+	Plotted bool `json:"plotted"`
 }
 
 // OutlierGroup is outliers whose starts follow each other within
@@ -671,11 +688,13 @@ type repoRuns struct {
 	// timed are the runs with a verdict and a duration, outliers included.
 	timed, counted, failures int
 	wasted                   float64
+	// ci is every run's time, those without a verdict included.
+	ci float64
 }
 
 // byRepo counts the runs per repo. A run without a verdict is no run
-// here, nor its duration; an outlier counts as a run and in the failure
-// rate, but none of its time does.
+// here, nor its duration, only its CI time; an outlier counts as a run
+// and in the failure rate, but none of its time does.
 func (kr kindRuns) byRepo() map[string]*repoRuns {
 	repos := map[string]*repoRuns{}
 	for i, r := range kr.runs {
@@ -683,6 +702,9 @@ func (kr kindRuns) byRepo() map[string]*repoRuns {
 		if rr == nil {
 			rr = &repoRuns{}
 			repos[kr.repos[i]] = rr
+		}
+		if !kr.stuck[i] {
+			rr.ci += seconds(r)
 		}
 		v := kr.verdicts[i]
 		if v == VerdictNone {
@@ -779,10 +801,13 @@ func kindHotspots(kind string, kr kindRuns, repos map[string]*repoRuns, base *ba
 		h := RepoHotspot{
 			Repo: repo, Runs: rr.counted, Duration: spread(rr.durations),
 			Waiting: spread(rr.waits), Building: spread(rr.works), Failures: rr.failures,
-			FailureRate: ratio(rr.failures, rr.counted), WastedSeconds: rr.wasted,
+			FailureRate: ratio(rr.failures, rr.counted), WastedSeconds: rr.wasted, CISeconds: rr.ci,
 		}
 		h.against(rr, prev[repo], base.incomplete)
-		if h.DurationChange.Prev != nil || h.FailureChange.Prev != nil {
+		h.Compared = h.DurationChange.Prev != nil || h.FailureChange.Prev != nil
+		h.PrevComplete = h.DurationChange.Prev != nil && h.FailureChange.Prev != nil
+		h.Plotted = h.Duration.P50 != nil && h.FailureRate != nil
+		if h.Compared {
 			compared++
 		}
 		k.Repos = append(k.Repos, h)
@@ -798,6 +823,12 @@ func kindHotspots(kind string, kr kindRuns, repos map[string]*repoRuns, base *ba
 	slices.SortFunc(k.Repos, compareHotspots)
 	// Every flagged repo stays: compare counts them off this list.
 	k.Repos = topOrFlagged(k.Repos, func(h RepoHotspot) bool { return h.Flaky || h.Slow })
+	k.Unplotted = len(repos)
+	for _, h := range k.Repos {
+		if h.Plotted {
+			k.Unplotted--
+		}
+	}
 
 	k.OutlierThresholdS = kr.cut.threshold
 	return k, outliers, compared

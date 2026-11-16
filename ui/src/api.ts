@@ -137,6 +137,9 @@ export type KindHotspots = {
   // backend.
   slowest: RepoHotspot[];
   outlier_threshold_s: number | null;
+  // The kind's repos the chart cannot draw: past the cut, without a run
+  // with a verdict, or without a median.
+  unplotted: number;
 };
 
 // One repo against its own runs of the kind in the previous period.
@@ -154,6 +157,15 @@ export type RepoHotspot = {
   failure_change: Change;
   wasted_seconds: number;
   flaky: boolean;
+  // Every run's time of the kind, those without a verdict included,
+  // outliers aside; the rows add up to at most the kind's.
+  ci_seconds: number;
+  // Either previous value is there.
+  compared: boolean;
+  // Both are: a previous position to draw the arrow from.
+  prev_complete: boolean;
+  // A median and a failure rate: a position to draw the repo at.
+  plotted: boolean;
 };
 
 export type OutlierGroup = {
