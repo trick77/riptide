@@ -26,13 +26,16 @@ import {
 import { Eyebrow, LanguageSwitch, Mono } from "./ui";
 
 // The sections' anchors: German ids, kept in both languages so a shared
-// link lands in the same place.
+// link lands in the same place. The flow from commit to prod first, then
+// its parts in a change's order, builds before rollout; what the team works
+// on after the delivery path. The sections below render in this order too
+// (tested).
 const NAV = [
   "ueberblick",
   "fluss",
+  "build",
   "deploys",
   "arbeitsmix",
-  "build",
   "kosten",
   "daten",
   "frameworks",
@@ -410,9 +413,9 @@ export default function App() {
               onFacts={onFacts}
             />
             <Flow m={m} why={why} onWhy={onWhy} onFacts={onFacts} />
+            <Build m={m} onFacts={onFacts} />
             <Deploys m={m} />
             <Mix m={m} />
-            <Build m={m} onFacts={onFacts} />
             <Costs m={m} />
             <Facts
               facts={shownFacts}

@@ -25,8 +25,9 @@ is a JSON file changed by pull request, not an admin UI.
   rule and number and linking to the facts behind it, plus a conversation
   starter
 - Sections by question: Flow (where a change waits, from first commit to
-  prod), Deploys (how evenly it ships), Work mix, Build (CI success and duration
-  per kind of run, repos that got slower or flakier than before), Costs (noergler review spend), Data
+  prod), Build (CI success and duration per kind of run, repos that got slower
+  or flakier than before), Deploys (how evenly it ships), Work mix, Costs
+  (noergler review spend), Data
   (the PRs, deploys and runs behind every number, searchable) and Frameworks
   (which number belongs to DORA, DX Core 4, SPACE, DevEx or Flow)
 - Whole calendar weeks (4, 12 or 26), each number against the same span right
