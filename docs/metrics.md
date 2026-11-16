@@ -437,6 +437,12 @@ previous median and failure rate to its current ones, the circle's area
 its share of the kind's CI time; red only where the backend flagged it, no
 arrow without both previous values (`prev_complete`). The repos it cannot
 draw are counted (`unplotted`).
+Each kind's heatmap gives those repo rows, plus one row for the repos past
+the cut, a cell per week, bucketed as the kind's weekly rate: runs and
+failures counted as in the row, outliers included, and a class the backend
+picks: none under 3 runs (no verdict, hatched), 0 without a failure, then
+under 10 %, 10–20 %, 20–40 % and 40 % or more. A flaky repo shows as a red
+row, a shared outage as a red column. Starting values, not measured.
 A run of a commit Bitbucket never saw counts with the repository its
 pipeline is named after. A run succeeded on SUCCESS (Jenkins), Succeeded
 or Completed (Tekton) and failed on FAILURE, UNSTABLE or Failed; anything

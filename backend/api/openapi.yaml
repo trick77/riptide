@@ -1229,7 +1229,7 @@ components:
       additionalProperties: false
       required: [min_runs, slow_factor, flaky_factor, flaky_min_points, flaky_min_failures, outlier_factor,
                  outlier_min_s, outlier_repo_min_runs, slowest_min_runs, kinds, outliers, outlier_count,
-                 outlier_groups]
+                 outlier_groups, heat_min_runs, heat_steps, heat_classes]
       properties:
         min_runs: { type: integer, description: "Runs a repo needs in a kind, in both periods, to be flagged." }
         slow_factor: { type: number, description: A repo median this many times its previous one is slow. }
@@ -1259,12 +1259,35 @@ components:
         slowest_min_runs:
           type: integer
           description: Runs with a verdict and a duration, outliers aside, a repo needs to rank in `slowest`.
+        heat_min_runs:
+          type: integer
+          description: Runs with a verdict a heatmap cell needs for a `step`.
+        heat_steps:
+          type: array
+          description: |
+            Failure rates, 0..1, where heatmap `step` 2, 3 and 4 start; step 1
+            is any failure below the first.
+          items: { type: number }
+        heat_classes:
+          type: array
+          description: |
+            The heatmap's classes for its legend, step 0 first: a failure rate
+            from `from` (inclusive) to `to` (exclusive), null where open.
+            Step 0 is no failure, step 1 any failure under the first cut.
+          items:
+            type: object
+            additionalProperties: false
+            required: [step, from, to]
+            properties:
+              step: { type: integer }
+              from: { $ref: "#/components/schemas/NullableNumber" }
+              to: { $ref: "#/components/schemas/NullableNumber" }
         kinds:
           type: array
           items:
             type: object
             additionalProperties: false
-            required: [kind, duration, failure_rate, repos, slowest, outlier_threshold_s, unplotted]
+            required: [kind, duration, failure_rate, repos, slowest, outlier_threshold_s, unplotted, heatmap]
             properties:
               kind: { $ref: "#/components/schemas/RunKind" }
               duration:
@@ -1299,6 +1322,50 @@ components:
                   The kind's repos without a median and a failure rate in
                   `repos`: past its cut, without a run with a verdict, or
                   every timed run an outlier.
+              heatmap:
+                type: array
+                description: |
+                  A row per repo of `repos`, in its order, then one `other`
+                  row for the kind's repos past that cut (only when there
+                  are any); a cell per week of the period: the failure rate
+                  per week, runs counted as in `repos` (with a verdict,
+                  outliers included). Weeks as BuildStats' `weekly`: by a
+                  run's end, else its start, so a column holds the runs the
+                  kind's weekly rate is over. A run loaded for the period
+                  (by when its event arrived) that ended outside it counts
+                  in no week, so a row may sum to less than its repo's
+                  `runs`.
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [repo, other, weeks]
+                  properties:
+                    repo: { type: string, description: Empty on the `other` row. }
+                    other: { type: boolean, description: "The kind's repos past the cut of `repos`, together." }
+                    weeks:
+                      type: array
+                      items:
+                        type: object
+                        additionalProperties: false
+                        required: [runs, failed, rate, step, no_data]
+                        properties:
+                          no_data:
+                            type: boolean
+                            description: |
+                              No run, in a week before the run data starts
+                              (Build's `gap_weeks`): unknown, not none.
+                          runs: { type: integer, description: Runs with a verdict. }
+                          failed: { type: integer }
+                          rate:
+                            $ref: "#/components/schemas/NullableNumber"
+                            description: "`failed` over `runs`; null without a run."
+                          step:
+                            type: [integer, "null"]
+                            minimum: 0
+                            maximum: 4
+                            description: |
+                              Null under `heat_min_runs` runs (no verdict), 0
+                              without a failure, else 1..4 by `heat_steps`.
         outliers:
           type: array
           description: Runs past their kind's threshold across kinds, longest first, the top 10.

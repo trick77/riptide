@@ -81,7 +81,7 @@ func Compute(ds, prev *dataset.Dataset, p Params) Metrics {
 	// The previous period first: every repo's build flags compare with it,
 	// its runs named as this period's.
 	names := newRepoNamer(slices.Concat(ds.Runs, prev.Runs))
-	pm := compute(prev, p.Previous, f, &baseline{repos: names})
+	pm := compute(prev, p.Previous, f, &baseline{repos: names, previous: true})
 	base := &baseline{repos: names, kinds: pm.Build.repos, incomplete: buildsIncomplete(ds.Meta, p.Previous.From)}
 	m := compute(ds, p.Period, f, base)
 	m.Comparison = compare(m, pm, p.Previous)

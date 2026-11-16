@@ -487,6 +487,20 @@ export const en = {
     untrackedText:
       "({{n}} of {{total}}). This work shows up in no planning. Question for the team: key forgotten, or unplanned work?",
   },
+  heat: {
+    title: "Failure rate per repo and week",
+    sub: "A red row means: this repo. A red column means: everyone at once, more likely the infrastructure.",
+    aria: "Failure rate per repo and week, {{kind}}",
+    failed_one: "{{failed}} of {{count}} run failed",
+    failed_other: "{{failed}} of {{count}} runs failed",
+    noVerdict: "under {{min}} runs: no verdict",
+    none: "no runs",
+    zero: "0 %",
+    below: "under {{v}}",
+    from: "{{v}} or more",
+    other: "other repos",
+    colRepo: "Repo",
+  },
   build: {
     // Searched by the backend too: terms.json.
     kind: terms.en.runKind,

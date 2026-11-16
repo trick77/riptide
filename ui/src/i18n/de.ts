@@ -482,6 +482,20 @@ export const de = {
     untrackedText:
       "({{n}} von {{total}}). Diese Arbeit taucht in keiner Planung auf. Frage fürs Team: Key vergessen oder ungeplante Arbeit?",
   },
+  heat: {
+    title: "Fehlerquote pro Repo und Woche",
+    sub: "Eine rote Zeile heisst: dieses Repo. Eine rote Spalte heisst: alle gleichzeitig, eher die Infrastruktur.",
+    aria: "Fehlerquote pro Repo und Woche, {{kind}}",
+    failed_one: "{{failed}} von {{count}} Lauf fehlgeschlagen",
+    failed_other: "{{failed}} von {{count}} Läufen fehlgeschlagen",
+    noVerdict: "unter {{min}} Läufen: kein Urteil",
+    none: "keine Läufe",
+    zero: "0 %",
+    below: "unter {{v}}",
+    from: "ab {{v}}",
+    other: "übrige Repos",
+    colRepo: "Repo",
+  },
   build: {
     kind: terms.de.runKind,
     kindNote: {

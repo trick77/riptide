@@ -33,7 +33,7 @@ export function Tip({
 }
 
 // Every n-th week label, so 26 weeks do not overprint each other.
-function labelEvery(n: number): number {
+export function labelEvery(n: number): number {
   return n <= 6 ? 1 : n <= 13 ? 2 : 4;
 }
 
