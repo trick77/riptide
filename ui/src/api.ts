@@ -228,6 +228,8 @@ export type OpenRepo = {
   jammed: boolean;
   age: Spread;
   waiting: WaitingCounts;
+  // What the long-open ones wait on.
+  long_waiting: WaitingCounts;
   inactive: number;
 };
 

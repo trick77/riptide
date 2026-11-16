@@ -9,7 +9,13 @@ import { num } from "./format";
 
 export type Series = { key: string; label: string; className: string };
 
-function Tip({ title, rows }: { title: string; rows: [string, ReactNode][] }) {
+export function Tip({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: [string, ReactNode][];
+}) {
   return (
     <div
       role="tooltip"

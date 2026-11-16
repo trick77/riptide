@@ -114,9 +114,11 @@ type OpenRepo struct {
 	Jammed bool `json:"jammed"`
 	// Age is over the repo's open PRs: the median, never the oldest, which
 	// one PR alone decides.
-	Age      Spread  `json:"age"`
-	Waiting  Waiting `json:"waiting"`
-	Inactive int     `json:"inactive"`
+	Age     Spread  `json:"age"`
+	Waiting Waiting `json:"waiting"`
+	// LongWaiting is what the long-open ones wait on.
+	LongWaiting Waiting `json:"long_waiting"`
+	Inactive    int     `json:"inactive"`
 }
 
 // OpenPRs are the PRs open at the period's end: GitOps promotions left out,
@@ -179,9 +181,8 @@ func openSection(ds *dataset.Dataset, f filter) OpenPRs {
 		Repos: []OpenRepo{}}
 	var ages []float64
 	type repoAcc struct {
-		row         OpenRepo
-		ages        []float64
-		longWaiting Waiting
+		row  OpenRepo
+		ages []float64
 	}
 	repos := map[string]*repoAcc{}
 	for _, pr := range openPRs(ds, f) {
@@ -204,7 +205,7 @@ func openSection(ds *dataset.Dataset, f filter) OpenPRs {
 			out.Long++
 			r.row.Long++
 			out.LongWaiting.add(on)
-			r.longWaiting.add(on)
+			r.row.LongWaiting.add(on)
 		}
 		ages = append(ages, age)
 		r.ages = append(r.ages, age)
@@ -221,7 +222,7 @@ func openSection(ds *dataset.Dataset, f filter) OpenPRs {
 		if r.row.Jammed {
 			out.Jammed++
 			out.JammedLong += r.row.Long
-			out.JammedWaiting.plus(r.longWaiting)
+			out.JammedWaiting.plus(r.row.LongWaiting)
 		}
 		rows = append(rows, r.row)
 	}

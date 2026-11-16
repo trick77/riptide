@@ -396,7 +396,10 @@ with a long-open PR. The jammed repos are compared with the previous
 period's end; more than then is a finding to look at, any at all a hint. A
 long-open PR or two in a repo is no finding: a PR left lying, or one whose
 close event never came. Inactive PRs (no event for 30 days) show as their
-own count and last among the open PRs in the PR table.
+own count and last among the open PRs in the PR table. A Marimekko draws
+the same repos in the same order: width the repo's open PRs, height the
+share per wait, per wait how many are long open (`long_waiting`);
+inactive PRs not in it.
 
 Build hotspots compare each repo with its own runs of the same kind
 (release, main, feature, other, unknown) in the previous period, never with
