@@ -68,6 +68,14 @@
   /* "Everything else" in a stack (a sync without new images, a PR without a
      branch prefix): a grey, so it reads as the remainder, not a fifth hue. */
   --color-other: #5c5a54;
+  /* Sequential magnitude ramp (releases per day): OKLab mixes from the
+     empty cell (cell-empty) to s1, equal lightness steps, validated as an
+     ordinal ramp against #191918 and the panel #1b1b1a (light end 2.12:1
+     and 2.08:1). It ends on s1 itself. */
+  --color-seq-1: #335073;
+  --color-seq-2: #366298;
+  --color-seq-3: #3874be;
+  --color-seq-4: var(--color-s1);
 
   --font-sans:
     "Anthropic Sans", system-ui, "Segoe UI", Roboto, Helvetica, Arial,

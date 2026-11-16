@@ -28,6 +28,8 @@ type Period struct {
 	// Span is the length in weeks, the current one counted as far as it has
 	// run: the divisor of a per-week rate.
 	Span float64 `json:"-"`
+	// loc is the viewer's zone the weeks were cut in; nil reads as UTC.
+	loc *time.Location
 }
 
 // weekStart is the Monday 00:00 of t's week in loc.
@@ -65,7 +67,49 @@ func periodFrom(first time.Time, weeks int, to time.Time) Period {
 		To:    to.UTC(),
 		Weeks: list,
 		Span:  float64(to.Sub(first)) / float64(7*24*time.Hour),
+		loc:   first.Location(),
 	}
+}
+
+func (p Period) location() *time.Location {
+	if p.loc == nil {
+		return time.UTC
+	}
+	return p.loc
+}
+
+// calendarDay is one calendar day of the period in the viewer's zone,
+// midnight to midnight: 23 or 25 hours across a DST switch.
+type calendarDay struct {
+	start, end time.Time
+}
+
+// calendar is the period's weeks day by day, Monday first, 7 per week, the
+// days of the running week after now included.
+func (p Period) calendar() []calendarDay {
+	out := make([]calendarDay, 0, 7*len(p.Weeks))
+	for _, w := range p.Weeks {
+		start := w.Start.In(p.location())
+		for d := range 7 {
+			out = append(out, calendarDay{start: start.AddDate(0, 0, d), end: start.AddDate(0, 0, d+1)})
+		}
+	}
+	return out
+}
+
+// dayIndex is the index into days (a period's calendar) of the day t falls
+// on, given week, the index of t's week (WeekIndex): the day's own bounds
+// decide, so the days and the weeks cannot disagree. -1 outside the period.
+func dayIndex(days []calendarDay, week int, t time.Time) int {
+	if week < 0 {
+		return -1
+	}
+	for i := 7 * week; i < 7*week+7; i++ {
+		if t.Before(days[i].end) {
+			return i
+		}
+	}
+	return -1
 }
 
 // WeekIndex is the index of the week t falls in, or -1 outside the period.

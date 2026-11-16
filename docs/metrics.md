@@ -403,6 +403,16 @@ noise), no verdict no score; Argo CD silent for the team is
 has a better direction at all, whatever the verdict (an undirected one with
 too few data says `low_sample`); the strip draws only the directed ones.
 
+Deploy frequency also comes per calendar day in the viewer's zone, the
+period's weeks Monday first: each release on the day of its first deploy in
+the period, so the days add up to the weekly bars. A day's shade is a
+step, 0 for none to 4 for four releases or more. A day after the period's
+end or before Argo CD reported is no data, not a day without a release, so
+each weekday's releases are per whole day with data, never per calendar
+day: today and Argo CD's first day show their releases but are left out of
+the rate. Argo CD's data end is no cutoff: an outage and a team that did
+not deploy both send no events.
+
 Open PRs list the jammed repos first (3 PRs or more open 7 days or more),
 then by long-open PRs, then by the median age; the top 8 and every repo
 with a long-open PR. The jammed repos are compared with the previous

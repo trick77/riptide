@@ -138,6 +138,126 @@ func TestDeployFrequency(t *testing.T) {
 	}
 }
 
+// calendarOf is the frequency with its days, as Compute fills them.
+func calendarOf(ds *dataset.Dataset, p Period) DeployFrequency {
+	d := deployFrequency(ds, p, filter{}, "prod")
+	d.fillCalendar(p, ds.Meta.DataStart.ArgoCD)
+	return d
+}
+
+func TestDeployDays(t *testing.T) {
+	p := p4()
+	d := calendarOf(deployData(), p)
+	if len(d.Days) != 28 || d.Days[0].Date != "2026-10-19" || d.Days[27].Date != "2026-11-15" {
+		t.Fatalf("days = %+v", d.Days)
+	}
+	// The days add up to the weeks.
+	for w, week := range d.Weeks {
+		sum := 0
+		for _, day := range d.Days[7*w : 7*w+7] {
+			sum += day.Releases
+		}
+		if sum != week.Release {
+			t.Errorf("KW %d: days %d, week %d", p.Weeks[w].KW, sum, week.Release)
+		}
+	}
+	// r4 on Monday 2.11., r1 on Wednesday 11.11.; a sync and a first deploy
+	// are no release.
+	if d.Days[14].Releases != 1 || d.Days[23].Releases != 1 {
+		t.Errorf("days 14/23 = %+v %+v", d.Days[14], d.Days[23])
+	}
+	// Today has data, tomorrow none yet; Argo CD reported all along.
+	if d.Days[24].NoData || !d.Days[25].NoData || d.Days[0].NoData || d.NoDataDays != 3 {
+		t.Errorf("no data = %v %v %v, %d days", d.Days[24].NoData, d.Days[25].NoData, d.Days[0].NoData, d.NoDataDays)
+	}
+	// Per weekday over the whole days with data only: Friday to Sunday of
+	// the running week are still to come, today is not over.
+	expectWeekday(t, d, 0, 1, 4, 0.25)
+	expectWeekday(t, d, 2, 1, 4, 0.25)
+	expectWeekday(t, d, 3, 0, 3, 0)
+	expectWeekday(t, d, 4, 0, 3, 0)
+	// A release this morning shows on today's cell, not in Thursday's rate.
+	today := calendarOf(data(func(ds *dataset.Dataset) {
+		ds.Deploys = []dataset.Deploy{deploy(func(d *dataset.Deploy) { d.At = ago(0.1) })}
+	}), p)
+	if today.Days[24].Releases != 1 || today.Days[24].Step != 1 {
+		t.Errorf("today = %+v", today.Days[24])
+	}
+	expectWeekday(t, today, 3, 0, 3, 0)
+
+	// Around the switch back from summer time, Sunday 25.10. has 25 hours:
+	// 23:30 is still Sunday, 00:30 Monday. Five releases on Monday shade
+	// as four or more.
+	at := func(v string) time.Time { t, _ := time.Parse(time.RFC3339, v); return t }
+	ds := data(func(ds *dataset.Dataset) {
+		ds.Deploys = []dataset.Deploy{
+			deploy(func(d *dataset.Deploy) { d.Revision, d.At = "sun", at("2026-10-25T23:30:00+01:00") }),
+		}
+		for i, r := range []string{"m1", "m2", "m3", "m4", "m5"} {
+			ds.Deploys = append(ds.Deploys, deploy(func(d *dataset.Deploy) {
+				d.Revision, d.At = r, at("2026-10-26T00:30:00+01:00").Add(time.Duration(i)*time.Hour)
+			}))
+		}
+		ds.Meta.DataStart.ArgoCD = ptr(at("2026-10-21T18:00:00+02:00"))
+	})
+	d = calendarOf(ds, p)
+	sun, mon := d.Days[6], d.Days[7]
+	if sun != (DeployDay{Date: "2026-10-25", Releases: 1, Step: 1}) || mon != (DeployDay{Date: "2026-10-26", Releases: 5, Step: 4}) {
+		t.Errorf("sunday %+v, monday %+v", sun, mon)
+	}
+	// Argo CD started on Wednesday evening: that day counts, Tuesday not.
+	if !d.Days[1].NoData || d.Days[2].NoData || d.NoDataDays != 5 {
+		t.Errorf("before Argo CD = %v %v, %d days", d.Days[1].NoData, d.Days[2].NoData, d.NoDataDays)
+	}
+	// The Mondays and Tuesdays before Argo CD are no days without a release,
+	// and its first Wednesday, known only from 18:00, is no whole day.
+	expectWeekday(t, d, 0, 5, 3, 5.0/3)
+	expectWeekday(t, d, 1, 0, 3, 0)
+	expectWeekday(t, d, 2, 0, 3, 0)
+	expectWeekday(t, d, 6, 1, 3, 1.0/3)
+	// Argo CD never reported: no day has data, no weekday a rate.
+	silent := calendarOf(data(func(ds *dataset.Dataset) { ds.Meta.DataStart.ArgoCD = nil }), p)
+	if !silent.Days[0].NoData || !silent.Days[24].NoData || silent.NoDataDays != 28 {
+		t.Error("days with data without Argo CD")
+	}
+	for i, wd := range silent.Weekdays {
+		if wd.Days != 0 || wd.PerDay != nil {
+			t.Errorf("silent weekday %d = %+v", i, wd)
+		}
+	}
+
+	// Days cut in another zone than the weeks (a period without its zone,
+	// days in UTC): Sunday 23:30 local is past the UTC week's last day. The
+	// release stays counted, no day takes it, nothing panics.
+	utc := p
+	utc.loc = nil
+	d = calendarOf(ds, utc)
+	if d.Releases != 6 || d.unplaced != 1 || d.Days[6].Releases != 0 {
+		t.Errorf("releases %d, unplaced %d, sunday %+v", d.Releases, d.unplaced, d.Days[6])
+	}
+}
+
+func TestCalendarCurrentPeriodOnly(t *testing.T) {
+	ds := deployData()
+	m := Compute(ds, ds, Params{Period: p4(), Previous: PreviousPeriod(4, now, zurich)})
+	if len(m.Delivery.Frequency.Days) != 28 {
+		t.Errorf("days = %d", len(m.Delivery.Frequency.Days))
+	}
+	pm := compute(ds, PreviousPeriod(4, now, zurich), filter{}, &baseline{repos: newRepoNamer(nil)})
+	if pm.Delivery.Frequency.Days != nil {
+		t.Error("days built for the previous period")
+	}
+}
+
+func expectWeekday(t *testing.T, d DeployFrequency, i, releases, days int, perDay float64) {
+	t.Helper()
+	wd := d.Weekdays[i]
+	if wd.Releases != releases || wd.Days != days {
+		t.Errorf("weekday %d = %d releases on %d days, want %d on %d", i, wd.Releases, wd.Days, releases, days)
+	}
+	expectNear(t, "per day", wd.PerDay, perDay)
+}
+
 func TestEnvironments(t *testing.T) {
 	ds := deployData()
 	if got := environments(ds, filter{}); !slices.Equal(got, []string{"intg", "prod"}) {

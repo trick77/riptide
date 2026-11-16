@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { Facts, FlowOutcome, Metrics, RunKind } from "./api";
 import { Build } from "./Build";
+import { DayCalendar } from "./calendar";
 import { Costs } from "./Costs";
 import { Flow } from "./Flow";
 import { stepLook } from "./heatmap";
@@ -1171,9 +1172,11 @@ describe("App", () => {
       };
     });
     render(<App />);
+    // The tile and the calendar, which draws no day as one without a release.
     expect(
-      await screen.findByText("Argo CD meldet für das Team noch nicht"),
-    ).toBeInTheDocument();
+      await screen.findAllByText("Argo CD meldet für das Team noch nicht"),
+    ).toHaveLength(2);
+    expect(screen.queryAllByTestId("day-cell")).toHaveLength(0);
   });
 
   it("notes when Argo CD started inside the window", async () => {
@@ -1805,6 +1808,85 @@ describe("CI hours", () => {
       />,
     );
     expect(screen.queryByText("Wohin die CI-Stunden fliessen")).toBeNull();
+  });
+});
+
+describe("calendar", () => {
+  it("shades the days by the backend's step, weekday by weekday", async () => {
+    mockFetch();
+    render(<App />);
+    // The drawing is for the eye only; the table is what a screen reader
+    // gets, saying how many days have no data.
+    const cal = await screen.findByTestId("calendar");
+    expect(cal).toHaveAttribute("aria-hidden", "true");
+    const table = screen.getByRole("table", {
+      name: "Releases auf PROD pro Tag; 3 Tage ohne Daten",
+    });
+    // Rows are weekdays, columns the 4 weeks: Wednesday of KW 46 is the
+    // third row's last cell.
+    const cells = within(cal).getAllByTestId("day-cell");
+    expect(cells).toHaveLength(28);
+    expect(cells[2 * 4 + 3]).toHaveClass("bg-seq-1");
+    expect(cells[0]).toHaveClass("bg-cell-empty");
+    // The tooltip is for the eye too, hidden with the drawing.
+    const tip = () => screen.getByRole("tooltip", { hidden: true });
+    fireEvent.mouseEnter(cells[2 * 4 + 3]);
+    expect(tip()).toHaveTextContent("Mi 11.11.2026 · KW 46Releases1");
+    fireEvent.mouseLeave(cells[2 * 4 + 3]);
+    // Friday is after now: no data, not no release.
+    expect(cells[4 * 4 + 3]).toHaveClass("texture-gap");
+    fireEvent.mouseEnter(cells[4 * 4 + 3]);
+    expect(tip()).toHaveTextContent("keine Daten");
+    expect(within(cal).getAllByTestId("weekday-bar")).toHaveLength(1);
+    expect(within(cal).getByText("0.25")).toBeInTheDocument();
+    const kw46 = within(table).getByRole("row", { name: /^KW 46/ });
+    expect(kw46).toHaveTextContent(
+      "KW 460010keine Datenkeine Datenkeine Daten",
+    );
+    // Per weekday over the whole days with data: today is not over.
+    const rate = within(table).getByRole("row", { name: /^pro ganzen Tag/ });
+    expect(rate).toHaveTextContent("0.25: 1 an 4 Tagen");
+    expect(rate).toHaveTextContent("0.00: 0 an 3 Tagen");
+  });
+
+  it("caps the shade at four and more", () => {
+    const w = metrics(1).period.weeks;
+    const day = (date: string, releases: number, step: 0 | 1 | 2 | 3 | 4) => ({
+      date,
+      releases,
+      step,
+      no_data: false,
+    });
+    render(
+      <DayCalendar
+        weeks={w}
+        days={[
+          day("2026-11-09", 7, 4),
+          day("2026-11-10", 3, 3),
+          day("2026-11-11", 2, 2),
+          day("2026-11-12", 0, 0),
+          day("2026-11-13", 0, 0),
+          day("2026-11-14", 0, 0),
+          day("2026-11-15", 0, 0),
+        ]}
+        weekdays={[7, 3, 2, 0, 0, 0, 0].map((releases) => ({
+          releases,
+          days: 1,
+          per_day: releases,
+        }))}
+        noDataDays={0}
+        prod="PROD"
+      />,
+    );
+    const cells = screen.getAllByTestId("day-cell");
+    expect(cells[0]).toHaveClass("bg-seq-4");
+    expect(cells[1]).toHaveClass("bg-seq-3");
+    fireEvent.mouseEnter(cells[0]);
+    const tip = screen.getByRole("tooltip", { hidden: true });
+    expect(tip).toHaveTextContent("Mo 09.11.2026");
+    expect(tip).toHaveTextContent("Releases7");
+    expect(screen.getAllByTestId("weekday-bar")).toHaveLength(3);
+    expect(document.body.textContent).not.toMatch(/NaN/);
   });
 });
 
