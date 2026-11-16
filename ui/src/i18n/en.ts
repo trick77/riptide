@@ -254,7 +254,7 @@ export const en = {
       basisBots: ", plus {{n}} by bots",
       filterBots: "bots separate",
       coverage:
-        "Only commits Riptide can map to a deploy (the build's image reference or release notes); a deploy without a mapping is missing here.",
+        "Only commits Riptide can map to a deployment (the build's image reference or release notes); a deployment without a mapping is missing here.",
     },
     dsucc: {
       label: "Deploy success",
@@ -278,7 +278,7 @@ export const en = {
       label: "Instability",
       dora: "DORA · Change fail rate · Deployment rework rate · Failed deployment recovery time",
       question:
-        "How often does a deploy cause trouble, and how fast is it fixed?",
+        "How often does a deployment cause trouble, and how fast is it fixed?",
       value: "not measured",
       text: "This needs an incident source. Without one, Riptide shows throughput only; the instability side is missing. The hotfix share or deploy success do not replace it.",
     },
@@ -315,7 +315,7 @@ export const en = {
     hotRest:
       ": {{share}} of the time to {{prod}}. Speeding up the short stages brings little.",
     chainNote:
-      "Review is a stage of its own because the approval is mostly the reviewer's first contact. Only PRs whose merge commit maps to a deploy reach the last two stages.",
+      "Review is a stage of its own because the approval is mostly the reviewer's first contact. Only PRs whose merge commit maps to a deployment reach the last two stages.",
     people: "People",
     bots: "Bots",
     eyebrow: "From commit to {{prod}} · app repos only",

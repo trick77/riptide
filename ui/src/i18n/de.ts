@@ -249,7 +249,7 @@ export const de = {
       basisBots: ", dazu {{n}} von Bots",
       filterBots: "Bots separat",
       coverage:
-        "Nur Commits, die Riptide einem Deploy zuordnen kann (Image-Referenz des Builds oder Release-Notes); ein Deploy ohne Zuordnung fehlt hier.",
+        "Nur Commits, die Riptide einem Deployment zuordnen kann (Image-Referenz des Builds oder Release-Notes); ein Deployment ohne Zuordnung fehlt hier.",
     },
     dsucc: {
       label: "Deploy-Erfolg",
@@ -273,7 +273,7 @@ export const de = {
       label: "Instability",
       dora: "DORA · Change fail rate · Deployment rework rate · Failed deployment recovery time",
       question:
-        "Wie oft macht ein Deploy Ärger, und wie schnell ist er behoben?",
+        "Wie oft macht ein Deployment Ärger, und wie schnell ist er behoben?",
       value: "nicht gemessen",
       text: "Dafür braucht es eine Incident-Quelle. Ohne sie zeigt Riptide nur Throughput; die Instability-Seite fehlt. Hotfix-Anteil oder Deploy-Erfolg ersetzen sie nicht.",
     },
@@ -310,7 +310,7 @@ export const de = {
     hotRest:
       ": {{share}} der Zeit bis {{prod}}. Die kurzen Etappen zu beschleunigen, bringt wenig.",
     chainNote:
-      "Review ist eine eigene Etappe, weil das Approval meist der erste Kontakt des Reviewers ist. Die letzten zwei Etappen erreichen nur PRs, deren Merge-Commit einem Deploy zugeordnet ist.",
+      "Review ist eine eigene Etappe, weil das Approval meist der erste Kontakt des Reviewers ist. Die letzten zwei Etappen erreichen nur PRs, deren Merge-Commit einem Deployment zugeordnet ist.",
     people: "Menschen",
     bots: "Bots",
     eyebrow: "Vom Commit nach {{prod}} · nur App-Repos",
