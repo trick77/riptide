@@ -307,6 +307,13 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
             changes: 0,
             merge: 1,
           },
+          long_waiting: {
+            draft: 0,
+            first_review: 2,
+            review: 0,
+            changes: 0,
+            merge: 1,
+          },
           inactive: 1,
         },
         {
@@ -318,6 +325,13 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
           waiting: {
             draft: 0,
             first_review: 1,
+            review: 0,
+            changes: 0,
+            merge: 0,
+          },
+          long_waiting: {
+            draft: 0,
+            first_review: 0,
             review: 0,
             changes: 0,
             merge: 0,

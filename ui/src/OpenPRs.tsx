@@ -6,6 +6,7 @@
 import { useTranslation } from "react-i18next";
 import type { Metrics, PRWaiting, WaitingCounts } from "./api";
 import { dateTime, dur, num } from "./format";
+import { OpenMekko } from "./marimekko";
 import type { Tab } from "./state";
 import { Card, CardHead, Compare, Direction, Mono, Pill, Tile } from "./ui";
 
@@ -135,6 +136,7 @@ export function OpenPRs({
           </button>
         </p>
       )}
+      <OpenMekko o={o} waits={WAITS} />
       {o.repos.length ? (
         <div className="mt-3 overflow-x-auto">
           <div className="grid min-w-[720px] grid-cols-[minmax(150px,1.3fr)_64px_64px_104px_minmax(200px,2fr)_64px_120px] items-center gap-x-3.5">

@@ -824,7 +824,7 @@ components:
     OpenRepo:
       type: object
       additionalProperties: false
-      required: [repo, open, long, jammed, age, waiting, inactive]
+      required: [repo, open, long, jammed, age, waiting, long_waiting, inactive]
       properties:
         repo: { type: string }
         open: { type: integer, description: Open and not inactive. }
@@ -832,6 +832,7 @@ components:
         jammed: { type: boolean, description: "`long` reaches `jam_min`." }
         age: { $ref: "#/components/schemas/Spread", description: Over `open`; the median, never the oldest. }
         waiting: { $ref: "#/components/schemas/WaitingCounts" }
+        long_waiting: { $ref: "#/components/schemas/WaitingCounts", description: What the `long` ones wait on. }
         inactive: { type: integer, description: Open with no event for `inactive_days`; in no other count. }
 
     OpenPRs:

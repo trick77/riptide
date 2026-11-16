@@ -413,6 +413,15 @@ export const de = {
     colInactive: "Inaktiv",
     viewPRs: "PRs ansehen →",
     none: "Am Ende des Zeitraums war kein PR offen.",
+    mekko: {
+      head: "Wer wartet worauf: Breite = offene PRs im Repo, Höhe = Anteil pro Wartegrund, inaktive nicht dabei.",
+      aria: "Offene PRs pro Repo, nach dem, worauf sie warten",
+      of_one: "{{n}} von {{open}} offenen PR",
+      of_other: "{{n}} von {{open}} offenen PRs",
+      long: "{{long}} davon ≥ {{days}} Tage offen",
+      longMark: "≥ {{days}} Tage offen",
+      draft: "wartet nicht aufs Team",
+    },
     why: {
       means:
         "Jede andere PR-Zahl zählt einen PR erst, wenn er gemerged ist. Ein PR, der seit Wochen offen ist, fehlt dort ganz; hier zeigt er sich, pro Repo und mit dem, worauf er wartet.",

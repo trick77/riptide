@@ -1072,15 +1072,18 @@ describe("open PRs", () => {
     expect(screen.getByText("typischerweise 9.0 Tage alt")).toBeInTheDocument();
     // The repo's median age, never its oldest PR's.
     expect(screen.getByText("12.0 Tage")).toBeInTheDocument();
-    // In the backend's order, zero counts left out; the jam marked.
+    // In the backend's order, chart and table, zero counts left out; the
+    // jam marked.
     const rows = screen.getAllByText(/^(kasse\/kasse-api|portal\/portal-web)$/);
     expect(rows.map((r) => r.textContent)).toEqual([
+      "kasse/kasse-api",
+      "portal/portal-web",
       "kasse/kasse-api",
       "portal/portal-web",
     ]);
     expect(screen.getAllByText("Stau")).toHaveLength(1);
     expect(screen.getAllByText("Bereit zum Merge 1")).toHaveLength(2);
-    expect(screen.queryByText(/Entwurf/)).toBeNull();
+    expect(screen.queryByText(/^Entwurf \d/)).toBeNull();
     fireEvent.click(
       screen.getAllByRole("button", { name: "PRs ansehen →" })[0],
     );
@@ -1091,6 +1094,89 @@ describe("open PRs", () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Ansehen →" }));
     expect(onFacts).toHaveBeenCalledWith("prs", "Inaktiv");
+  });
+
+  it("draws a column per repo, as wide as its open PRs, split by wait", () => {
+    render(
+      <Flow why={null} onWhy={() => {}} onFacts={() => {}} m={metrics()} />,
+    );
+    const chart = screen.getByRole("group", {
+      name: "Offene PRs pro Repo, nach dem, worauf sie warten",
+    });
+    const cols = within(chart).getAllByTestId("mekko-col");
+    expect(cols.map((c) => c.style.flex)).toEqual(["3 1 0px", "1 1 0px"]);
+    // At least 22px per open PR: past that it scrolls.
+    expect(chart.style.minWidth).toBe(`${64 + 42 + 4 * 22 + 3}px`);
+    // kasse-api: first review at the foot, the merge on top; its 3
+    // long-open PRs marked.
+    const api = within(cols[0]).getAllByTestId("mekko-seg");
+    expect(api.map((s) => s.style.height)).toEqual(["113.333px", "56.6667px"]);
+    expect(api[0].className).toContain("from-s1");
+    expect(api[1].className).toContain("from-s2");
+    expect(api[1].className).toContain("rounded-t");
+    expect(api[1].className).toContain("border-b-2");
+    expect(
+      within(cols[0]).getByText("3", { selector: ".text-ochre" }),
+    ).toBeInTheDocument();
+    expect(
+      within(cols[1]).queryByText("1", { selector: ".text-ochre" }),
+    ).toBeNull();
+    // The whole column is the target, its tooltip every segment, top
+    // first; formatted counts, en spaces round the middot.
+    fireEvent.mouseEnter(cols[0]);
+    const sep = `${String.fromCharCode(0x2002)}·${String.fromCharCode(0x2002)}`;
+    const tip = within(chart).getByRole("tooltip");
+    expect(
+      within(tip)
+        .getAllByText(/./, { selector: "span" })
+        .map((s) => s.textContent),
+    ).toEqual([
+      "Bereit zum Merge",
+      `1 von 3 offenen PRs${sep}1 davon ≥ 7 Tage offen`,
+      "Wartet auf Review",
+      `2 von 3 offenen PRs${sep}2 davon ≥ 7 Tage offen`,
+    ]);
+    fireEvent.mouseLeave(cols[0]);
+    expect(within(chart).queryByRole("tooltip")).toBeNull();
+    // Keyboard: focusable, the tooltip on focus, the same words as label.
+    expect(cols[1]).toHaveAttribute("tabindex", "0");
+    expect(cols[1]).toHaveAccessibleName(
+      "portal/portal-web: Wartet auf Review 1 von 1 offenen PR",
+    );
+    fireEvent.focus(cols[1]);
+    expect(within(chart).getByText("1 von 1 offenen PR")).toBeInTheDocument();
+    // Every reason in the legend, the draft as not the team's.
+    expect(
+      screen.getByText("Entwurf (wartet nicht aufs Team)"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps a sliver segment without the gap, so the column stays 100 %", () => {
+    const m = metrics();
+    const [api] = m.open_prs.repos;
+    render(
+      <Flow
+        why={null}
+        onWhy={() => {}}
+        onFacts={() => {}}
+        m={{
+          ...m,
+          open_prs: {
+            ...m.open_prs,
+            repos: [
+              {
+                ...api,
+                open: 100,
+                waiting: { ...api.waiting, first_review: 99, merge: 1 },
+              },
+            ],
+          },
+        }}
+      />,
+    );
+    const [, merge] = screen.getAllByTestId("mekko-seg");
+    expect(merge.style.height).toBe("1.7px");
+    expect(merge.className).not.toContain("border-b-2");
   });
 
   it("says when nothing was open", () => {

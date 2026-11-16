@@ -109,6 +109,14 @@ func TestOpenPRs(t *testing.T) {
 		api.Waiting.Merge != 1 || api.Waiting.FirstReview != 3 {
 		t.Errorf("kasse-api = %+v", api)
 	}
+	// What its long-open ones wait on: the 1-day PR's first review left out.
+	if w := api.LongWaiting; w.FirstReview != 2 || w.Merge != 1 || w.Draft != 0 || w.Review != 0 || w.Changes != 0 {
+		t.Errorf("kasse-api long waiting = %+v", w)
+	}
+	// kasse-web's draft is 6.9 days old, not long open; its 20-day one is.
+	if web := o.Repos[2]; web.LongWaiting != (Waiting{FirstReview: 1}) {
+		t.Errorf("kasse-web long waiting = %+v", web.LongWaiting)
+	}
 	// The median, which the 300-day PR does not move.
 	if web := o.Repos[2]; web.Jammed || web.Inactive != 1 || web.Age.P50 == nil || !near(*web.Age.P50, 6.9*86400) {
 		t.Errorf("kasse-web = %+v", web)

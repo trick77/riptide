@@ -418,6 +418,15 @@ export const en = {
     colInactive: "Inactive",
     viewPRs: "View PRs →",
     none: "No PR was open at the end of the period.",
+    mekko: {
+      head: "Who waits on what: width = open PRs in the repo, height = share per wait, inactive ones left out.",
+      aria: "Open PRs per repo, by what they wait on",
+      of_one: "{{n}} of {{open}} open PR",
+      of_other: "{{n}} of {{open}} open PRs",
+      long: "{{long}} of them open ≥ {{days}} days",
+      longMark: "open ≥ {{days}} days",
+      draft: "not waiting on the team",
+    },
     why: {
       means:
         "Every other PR number counts a PR only once it is merged. A PR open for weeks is missing there entirely; here it shows, per repo and with what it waits on.",
