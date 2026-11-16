@@ -317,27 +317,27 @@ type Build struct {
 }
 
 // gitopsRun tells a run in a GitOps repo, a stage promotion's check: flagged
-// by its commit, or, without one Bitbucket saw, named after a repo the
-// window's PRs, reviews or flagged runs show is one.
+// by its commit, or, without one Bitbucket saw, named after one of the
+// dataset's GitOps repos.
 func gitopsRun(ds *dataset.Dataset) func(dataset.Run) bool {
-	repos := map[string]bool{}
-	for _, pr := range ds.PRs {
-		if pr.GitOps {
-			repos[pr.Repo] = true
-		}
-	}
-	for _, r := range ds.Reviews {
-		if r.GitOps && r.Repo != nil {
-			repos[*r.Repo] = true
-		}
-	}
-	for _, r := range ds.Runs {
-		if r.GitOps && r.Repo != nil {
-			repos[*r.Repo] = true
+	repos, short, ambiguous := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	for _, repo := range ds.GitOpsRepos {
+		repos[repo] = true
+		if _, name, ok := strings.Cut(repo, "/"); ok {
+			ambiguous[name] = short[name]
+			short[name] = true
 		}
 	}
 	name := newRepoNamer(ds.Runs)
-	return func(r dataset.Run) bool { return r.GitOps || repos[name(r)] }
+	return func(r dataset.Run) bool {
+		if r.GitOps {
+			return true
+		}
+		n := name(r)
+		// Unresolved, the namer answers the pipeline's head: a GitOps repo's
+		// name when no other project has one like it.
+		return repos[n] || (r.Repo == nil && short[n] && !ambiguous[n])
+	}
 }
 
 // teamRuns are the runs the build section counts: with a status, in the

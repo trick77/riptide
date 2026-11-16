@@ -51,9 +51,14 @@ gitops_repos AS (
   SELECT DISTINCT b.repo_full_name
   FROM argocd_events a
   JOIN bitbucket_events b ON b.commit_sha = a.revision
+  WHERE b.repo_full_name IS NOT NULL
 )
 -- ... WHERE repo_full_name NOT IN (SELECT repo_full_name FROM gitops_repos)
 ```
+
+riptide reads that set once per dataset (`backend/internal/dataset/sql/gitops.sql`)
+and hands it to its queries as a `text[]` parameter (`= ANY($n)`, `<> ALL($n)`);
+a new dataset query takes the parameter, never a CTE of its own.
 
 The general rule: an event's name describes what the git host did, not who did
 it or why. Check `author` and the commit message before reading intent into a

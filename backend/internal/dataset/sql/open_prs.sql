@@ -29,7 +29,7 @@
 -- One pass over the team's PR events, their scalars only; a payload is read
 -- for one event per open PR alone.
 --
--- $1 team, $2 the instant T.
+-- $1 team, $2 the instant T, $3 the GitOps repos (sql/gitops.sql).
 WITH non_human_identities AS (
   -- Accounts senders declared as non-human (docs/metrics.md, pickup-time query).
   SELECT DISTINCT lower(reviewer_handle) AS handle
@@ -39,13 +39,6 @@ WITH non_human_identities AS (
   SELECT DISTINCT lower(actor_handle)
   FROM pipeline_events
   WHERE actor_handle IS NOT NULL AND actor_account_kind IN ('bot', 'service')
-),
-gitops_repos AS (
-  -- GitOps repos: their commits are what argocd_events.revision points at.
-  SELECT DISTINCT repo_full_name
-  FROM bitbucket_events
-  WHERE commit_sha IN (SELECT revision FROM argocd_events)
-    AND repo_full_name IS NOT NULL
 ),
 pr_events AS MATERIALIZED (
   SELECT e.id, e.repo_full_name, e.pr_id, e.event_type, e.occurred_at, e.author, e.author_display_name,
@@ -59,7 +52,7 @@ pr_events AS MATERIALIZED (
   WHERE e.team = $1
     AND e.event_type LIKE 'pr:%'
     AND e.pr_id IS NOT NULL AND e.repo_full_name IS NOT NULL
-    AND e.repo_full_name NOT IN (SELECT repo_full_name FROM gitops_repos)
+    AND e.repo_full_name <> ALL($3::text[])
 ),
 status AS (
   SELECT repo_full_name, pr_id,

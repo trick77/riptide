@@ -11,15 +11,8 @@
 -- check is mechanical, not the team's build; Go leaves it out of the build
 -- numbers.
 --
--- $1 team, $2 window start (inclusive), $3 window end (exclusive).
-WITH gitops_repos AS (
-  -- GitOps repos: their commits are what argocd_events.revision points at
-  -- (docs/metrics.md, "Reading the event tables"). Over all data, not the window.
-  SELECT DISTINCT repo_full_name
-  FROM bitbucket_events
-  WHERE commit_sha IN (SELECT revision FROM argocd_events)
-    AND repo_full_name IS NOT NULL
-)
+-- $1 team, $2 window start (inclusive), $3 window end (exclusive), $4 the
+-- GitOps repos (sql/gitops.sql).
 SELECT p.source,
        p.pipeline_name,
        p.build_type,
@@ -33,7 +26,7 @@ SELECT p.source,
        r.repo_full_name AS repo,
        split_part(r.repo_full_name, '/', 1) AS project,
        p.image_refs::text[] AS image_refs,
-       coalesce(r.repo_full_name IN (SELECT repo_full_name FROM gitops_repos), false) AS gitops
+       coalesce(r.repo_full_name = ANY($4::text[]), false) AS gitops
 FROM pipeline_events p
 LEFT JOIN LATERAL (
   SELECT b.repo_full_name

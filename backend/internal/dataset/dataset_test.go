@@ -479,6 +479,10 @@ func TestDatasetRunOfPromotion(t *testing.T) {
 	if !gitops["kasse-gitops/master"] || gitops["kasse-api/master"] || gitops["nightly"] {
 		t.Errorf("runs gitops = %v", gitops)
 	}
+	// Over all data, not the team's or window's only.
+	if !slices.Equal(d.GitOpsRepos, []string{kasseOps, "portal/portal-gitops"}) {
+		t.Errorf("gitops repos = %v", d.GitOpsRepos)
+	}
 }
 
 // approved_at counts reviewers as first_review_at does: a bot's approval

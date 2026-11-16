@@ -38,6 +38,8 @@ var (
 	reviewsSQL string
 	//go:embed sql/open_prs.sql
 	openPRsSQL string
+	//go:embed sql/gitops.sql
+	gitopsSQL string
 )
 
 // Params selects one team's window. From is inclusive, To exclusive.
@@ -75,6 +77,9 @@ type Dataset struct {
 	Reviews   []Review   `json:"reviews"`
 	// OpenPRs are the PRs open at the window's end, whenever opened.
 	OpenPRs []OpenPR `json:"open_prs"`
+	// GitOpsRepos are every GitOps repo (sql/gitops.sql), not the window's
+	// only: a run whose commit Bitbucket never saw is matched by name.
+	GitOpsRepos []string `json:"-"`
 }
 
 // Meta describes the window and where each source's data starts.
@@ -306,16 +311,26 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 		Noergler: meta.NoerglerEnd}
 	d.Meta.BuildDataFrom, d.Meta.BuildTypeFrom = meta.BuildDataFrom, meta.BuildTypeFrom
 
-	if d.PRs, err = all[PR](ctx, tx, "prs", prsSQL, p.Team, p.From, p.To); err != nil {
+	// Never nil: pgx sends nil as NULL, `= ANY(NULL)` scans NULL into a
+	// bool and `<> ALL(NULL)` drops every open PR.
+	var gitops []string
+	if err := tx.QueryRow(ctx, gitopsSQL).Scan(&gitops); err != nil {
+		return nil, fmt.Errorf("dataset gitops: %w", err)
+	}
+	if gitops == nil {
+		gitops = []string{}
+	}
+	d.GitOpsRepos = gitops
+	if d.PRs, err = all[PR](ctx, tx, "prs", prsSQL, p.Team, p.From, p.To, d.GitOpsRepos); err != nil {
 		return nil, err
 	}
-	if d.OpenPRs, err = all[OpenPR](ctx, tx, "open_prs", openPRsSQL, p.Team, p.To); err != nil {
+	if d.OpenPRs, err = all[OpenPR](ctx, tx, "open_prs", openPRsSQL, p.Team, p.To, d.GitOpsRepos); err != nil {
 		return nil, err
 	}
 	if d.Deploys, err = all[Deploy](ctx, tx, "deploys", deploysSQL, p.Team, p.From, p.To); err != nil {
 		return nil, err
 	}
-	if d.Runs, err = all[Run](ctx, tx, "runs", runsSQL, p.Team, p.From, p.To); err != nil {
+	if d.Runs, err = all[Run](ctx, tx, "runs", runsSQL, p.Team, p.From, p.To, d.GitOpsRepos); err != nil {
 		return nil, err
 	}
 	d.LeadTimes, d.Reviews = []LeadTime{}, []Review{}
@@ -323,7 +338,7 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 		if d.LeadTimes, err = all[LeadTime](ctx, tx, "lead_times", leadTimesSQL, p.Team, p.From, p.To); err != nil {
 			return nil, err
 		}
-		if d.Reviews, err = all[Review](ctx, tx, "reviews", reviewsSQL, p.Team, p.From, p.To); err != nil {
+		if d.Reviews, err = all[Review](ctx, tx, "reviews", reviewsSQL, p.Team, p.From, p.To, d.GitOpsRepos); err != nil {
 			return nil, err
 		}
 	}

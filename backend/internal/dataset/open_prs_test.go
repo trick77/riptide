@@ -10,6 +10,22 @@ import (
 	"github.com/trick77/riptide/internal/dataset"
 )
 
+// Without any Argo CD data there is no GitOps repo: the empty set keeps
+// every open PR (`<> ALL` of NULL would drop them all).
+func TestDatasetOpenPRsWithoutGitOps(t *testing.T) {
+	st, pool := migrated(t)
+	s := &seeder{t: t, pool: pool}
+	s.pr(prEvent{event: "pr:opened", repo: kasseAPI, id: 1, author: "dev-anna", branch: "feature/kas-1",
+		state: "OPEN", at: days(1)})
+	d := load(t, st, t0, days(10))
+	if len(d.OpenPRs) != 1 || d.GitOpsRepos == nil || len(d.GitOpsRepos) != 0 {
+		t.Errorf("open = %+v, gitops repos %#v", d.OpenPRs, d.GitOpsRepos)
+	}
+	if len(d.PRs) != 1 || d.PRs[0].GitOps {
+		t.Errorf("prs = %+v", d.PRs)
+	}
+}
+
 // The PRs open at the window's end, from the events before it only.
 func TestDatasetOpenPRs(t *testing.T) {
 	st, pool := migrated(t)
