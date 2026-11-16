@@ -716,7 +716,9 @@ func TestBranch(t *testing.T) {
 		{"kasse-api/prefix%2Fy", "prefix/y", "other"},
 		{"kasse-api/chore%2Fdeps", "chore/deps", "feature"},
 		{"kasse-api/Refactor%2Fx", "Refactor/x", "feature"},
-		{"kasse-api/docs%2Freadme", "docs/readme", "feature"},
+		// docs pipelines often skip the build: no feature build.
+		{"kasse-api/docs%2Freadme", "docs/readme", "other"},
+		{"kasse-api/Doc%2Freadme", "Doc/readme", "other"},
 		{"kasse-api/chore", "chore", "other"},
 		{"kasse-api/feature", "feature", "other"},
 		{"kasse-api/PR-12", "PR-12", "pr"},

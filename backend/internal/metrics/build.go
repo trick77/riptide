@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/trick77/riptide/internal/dataset"
+	"github.com/trick77/riptide/internal/parse"
 )
 
 // Run kinds: what a run was, so durations and success rates are never
@@ -60,10 +61,12 @@ var notFeatureStems = map[string]bool{
 
 // notFeature: an other-kind scheme whose runs are no sign of unrecognised
 // feature builds. A pipeline name without a branch (Tekton) says nothing
-// either way.
+// either way. docs/ and doc/ only with their '/' (parse.DocsBranch): a
+// DOC-123 Jira key is a feature scheme.
 func notFeature(prefix string) bool {
 	stem := strings.TrimSuffix(strings.TrimSuffix(prefix, "/"), "-…")
-	return stem == "" || notFeatureStems[stem] || strings.Contains(stem, "nightly")
+	return stem == "" || notFeatureStems[stem] || strings.Contains(stem, "nightly") ||
+		parse.DocsBranch(prefix)
 }
 
 // FeatureHint says no run counted as a feature build, while other runs on
