@@ -273,7 +273,7 @@ export const de = {
       label: "Instability",
       dora: "DORA · Change fail rate · Deployment rework rate · Failed deployment recovery time",
       question:
-        "Wie oft macht ein Deployment Ärger, und wie schnell ist er behoben?",
+        "Wie oft macht ein Deployment Ärger, und wie schnell ist es behoben?",
       value: "nicht gemessen",
       text: "Dafür braucht es eine Incident-Quelle. Ohne sie zeigt Riptide nur Throughput; die Instability-Seite fehlt. Hotfix-Anteil oder Deploy-Erfolg ersetzen sie nicht.",
     },
