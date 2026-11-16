@@ -349,7 +349,7 @@ describe("App", () => {
     // The question to talk about, no retro questions of a model.
     expect(
       p.getByText(
-        "64 % Approvals ohne vorherigen Kommentar: Besprechen wir grosse Änderungen ausserhalb von Bitbucket?",
+        "64 % Approvals ohne vorherigen Kommentar: Passt das zu unserer Art zu reviewen?",
       ),
     ).toBeInTheDocument();
   });

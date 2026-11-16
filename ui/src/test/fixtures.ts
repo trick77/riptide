@@ -909,7 +909,7 @@ export function analysisText(): AnalysisText {
         lever: "name_what_helped",
       },
     ],
-    question: "Besprechen wir grosse Änderungen ausserhalb von Bitbucket?",
+    question: "Passt das zu unserer Art zu reviewen?",
   };
 }
 
