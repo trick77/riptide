@@ -126,10 +126,7 @@ func TestOpenPRs(t *testing.T) {
 		t.Errorf("future PR age = %v", batch.Age.P50)
 	}
 
-	// Bots counted in when asked; the product filters.
-	if got := openSection(ds, filter{bots: true}); got.Open != 10 || got.Long != 6 || got.Jammed != 1 {
-		t.Errorf("with bots open %d long %d jammed %d", got.Open, got.Long, got.Jammed)
-	}
+	// The product filters.
 	if got := openSection(ds, filter{product: "portal"}); got.Open != 1 || got.Long != 1 || len(got.Repos) != 1 {
 		t.Errorf("portal = %+v", got)
 	}

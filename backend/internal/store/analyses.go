@@ -9,13 +9,12 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// AnalysisView is the page view an analysis words: team, window, product
-// and bots, as the read API takes them.
+// AnalysisView is the page view an analysis words: team, window and
+// product, as the read API takes them.
 type AnalysisView struct {
 	Team    string
 	Weeks   int
 	Product string
-	Bots    bool
 }
 
 // AnalysisClaim starts an attempt.
@@ -48,13 +47,13 @@ type AnalysisResult struct {
 	At time.Time
 }
 
-const analysisColumns = `id, team, weeks, product, bots, period_from, period_to, trigger, status, model,
+const analysisColumns = `id, team, weeks, product, period_from, period_to, trigger, status, model,
 	input_hash, assessment, output, report, input_tokens, output_tokens, cost_nano_usd, error, attempts,
 	created_at, finished_at`
 
 func scanAnalysis(r pgx.CollectableRow) (Analysis, error) {
 	var a Analysis
-	err := r.Scan(&a.ID, &a.Team, &a.Weeks, &a.Product, &a.Bots, &a.PeriodFrom, &a.PeriodTo, &a.Trigger,
+	err := r.Scan(&a.ID, &a.Team, &a.Weeks, &a.Product, &a.PeriodFrom, &a.PeriodTo, &a.Trigger,
 		&a.Status, &a.Model, &a.InputHash, &a.Assessment, &a.Output, &a.Report, &a.InputTokens, &a.OutputTokens,
 		&a.CostNanoUSD, &a.Error, &a.Attempts, &a.CreatedAt, &a.FinishedAt)
 	return a, err
@@ -67,21 +66,21 @@ func (s *Store) ClaimAnalysis(ctx context.Context, c AnalysisClaim) (id int64, o
 	v := c.View
 	if c.Trigger != "scheduled" {
 		err = s.pool.QueryRow(ctx, `INSERT INTO team_analyses
-			(team, weeks, product, bots, period_from, period_to, trigger, status, model, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, 'running', $8, $9) RETURNING id`,
-			v.Team, v.Weeks, v.Product, v.Bots, c.From, c.To, c.Trigger, c.Model, c.At).Scan(&id)
+			(team, weeks, product, period_from, period_to, trigger, status, model, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, 'running', $7, $8) RETURNING id`,
+			v.Team, v.Weeks, v.Product, c.From, c.To, c.Trigger, c.Model, c.At).Scan(&id)
 		return id, err == nil, err
 	}
 	err = s.pool.QueryRow(ctx, `INSERT INTO team_analyses
-		(team, weeks, product, bots, period_from, period_to, trigger, status, model, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, 'scheduled', 'running', $7, $10)
-		ON CONFLICT (team, weeks, product, bots, period_to) WHERE trigger = 'scheduled'
+		(team, weeks, product, period_from, period_to, trigger, status, model, created_at)
+		VALUES ($1, $2, $3, $4, $5, 'scheduled', 'running', $6, $9)
+		ON CONFLICT (team, weeks, product, period_to) WHERE trigger = 'scheduled'
 		DO UPDATE SET status = 'running', attempts = team_analyses.attempts + 1, model = EXCLUDED.model,
 			created_at = EXCLUDED.created_at, finished_at = NULL, error = NULL
-		WHERE team_analyses.attempts < $8 AND (team_analyses.status = 'failed'
-		   OR (team_analyses.status = 'running' AND team_analyses.created_at < $10 - $9 * interval '1 second'))
+		WHERE team_analyses.attempts < $7 AND (team_analyses.status = 'failed'
+		   OR (team_analyses.status = 'running' AND team_analyses.created_at < $9 - $8 * interval '1 second'))
 		RETURNING id`,
-		v.Team, v.Weeks, v.Product, v.Bots, c.From, c.To, c.Model, c.MaxAttempts, c.StaleAfter.Seconds(), c.At).Scan(&id)
+		v.Team, v.Weeks, v.Product, c.From, c.To, c.Model, c.MaxAttempts, c.StaleAfter.Seconds(), c.At).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, false, nil
 	}
@@ -117,8 +116,8 @@ func (s *Store) endAnalysis(ctx context.Context, id int64, status string, r Anal
 // at most limit.
 func (s *Store) DoneAnalyses(ctx context.Context, v AnalysisView, limit int) ([]Analysis, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+analysisColumns+` FROM team_analyses
-		WHERE team = $1 AND weeks = $2 AND product = $3 AND bots = $4 AND status = 'done'
-		ORDER BY period_to DESC, finished_at DESC LIMIT $5`, v.Team, v.Weeks, v.Product, v.Bots, limit)
+		WHERE team = $1 AND weeks = $2 AND product = $3 AND status = 'done'
+		ORDER BY period_to DESC, finished_at DESC LIMIT $4`, v.Team, v.Weeks, v.Product, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -129,8 +128,8 @@ func (s *Store) DoneAnalyses(ctx context.Context, v AnalysisView, limit int) ([]
 // ending at to; nil without one.
 func (s *Store) ScheduledAttempt(ctx context.Context, v AnalysisView, to time.Time) (*Analysis, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+analysisColumns+` FROM team_analyses
-		WHERE team = $1 AND weeks = $2 AND product = $3 AND bots = $4 AND period_to = $5 AND trigger = 'scheduled'`,
-		v.Team, v.Weeks, v.Product, v.Bots, to)
+		WHERE team = $1 AND weeks = $2 AND product = $3 AND period_to = $4 AND trigger = 'scheduled'`,
+		v.Team, v.Weeks, v.Product, to)
 	if err != nil {
 		return nil, err
 	}
@@ -151,8 +150,8 @@ func oneAnalysis(rows pgx.Rows) (*Analysis, error) {
 // LatestAttempt is the view's newest attempt in any state; nil without one.
 func (s *Store) LatestAttempt(ctx context.Context, v AnalysisView) (*Analysis, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+analysisColumns+` FROM team_analyses
-		WHERE team = $1 AND weeks = $2 AND product = $3 AND bots = $4
-		ORDER BY created_at DESC LIMIT 1`, v.Team, v.Weeks, v.Product, v.Bots)
+		WHERE team = $1 AND weeks = $2 AND product = $3
+		ORDER BY created_at DESC LIMIT 1`, v.Team, v.Weeks, v.Product)
 	if err != nil {
 		return nil, err
 	}

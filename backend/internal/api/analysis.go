@@ -44,8 +44,7 @@ func (d Deps) TeamNames() []string {
 // the analysis' calendar (BACKEND_ANALYSIS_TZ), not the viewer's: one
 // stored analysis serves every viewer.
 func analysisView(v view) analysis.View {
-	product := v.params.Product
-	return analysis.View{Team: v.team, Weeks: len(v.params.Period.Weeks), Product: product, Bots: v.params.Bots}
+	return analysis.View{Team: v.team, Weeks: len(v.params.Period.Weeks), Product: v.params.Product}
 }
 
 // analysisStatus serves a view's assessment over its closed weeks and the
@@ -104,8 +103,7 @@ func (d Deps) analysisAsk(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteDetail(w, http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
-	d.Log.InfoContext(r.Context(), "analysis_asked", "team", v.team, "weeks", av.Weeks, "product", av.Product,
-		"bots", av.Bots)
+	d.Log.InfoContext(r.Context(), "analysis_asked", "team", v.team, "weeks", av.Weeks, "product", av.Product)
 	st, err := d.Analysis.Status(r.Context(), av)
 	if err != nil {
 		d.Log.ErrorContext(r.Context(), "analysis_status_failed", "team", v.team, logging.Err(err))

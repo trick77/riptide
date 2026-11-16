@@ -15,9 +15,7 @@ import {
   CardHead,
   Compare,
   Direction,
-  Legend,
   SectionHead,
-  Swatch,
   Tile,
   type Why,
   WhyPanel,
@@ -202,13 +200,8 @@ export function Flow({ m, why, onWhy, onFacts }: Props) {
   const rv = durParts(r.review.p50);
   const labels = bucketLabels(t, r.cycle_histogram.upper_bounds_s);
   const day = r.cycle_histogram.upper_bounds_s.indexOf(86400);
-  const series = [
-    { key: "h", label: t("flow.people"), className: "bg-s1" },
-    ...(m.bots
-      ? [{ key: "b", label: t("flow.bots"), className: "bg-s2" }]
-      : []),
-  ];
-  const hist = [r.cycle_histogram.human, r.cycle_histogram.bot];
+  // People's PRs only: bots never count.
+  const series = [{ key: "h", label: t("flow.people"), className: "bg-s1" }];
 
   const whys: Record<string, Why> = {
     review: {
@@ -312,12 +305,7 @@ export function Flow({ m, why, onWhy, onFacts }: Props) {
       />
 
       <Card className="mt-3">
-        <CardHead
-          title={t("flow.reviewTitle")}
-          sub={t("flow.reviewSub", {
-            bots: m.bots ? t("flow.reviewSubBots") : "",
-          })}
-        />
+        <CardHead title={t("flow.reviewTitle")} sub={t("flow.reviewSub")} />
         <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-3">
           <Tile
             label={t("flow.review.label")}
@@ -404,26 +392,17 @@ export function Flow({ m, why, onWhy, onFacts }: Props) {
                 {t("flow.histHead")}
                 {day >= 0 && t("flow.histLine")}
               </div>
-              {m.bots && (
-                <Legend>
-                  {series.map((s) => (
-                    <Swatch
-                      key={s.key}
-                      className={s.className}
-                      label={s.label}
-                    />
-                  ))}
-                </Legend>
-              )}
             </div>
             <GroupedBars
               labels={labels}
               series={series}
-              values={hist.slice(0, series.length)}
+              values={[r.cycle_histogram.human]}
               markAfter={day >= 0 ? day : undefined}
               markLabel="24 h"
               ariaLabel={t("flow.histAria", {
-                parts: labels.map((l, i) => `${l} ${hist[0][i]}`).join(", "),
+                parts: labels
+                  .map((l, i) => `${l} ${r.cycle_histogram.human[i]}`)
+                  .join(", "),
               })}
             />
           </div>

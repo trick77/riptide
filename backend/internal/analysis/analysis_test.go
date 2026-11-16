@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"maps"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -36,7 +39,8 @@ func jammed(_ context.Context, team string, p metrics.Period) (*dataset.Dataset,
 	ds := &dataset.Dataset{
 		Meta: dataset.Meta{Team: team, From: p.From, To: p.To, GeneratedAt: p.To, ProductionStage: "prod"},
 		PRs:  []dataset.PR{}, Deploys: []dataset.Deploy{}, LeadTimes: []dataset.LeadTime{}, Runs: []dataset.Run{},
-		Reviews: []dataset.Review{},
+		Reviews:  []dataset.Review{},
+		Products: []dataset.Product{{Key: "kasse", Repos: []string{"kasse/kasse-api"}, Apps: []string{}}},
 	}
 	for i, days := range []int{9, 10, 12} {
 		at := p.To.AddDate(0, 0, -days)
@@ -59,7 +63,8 @@ func (m *memStore) ClaimAnalysis(_ context.Context, c store.AnalysisClaim) (int6
 	defer m.mu.Unlock()
 	if c.Trigger == TriggerScheduled {
 		for i, r := range m.rows {
-			if r.Trigger == TriggerScheduled && r.Team == c.View.Team && r.Weeks == c.View.Weeks && r.PeriodTo.Equal(c.To) {
+			if r.Trigger == TriggerScheduled && r.Team == c.View.Team && r.Weeks == c.View.Weeks &&
+				r.Product == c.View.Product && r.PeriodTo.Equal(c.To) {
 				if r.Status == "failed" && r.Attempts < c.MaxAttempts {
 					m.rows[i].Status, m.rows[i].Attempts = "running", r.Attempts+1
 					return r.ID, true, nil
@@ -70,7 +75,7 @@ func (m *memStore) ClaimAnalysis(_ context.Context, c store.AnalysisClaim) (int6
 	}
 	id := int64(len(m.rows) + 1)
 	m.rows = append(m.rows, store.Analysis{ID: id, Team: c.View.Team, Weeks: c.View.Weeks, Product: c.View.Product,
-		Bots: c.View.Bots, PeriodFrom: c.From, PeriodTo: c.To, Trigger: c.Trigger, Status: "running", Model: c.Model,
+		PeriodFrom: c.From, PeriodTo: c.To, Trigger: c.Trigger, Status: "running", Model: c.Model,
 		Attempts: 1, CreatedAt: c.At})
 	return id, true, nil
 }
@@ -120,7 +125,8 @@ func (m *memStore) ScheduledAttempt(_ context.Context, v store.AnalysisView, to 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, r := range m.rows {
-		if r.Trigger == TriggerScheduled && r.Team == v.Team && r.Weeks == v.Weeks && r.PeriodTo.Equal(to) {
+		if r.Trigger == TriggerScheduled && r.Team == v.Team && r.Weeks == v.Weeks && r.Product == v.Product &&
+			r.PeriodTo.Equal(to) {
 			return &r, nil
 		}
 	}
@@ -416,8 +422,15 @@ func TestHistory(t *testing.T) {
 	if got := h.Seen["pr_jam:kasse/kasse-api"]; got != 3 {
 		t.Errorf("jam seen %d times in a row, want 3", got)
 	}
-	if h.Latest["pr_jam:kasse/kasse-api"] == "" {
-		t.Errorf("latest = %v", h.Latest)
+	if h.Latest["pr_jam:kasse/kasse-api"] == "" || h.Runs != 3 {
+		t.Errorf("latest = %v, runs %d", h.Latest, h.Runs)
+	}
+	// The view's first assessment has nothing to compare with; the next do.
+	for i, want := range []bool{false, true, true} {
+		var a metrics.Assessment
+		if err := json.Unmarshal(st.rows[i].Assessment, &a); err != nil || a.Compared != want {
+			t.Errorf("run %d compared %v, want %v (%v)", i+1, a.Compared, want, err)
+		}
 	}
 	// A missed week ends the streak: two weeks on, the latest run is a week
 	// behind the closed weeks, the one before two more.
@@ -427,6 +440,132 @@ func TestHistory(t *testing.T) {
 	}
 	if got := h.Seen["pr_jam:kasse/kasse-api"]; got != 0 {
 		t.Errorf("jam seen %d times across a missed week, want 0", got)
+	}
+}
+
+// The schedule words all products and then each product with data, once
+// per closed week; a product tab never shows all of them.
+func TestTickWordsEveryProduct(t *testing.T) {
+	llm := &fakeLLM{answer: goodAnswer}
+	st := &memStore{}
+	s := service(llm, st)
+	ctx := context.Background()
+	s.tick(ctx, []string{"team-a"})
+	got := map[string]int{}
+	for _, r := range st.rows {
+		if r.Trigger != TriggerScheduled || r.Status != "done" {
+			t.Errorf("row = %+v", r)
+		}
+		got[strconv.Itoa(r.Weeks)+"|"+r.Product]++
+	}
+	// KW 45 closed on 9 November: 4 weeks due, 26 not (not the month's
+	// first Monday), 12 by its fortnight.
+	want := map[string]int{"4|": 1, "4|kasse": 1}
+	if due(12, weekStart(now, zurich)) {
+		want["12|"], want["12|kasse"] = 1, 1
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("scheduled views = %v, want %v", got, want)
+	}
+	calls := llm.calls
+	s.tick(ctx, []string{"team-a"})
+	if llm.calls != calls {
+		t.Errorf("a second tick asked again: %d calls, then %d", calls, llm.calls)
+	}
+}
+
+// A window's views read its two datasets once; a product with data but no
+// repo active in it is left out, and promised nothing.
+func TestTickLoadsOnceSkipsQuiet(t *testing.T) {
+	llm := &fakeLLM{answer: goodAnswer}
+	st := &memStore{}
+	s := service(llm, st)
+	var loadsN atomic.Int32
+	s.Load = func(ctx context.Context, team string, p metrics.Period) (*dataset.Dataset, error) {
+		loadsN.Add(1)
+		ds, err := jammed(ctx, team, p)
+		ds.Products = append(ds.Products, dataset.Product{Key: "idle", Repos: []string{}, Apps: []string{}})
+		return ds, err
+	}
+	ctx := context.Background()
+	s.tick(ctx, []string{"team-a"})
+	windows := 1
+	if due(12, weekStart(now, zurich)) {
+		windows++
+	}
+	if int(loadsN.Load()) != 2*windows {
+		t.Errorf("%d dataset loads for %d due windows, want 2 each", loadsN.Load(), windows)
+	}
+	for _, r := range st.rows {
+		if r.Product == "idle" {
+			t.Errorf("a quiet product was worded: %+v", r)
+		}
+	}
+	idle, _ := s.Status(ctx, View{Team: "team-a", Weeks: 4, Product: "idle"})
+	made, _ := s.Status(ctx, View{Team: "team-a", Weeks: 4, Product: "made-up"})
+	kasse, _ := s.Status(ctx, View{Team: "team-a", Weeks: 4, Product: "kasse"})
+	if idle.NextRun != nil || made.NextRun != nil || kasse.NextRun == nil {
+		t.Errorf("next run: idle %v, made-up %v, kasse %v", idle.NextRun, made.NextRun, kasse.NextRun)
+	}
+	// The next tick asks nothing: the quiet product waits for next week.
+	calls := llm.calls
+	s.tick(ctx, []string{"team-a"})
+	if llm.calls != calls {
+		t.Errorf("asked again: %d, then %d calls", calls, llm.calls)
+	}
+}
+
+// A dataset that does not load is not read again on every tick.
+func TestProductsBackOff(t *testing.T) {
+	s := service(&fakeLLM{answer: goodAnswer}, &memStore{})
+	var loadsN atomic.Int32
+	s.Load = func(context.Context, string, metrics.Period) (*dataset.Dataset, error) {
+		loadsN.Add(1)
+		return nil, io.ErrUnexpectedEOF
+	}
+	w := weekStart(now, zurich)
+	// A page's failed read (a closed tab) does not hold the schedule back.
+	s.productsFor(context.Background(), "team-a", 4, w, now, false)
+	for range 3 {
+		if p := s.productsFor(context.Background(), "team-a", 4, w, now, true); p != nil {
+			t.Errorf("products of a failed load = %v", p)
+		}
+	}
+	if loadsN.Load() != 2 {
+		t.Errorf("%d loads, want the page's and one of the schedule's", loadsN.Load())
+	}
+	// Over, the backoff goes with the next week's sweep.
+	s.sweepWeek(w.AddDate(0, 0, 7), now.Add(2*retryAfter))
+	if _, ok := s.backoff.Load("products|team-a|4|" + strconv.FormatInt(w.Unix(), 10)); ok {
+		t.Error("an expired backoff kept")
+	}
+	if ianaZone(time.Local) != "" || ianaZone(zurich) != "Europe/Zurich" {
+		t.Errorf("zones: %q, %q", ianaZone(time.Local), ianaZone(zurich))
+	}
+}
+
+// An analysis stored before Compared existed reads it from its history.
+func TestComparedBackfilled(t *testing.T) {
+	ctx := context.Background()
+	st := &memStore{}
+	s := service(&fakeLLM{answer: goodAnswer}, st)
+	for _, d := range []int{-7, 0} {
+		s.Now = func() time.Time { return now.AddDate(0, 0, d) }
+		if err := s.Run(ctx, view, TriggerScheduled); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Strip the field as an old row lacks it.
+	var raw map[string]any
+	_ = json.Unmarshal(st.rows[1].Assessment, &raw)
+	delete(raw, "compared")
+	st.rows[1].Assessment, _ = json.Marshal(raw)
+	got, err := s.Status(ctx, view)
+	if err != nil || !got.Assessment.Compared {
+		t.Errorf("compared of an old row = %v (%v)", got.Assessment.Compared, err)
+	}
+	if got.Zone != "Europe/Zurich" {
+		t.Errorf("zone = %q", got.Zone)
 	}
 }
 

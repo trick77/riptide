@@ -65,12 +65,9 @@ func TestFacts(t *testing.T) {
 	if f.ProductionStage != "prod" || f.Limit != FactsLimit {
 		t.Errorf("facts = %+v", f)
 	}
-	// Newest first, bots only on request, no period filter.
+	// Newest first, bots left out (PR 3), no period filter.
 	if got := prIDs(f.PRs.Rows); fmt.Sprint(got) != "[2 4 1 5]" || f.PRs.Count != 4 {
 		t.Errorf("prs = %v", got)
-	}
-	if got := prIDs(ComputeFacts(ds, Params{Period: p4(), Bots: true}, "").PRs.Rows); fmt.Sprint(got) != "[2 3 4 1 5]" {
-		t.Errorf("prs with bots = %v", got)
 	}
 	portal := f.PRs.Rows[1]
 	if portal.ProdAt == nil || portal.ToProdS == nil || *portal.ToProdS != 86400 || portal.State != "merged" {

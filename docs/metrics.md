@@ -381,7 +381,7 @@ noergler costs; each against the same number of whole weeks right before
 (a second read of that window). What the page leads with is
 `/api/analysis`, below.
 `product=<key>` narrows it to one Bitbucket project,
-`bots=1` counts bots' PRs in. `GET /api/facts` takes the same parameters
+bots' PRs never count. `GET /api/facts` takes the same parameters
 plus `q` and returns the PRs, deploys and runs behind the numbers, newest
 first (the PRs open at the period's end ahead of them, oldest first, with
 their age and wait), searched; it reads no lead times or reviews, so it takes the product
@@ -526,7 +526,7 @@ The model (`BACKEND_ANALYSIS_MODEL`) words this and nothing else:
 The validator drops what breaks a rule: a digit, an unknown fact, a
 foreign lever, a sharp s, a repo outside the candidates or an overlong text.
 It lists the top 3 signals the text missed; the page shows them as "also
-spotted". The schedule words every team's default view after its week
+spotted". The schedule words every team's views, all products and then each product with data, after its week
 closes, Monday 06:00: 4 weeks weekly, 12 every second week, 26 monthly.
 The page shows the newest analysis of the same window while it is no
 older than its schedule's gap; without one, the same signals with the rule

@@ -125,7 +125,6 @@ export type Review = {
   cycle_histogram: {
     upper_bounds_s: number[];
     human: number[];
-    bot: number[];
   };
   within_day: Share;
   change_mix: MixWeek[];
@@ -402,7 +401,6 @@ export type Metrics = {
   period: Period;
   products: Product[];
   product: string | null;
-  bots: boolean;
   delivery: Delivery;
   lead_chain: LeadChain;
   review: Review;
@@ -428,7 +426,6 @@ export type PRFact = {
   jira_prefix: JiraRef[];
   jira_more: number;
   gitops: boolean;
-  bot: boolean;
   change_type: string | null;
   state: "open" | "merged" | "declined" | "deleted";
   review_s: number | null;
@@ -509,13 +506,11 @@ export function fetchTeams(signal?: AbortSignal): Promise<string[]> {
   );
 }
 
-// What the page shows: whose data, how many calendar weeks, which product,
-// bots or not.
+// What the page shows: whose data, how many calendar weeks, which product.
 export type Query = {
   team: string;
   weeks: number;
   product: string | null;
-  bots: boolean;
 };
 
 // The viewer's time zone: the backend cuts weeks at Monday 00:00 there.
@@ -530,7 +525,6 @@ function params(v: Query): URLSearchParams {
     tz: viewerZone(),
   });
   if (v.product) q.set("product", v.product);
-  if (v.bots) q.set("bots", "1");
   return q;
 }
 
@@ -592,6 +586,8 @@ export type Signal = {
   stage: StageKey | null;
   prev_stage: StageKey | null;
   low_sample: boolean;
+  // The cases it rests on, where counted (a stage's PRs).
+  sample: number | null;
   weight: number;
   seen: number;
   facts: Fact[];
@@ -637,6 +633,8 @@ export type Assessment = {
   team: Fact[];
   question: Signal | null;
   ci: CISplit;
+  // An assessment of the view for an earlier week was there.
+  compared: boolean;
 };
 
 export type FocusText = {
@@ -689,6 +687,9 @@ export type AnalysisStatus = {
   failure: { at: string; detail: string } | null;
   next_run: string | null;
   cooldown_until: string | null;
+  // The zone the closed weeks are cut in, their days shown there; empty:
+  // the viewer's.
+  zone: string;
 };
 
 export function fetchAnalysis(

@@ -358,18 +358,16 @@ func ids(prs []dataset.PR) []int64 {
 
 func TestPRs(t *testing.T) {
 	ds, p := prData(), p4()
-	if got := ids(mergedPRs(ds, p, filter{}, false)); !slices.Equal(got, []int64{1, 6, 7}) {
+	// The bot's PR 2 never counts.
+	if got := ids(mergedPRs(ds, p, filter{})); !slices.Equal(got, []int64{1, 6, 7}) {
 		t.Errorf("merged = %v", got)
 	}
-	if got := ids(mergedPRs(ds, p, filter{}, true)); !slices.Equal(got, []int64{1, 2, 6, 7}) {
-		t.Errorf("with bots = %v", got)
-	}
-	if got := ids(mergedPRs(ds, p, filter{product: "portal"}, true)); !slices.Equal(got, []int64{6}) {
+	if got := ids(mergedPRs(ds, p, filter{product: "portal"})); !slices.Equal(got, []int64{6}) {
 		t.Errorf("portal = %v", got)
 	}
 
 	// Cycle time needs the opening.
-	c := cycleTimes(mergedPRs(ds, p, filter{}, false))
+	c := cycleTimes(mergedPRs(ds, p, filter{}))
 	if len(c) != 2 || !near(c[0], 0.2*86400) || !near(c[1], 86400) {
 		t.Errorf("cycle = %v", c)
 	}
@@ -378,13 +376,13 @@ func TestPRs(t *testing.T) {
 	}
 
 	// Change types per merge week.
-	mix := changeMix(mergedPRs(ds, p, filter{}, true), p)
-	if mix[3] != (MixWeek{Feature: 1, Other: 1}) || mix[2] != (MixWeek{Bugfix: 1, Other: 1}) {
+	mix := changeMix(mergedPRs(ds, p, filter{}), p)
+	if mix[3] != (MixWeek{Feature: 1}) || mix[2] != (MixWeek{Bugfix: 1, Other: 1}) {
 		t.Errorf("mix = %+v", mix)
 	}
 
-	r := reviewOf(ds, p, filter{bots: true})
-	if r.Merged != 4 || r.Untracked != 0 || r.Cycle.N != 2 || !slices.Equal(r.CycleHistogram.Bot, []int{0, 0, 0, 1, 0, 0}) {
+	r := reviewOf(ds, p, filter{})
+	if r.Merged != 3 || r.Untracked != 0 || r.Cycle.N != 2 {
 		t.Errorf("review = %+v", r)
 	}
 	expectNear(t, "untracked rate", r.UntrackedRate, 0)
@@ -857,8 +855,8 @@ func TestCosts(t *testing.T) {
 
 func TestCompute(t *testing.T) {
 	ds := prData()
-	m := Compute(ds, nil, Params{Period: p4(), Product: "portal", Bots: true})
-	if m.Product == nil || *m.Product != "portal" || !m.Bots || m.Review.Merged != 1 || len(m.Period.Weeks) != 4 ||
+	m := Compute(ds, nil, Params{Period: p4(), Product: "portal"})
+	if m.Product == nil || *m.Product != "portal" || m.Review.Merged != 1 || len(m.Period.Weeks) != 4 ||
 		len(m.Review.CycleHistogram.UpperBoundsS) != len(m.Review.CycleHistogram.Human)-1 {
 		t.Errorf("portal = %+v", m)
 	}

@@ -2,17 +2,25 @@ package analysis
 
 import (
 	"context"
+	"errors"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
+	"github.com/trick77/ship/kit/logging"
+
+	"github.com/trick77/riptide/internal/dataset"
 	"github.com/trick77/riptide/internal/metrics"
 	"github.com/trick77/riptide/internal/store"
 )
 
-// The schedule words every team's default view (all products, no bots)
-// once its week has closed: 4 weeks every Monday, 12 every second Monday,
-// 26 on the first Monday of the month (user, 2026-11-16: a long window
-// barely moves in a week, and a weekly run only repeats itself). A view
-// another product or bots selects is worded on request only.
+// The schedule words every view of every team once its week has closed,
+// all products first, then each product with data in the window (user,
+// 2026-11-16: a product tab must not show an assessment of all of them;
+// the cost is no reason against it): 4 weeks every Monday, 12 every second
+// Monday, 26 on the first Monday of the month (user, 2026-11-16: a long
+// window barely moves in a week, and a weekly run only repeats itself).
 const (
 	// RunAfter is how long into Monday the schedule waits: the week's last
 	// webhooks are in, the team is not yet in its daily.
@@ -23,8 +31,6 @@ const (
 	// retryAfter is the pause after a failed scheduled run of a view.
 	retryAfter = time.Hour
 )
-
-func scheduled(v View) bool { return v.Product == "" && !v.Bots }
 
 // settled reports whether a scheduled attempt needs no further try: done,
 // tried MaxAttempts times, or running and not yet stale.
@@ -77,8 +83,8 @@ func (s *Service) NextRun(weeks int) time.Time {
 	}
 }
 
-// Schedule runs the due analyses until ctx ends: every team's default
-// view, every window due for the last closed week, one after the other.
+// Schedule runs the due analyses until ctx ends: every team's views, every
+// window due for the last closed week, one after the other.
 // Late is fine: a pod down on Monday catches up within the week.
 func (s *Service) Schedule(ctx context.Context, teams func() []string) {
 	t := time.NewTicker(tickEvery)
@@ -102,6 +108,7 @@ func (s *Service) tick(ctx context.Context, teams []string) {
 	if n.Before(w.Add(RunAfter)) {
 		return
 	}
+	s.sweepWeek(w, n)
 	for _, team := range teams {
 		for _, weeks := range metrics.Windows {
 			if ctx.Err() != nil {
@@ -110,25 +117,149 @@ func (s *Service) tick(ctx context.Context, teams []string) {
 			if !due(weeks, w) {
 				continue
 			}
-			v := View{Team: team, Weeks: weeks}
-			// A cheap look first: reading a team's datasets every tick only
-			// to find the week done would load the database for nothing.
-			// Run's claim still decides across replicas.
-			if a, err := s.Store.ScheduledAttempt(ctx, v, w.UTC()); err != nil || (a != nil && settled(*a, n)) {
-				continue
+			// The window's views share their two datasets: read once, not
+			// once per product (and once more for the product list).
+			wctx := withLoads(ctx)
+			views := []View{{Team: team, Weeks: weeks}}
+			// A team whose products do not load gets its all-products view,
+			// which fails the same way and backs off; the products follow
+			// on a later tick.
+			for _, p := range s.productsFor(wctx, team, weeks, w, n, true) {
+				views = append(views, View{Team: team, Weeks: weeks, Product: p})
 			}
-			key := viewKey(v)
-			if until, ok := s.backoff.Load(key); ok && n.Before(until.(time.Time)) {
-				continue
-			}
-			// A run failing before its claim leaves no row to count its
-			// attempts on (a dataset that does not load): wait before the
-			// next try rather than reload the team every tick.
-			if err := s.Run(ctx, v, TriggerScheduled); err != nil && !IsBusy(err) {
-				s.backoff.Store(key, n.Add(retryAfter))
-			} else {
-				s.backoff.Delete(key)
+			for _, v := range views {
+				if ctx.Err() != nil {
+					return
+				}
+				s.tickView(wctx, v, w, n)
 			}
 		}
 	}
+}
+
+func (s *Service) tickView(ctx context.Context, v View, w, n time.Time) {
+	key := viewKey(v)
+	// Settled for the week: no query either, every product of every team
+	// would ask each tick all week.
+	if at, ok := s.settledAt.Load(key); ok && at.(time.Time).Equal(w) {
+		return
+	}
+	// A cheap look first: reading a team's datasets every tick only to find
+	// the week done would load the database for nothing. Run's claim still
+	// decides across replicas.
+	a, err := s.Store.ScheduledAttempt(ctx, v, w.UTC())
+	if err != nil {
+		return
+	}
+	if a != nil && settled(*a, n) {
+		s.settledAt.Store(key, w)
+		return
+	}
+	if until, ok := s.backoff.Load(key); ok && n.Before(until.(time.Time)) {
+		return
+	}
+	// A run failing before its claim leaves no row to count its attempts on
+	// (a dataset that does not load): wait before the next try rather than
+	// reload the team every tick.
+	switch err := s.Run(ctx, v, TriggerScheduled); {
+	case errors.Is(err, errQuiet):
+		// Nothing to word this week; the next closed week may have.
+		s.backoff.Store(key, w.AddDate(0, 0, 7))
+	case err != nil && !IsBusy(err):
+		s.backoff.Store(key, n.Add(retryAfter))
+	default:
+		s.backoff.Delete(key)
+	}
+}
+
+// productsFor are the products with data in the window's closed weeks
+// ending at w, read once per team, window and week. Nil when the dataset
+// does not load. For the schedule (sched) a failure is logged and not
+// tried again before retryAfter: every tick would read the team's whole
+// window. A page's failed read (a closed tab cancels it) leaves the
+// schedule alone.
+func (s *Service) productsFor(ctx context.Context, team string, weeks int, w, n time.Time, sched bool) []string {
+	key := team + "|" + strconv.Itoa(weeks) + "|" + strconv.FormatInt(w.Unix(), 10)
+	if p, ok := s.products.Load(key); ok {
+		return p.([]string)
+	}
+	if until, ok := s.backoff.Load("products|" + key); ok && n.Before(until.(time.Time)) {
+		return nil
+	}
+	cur, _ := s.periods(weeks)
+	ds, err := s.load(ctx, team, cur)
+	if err != nil {
+		if sched {
+			s.Log.ErrorContext(ctx, "analysis_failed", "stage", "products", "team", team, "weeks", weeks,
+				logging.Err(err))
+			s.backoff.Store("products|"+key, n.Add(retryAfter))
+		}
+		return nil
+	}
+	out := make([]string, 0, len(ds.Products))
+	for _, p := range ds.Products {
+		out = append(out, p.Key)
+	}
+	s.products.Store(key, out)
+	return out
+}
+
+// sweepWeek drops what belongs to weeks before w: their product lists and
+// settled marks, and every backoff already over.
+func (s *Service) sweepWeek(w, n time.Time) {
+	suffix := "|" + strconv.FormatInt(w.Unix(), 10)
+	s.products.Range(func(k, _ any) bool {
+		if !strings.HasSuffix(k.(string), suffix) {
+			s.products.Delete(k)
+		}
+		return true
+	})
+	s.settledAt.Range(func(k, at any) bool {
+		if !at.(time.Time).Equal(w) {
+			s.settledAt.Delete(k)
+		}
+		return true
+	})
+	s.backoff.Range(func(k, until any) bool {
+		if !n.Before(until.(time.Time)) {
+			s.backoff.Delete(k)
+		}
+		return true
+	})
+}
+
+// loadsKey holds a window's datasets in a tick's context.
+type loadsKey struct{}
+
+type loads struct {
+	mu sync.Mutex
+	m  map[string]*dataset.Dataset
+}
+
+func withLoads(ctx context.Context) context.Context {
+	return context.WithValue(ctx, loadsKey{}, &loads{m: map[string]*dataset.Dataset{}})
+}
+
+// load is Load, kept for the rest of the tick when the context holds a
+// cache: a window's product views read the same two periods.
+func (s *Service) load(ctx context.Context, team string, p metrics.Period) (*dataset.Dataset, error) {
+	c, ok := ctx.Value(loadsKey{}).(*loads)
+	if !ok {
+		return s.Load(ctx, team, p)
+	}
+	key := team + "|" + p.From.String() + "|" + p.To.String()
+	c.mu.Lock()
+	ds, ok := c.m[key]
+	c.mu.Unlock()
+	if ok {
+		return ds, nil
+	}
+	// Unlocked: assess reads both periods at once.
+	ds, err := s.Load(ctx, team, p)
+	if err == nil {
+		c.mu.Lock()
+		c.m[key] = ds
+		c.mu.Unlock()
+	}
+	return ds, err
 }

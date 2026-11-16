@@ -42,7 +42,7 @@ import {
 
 type Answer = Metrics | Facts | AnalysisStatus | Response;
 
-// The sample team's answers: per product, bots and search as the backend
+// The sample team's answers: per product and search as the backend
 // would compute them.
 function sample(url: URL): Answer {
   const weeks = Number(url.searchParams.get("weeks") ?? 4);
@@ -86,12 +86,6 @@ function sample(url: URL): Answer {
       costs: { ...empty.costs, rows: [] },
     };
   }
-  if (url.searchParams.get("bots") === "1")
-    return {
-      ...m,
-      bots: true,
-      review: { ...m.review, merged: 2, untracked: 1, untracked_rate: 0.5 },
-    };
   return m;
 }
 
@@ -142,7 +136,7 @@ describe("App", () => {
     // The facts come last: they ask for the product the metrics resolved.
     await screen.findByRole("tablist", { name: "Faktentabelle" });
     for (const h of [
-      "Was jetzt?",
+      "Einschätzung",
       "Gegen die Vorperiode",
       "Throughput und Instability",
       "Wo wartet eine Änderung?",
@@ -187,7 +181,7 @@ describe("App", () => {
   it("explains a number on demand, one at a time", async () => {
     mockFetch();
     render(<App />);
-    await screen.findByRole("heading", { name: "Was jetzt?" });
+    await screen.findByRole("heading", { name: "Einschätzung" });
     const whys = screen.getAllByRole("button", { name: "Was heisst das?" });
     fireEvent.click(whys[0]);
     expect(
@@ -219,7 +213,7 @@ describe("App", () => {
   it("shows each number against the previous period", async () => {
     mockFetch();
     render(<App />);
-    await screen.findByRole("heading", { name: "Was jetzt?" });
+    await screen.findByRole("heading", { name: "Einschätzung" });
     expect(screen.getByText("Besser")).toBeInTheDocument();
     expect(screen.getByText("Schlechter")).toBeInTheDocument();
     expect(screen.getAllByText("Unverändert").length).toBeGreaterThan(0);
@@ -253,21 +247,27 @@ describe("App", () => {
         name: "Ihr liefert öfter – aber Reviews bleiben liegen.",
       }),
     ).toBeInTheDocument();
-    expect(p.getByText("Einordnung: LLM")).toBeInTheDocument();
-    // The stamp and the next scheduled run, both visible.
-    expect(
-      p.getByText(/Einschätzung vom .* · automatisch/),
-    ).toBeInTheDocument();
-    expect(p.getByText(/nächste: /)).toBeInTheDocument();
+    // Who worded it is nobody's business (user): no model, no LLM badge.
+    expect(panel.textContent).not.toMatch(/LLM|mimo|USD/);
+    // The weeks, the stamp and the next scheduled run, in one line.
+    const weeks = p.getByTitle("ohne die laufende Woche");
+    expect(weeks.textContent).toMatch(
+      /^KW \d+–\d+ · \d\d\.\d\d\.–\d\d\.\d\d\.$/,
+    );
+    expect(weeks.parentElement?.textContent).toMatch(
+      /· Einschätzung vom .*, automatisch · nächste: /,
+    );
     expect(
       p.getByText(
         "Argo CD meldet seit 6 Tagen nichts: Aussagen dazu ausgelassen.",
       ),
     ).toBeInTheDocument();
     // The focus, the placeholders filled with the backend's numbers.
+    expect(p.getByText("Im Fokus")).toBeInTheDocument();
     expect(
-      p.getByText("Im Fokus · 2 von 11 aktiven Repos"),
+      p.getByText("9 weitere aktive Repos ohne Auffälligkeiten"),
     ).toBeInTheDocument();
+    expect(p.getByText("Team, alle Produkte")).toBeInTheDocument();
     expect(
       p.getByRole("heading", { name: "kasse/kasse-api" }),
     ).toBeInTheDocument();
@@ -292,7 +292,9 @@ describe("App", () => {
     expect(p.getByText("Für die nächste Retro")).toBeInTheDocument();
     // On the focus block and gathered in the retro box.
     expect(p.getAllByText("Warum liegen diese PRs?")).toHaveLength(2);
-    expect(p.getByText(/mimo-v2.6-pro · 0.007 USD/)).toBeInTheDocument();
+    expect(
+      p.getByRole("button", { name: "Als Markdown kopieren" }),
+    ).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/\{\{|\}\}/);
     fireEvent.click(
       p.getByRole("button", { name: "Fakten zu kasse/kasse-web ansehen →" }),
@@ -306,9 +308,13 @@ describe("App", () => {
   it("shows the rules' own words without a model", async () => {
     mockFetch();
     render(<App />);
-    const p = within(await screen.findByTestId("assessment"));
-    expect(p.getByText("nur Regeln")).toBeInTheDocument();
+    const panel = await screen.findByTestId("assessment");
+    const p = within(panel);
+    expect(panel.textContent).not.toMatch(/LLM|Regeln/);
     expect(p.queryByRole("button", { name: /einschätzen/ })).toBeNull();
+    // Without a model nothing is scheduled, and nothing ever compared.
+    expect(p.queryByText(/nächste: /)).toBeNull();
+    expect(panel.textContent).not.toMatch(/Vergleich|erledigt\./);
     expect(
       p.getByText(
         "kasse/kasse-api: PRs stauen sich; bereit bis Approval: deutlich schlechter",
@@ -328,7 +334,6 @@ describe("App", () => {
         "64 % Approvals ohne vorherigen Kommentar: Besprechen wir grosse Änderungen ausserhalb von Bitbucket?",
       ),
     ).toBeInTheDocument();
-    expect(p.getByText(/Regelbefunde aus riptide/)).toBeInTheDocument();
   });
 
   it("asks for an assessment and shows it running", async () => {
@@ -347,9 +352,7 @@ describe("App", () => {
     });
     render(<App />);
     const p = within(await screen.findByTestId("assessment"));
-    fireEvent.click(
-      p.getByRole("button", { name: "Für diesen Zeitraum einschätzen" }),
-    );
+    fireEvent.click(p.getByRole("button", { name: "Jetzt einschätzen" }));
     expect(await p.findByRole("button", { name: "läuft …" })).toBeDisabled();
     expect(p.getByText(/läuft, meist unter einer Minute/)).toBeInTheDocument();
     expect(calls.filter((c) => c.startsWith("POST /api/analysis"))).toEqual([
@@ -398,7 +401,7 @@ describe("App", () => {
   it("switches to English and keeps the choice", async () => {
     mockFetch();
     const { unmount } = render(<App />);
-    await screen.findByRole("heading", { name: "Was jetzt?" });
+    await screen.findByRole("heading", { name: "Einschätzung" });
     await screen.findByText(": Pay by card");
     // A placeholder the call site names differently stays raw on screen.
     const raw = /\{\{|\}\}/;
@@ -409,7 +412,7 @@ describe("App", () => {
       }),
     );
     expect(
-      await screen.findByRole("heading", { name: "What now?" }),
+      await screen.findByRole("heading", { name: "Assessment" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Print/ })).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(raw);
@@ -425,7 +428,7 @@ describe("App", () => {
     expect(initialLanguage()).toBe("en");
     render(<App />);
     expect(
-      await screen.findByRole("heading", { name: "What now?" }),
+      await screen.findByRole("heading", { name: "Assessment" }),
     ).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole("button", {
@@ -433,7 +436,7 @@ describe("App", () => {
       }),
     );
     expect(
-      await screen.findByRole("heading", { name: "Was jetzt?" }),
+      await screen.findByRole("heading", { name: "Einschätzung" }),
     ).toBeInTheDocument();
     expect(localStorage.getItem("lang")).toBe("de");
   });
@@ -461,12 +464,96 @@ describe("App", () => {
     expect((await row("d")).getByText("spike")).toBeInTheDocument();
   });
 
+  it("says how few, what all wait on, and that a first one has no past", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis") {
+        const a = assessment();
+        const l = analysisStatus().layout;
+        return analysisStatus({
+          enabled: true,
+          // Without an earlier assessment nothing can be resolved.
+          layout: { ...l, cards: l.cards.filter((c) => c.column !== "done") },
+          assessment: {
+            ...a,
+            compared: false,
+            signals: a.signals.map((s) =>
+              s.id === "change:merged_per_week"
+                ? { ...s, low_sample: true, sample: 7 }
+                : s,
+            ),
+            focus: a.focus.map((f) =>
+              f.waiting
+                ? {
+                    ...f,
+                    waiting: { ...f.waiting, first_review: 0, changes: 3 },
+                  }
+                : f,
+            ),
+          },
+        });
+      }
+      return metrics();
+    });
+    render(<App />);
+    const p = within(await screen.findByTestId("assessment"));
+    expect(p.getByText("wenig belastbar · 7 PRs")).toBeInTheDocument();
+    expect(p.getByText("alle 3 warten auf Änderungen")).toBeInTheDocument();
+    expect(
+      p.getByText(/keine frühere Woche eingeschätzt, noch kein Vergleich/),
+    ).toBeInTheDocument();
+  });
+
+  it("says drafts are drafts, and copies with team and product", async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis") {
+        const a = assessment();
+        return analysedStatus({
+          assessment: {
+            ...a,
+            focus: a.focus.map((f) =>
+              f.waiting
+                ? {
+                    ...f,
+                    waiting: {
+                      draft: 2,
+                      first_review: 0,
+                      review: 0,
+                      changes: 0,
+                      merge: 0,
+                    },
+                  }
+                : f,
+            ),
+          },
+        });
+      }
+      return metrics();
+    });
+    render(<App />);
+    const p = within(await screen.findByTestId("assessment"));
+    expect(p.getByText("alle 2 sind Entwürfe")).toBeInTheDocument();
+    fireEvent.click(p.getByRole("button", { name: "Als Markdown kopieren" }));
+    expect(writeText).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^## Retro-Input riptide\u2002·\u2002team-a\u2002·\u2002Alle Produkte\u2002·\u2002KW /,
+      ),
+    );
+  });
+
   it("says so when nothing stands out", async () => {
     mockFetch((url) => {
       if (url.pathname === "/api/facts") return facts();
       if (url.pathname === "/api/analysis") {
         const a = assessment();
         return analysisStatus({
+          enabled: true,
           assessment: {
             ...a,
             gaps: [],
@@ -481,16 +568,21 @@ describe("App", () => {
     });
     render(<App />);
     const p = within(await screen.findByTestId("assessment"));
-    expect(p.getByText("Nichts hakt.")).toBeInTheDocument();
-    expect(p.getByText("Nichts bemerkenswert besser.")).toBeInTheDocument();
+    // The empty columns in one quiet line, no empty boxes.
+    expect(
+      p.getByText(
+        "nichts bemerkenswert besser · nichts hakt · seit der letzten Einschätzung nichts erledigt.",
+      ),
+    ).toBeInTheDocument();
+    expect(p.queryByText("Im Fokus")).toBeNull();
     expect(p.queryByText("Für die nächste Retro")).toBeNull();
     expect(p.queryByText("Wohin die CI-Zeit geht")).toBeNull();
   });
 
-  it("asks for a product and bots, keeps them in the URL", async () => {
+  it("asks for a product, keeps it in the URL", async () => {
     const calls = mockFetch();
     render(<App />);
-    await screen.findByRole("heading", { name: "Was jetzt?" });
+    await screen.findByRole("heading", { name: "Einschätzung" });
     const products = screen.getByRole("group", { name: "Produkt" });
     fireEvent.click(within(products).getByRole("button", { name: /portal/ }));
     expect(window.location.search).toBe("?product=portal");
@@ -512,17 +604,14 @@ describe("App", () => {
     );
     await screen.findByText(/Team team-a, alle Produkte/);
     expect(screen.getByText(/^\(0 von 1\)/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Bots einbeziehen" }));
-    expect(window.location.search).toBe("?bots=1");
-    expect(await screen.findByText(/^\(1 von 2\)/)).toBeInTheDocument();
-    expect(metricsCalls(calls).at(-1)).toMatch(/&bots=1$/);
-    expect(screen.getAllByText("Bots").length).toBeGreaterThan(0);
+    // Bots are never counted in: no switch for them.
+    expect(screen.queryByRole("button", { name: /Bots/ })).toBeNull();
   });
 
   it("switches the window and the team, refetching", async () => {
     const calls = mockFetch();
     render(<App />);
-    await screen.findByRole("heading", { name: "Was jetzt?" });
+    await screen.findByRole("heading", { name: "Einschätzung" });
     fireEvent.click(screen.getByRole("button", { name: "12 W" }));
     await screen.findByText(/KW 35–46/);
     expect(metricsCalls(calls).at(-1)).toMatch(/weeks=12/);
@@ -1072,7 +1161,6 @@ describe("App", () => {
           cycle_histogram: {
             upper_bounds_s: [600],
             human: [1, 2],
-            bot: [0, 0],
           },
         },
       };
@@ -1115,7 +1203,7 @@ describe("App", () => {
     render(<App />);
     expect(await screen.findByRole("alert")).toHaveTextContent("500: boom");
     expect(
-      screen.getByRole("heading", { name: "Was jetzt?" }),
+      screen.getByRole("heading", { name: "Einschätzung" }),
     ).toBeInTheDocument();
     // The data section says so instead of loading forever.
     expect(
@@ -1305,7 +1393,7 @@ describe("App", () => {
     render(<App />);
     expect(await screen.findByRole("alert")).toHaveTextContent("boom");
     fireEvent.click(screen.getByRole("button", { name: "12 W" }));
-    await screen.findByRole("heading", { name: "Was jetzt?" });
+    await screen.findByRole("heading", { name: "Einschätzung" });
     fireEvent.click(screen.getByRole("button", { name: "4 W" }));
     // The page's scope and the assessment's closed weeks both name it.
     await screen.findAllByText(/KW 43–46/);
@@ -1798,7 +1886,7 @@ describe("open PRs", () => {
     const calls = mockFetch();
     render(<App />);
     const p = within(await screen.findByTestId("assessment"));
-    expect(p.getByText("erstes Review 4")).toBeInTheDocument();
+    expect(p.getByText("wartet auf erstes Review: 4")).toBeInTheDocument();
     fireEvent.click(
       p.getByRole("button", { name: "Fakten zu kasse/kasse-api ansehen →" }),
     );
@@ -2400,18 +2488,16 @@ describe("calendar", () => {
 
 describe("state", () => {
   it("round-trips through the query string", () => {
+    // An old link's bots=1 is no part of the view any more.
     const s = parseState("?team=a&product=kasse&w=26&bots=1&q=x&tab=deploys");
     expect(s).toEqual({
       team: "a",
       product: "kasse",
       weeks: 26,
-      bots: true,
       q: "x",
       tab: "deploys",
     });
-    expect(stateQuery(s)).toBe(
-      "?team=a&product=kasse&w=26&bots=1&q=x&tab=deploys",
-    );
+    expect(stateQuery(s)).toBe("?team=a&product=kasse&w=26&q=x&tab=deploys");
     expect(parseState("?w=5&tab=nope")).toMatchObject({
       weeks: 4,
       tab: "prs",

@@ -57,8 +57,12 @@ export function durParts(seconds: number | null): {
     : { value: t.slice(0, i), unit: t.slice(i + 1) };
 }
 
-export function dayMonth(d: Date): string {
-  return d.toLocaleDateString(LOCALE, { day: "2-digit", month: "2-digit" });
+export function dayMonth(d: Date, timeZone?: string): string {
+  return d.toLocaleDateString(LOCALE, {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone,
+  });
 }
 
 export function clock(iso: string): string {

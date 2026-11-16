@@ -94,7 +94,7 @@ func TestReadParams(t *testing.T) {
 		weeks int
 	}{
 		{"team=checkout", utc(2029, 12, 10, 0), 4},
-		{"team=%20checkout%20&bots=1", utc(2029, 12, 10, 0), 4},
+		{"team=%20checkout%20", utc(2029, 12, 10, 0), 4},
 		{"team=checkout&weeks=12&tz=UTC", utc(2029, 10, 15, 0), 12},
 		// Monday 00:00 in Zurich, CET then; twelve weeks back it was CEST.
 		{"team=checkout&tz=Europe/Zurich", utc(2029, 12, 9, 23), 4},
@@ -160,7 +160,6 @@ func TestReadParams(t *testing.T) {
 		{"team=checkout&weeks=5", http.StatusUnprocessableEntity, "weeks must be one of 4, 12, 26"},
 		{"team=checkout&weeks=x", http.StatusUnprocessableEntity, "weeks must be one of 4, 12, 26"},
 		{"team=checkout&tz=Mars/Olympus", http.StatusUnprocessableEntity, "tz must be an IANA time zone"},
-		{"team=checkout&bots=yes", http.StatusUnprocessableEntity, "bots must be 0 or 1"},
 	} {
 		for _, path := range []string{"/api/metrics?", "/api/facts?"} {
 			w := h.serveUI(newRequest(http.MethodGet, path+c.query, nil))
@@ -211,7 +210,7 @@ func TestReadMatchesOpenAPISpec(t *testing.T) {
 	}
 	h.mem.dataset = ds
 	for _, path := range []string{"/api/metrics", "/api/facts"} {
-		for _, q := range []string{"team=checkout&tz=Europe/Zurich", "team=checkout&product=kasse&bots=1", "", "team=nobody", "team=checkout&weeks=3"} {
+		for _, q := range []string{"team=checkout&tz=Europe/Zurich", "team=checkout&product=kasse", "", "team=nobody", "team=checkout&weeks=3"} {
 			validateResponse(t, router, http.MethodGet, path, h.serveUI(newRequest(http.MethodGet, path+"?"+q, nil)))
 		}
 	}
