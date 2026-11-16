@@ -1077,7 +1077,7 @@ components:
       type: object
       description: The lead-time breakdown per human PR merged in the period.
       additionalProperties: false
-      required: [stages, pre_environment, attention_share, min_prs, before_prod, bucket_bounds_s]
+      required: [stages, pre_environment, attention_share, min_prs, before_prod, reaches_prod, bucket_bounds_s]
       properties:
         stages:
           type: array
@@ -1094,8 +1094,8 @@ components:
               low_sample: { type: boolean, description: Fewer than 10 PRs. }
               share:
                 $ref: "#/components/schemas/NullableNumber"
-                description: The stage's part of the summed medians, 0..1; equal parts when all medians are 0.
-              hot: { type: boolean, description: The stage with the largest median. }
+                description: The stage's part of the summed medians, 0..1; equal parts when all medians are 0. Null without data or when `reaches_prod` is false.
+              hot: { type: boolean, description: The stage with the largest median; none when `reaches_prod` is false. }
               histogram:
                 type: [array, "null"]
                 description: |
@@ -1124,6 +1124,11 @@ components:
         before_prod:
           type: number
           description: Sum of the medians before the last stage.
+        reaches_prod:
+          type: boolean
+          description: |
+            Some PR has a production wait. False: no shares and no hot stage,
+            the medians would add up to the time to merge only.
 
     Review:
       type: object

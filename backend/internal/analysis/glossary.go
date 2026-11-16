@@ -115,7 +115,7 @@ var labels = map[string]string{
 	"build_success":   "share of a run kind's runs that succeeded; higher is better",
 	"merged_per_week": "human PRs merged per week, the team's throughput; more is better",
 	"wip_weeks":       "open PRs over PRs merged per week: weeks of work standing open; fewer is better",
-	"wait_share":      "part of the lead time spent waiting (review, merge, deploys) rather than coding; lower is better",
+	"wait_share":      "part of the lead time spent waiting (review, merge, deploys) rather than coding; lower is better; null when no PR reached production",
 	"stage_share":     "the stage's part of the lead time",
 	"stage_p50":       "the stage's median",
 	"stage_p90":       "the stage's slowest tenth starts here",

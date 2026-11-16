@@ -439,6 +439,8 @@ export const de = {
     ofTime: "· {{share}} der Zeit",
     hot: "Der Hebel liegt bei «{{name}}»",
     hotRest: ": {{share}} der Zeit bis {{prod}}.",
+    noProd:
+      "In diesem Zeitraum wurde keine Änderung bis {{prod}} verfolgt: Anteile gibt es nur über die ganze Strecke.",
     chainNote:
       "Die letzten zwei Etappen erreichen nur PRs, deren Merge-Commit einem Deployment zugeordnet ist.",
     ridge: {
