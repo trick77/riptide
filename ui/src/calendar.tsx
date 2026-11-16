@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 import type { DeployDay, DeployWeekday, Week } from "./api";
 import { labelEvery, Tip } from "./charts";
 import { fullDate, num } from "./format";
+import { SrTable } from "./ui";
 
 const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 
@@ -148,57 +149,53 @@ export function DayCalendar({
           </span>
         </div>
       </div>
-      {/* The days for a screen reader, the calendar's only accessible
-          form; a table ignores sr-only's 1px box, the wrapper does not. */}
-      <div className="sr-only">
-        <table>
-          <caption>
-            {t("calendar.tableCaption", {
-              prod,
-              noData: t("calendar.noDataDays", { count: noDataDays }),
-            })}
-          </caption>
-          <thead>
-            <tr>
-              <th scope="col">{t("calendar.week")}</th>
-              {WEEKDAYS.map((wd, d) => (
-                <th key={wd} scope="col">
-                  {dayName(d)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {weeks.map((w, i) => (
-              <tr key={w.start}>
-                <th scope="row">{t("common.cw", { kw: w.kw })}</th>
-                {WEEKDAYS.map((wd, d) => {
-                  const day = days[7 * i + d];
-                  return (
-                    <td key={wd}>
-                      {!day || day.no_data
-                        ? t("calendar.noData")
-                        : num(day.releases)}
-                    </td>
-                  );
-                })}
-              </tr>
+      {/* The days for a screen reader, the calendar's only accessible form. */}
+      <SrTable
+        caption={t("calendar.tableCaption", {
+          prod,
+          noData: t("calendar.noDataDays", { count: noDataDays }),
+        })}
+      >
+        <thead>
+          <tr>
+            <th scope="col">{t("calendar.week")}</th>
+            {WEEKDAYS.map((wd, d) => (
+              <th key={wd} scope="col">
+                {dayName(d)}
+              </th>
             ))}
-            <tr>
-              <th scope="row">{t("calendar.perDay")}</th>
-              {WEEKDAYS.map((wd, d) => (
-                <td key={wd}>
-                  {t("calendar.weekdayCell", {
-                    perDay: perDay(weekdays[d]),
-                    releases: weekdays[d]?.releases ?? 0,
-                    count: weekdays[d]?.days ?? 0,
-                  })}
-                </td>
-              ))}
+          </tr>
+        </thead>
+        <tbody>
+          {weeks.map((w, i) => (
+            <tr key={w.start}>
+              <th scope="row">{t("common.cw", { kw: w.kw })}</th>
+              {WEEKDAYS.map((wd, d) => {
+                const day = days[7 * i + d];
+                return (
+                  <td key={wd}>
+                    {!day || day.no_data
+                      ? t("calendar.noData")
+                      : num(day.releases)}
+                  </td>
+                );
+              })}
             </tr>
-          </tbody>
-        </table>
-      </div>
+          ))}
+          <tr>
+            <th scope="row">{t("calendar.perDay")}</th>
+            {WEEKDAYS.map((wd, d) => (
+              <td key={wd}>
+                {t("calendar.weekdayCell", {
+                  perDay: perDay(weekdays[d]),
+                  releases: weekdays[d]?.releases ?? 0,
+                  count: weekdays[d]?.days ?? 0,
+                })}
+              </td>
+            ))}
+          </tr>
+        </tbody>
+      </SrTable>
     </>
   );
 }
