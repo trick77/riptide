@@ -22,6 +22,8 @@ type Params struct {
 	Product string
 	// Bots counts bots' PRs in (on their own series where a chart has one).
 	Bots bool
+	// JiraURL is the config's jira.base_url: Jira keys link there.
+	JiraURL string
 }
 
 // filter is the product and bot selection, the product resolved against

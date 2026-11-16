@@ -92,6 +92,15 @@ func TestParseRejects(t *testing.T) {
 		{"excluded project a number", `{"excluded_projects": [1]}`, "`excluded_projects` must be a list of strings"},
 		{"empty excluded project", `{"excluded_projects": [""]}`, "`excluded_projects` entries must be non-empty strings"},
 		{"blank excluded project", `{"excluded_projects": [" "]}`, "`excluded_projects` entries must be non-empty strings"},
+		{"jira not an object", `{"jira": "https://jira.example.com"}`, "`jira` must be an object"},
+		{"jira base url a number", `{"jira": {"base_url": 1}}`, "`jira.base_url` must be a string"},
+		{"jira base url relative", `{"jira": {"base_url": "jira.example.com"}}`, "`jira.base_url` must be an absolute"},
+		{"jira base url empty", `{"jira": {"base_url": ""}}`, "`jira.base_url` must be an absolute"},
+		{"jira base url ftp", `{"jira": {"base_url": "ftp://jira.example.com"}}`, "`jira.base_url` must be an absolute"},
+		{"jira base url query", `{"jira": {"base_url": "https://jira.example.com/?a=1"}}`, "`jira.base_url` must be an absolute"},
+		{"jira base url bare query", `{"jira": {"base_url": "https://jira.example.com?"}}`, "`jira.base_url` must be an absolute"},
+		{"jira base url bare fragment", `{"jira": {"base_url": "https://jira.example.com/#/"}}`, "`jira.base_url` must be an absolute"},
+		{"jira base url credentials", `{"jira": {"base_url": "https://svc:token@jira.example.com"}}`, "`jira.base_url` must be an absolute"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := Parse([]byte(c.body))
@@ -109,6 +118,22 @@ func TestEnvironments(t *testing.T) {
 	}
 	if !reflect.DeepEqual(c.Environments.IgnoredStages, map[string]bool{"dev": true, "entw": true, "syst": true}) {
 		t.Errorf("ignored = %v", c.Environments.IgnoredStages)
+	}
+}
+
+func TestJiraBaseURL(t *testing.T) {
+	for body, want := range map[string]string{
+		`{}`:                           "",
+		`{"jira": null}`:               "",
+		`{"jira": {}}`:                 "",
+		`{"jira": {"base_url": null}}`: "",
+		`{"jira": {"base_url": " https://jira.example.com/ "}}`: "https://jira.example.com",
+		`{"jira": {"base_url": "https://example.com/jira"}}`:    "https://example.com/jira",
+		`{"jira": {"base_url": "https://example.com/a b"}}`:     "https://example.com/a%20b",
+	} {
+		if got := mustParse(t, body).JiraBaseURL; got != want {
+			t.Errorf("%s: %q, want %q", body, got, want)
+		}
 	}
 }
 

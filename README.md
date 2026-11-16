@@ -116,7 +116,9 @@ Environment (a `.env` in the working directory fills in what is unset):
 [`config/riptide.json`](config/riptide.json) holds the teams,
 `environments.production_stage` (the namespace suffix that counts as
 production, default `prod`), `excluded_projects` (Bitbucket projects the
-metrics leave out) and `automation` (bot accounts nobody declares). Adding a
+metrics leave out), `jira.base_url` (Jira keys in the PR table link to
+`<base_url>/browse/<KEY>`; unset, they are shown unlinked) and `automation`
+(bot accounts nobody declares). Adding a
 team: [docs/onboarding-a-team.md](docs/onboarding-a-team.md).
 
 `team-keys.json`:

@@ -1,9 +1,15 @@
 // The single facts behind every number, searched by the backend: PRs,
 // deploys, runs.
 
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import type { DeployFact, Facts as FactsData, PRFact, RunFact } from "./api";
+import type {
+  DeployFact,
+  Facts as FactsData,
+  JiraRef,
+  PRFact,
+  RunFact,
+} from "./api";
 import { ciWord, dateTime, dur, shortImage, shortSha } from "./format";
 import terms from "./i18n/terms.json";
 import type { Tab } from "./state";
@@ -41,6 +47,27 @@ const RUN_TONE: Record<RunFact["verdict"], Tone> = {
   failure: "fail",
   none: "none",
 };
+
+// A Jira key, orange wherever it stands; a link to the ticket when the
+// backend sends its URL (jira.base_url in the config).
+function JiraKey({ jira }: { jira: JiraRef }) {
+  return (
+    <Mono className="text-accent-strong">
+      {jira.url ? (
+        <a
+          href={jira.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-inherit no-underline hover:underline"
+        >
+          {jira.key}
+        </a>
+      ) : (
+        jira.key
+      )}
+    </Mono>
+  );
+}
 
 type Col = { label: string; right?: boolean };
 
@@ -182,10 +209,27 @@ function FactsTables({
         ]}
         rows={facts.prs.rows.map((p) => [
           <>
-            {p.jira_prefix && (
-              <Mono className="text-accent-strong">{p.jira_prefix} </Mono>
+            {p.jira_prefix.map((j) => (
+              <Fragment key={j.key}>
+                <JiraKey jira={j} />{" "}
+              </Fragment>
+            ))}
+            {p.jira_more > 0 && (
+              <Mono className="text-accent-strong">+{p.jira_more} </Mono>
             )}
-            {p.title ?? <span className="text-muted">#{p.pr_id}</span>}
+            {p.title_parts.length > 0 ? (
+              <span>
+                {p.title_parts.map((part, i) =>
+                  part.jira ? (
+                    <JiraKey key={i} jira={part.jira} />
+                  ) : (
+                    <Fragment key={i}>{part.text}</Fragment>
+                  ),
+                )}
+              </span>
+            ) : (
+              <span className="text-muted">#{p.pr_id}</span>
+            )}
           </>,
           <Mono className="whitespace-nowrap">{p.repo}</Mono>,
           <span className="text-muted">

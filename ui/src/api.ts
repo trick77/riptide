@@ -307,11 +307,21 @@ export type Metrics = {
   comparison: Comparison;
 };
 
+// A Jira key; url is null when the config sets no jira.base_url.
+export type JiraRef = { key: string; url: string | null };
+
+// A piece of a PR title: plain text, or a Jira key.
+export type TitlePart = { text: string; jira: JiraRef | null };
+
 export type PRFact = {
   repo: string;
   pr_id: number;
   title: string | null;
-  jira_prefix: string;
+  // The title split at its Jira keys; empty without a title.
+  title_parts: TitlePart[];
+  // The keys the title does not show, three at most, and how many more.
+  jira_prefix: JiraRef[];
+  jira_more: number;
   gitops: boolean;
   bot: boolean;
   change_type: string | null;

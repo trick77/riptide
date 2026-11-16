@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/trick77/riptide/internal/dataset"
+	"github.com/trick77/riptide/internal/parse"
 )
 
 // FactsLimit caps each facts table; rows past it are left out of the
@@ -115,35 +116,85 @@ func deployClass(d dataset.Deploy) (string, string) {
 	return class, deployTerm[class].both()
 }
 
-// jiraPrefix is the Jira keys a PR's title does not already show, three at
-// most: a promotion PR collects every key it ships.
-func jiraPrefix(pr dataset.PR) string {
-	title := ""
-	if pr.Title != nil {
-		title = *pr.Title
+// JiraRef is a Jira key and its ticket's URL; null without jira.base_url.
+type JiraRef struct {
+	Key string  `json:"key"`
+	URL *string `json:"url"`
+}
+
+// TitlePart is a piece of a PR title: plain text, or a Jira key.
+type TitlePart struct {
+	Text string   `json:"text"`
+	Jira *JiraRef `json:"jira"`
+}
+
+// jiraLink is <base>/browse/<key>, the ticket URL on Jira Server and Cloud.
+func jiraLink(base, key string) JiraRef {
+	if base == "" {
+		return JiraRef{Key: key}
 	}
-	var keys []string
-	for _, k := range pr.JiraKeys {
-		if !strings.Contains(title, k) {
-			keys = append(keys, k)
+	u := base + "/browse/" + key
+	return JiraRef{Key: key, URL: &u}
+}
+
+// titleParts splits a PR title at its Jira keys, by the rule ingest
+// extracts them with.
+func titleParts(title *string, base string) []TitlePart {
+	out := []TitlePart{}
+	if title == nil {
+		return out
+	}
+	s, at := *title, 0
+	for _, sp := range parse.JiraKeySpans(s) {
+		if sp[0] > at {
+			out = append(out, TitlePart{Text: s[at:sp[0]]})
+		}
+		ref := jiraLink(base, s[sp[0]:sp[1]])
+		out = append(out, TitlePart{Text: ref.Key, Jira: &ref})
+		at = sp[1]
+	}
+	if at < len(s) {
+		out = append(out, TitlePart{Text: s[at:]})
+	}
+	return out
+}
+
+// jiraPrefix is the Jira keys the title's parts do not already show, three
+// at most, and how many more there are: a promotion PR collects every key
+// it ships.
+func jiraPrefix(keys []string, title []TitlePart, base string) ([]JiraRef, int) {
+	shown := map[string]bool{}
+	for _, p := range title {
+		if p.Jira != nil {
+			shown[p.Jira.Key] = true
 		}
 	}
-	if len(keys) <= 3 {
-		return strings.Join(keys, " ")
+	refs := []JiraRef{}
+	more := 0
+	for _, k := range keys {
+		switch {
+		case shown[k]:
+		case len(refs) < 3:
+			refs = append(refs, jiraLink(base, k))
+		default:
+			more++
+		}
 	}
-	return fmt.Sprintf("%s +%d", strings.Join(keys[:3], " "), len(keys)-3)
+	return refs, more
 }
 
 // PRFact is one row of the PR table.
 type PRFact struct {
-	Repo       string  `json:"repo"`
-	PRID       int64   `json:"pr_id"`
-	Title      *string `json:"title"`
-	JiraPrefix string  `json:"jira_prefix"`
-	GitOps     bool    `json:"gitops"`
-	Bot        bool    `json:"bot"`
-	ChangeType *string `json:"change_type"`
-	State      string  `json:"state"`
+	Repo       string      `json:"repo"`
+	PRID       int64       `json:"pr_id"`
+	Title      *string     `json:"title"`
+	TitleParts []TitlePart `json:"title_parts"`
+	JiraPrefix []JiraRef   `json:"jira_prefix"`
+	JiraMore   int         `json:"jira_more"`
+	GitOps     bool        `json:"gitops"`
+	Bot        bool        `json:"bot"`
+	ChangeType *string     `json:"change_type"`
+	State      string      `json:"state"`
 	// ReviewS is ready to approval, CycleS opened to merged, ToProdS merged
 	// to the first production deploy; null when unknown or negative.
 	ReviewS  *float64   `json:"review_s"`
@@ -414,8 +465,11 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 		}, func(x factPR) PRFact {
 			pr := x.pr
 			prodAt := firstDeploy(pr, prod)
+			parts := titleParts(pr.Title, p.JiraURL)
+			keys, more := jiraPrefix(pr.JiraKeys, parts, p.JiraURL)
 			return PRFact{
-				Repo: pr.Repo, PRID: pr.PRID, Title: pr.Title, JiraPrefix: jiraPrefix(pr),
+				Repo: pr.Repo, PRID: pr.PRID, Title: pr.Title, TitleParts: parts,
+				JiraPrefix: keys, JiraMore: more,
 				GitOps: pr.GitOps, Bot: pr.Bot, ChangeType: pr.ChangeType,
 				State:   pr.State,
 				ReviewS: wait(pr.ReadyAt, pr.ApprovedAt), CycleS: wait(pr.OpenedAt, pr.MergedAt),

@@ -6,7 +6,9 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/trick77/riptide/internal/dataset"
@@ -266,13 +268,64 @@ func TestJiraPrefix(t *testing.T) {
 		title *string
 		keys  []string
 		want  string
+		more  int
 	}{
-		{s("KAS-1 Pay by card"), []string{"KAS-1"}, ""},
-		{s("Pay by card"), []string{"KAS-1", "KAS-2"}, "KAS-1 KAS-2"},
-		{nil, []string{"A-1", "A-2", "A-3", "A-4", "A-5"}, "A-1 A-2 A-3 +2"},
+		{s("KAS-1 Pay by card"), []string{"KAS-1"}, "", 0},
+		{s("Pay by card"), []string{"KAS-1", "KAS-2"}, "KAS-1 KAS-2", 0},
+		{nil, []string{"A-1", "A-2", "A-3", "A-4", "A-5"}, "A-1 A-2 A-3", 2},
+		// KAS-12 in the title does not show KAS-1.
+		{s("KAS-12 Pay by card"), []string{"KAS-12", "KAS-1"}, "KAS-1", 0},
 	} {
-		if got := jiraPrefix(pr(func(p *dataset.PR) { p.Title, p.JiraKeys = c.title, c.keys })); got != c.want {
-			t.Errorf("%v: %q, want %q", c.keys, got, c.want)
+		refs, more := jiraPrefix(c.keys, titleParts(c.title, ""), "")
+		var keys []string
+		for _, r := range refs {
+			keys = append(keys, r.Key)
+			if r.URL != nil {
+				t.Errorf("%v: url %q without a base URL", c.keys, *r.URL)
+			}
+		}
+		if got := strings.Join(keys, " "); got != c.want || more != c.more {
+			t.Errorf("%v: %q +%d, want %q +%d", c.keys, got, more, c.want, c.more)
+		}
+	}
+	refs, _ := jiraPrefix([]string{"KAS-1"}, titleParts(s("Pay"), ""), "https://jira.example.com")
+	if len(refs) != 1 || refs[0].URL == nil || *refs[0].URL != "https://jira.example.com/browse/KAS-1" {
+		t.Errorf("linked prefix = %+v", refs)
+	}
+}
+
+func TestTitleParts(t *testing.T) {
+	const base = "https://jira.example.com"
+	type part struct{ text, url string }
+	flat := func(ps []TitlePart) []part {
+		out := []part{}
+		for _, p := range ps {
+			switch {
+			case p.Jira == nil:
+				out = append(out, part{p.Text, ""})
+			case p.Jira.URL == nil:
+				out = append(out, part{p.Text, "-"})
+			default:
+				out = append(out, part{p.Text, *p.Jira.URL})
+			}
+		}
+		return out
+	}
+	for _, c := range []struct {
+		title *string
+		base  string
+		want  []part
+	}{
+		{nil, base, []part{}},
+		{s("Pay by card"), base, []part{{"Pay by card", ""}}},
+		{s("SEP-25360: Smoke"), base, []part{{"SEP-25360", base + "/browse/SEP-25360"}, {": Smoke", ""}}},
+		{s("Fix SEP-1 and SEP-2"), base, []part{{"Fix ", ""}, {"SEP-1", base + "/browse/SEP-1"},
+			{" and ", ""}, {"SEP-2", base + "/browse/SEP-2"}}},
+		{s("aSEP-1 SEP-1x"), base, []part{{"aSEP-1 SEP-1x", ""}}},
+		{s("SEP-1"), "", []part{{"SEP-1", "-"}}},
+	} {
+		if got := flat(titleParts(c.title, c.base)); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%v: %v, want %v", c.title, got, c.want)
 		}
 	}
 }
