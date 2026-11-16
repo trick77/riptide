@@ -61,8 +61,6 @@ export const de = {
       "Team {{team}}, {{product}} · KW {{from}}–{{to}} · {{start}} bis {{end}} · verglichen mit den {{weeks}} Wochen davor",
     oneProduct: "Produkt {{product}}",
     allProductsLower: "alle Produkte",
-    mirror:
-      "Ein Spiegel für das Team, kein Ranking zwischen Teams oder Personen. Jede Zahl sagt, was sie bedeutet, welche Richtung gut ist und ob sie sich gegenüber der Vorperiode verändert hat.",
     dataAsOf: "Datenstand:",
     source: "{{source}} {{at}}",
     noData: "keine Daten",
@@ -76,13 +74,9 @@ export const de = {
     reposHead: "Repos",
     appsHead: "Argo-Apps",
     none: "keine",
-    mapping:
-      "Zuordnung aus den Daten: Repos über den Bitbucket-Projektschlüssel, Apps über das GitOps-Repo, dessen Revision sie deployen. Keine Namensliste.",
     loadFailed: "Daten konnten nicht geladen werden: {{msg}}",
     noTeam: "In der Konfiguration ist kein Team eingetragen.",
     loading: "Lädt",
-    footer:
-      "Riptide liest die Rohdaten nur. Jede Zahl lässt sich über «Woher?» bis zur Query zurückverfolgen.",
   },
   compare: {
     better: "Besser",
@@ -340,8 +334,6 @@ export const de = {
       "Argo CD meldet erst seit {{date}}: die Wochen davor sind leer, die Rate gilt ab dann.",
     sinceLow: " Weniger als eine Woche Daten: wenig belastbar.",
     throughput: "Throughput und Instability",
-    throughputText:
-      "So gliedert DORA die fünf Metriken. Beide Seiten gehören zusammen: mehr Throughput bei steigender Instability ist kein Fortschritt.",
     freq: {
       label: "Deploy-Frequenz",
       dora: "DORA · Deployment frequency · Throughput",
@@ -423,7 +415,7 @@ export const de = {
       question:
         "Wie oft macht ein Deployment Ärger, und wie schnell ist es behoben?",
       value: "nicht gemessen",
-      text: "Dafür braucht es eine Incident-Quelle. Ohne sie zeigt Riptide nur Throughput; die Instability-Seite fehlt. Hotfix-Anteil oder Deploy-Erfolg ersetzen sie nicht.",
+      text: "Dafür fehlt eine Incident-Quelle.",
     },
   },
   flow: {
@@ -448,20 +440,18 @@ export const de = {
     },
     chainTitle: "Anteil jeder Etappe an der Zeit bis {{prod}}",
     chainSub:
-      "Pro PR in App-Repos, typische Dauer je Etappe. Die Lead Time oben zählt pro Commit; die Etappen zeigen, wo die Zeit liegt.",
+      "Pro PR in App-Repos, typische Dauer je Etappe; die Lead Time oben zählt pro Commit.",
     leadTo: "Lead Time bis {{env}}:",
     typicalSlowest: "typischer Wert · die langsamsten 10 %: über {{p90}}",
-    gap: "Der Abstand zwischen beiden ist die Zeit vor {{prod}}: liegt sie dort, ist die Pipeline schnell und das Release der Engpass.",
     shareAria: "Anteil an der Zeit bis {{prod}}: {{parts}}",
     ofTime: "· {{share}} der Zeit",
     hot: "Der Hebel liegt bei «{{name}}»",
-    hotRest:
-      ": {{share}} der Zeit bis {{prod}}. Die kurzen Etappen zu beschleunigen, bringt wenig.",
+    hotRest: ": {{share}} der Zeit bis {{prod}}.",
     chainNote:
-      "Review ist eine eigene Etappe, weil das Approval meist der erste Kontakt des Reviewers ist. Die letzten zwei Etappen erreichen nur PRs, deren Merge-Commit einem Deployment zugeordnet ist.",
+      "Die letzten zwei Etappen erreichen nur PRs, deren Merge-Commit einem Deployment zugeordnet ist.",
     ridge: {
       title: "Wie die Zeit in jeder Etappe verteilt ist",
-      sub: "Dieselben PRs wie oben, Zeitachse logarithmisch. Ein breiter Berg weit rechts heisst: die Etappe ist durchgehend langsam, nicht nur wegen einzelner Ausreisser. Strich: typischer Wert, gestrichelt: ab da die langsamsten 10 %.",
+      sub: "Dieselben PRs wie oben, Zeitachse logarithmisch. Strich: typischer Wert, gestrichelt: ab da die langsamsten 10 %.",
       caption: "Wartezeit je Etappe",
       colStage: "Etappe",
       few: "unter {{min}} PRs: einzelne PRs statt Kurve",
@@ -480,11 +470,10 @@ export const de = {
     people: "Menschen",
     eyebrow: "Vom Commit nach {{prod}} · nur App-Repos",
     title: "Wo wartet eine Änderung?",
-    lead: "Die Zeit bis zum Nutzer, aufgeteilt in Etappen. Wo die meiste Zeit liegt, liegt der Hebel; die kurzen Etappen zu beschleunigen, bringt wenig.",
+    lead: "Die Zeit bis zum Nutzer, aufgeteilt in Etappen.",
     fwLeadTime: "Change lead time, aufgeschlüsselt",
     reviewTitle: "Review: schnell, aber wie gründlich?",
-    reviewSub:
-      "Beide Zahlen zusammen lesen: wer nur auf eine optimiert, winkt durch oder bremst. Nur PRs von Menschen.",
+    reviewSub: "Nur PRs von Menschen.",
     review: {
       label: "Review-Zeit",
       question: "Wie lange wartet ein PR auf das erste Approval?",
@@ -602,7 +591,6 @@ export const de = {
   deploys: {
     eyebrow: "Ausrollen",
     title: "Wie gleichmässig kommt Code nach {{prod}}?",
-    lead: "Gleichmässig ist gut: Lücken und Spitzen deuten auf Sammelreleases, die viele Änderungen auf einmal ausliefern.",
     fwSpeed: "Speed, sekundär",
     cardTitle: "Releases auf {{prod}} pro Woche",
     cardSub:
@@ -611,7 +599,7 @@ export const de = {
     releases: "Releases",
     typical: "typisch {{n}} pro Woche",
     aria: "Releases auf {{prod}} pro Woche: {{parts}}",
-    note: "{{resyncs}} und {{firstSeen}} zählen nicht; was sie sind, steht bei der Deploy-Frequenz unter «Was heisst das?». Die typische Woche ist der Median über die ganzen Wochen, in denen Argo CD meldete.",
+    note: "{{resyncs}} und {{firstSeen}} zählen nicht. Die typische Woche ist der Median der ganzen Wochen, in denen Argo CD meldete.",
   },
   calendar: {
     cardTitle: "Releases auf {{prod}} pro Tag",
@@ -648,7 +636,7 @@ export const de = {
     other: "Anderes / ohne Präfix",
     eyebrow: "Arbeitsmix",
     title: "Woran arbeitet das Team?",
-    lead: "Welche Arten von PRs im Zeitraum gemerged wurden, nach Branch-Präfix: ein Anteil an PRs, nicht an Zeit. Kein Zielwert: wichtig ist, ob der Mix zum Plan des Teams passt.",
+    lead: "Nach Branch-Präfix, als Anteil an PRs, nicht an Zeit.",
     fwImpact: "Impact, Näherung für «Zeit für Neues»",
     cardTitle: "PRs nach Art, gemerged im Zeitraum",
     cardSub_one: "{{count}} PR im Zeitraum, ohne Bots",
@@ -658,7 +646,7 @@ export const de = {
     barTitle_other: "{{label}}: {{count}} PRs, {{share}}",
     untracked: "{{rate}} ohne Jira-Key",
     untrackedText:
-      "({{n}} von {{total}}). Diese Arbeit taucht in keiner Planung auf. Frage fürs Team: Key vergessen oder ungeplante Arbeit?",
+      "({{n}} von {{total}}): Key vergessen oder ungeplante Arbeit?",
   },
   heat: {
     title: "Fehlerquote pro Repo und Woche",
@@ -685,7 +673,6 @@ export const de = {
         "kein bekanntes Präfix: release/… ohne Release, Nightlies, eigene Namensschemas",
       unknown: "vor der ersten build_type-Meldung",
     },
-    featureWhy: "Darauf warten Developer, bevor sie weiterarbeiten können",
     prefixes: "Häufigste Präfixe",
     noBranch: "ohne Branch im Pipeline-Namen",
     featureMissingTitle: "Feature- und Bugfix-Builds: kein Lauf erkannt",
@@ -736,16 +723,14 @@ export const de = {
     noAgent: "Der Lauf meldet nicht, wann er einen Agent bekam",
     eyebrow: "CI · Jenkins · Tekton · jede Lauf-Art für sich",
     title: "Wie schnell und verlässlich ist das Feedback?",
-    lead: "Auf Feature- und Bugfix-Builds warten Developer, bevor sie weiterarbeiten können: Dort geht ihre Zeit verloren, darum stehen sie zuerst. Releases überspringen Tests, Feature-Builds scheitern öfter, deshalb gibt es keine Summe über alle Arten: jede Karte steht für sich.",
     fwEffectiveness: "Effectiveness, Treiber",
-    dataFrom:
-      "Build-Daten ab {{date}}: der erste Lauf, den Riptide für das Team erhalten hat. Ältere Wochen bleiben leer statt falsch.",
+    dataFrom: "Build-Daten ab {{date}}; die Wochen davor sind leer.",
     noRuns: "Keine abgeschlossenen Läufe im Zeitraum.",
     legend:
       "Erfolgreich: SUCCESS (Tekton: Succeeded, Completed). Rot: FAILURE, UNSTABLE oder Failed. Ohne Ergebnis (ABORTED, NOT_BUILT): kein Lauf, nur CI-Zeit; ein Jenkins-timeout() endet ebenfalls ABORTED.",
     hotspotsTitle: "Repos, die das Feedback bremsen",
     hotspotsSub:
-      "Jedes Repo gegen seine eigenen Läufe derselben Art in der Vorperiode · die Schwellen sind Startwerte, nicht gemessen",
+      "Jedes Repo gegen seine eigenen Läufe derselben Art in der Vorperiode",
     kindGroup: "Lauf-Art",
     colRepo: "Repo",
     colWhy: "Warum",
@@ -754,14 +739,14 @@ export const de = {
     noneOfKind: "Keine Läufe dieser Art mit Ergebnis.",
     slowestTitle: "Längste Builds",
     slowestSub:
-      "Nach Median, ohne Ausreisser, ab {{min}} Läufen mit Ergebnis und Dauer. Ohne Schwelle: auch unauffällige Repos.",
+      "Nach Median, ohne Ausreisser, ab {{min}} Läufen mit Ergebnis und Dauer.",
     colMedian: "Median",
     colSlowest: "Langsamste 10 %",
     colWaitBuild: "Warten / Bauen",
     colRuns: "Läufe",
     noAgentRepo: "Keiner der Läufe meldet, wann er einen Agent bekam",
     hotspotsRule:
-      "Fehleranfälliger geworden: Quote mindestens {{flaky}}× die der Vorperiode und {{points}} Prozentpunkte darüber, höchstens halbwegs zwischen ihr und 100 %, mit mindestens {{failures}} roten Läufen. Langsamer geworden: Median mindestens {{slow}}× der der Vorperiode. Beides ab {{min}} Läufen in beiden Perioden. Nie gegen das Team: eine Lauf-Art mischt Gradle-, npm- und andere Builds, ein UI-Build mit Smoke-Tests wäre sonst immer langsam.",
+      "Fehleranfälliger geworden: Quote mindestens {{flaky}}× die der Vorperiode und {{points}} Prozentpunkte darüber, höchstens halbwegs zwischen ihr und 100 %, mit mindestens {{failures}} roten Läufen. Langsamer geworden: Median mindestens {{slow}}× der der Vorperiode. Beides ab {{min}} Läufen in beiden Perioden.",
     stuckTitle: "Hängende Läufe",
     stuckSub: "Läufe über {{factor}}× dem Median ihrer Art und über {{min}}",
     stuck_one: "1 Lauf hing",
@@ -771,7 +756,7 @@ export const de = {
     showAll: "Läufe anzeigen",
     noOutliers: "Keine Ausreisser im Zeitraum.",
     stuckRule:
-      "Ein Repo mit mindestens {{min}} eigenen Läufen mit Ergebnis und Dauer muss zudem {{factor}}× seinen eigenen Median überschreiten: ein langsames Repo ist kein Ausreisser. Abgebrochene Läufe erscheinen trotzdem.",
+      "Ein Repo mit mindestens {{min}} eigenen Läufen mit Ergebnis und Dauer muss zudem {{factor}}× seinen eigenen Median überschreiten. Abgebrochene Läufe erscheinen trotzdem.",
     flow: {
       title: "Wohin die CI-Stunden fliessen",
       sub: "CI-Zeit jeder Lauf-Art nach Ausgang, Ausreisser eingerechnet{{sep}}Bandbreite = Stunden",
@@ -809,7 +794,7 @@ export const de = {
   costs: {
     eyebrow: "FinOps · noergler",
     title: "Was kosten die KI-Reviews?",
-    lead: "Ausgaben der automatischen Reviews im Zeitraum. Kein Framework misst das; die Zahlen helfen, Kosten und Nutzen der Reviews abzuwägen.",
+    lead: "Ausgaben der automatischen Reviews im Zeitraum.",
     spend: "Ausgaben",
     spendNote_one: "davon {{merged}} für {{count}} PR, der gemerged wurde",
     spendNote_other: "davon {{merged}} für {{count}} PRs, die gemerged wurden",
@@ -832,7 +817,6 @@ export const de = {
   facts: {
     eyebrow: "Einzelfakten hinter allen Zahlen",
     title: "Daten",
-    lead: "Jede Zahl oben besteht aus diesen PRs, Deploys und Läufen. Die Suche filtert nur diese Tabellen.",
     searchLabel: "Suche nach Repo, App, PR oder Jira-Key",
     placeholder: "Repo, App, PR, Jira-Key …",
     failed:
@@ -875,7 +859,7 @@ export const de = {
   frameworks: {
     eyebrow: "Einordnung",
     title: "Welche Frameworks Riptide abdeckt",
-    lead: "Riptide misst aus den Daten der Tools, was ohne Umfrage messbar ist: von den fünf DORA-Metriken zwei, DX Core 4 teilweise. SPACE und DevEx brauchen zusätzlich Befragungen.",
+    lead: "Ohne Umfrage messbar: zwei der fünf DORA-Metriken, DX Core 4 teilweise.",
     row: {
       freq: "Deploy-Frequenz",
       lead: "Lead Time bis PROD",
@@ -918,7 +902,5 @@ export const de = {
       satisfactionSurvey: "Satisfaction & well-being, nur per Umfrage",
       surveyOnly: "nur per Umfrage",
     },
-    footnote:
-      "Change fail rate, Deployment rework rate und Failed deployment recovery time brauchen eine Incident-Quelle, die Riptide nicht hat. DORA führt seit dem Report 2025 keine Leistungsstufen mehr und nennt den Vergleich desselben Dienstes über die Zeit den aussagekräftigsten. Riptide vergleicht darum jedes Team nur mit sich selbst, nie mit Umfragewerten oder anderen Teams. DORA und DX Core 4 betonen beide: Metriken gelten für Teams und Anwendungen, nie für Personen.",
   },
 } satisfies Catalog;

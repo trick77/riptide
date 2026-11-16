@@ -108,9 +108,6 @@ function Chain({ m }: { m: Metrics }) {
             <span className="font-medium text-ink tabular-nums">
               {dur(m.delivery.lead_time.human.p50)}
             </span>
-            <div className="mt-1 text-xs text-muted">
-              {t("flow.gap", { prod })}
-            </div>
           </div>
         </div>
       )}

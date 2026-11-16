@@ -114,10 +114,7 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
       <Assessment query={query} m={m} onFacts={onFacts} />
       <Strip m={m} />
 
-      <SubHead
-        title={t("overview.throughput")}
-        text={t("overview.throughputText")}
-      />
+      <SubHead title={t("overview.throughput")} />
       <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3">
         <Tile
           label={t("overview.freq.label")}

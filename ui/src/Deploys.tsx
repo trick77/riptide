@@ -20,7 +20,6 @@ export function Deploys({ m }: { m: Metrics }) {
         id="h-deploys"
         eyebrow={t("deploys.eyebrow")}
         title={t("deploys.title", { prod })}
-        lead={t("deploys.lead")}
         frameworks={[
           ["DORA", "Deployment frequency"],
           ["Core 4", t("deploys.fwSpeed")],

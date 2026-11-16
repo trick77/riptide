@@ -69,8 +69,6 @@ export const en = {
       "Team {{team}}, {{product}} · CW {{from}}–{{to}} · {{start}} to {{end}} · compared with the {{weeks}} weeks before",
     oneProduct: "product {{product}}",
     allProductsLower: "all products",
-    mirror:
-      "A mirror for the team, not a ranking of teams or people. Every number says what it means, which way is good and whether it changed against the previous period.",
     dataAsOf: "Data as of:",
     source: "{{source}} {{at}}",
     noData: "no data",
@@ -84,13 +82,9 @@ export const en = {
     reposHead: "Repos",
     appsHead: "Argo apps",
     none: "none",
-    mapping:
-      "Mapped from the data: repos by the Bitbucket project key, apps by the GitOps repo whose revision they deploy. No name list.",
     loadFailed: "Could not load the data: {{msg}}",
     noTeam: "No team is configured.",
     loading: "Loading",
-    footer:
-      "Riptide only reads the raw data. Every number traces back to its query under “Source”.",
   },
   compare: {
     better: "Better",
@@ -343,8 +337,6 @@ export const en = {
       "Argo CD only reports since {{date}}: the weeks before are empty, the rate applies from then on.",
     sinceLow: " Less than a week of data: not very reliable.",
     throughput: "Throughput and instability",
-    throughputText:
-      "This is how DORA groups the five metrics. Both sides belong together: more throughput with rising instability is no progress.",
     freq: {
       label: "Deployment frequency",
       dora: "DORA · Deployment frequency · Throughput",
@@ -427,7 +419,7 @@ export const en = {
       question:
         "How often does a deployment cause trouble, and how fast is it fixed?",
       value: "not measured",
-      text: "This needs an incident source. Without one, Riptide shows throughput only; the instability side is missing. The hotfix share or deploy success do not replace it.",
+      text: "Needs an incident source, which is missing.",
     },
   },
   flow: {
@@ -452,20 +444,18 @@ export const en = {
     },
     chainTitle: "Share of each stage in the time to {{prod}}",
     chainSub:
-      "Per PR in app repos, typical duration per stage. The lead time above counts per commit; the stages show where the time goes.",
+      "Per PR in app repos, typical duration per stage; the lead time above counts per commit.",
     leadTo: "Lead time to {{env}}:",
     typicalSlowest: "typical value · the slowest 10 %: over {{p90}}",
-    gap: "The gap between the two is the time before {{prod}}: if it lies there, the pipeline is fast and the release is the bottleneck.",
     shareAria: "Share of the time to {{prod}}: {{parts}}",
     ofTime: "· {{share}} of the time",
     hot: "The lever is at “{{name}}”",
-    hotRest:
-      ": {{share}} of the time to {{prod}}. Speeding up the short stages brings little.",
+    hotRest: ": {{share}} of the time to {{prod}}.",
     chainNote:
-      "Review is a stage of its own because the approval is mostly the reviewer's first contact. Only PRs whose merge commit maps to a deployment reach the last two stages.",
+      "Only PRs whose merge commit maps to a deployment reach the last two stages.",
     ridge: {
       title: "How the time spreads within each stage",
-      sub: "The same PRs as above, time on a log scale. A wide mountain far to the right means the stage is slow throughout, not just for a few outliers. Line: typical value, dashed: from there the slowest 10 %.",
+      sub: "The same PRs as above, time on a log scale. Line: typical value, dashed: from there the slowest 10 %.",
       caption: "Wait per stage",
       colStage: "Stage",
       few: "under {{min}} PRs: single PRs instead of a curve",
@@ -484,11 +474,10 @@ export const en = {
     people: "People",
     eyebrow: "From commit to {{prod}} · app repos only",
     title: "Where does a change wait?",
-    lead: "The time to the user, split into stages. Where most of the time lies, the lever lies; speeding up the short stages brings little.",
+    lead: "The time to the user, split into stages.",
     fwLeadTime: "Change lead time, broken down",
     reviewTitle: "Review: fast, but how thorough?",
-    reviewSub:
-      "Read both numbers together: optimising only one means waving through or holding up. PRs by people only.",
+    reviewSub: "PRs by people only.",
     review: {
       label: "Review time",
       question: "How long does a PR wait for its first approval?",
@@ -606,7 +595,6 @@ export const en = {
   deploys: {
     eyebrow: "Rollout",
     title: "How evenly does code reach {{prod}}?",
-    lead: "Even is good: gaps and spikes point to bundled releases that ship many changes at once.",
     fwSpeed: "Speed, secondary",
     cardTitle: "Releases to {{prod}} per week",
     cardSub:
@@ -615,7 +603,7 @@ export const en = {
     releases: "Releases",
     typical: "typically {{n}} per week",
     aria: "Releases to {{prod}} per week: {{parts}}",
-    note: "{{resyncs}} and {{firstSeen}} do not count; what they are is under “What does this mean?” at the deployment frequency. The typical week is the median over the whole weeks in which Argo CD reported.",
+    note: "{{resyncs}} and {{firstSeen}} do not count. The typical week is the median of the whole weeks in which Argo CD reported.",
   },
   calendar: {
     cardTitle: "Releases to {{prod}} per day",
@@ -652,7 +640,7 @@ export const en = {
     other: "Other / no prefix",
     eyebrow: "Work mix",
     title: "What is the team working on?",
-    lead: "Share of merged PRs by branch prefix, not of time. No target: what matters is whether the mix fits the team's plan.",
+    lead: "By branch prefix, as a share of PRs, not of time.",
     fwImpact: "Impact, proxy for “time on new work”",
     cardTitle: "Merged PRs by type",
     cardSub_one: "{{count}} PR in the period, without bots",
@@ -661,8 +649,7 @@ export const en = {
     barTitle_one: "{{label}}: {{count}} PR, {{share}}",
     barTitle_other: "{{label}}: {{count}} PRs, {{share}}",
     untracked: "{{rate}} without a Jira key",
-    untrackedText:
-      "({{n}} of {{total}}). This work shows up in no planning. Question for the team: key forgotten, or unplanned work?",
+    untrackedText: "({{n}} of {{total}}): key forgotten, or unplanned work?",
   },
   heat: {
     title: "Failure rate per repo and week",
@@ -690,7 +677,6 @@ export const en = {
         "no known prefix: release/… without a release, nightlies, other naming schemes",
       unknown: "before the first build_type report",
     },
-    featureWhy: "Developers wait on these before they can carry on",
     prefixes: "Most frequent prefixes",
     noBranch: "no branch in the pipeline name",
     featureMissingTitle: "Feature and bugfix builds: no run recognised",
@@ -741,16 +727,14 @@ export const en = {
     noAgent: "The run does not report when it got an agent",
     eyebrow: "CI · Jenkins · Tekton · each kind of run on its own",
     title: "How fast and reliable is the feedback?",
-    lead: "Developers wait on feature and bugfix builds before they can carry on: that is where their time goes, so these come first. Releases skip tests, feature builds fail more often, so there is no total across kinds: each card stands on its own.",
     fwEffectiveness: "Effectiveness, driver",
-    dataFrom:
-      "Build data from {{date}}: the first run Riptide received for the team. Older weeks stay empty rather than wrong.",
+    dataFrom: "Build data from {{date}}; the weeks before are empty.",
     noRuns: "No finished runs in the period.",
     legend:
       "Successful: SUCCESS (Tekton: Succeeded, Completed). Red: FAILURE, UNSTABLE or Failed. Without a result (ABORTED, NOT_BUILT): no run, only CI time; a Jenkins timeout() also ends ABORTED.",
     hotspotsTitle: "Repos that slow down the feedback",
     hotspotsSub:
-      "Each repo against its own runs of the same kind in the previous period · the thresholds are starting values, not measured",
+      "Each repo against its own runs of the same kind in the previous period",
     kindGroup: "Kind of run",
     colRepo: "Repo",
     colWhy: "Why",
@@ -759,14 +743,14 @@ export const en = {
     noneOfKind: "No runs of this kind with a result.",
     slowestTitle: "Longest builds",
     slowestSub:
-      "By median, outliers aside, from {{min}} runs with a result and a duration. No threshold: unremarkable repos too.",
+      "By median, outliers aside, from {{min}} runs with a result and a duration.",
     colMedian: "Median",
     colSlowest: "Slowest 10 %",
     colWaitBuild: "Waiting / building",
     colRuns: "Runs",
     noAgentRepo: "None of the runs reports when it got an agent",
     hotspotsRule:
-      "Got flakier: rate at least {{flaky}}× the previous period's and {{points}} points above it, at most halfway between it and 100 %, with {{failures}} red runs or more. Got slower: median at least {{slow}}× the previous period's. Both from {{min}} runs in both periods. Never against the team: a kind mixes Gradle, npm and other builds, so a UI build with smoke tests would always be slow.",
+      "Got flakier: rate at least {{flaky}}× the previous period's and {{points}} points above it, at most halfway between it and 100 %, with {{failures}} red runs or more. Got slower: median at least {{slow}}× the previous period's. Both from {{min}} runs in both periods.",
     stuckTitle: "Stuck runs",
     stuckSub: "Runs over {{factor}}× the median of their kind and over {{min}}",
     stuck_one: "1 run got stuck",
@@ -777,7 +761,7 @@ export const en = {
     showAll: "Show runs",
     noOutliers: "No outliers in the period.",
     stuckRule:
-      "A repo with at least {{min}} runs of its own with a result and a duration must also exceed its own median {{factor}}×: a slow repo is no outlier. Aborted runs still appear.",
+      "A repo with at least {{min}} runs of its own with a result and a duration must also exceed its own median {{factor}}×. Aborted runs still appear.",
     flow: {
       title: "Where the CI hours go",
       sub: "Each kind's CI time by outcome, outliers included{{sep}}band width = hours",
@@ -815,7 +799,7 @@ export const en = {
   costs: {
     eyebrow: "FinOps · noergler",
     title: "What do the AI reviews cost?",
-    lead: "Spend on the automatic reviews in the period. No framework measures this; the numbers help weigh the reviews' cost against their benefit.",
+    lead: "Spend on the automatic reviews in the period.",
     spend: "Spend",
     spendNote_one: "{{merged}} of it for {{count}} merged PR",
     spendNote_other: "{{merged}} of it for {{count}} merged PRs",
@@ -837,7 +821,6 @@ export const en = {
   facts: {
     eyebrow: "The single facts behind every number",
     title: "Data",
-    lead: "Every number above is made of these PRs, deploys and runs. The search filters only these tables.",
     searchLabel: "Search by repo, app, PR or Jira key",
     placeholder: "Repo, app, PR, Jira key …",
     failed: "The single facts could not be loaded; the message is above.",
@@ -879,7 +862,7 @@ export const en = {
   frameworks: {
     eyebrow: "Classification",
     title: "Which frameworks Riptide covers",
-    lead: "Riptide measures from the tools' data what can be measured without a survey: two of the five DORA metrics, DX Core 4 in part. SPACE and DevEx also need surveys.",
+    lead: "Measurable without a survey: two of the five DORA metrics, DX Core 4 in part.",
     row: {
       freq: "Deployment frequency",
       lead: "Lead time to PROD",
@@ -924,8 +907,6 @@ export const en = {
       satisfactionSurvey: "Satisfaction & well-being, survey only",
       surveyOnly: "survey only",
     },
-    footnote:
-      "Change fail rate, deployment rework rate and failed deployment recovery time need an incident source Riptide does not have. Since its 2025 report DORA no longer uses performance levels and calls comparing the same service over time the most meaningful comparison. So Riptide compares each team only with itself, never with survey values or other teams. DORA and DX Core 4 both stress: metrics apply to teams and applications, never to people.",
   },
 };
 

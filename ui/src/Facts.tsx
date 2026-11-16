@@ -136,7 +136,6 @@ export function Facts({
         id="h-daten"
         eyebrow={t("facts.eyebrow")}
         title={t("facts.title")}
-        lead={t("facts.lead")}
       />
       <div className="no-print mb-3 max-w-[480px]">
         <label htmlFor="search" className="sr-only">

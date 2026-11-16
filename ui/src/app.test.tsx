@@ -1282,9 +1282,10 @@ describe("App", () => {
       1,
     );
     expect(screen.queryByText(/^Häufigste Präfixe:/)).toBeNull();
+    // no feature card: its success sparkline is the card's own mark
     expect(
-      screen.queryByText(
-        "Darauf warten Developer, bevor sie weiterarbeiten können",
+      screen.queryByLabelText(
+        /^Erfolgsquote pro Woche, Feature- und Bugfix-Builds/,
       ),
     ).toBeNull();
     // the repos that slow the feedback down: where the feature builds hide,
@@ -1318,14 +1319,15 @@ describe("App", () => {
     ).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("puts the feature card first with why it matters", async () => {
+  it("puts the feature card first", async () => {
     mockFetch();
     render(<App />);
-    expect(
-      await screen.findByText(
-        "Darauf warten Developer, bevor sie weiterarbeiten können",
-      ),
-    ).toBeInTheDocument();
+    // the card itself, not the hotspots' button of the same name, and
+    // twice as wide as the others
+    const spark = await screen.findByLabelText(
+      /^Erfolgsquote pro Woche, Feature- und Bugfix-Builds/,
+    );
+    expect(spark.closest(".md\\:col-span-2")).not.toBeNull();
     expect(screen.queryByText(/kein Lauf erkannt/)).toBeNull();
     // the cards in the backend's order, before the hotspots' kind buttons
     const names = screen
