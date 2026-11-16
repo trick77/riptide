@@ -458,6 +458,96 @@ func TestChain(t *testing.T) {
 	}
 }
 
+func TestStageBoundsAreLogSpaced(t *testing.T) {
+	b := StageBounds()
+	if len(b) != 23 || b[0] != 300 || b[len(b)-1] != 28*86400 {
+		t.Fatalf("bounds = %v", b)
+	}
+	for i := 1; i < len(b); i++ {
+		if r := b[i] / b[i-1]; r < 1.49 || r > 1.52 {
+			t.Errorf("step %d: ratio %v", i, r)
+		}
+	}
+	// A copy: changing it changes no one else's.
+	b[0] = 1
+	if StageBounds()[0] != 300 {
+		t.Error("StageBounds shares its array")
+	}
+}
+
+func TestStageHistogram(t *testing.T) {
+	b := StageBounds()
+	last := len(b) - 2
+	// Out-of-range waits clamp to the ends; an edge opens its bucket.
+	h := stageHistogram([]float64{0, 299, 300, b[1] - 1, b[1], b[5] + 1, b[len(b)-1] - 1, b[len(b)-1], 1e9})
+	want := make([]int, len(b)-1)
+	want[0], want[1], want[5], want[last] = 4, 1, 1, 3
+	if !slices.Equal(h, want) {
+		t.Errorf("histogram = %v, want %v", h, want)
+	}
+	if h := stageHistogram(nil); len(h) != len(b)-1 || slices.Max(h) != 0 {
+		t.Errorf("empty = %v", h)
+	}
+}
+
+// A stage carries its histogram over the same PRs as its spread; a
+// low-sample stage its waits one by one instead.
+func TestChainStageDistributions(t *testing.T) {
+	const h = 3600.0
+	var prs []dataset.PR
+	for i := range 12 {
+		prs = append(prs, pr(func(p *dataset.PR) {
+			p.PRID = int64(i + 1)
+			// coding: a day and i hours; merge: 10 min after approval
+			p.FirstCommitAt, p.ReadyAt = agoP(10+float64(i)/24), agoP(9)
+			p.ApprovedAt, p.MergedAt = agoP(8), agoP(8-10.0/1440)
+			if i < 3 {
+				p.Environments = []dataset.EnvironmentDeploy{{Environment: "prod", FirstDeployedAt: ago(8 - 10.0/1440 - float64(i+1)/24)}}
+			}
+		}))
+	}
+	c := leadChain(chainOf(data(func(ds *dataset.Dataset) { ds.PRs = prs }), p4(), filter{}))
+	if !slices.Equal(c.BucketBoundsS, StageBounds()) {
+		t.Errorf("bounds = %v", c.BucketBoundsS)
+	}
+	for _, s := range c.Stages {
+		if s.LowSample {
+			if s.Histogram != nil {
+				t.Errorf("%s: low sample with histogram %v", s.Key, s.Histogram)
+			}
+			continue
+		}
+		sum := 0
+		for _, n := range s.Histogram {
+			sum += n
+		}
+		if len(s.Histogram) != len(StageBounds())-1 || sum != s.N {
+			t.Errorf("%s: histogram %v, n %d", s.Key, s.Histogram, s.N)
+		}
+	}
+	coding := stage(c, StageCoding)
+	if coding.LowSample || coding.DurationsS != nil {
+		t.Errorf("coding = %+v", coding)
+	}
+	merge := stage(c, StageMerge)
+	if merge.Histogram[bucketOf(600)] != 12 {
+		t.Errorf("merge = %v", merge.Histogram)
+	}
+	prod := stage(c, StageToProd)
+	if !prod.LowSample || !slices.Equal(prod.DurationsS, []float64{h, 2 * h, 3 * h}) {
+		t.Errorf("to prod = %+v", prod)
+	}
+	// No PR reached the stage: no waits, an empty list rather than null.
+	empty := leadChain(chainOf(data(func(ds *dataset.Dataset) { ds.PRs = prs[3:] }), p4(), filter{}))
+	if s := stage(empty, StageToProd); s.DurationsS == nil || len(s.DurationsS) != 0 || !s.LowSample {
+		t.Errorf("empty to prod = %+v", s)
+	}
+}
+
+func bucketOf(s float64) int {
+	return slices.Index(stageHistogram([]float64{s}), 1)
+}
+
 func TestChainWithoutAStageBeforeProduction(t *testing.T) {
 	c := leadChain(chainOf(data(func(ds *dataset.Dataset) { ds.PRs = []dataset.PR{pr()} }), p4(), filter{}))
 	if c.PreEnvironment != nil || stage(c, StageToPre).Key != "missing" || len(c.Stages) != 4 {

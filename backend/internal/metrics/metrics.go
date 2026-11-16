@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"cmp"
+	"math"
 	"math/big"
 	"slices"
 	"time"
@@ -542,6 +543,50 @@ type Stage struct {
 	Share *float64 `json:"share"`
 	// Hot is the stage with the largest median.
 	Hot bool `json:"hot"`
+	// Histogram is the stage's PRs per StageBounds bucket; null when
+	// LowSample, which sends DurationsS instead.
+	Histogram []int `json:"histogram"`
+	// DurationsS are the stage's waits in seconds, ascending, only when
+	// LowSample: a curve from a handful of PRs would be invented, the UI
+	// draws them one by one. Null otherwise.
+	DurationsS []float64 `json:"durations_s"`
+}
+
+// stageSteps is the number of stage histogram buckets.
+const stageSteps = 22
+
+// stageBounds are the stage histograms' bucket edges in seconds, 5 min to
+// 28 days in 22 log-spaced steps (each ~1.5 times the one before). A
+// production wait of two weeks is common, so 14 days would pile the slow
+// half on the last edge. The first bucket also holds every shorter wait,
+// the last every longer one: a merge in the approval's second still counts.
+// An array: nothing outside can change it.
+var stageBounds = func() (out [stageSteps + 1]float64) {
+	const lo, hi = 300.0, 28 * 86400.0
+	for i := range out {
+		out[i] = math.Round(lo * math.Pow(hi/lo, float64(i)/stageSteps))
+	}
+	return out
+}()
+
+// StageBounds is a copy of the stage histograms' bucket edges.
+func StageBounds() []float64 { return slices.Clone(stageBounds[:]) }
+
+// stageHistogram counts seconds into stageBounds' buckets, out-of-range
+// waits into the first or last one.
+func stageHistogram(seconds []float64) []int {
+	out := make([]int, stageSteps)
+	for _, s := range seconds {
+		// The first edge above s, less one: the bucket s falls in.
+		i, _ := slices.BinarySearchFunc(stageBounds[:], s, func(b, s float64) int {
+			if b <= s {
+				return -1
+			}
+			return 1
+		})
+		out[min(max(i-1, 0), len(out)-1)]++
+	}
+	return out
 }
 
 // Chain is where the time to production goes.
@@ -555,10 +600,13 @@ type Chain struct {
 	MinPRs         int     `json:"min_prs"`
 	// BeforeProd is the sum of the medians before the last stage.
 	BeforeProd float64 `json:"before_prod"`
+	// BucketBoundsS are StageBounds, every stage's histogram edges.
+	BucketBoundsS []float64 `json:"bucket_bounds_s"`
 }
 
 func leadChain(c rawChain) Chain {
-	out := Chain{PreEnvironment: c.preEnvironment, AttentionShare: StageAttention, MinPRs: lowSample}
+	out := Chain{PreEnvironment: c.preEnvironment, AttentionShare: StageAttention, MinPRs: lowSample,
+		BucketBoundsS: StageBounds()}
 	var total float64
 	withData := 0
 	for _, k := range stageKeys {
@@ -567,6 +615,14 @@ func leadChain(c rawChain) Chain {
 		}
 		s := Stage{Key: k, Spread: spread(c.waits[k])}
 		s.LowSample = s.N < lowSample
+		if s.LowSample {
+			s.DurationsS = slices.Sorted(slices.Values(c.waits[k]))
+			if s.DurationsS == nil {
+				s.DurationsS = []float64{}
+			}
+		} else {
+			s.Histogram = stageHistogram(c.waits[k])
+		}
 		if s.P50 != nil {
 			total += *s.P50
 			withData++

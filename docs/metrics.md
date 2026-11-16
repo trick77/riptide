@@ -413,6 +413,15 @@ day: today and Argo CD's first day show their releases but are left out of
 the rate. Argo CD's data end is no cutoff: an outage and a team that did
 not deploy both send no events.
 
+Each lead-time stage carries its waits counted into `bucket_bounds_s`: 22
+log-spaced buckets from 5 min to 28 days, the same for every stage (the
+production wait runs to two weeks and more, so 14 days would pile it on
+the last edge). A shorter wait counts in the first bucket, a longer one in
+the last. Below the low-sample threshold the stage lists its waits one
+by one (`durations_s`) instead of the counts (`histogram` null) and the ridgeline draws them as dots, not a
+curve: a density from fewer than `min_prs` (10) values would be invented. The UI smooths the
+curve through the counts; the counts, medians and p90s are the backend's.
+
 Open PRs list the jammed repos first (3 PRs or more open 7 days or more),
 then by long-open PRs, then by the median age; the top 8 and every repo
 with a long-open PR. The jammed repos are compared with the previous

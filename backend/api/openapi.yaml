@@ -1034,7 +1034,7 @@ components:
       type: object
       description: The lead-time breakdown per human PR merged in the period.
       additionalProperties: false
-      required: [stages, pre_environment, attention_share, min_prs, before_prod]
+      required: [stages, pre_environment, attention_share, min_prs, before_prod, bucket_bounds_s]
       properties:
         stages:
           type: array
@@ -1042,7 +1042,7 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [key, n, p50, p90, low_sample, share, hot]
+            required: [key, n, p50, p90, low_sample, share, hot, histogram, durations_s]
             properties:
               key: { type: string, enum: [coding, review, merge, to_pre, to_prod] }
               n: { type: integer }
@@ -1053,6 +1053,24 @@ components:
                 $ref: "#/components/schemas/NullableNumber"
                 description: The stage's part of the summed medians, 0..1; equal parts when all medians are 0.
               hot: { type: boolean, description: The stage with the largest median. }
+              histogram:
+                type: [array, "null"]
+                description: |
+                  The stage's PRs per `bucket_bounds_s` bucket, one count fewer
+                  than bounds; a wait under the first bound counts in the first
+                  bucket, one at or past the last bound in the last. Null when
+                  `low_sample`: `durations_s` instead.
+                items: { type: integer, minimum: 0 }
+              durations_s:
+                type: [array, "null"]
+                description: The stage's waits in seconds, ascending, only when `low_sample`; null otherwise.
+                items: { type: number }
+        bucket_bounds_s:
+          type: array
+          description: |
+            Every stage histogram's bucket edges in seconds, ascending, log-spaced
+            from 5 min to 28 days; bucket i is [bound i, bound i+1).
+          items: { type: number }
         pre_environment: { type: [string, "null"] }
         attention_share:
           type: number
