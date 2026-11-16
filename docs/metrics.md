@@ -430,7 +430,13 @@ against itself, so each kind also lists its 5 slowest repos by median,
 outliers aside, from 3 runs with a verdict and a duration on, flagged or
 not and without a threshold. Every repo row carries the wait for a build
 agent and the build itself, as the kind does, over the runs that report
-when they got one.
+when they got one, and its CI time of the kind, counted as the kind's (the
+rows add up to at most the kind's: no row without a run with a verdict,
+and the list is cut). Above the table each repo is an arrow from its
+previous median and failure rate to its current ones, the circle's area
+its share of the kind's CI time; red only where the backend flagged it, no
+arrow without both previous values (`prev_complete`). The repos it cannot
+draw are counted (`unplotted`).
 A run of a commit Bitbucket never saw counts with the repository its
 pipeline is named after. A run succeeded on SUCCESS (Jenkins), Succeeded
 or Completed (Tekton) and failed on FAILURE, UNSTABLE or Failed; anything

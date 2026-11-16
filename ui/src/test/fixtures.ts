@@ -109,11 +109,16 @@ function kindHotspots(
         failure_change: change("none", null, "low_sample"),
         wasted_seconds: failures * 600,
         flaky: false,
+        ci_seconds: 600,
+        compared: false,
+        prev_complete: false,
+        plotted: true,
       },
     ],
     // One run: too few for the slowest list.
     slowest: [],
     outlier_threshold_s: null,
+    unplotted: 0,
   };
 }
 

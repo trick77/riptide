@@ -571,6 +571,23 @@ export const de = {
     stuckRule:
       "Ein Repo mit mindestens {{min}} eigenen Läufen mit Ergebnis und Dauer muss zudem {{factor}}× seinen eigenen Median überschreiten: ein langsames Repo ist kein Ausreisser. Abgebrochene Läufe erscheinen trotzdem.",
   },
+  quiver: {
+    aria: "{{kind}}: jedes Repo von der Vorperiode zu jetzt, Median-Dauer gegen Fehlerquote",
+    xAxis: "Median-Dauer (log) →",
+    yAxis: "↑ Fehlerquote",
+    slower: "▲ ×{{factor}} Dauer",
+    flakier: "▲ Fehlerquote {{prev}} → {{rate}}",
+    median: "Median",
+    rate: "Fehlerquote",
+    runs: "Läufe",
+    ci: "CI-Zeit",
+    legend:
+      "Pfeil: Vorperiode → jetzt; ein Punkt im oder am Kreis: kaum bewegt · voller Kreis ohne Punkt: nur der Median oder nur die Fehlerquote vergleichbar · Kreisfläche: Anteil an der CI-Zeit dieser Art · rot: langsamer oder fehleranfälliger geworden, wie unten · gestrichelt: kein Vergleich.",
+    unplotted_one:
+      "{{count}} Repo dieser Art ist nicht eingezeichnet: ausserhalb der Liste, ohne Lauf mit Ergebnis oder ohne Median.",
+    unplotted_other:
+      "{{count}} Repos dieser Art sind nicht eingezeichnet: ausserhalb der Liste, ohne Lauf mit Ergebnis oder ohne Median.",
+  },
   costs: {
     eyebrow: "FinOps · noergler",
     title: "Was kosten die KI-Reviews?",

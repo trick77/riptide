@@ -237,6 +237,10 @@ describe("App", () => {
           factor: 1,
           slow: false,
           flaky: true,
+          ci_seconds: 12_000,
+          compared: true,
+          prev_complete: true,
+          plotted: true,
         },
         {
           repo: "kasse/slow-api",
@@ -252,6 +256,10 @@ describe("App", () => {
           factor: 3,
           slow: true,
           flaky: false,
+          ci_seconds: 21_600,
+          compared: true,
+          prev_complete: true,
+          plotted: true,
         },
       ];
       m.findings = [
@@ -554,10 +562,13 @@ describe("App", () => {
         waiting: spread(4, 7 * 60),
         building: spread(4, 3 * 60),
       };
+      // The circles' base: the rows hold most of the kind's CI time.
+      m.build.kinds[2] = { ...m.build.kinds[2], ci_seconds: 60_000 };
       const h = m.build.hotspots;
       h.kinds[2] = {
         ...h.kinds[2],
         failure_rate: 0.1,
+        unplotted: 2,
         repos: [
           {
             repo: "kasse/flaky-api",
@@ -573,6 +584,10 @@ describe("App", () => {
             factor: 1,
             slow: false,
             flaky: true,
+            ci_seconds: 12_000,
+            compared: true,
+            prev_complete: true,
+            plotted: true,
           },
           {
             repo: "kasse/slow-api",
@@ -588,6 +603,10 @@ describe("App", () => {
             factor: 3,
             slow: true,
             flaky: false,
+            ci_seconds: 21_600,
+            compared: true,
+            prev_complete: true,
+            plotted: true,
           },
           {
             repo: "kasse/new-api",
@@ -603,6 +622,10 @@ describe("App", () => {
             factor: null,
             slow: false,
             flaky: false,
+            ci_seconds: 3600,
+            compared: false,
+            prev_complete: false,
+            plotted: true,
           },
         ],
       };
@@ -682,6 +705,73 @@ describe("App", () => {
       "Von 2 Repos sind 1 langsamer, 1 fehleranfälliger geworden als in der Vorperiode",
     );
     expect(screen.getByText("2.0 h")).toBeInTheDocument();
+    // Above the table: red arrows only where the backend flagged, labelled
+    // with what changed; no comparison, no arrow.
+    const quiver = screen.getByTestId("quiver");
+    expect(
+      within(quiver).getByRole("group", {
+        name: /^Feature- und PR-Builds: jedes Repo von der Vorperiode/,
+      }),
+    ).toBeInTheDocument();
+    expect(quiver).toHaveTextContent(
+      "2 Repos dieser Art sind nicht eingezeichnet",
+    );
+    const marks = within(quiver).getAllByTestId("quiver-repo");
+    const mark = (repo: string) => marks.find((g) => g.dataset.repo === repo)!;
+    expect(mark("kasse/flaky-api").dataset).toMatchObject({
+      flagged: "true",
+      arrow: "true",
+    });
+    expect(mark("kasse/slow-api").dataset).toMatchObject({
+      flagged: "true",
+      arrow: "true",
+    });
+    expect(mark("kasse/new-api").dataset.flagged).toBeUndefined();
+    expect(mark("kasse/new-api").dataset.arrow).toBeUndefined();
+    expect(mark("kasse/new-api").querySelector("circle")).toHaveAttribute(
+      "stroke-dasharray",
+    );
+    expect(
+      within(quiver).getByText("kasse/flaky-api ▲ Fehlerquote 10 % → 40 %"),
+    ).toBeInTheDocument();
+    expect(
+      within(quiver).getByText("kasse/slow-api ▲ ×3.0 Dauer"),
+    ).toBeInTheDocument();
+    expect(within(quiver).queryByText(/^kasse\/new-api/)).toBeNull();
+    const hit = (repo: string) =>
+      within(quiver)
+        .getAllByTestId("quiver-hit")
+        .find((c) => c.dataset.repo === repo)!;
+    // The tooltip lives outside the chart's scroll box, which would clip it.
+    fireEvent.mouseEnter(hit("kasse/slow-api"));
+    expect(within(quiver).queryByRole("tooltip")).toBeNull();
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      /kasse\/slow-apiMedian10 min → 30 minFehlerquote0 % → 0 %Läufe12CI-Zeit6.0 h$/,
+    );
+    fireEvent.mouseLeave(hit("kasse/slow-api"));
+    // By keyboard too, the tooltip's content as the target's name.
+    fireEvent.focus(hit("kasse/new-api"));
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      "Kein Vergleichkeine vergleichbaren Läufe dieser Art in der Vorperiode",
+    );
+    fireEvent.blur(hit("kasse/new-api"));
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(hit("kasse/new-api")).toHaveAttribute("tabindex", "0");
+    expect(
+      within(quiver).getByRole("img", { name: /^kasse\/slow-api; Median: / }),
+    ).toBeInTheDocument();
+    // Flagged ones painted last; hover targets the largest first, so a
+    // small circle is never under a big one's target.
+    expect(marks.map((g) => g.dataset.repo)).toEqual([
+      "kasse/new-api",
+      "kasse/flaky-api",
+      "kasse/slow-api",
+    ]);
+    expect(
+      within(quiver)
+        .getAllByTestId("quiver-hit")
+        .map((c) => c.dataset.repo),
+    ).toEqual(["kasse/slow-api", "kasse/flaky-api", "kasse/new-api"]);
     fireEvent.click(
       screen.getAllByRole("button", { name: "Läufe ansehen →" })[1],
     );
@@ -720,6 +810,23 @@ describe("App", () => {
     expect(
       screen.getByTitle("Der Lauf meldet nicht, wann er einen Agent bekam"),
     ).toHaveTextContent("–");
+  });
+
+  it("says how many repos the build chart cannot draw, even all", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      const m = metrics();
+      const k = m.build.hotspots.kinds[2];
+      k.repos = [{ ...k.repos[0], plotted: false }];
+      k.unplotted = 3;
+      return m;
+    });
+    render(<App />);
+    const quiver = await screen.findByTestId("quiver");
+    expect(quiver).toHaveTextContent(
+      "3 Repos dieser Art sind nicht eingezeichnet",
+    );
+    expect(quiver.querySelector("svg")).toBeNull();
   });
 
   it("lists the longest builds as the backend picked them", async () => {

@@ -15,6 +15,7 @@ import type {
   RunKind,
 } from "./api";
 import { clock, dateTime, dayMonth, dur, fullDate, num, pct } from "./format";
+import { Quiver } from "./quiver";
 import type { Tab } from "./state";
 import { Card, CardHead, Compare, Mono, Note, Pill, SectionHead } from "./ui";
 
@@ -220,8 +221,7 @@ function noCompare(
   h: RepoHotspot,
   minRuns: number,
 ): string | null {
-  if (h.duration_change.prev != null || h.failure_change.prev != null)
-    return null;
+  if (h.compared) return null;
   switch (h.duration_change.reason ?? h.failure_change.reason) {
     case "no_value":
       return t("build.noCompareNoValue");
@@ -498,6 +498,17 @@ export function Build({
                 </div>
               }
             />
+            {k && (k.repos.length > 0 || k.unplotted > 0) && (
+              <Quiver
+                k={k}
+                kindCiSeconds={
+                  stats.find((s) => s.kind === k.kind)?.ci_seconds ?? 0
+                }
+                kindLabel={t(`build.kind.${k.kind}`)}
+                stroke={KIND_STROKE[k.kind]}
+                noCompare={(r) => noCompare(t, r, h.min_runs)}
+              />
+            )}
             {k && k.repos.length ? (
               <div className="mt-3 overflow-x-auto">
                 <div className="grid min-w-[640px] grid-cols-[minmax(150px,1.3fr)_minmax(220px,2fr)_96px_150px] items-center gap-x-3.5">

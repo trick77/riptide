@@ -578,6 +578,23 @@ export const en = {
     stuckRule:
       "A repo with at least {{min}} runs of its own with a result and a duration must also exceed its own median {{factor}}×: a slow repo is no outlier. Aborted runs still appear.",
   },
+  quiver: {
+    aria: "{{kind}}: each repo from the previous period to now, median duration against failure rate",
+    xAxis: "Median duration (log) →",
+    yAxis: "↑ Failure rate",
+    slower: "▲ ×{{factor}} duration",
+    flakier: "▲ failure rate {{prev}} → {{rate}}",
+    median: "Median",
+    rate: "Failure rate",
+    runs: "Runs",
+    ci: "CI time",
+    legend:
+      "Arrow: previous period → now; a dot in or at the circle: barely moved · filled circle without a dot: only the median or only the failure rate compares · circle area: share of this kind's CI time · red: got slower or flakier, as below · dashed: no comparison.",
+    unplotted_one:
+      "{{count}} repo of this kind is not drawn: past the list, without a run with a result, or without a median.",
+    unplotted_other:
+      "{{count}} repos of this kind are not drawn: past the list, without a run with a result, or without a median.",
+  },
   costs: {
     eyebrow: "FinOps · noergler",
     title: "What do the AI reviews cost?",

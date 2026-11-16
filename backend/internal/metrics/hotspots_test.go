@@ -68,6 +68,49 @@ func repoOf(k KindHotspots, repo string) RepoHotspot {
 	return RepoHotspot{Repo: "missing"}
 }
 
+// The chart's bubbles: the rows' CI time is at most the kind's, never all
+// of it, and the repos it cannot draw are counted.
+func TestHotspotsChart(t *testing.T) {
+	ds := data(func(ds *dataset.Dataset) {
+		for i := range 10 {
+			ds.Runs = append(ds.Runs, runs(fmt.Sprintf("kasse/r%d", i), 10, 100, 0, "")...)
+		}
+		// only aborted runs: CI time, no row
+		ds.Runs = append(ds.Runs, runs("kasse/aborted", 3, 100, 3, "ABORTED")...)
+		ds.Runs = append(ds.Runs, runs("kasse/partial", 10, 100, 0, "")...)
+	})
+	prev := data(func(ds *dataset.Dataset) {
+		ds.Runs = append(ds.Runs, runs("kasse/r0", 10, 100, 0, "")...)
+		// no durations then: a failure rate to compare, no median
+		for _, r := range runs("kasse/partial", 10, 100, 0, "") {
+			r.DurationS = nil
+			ds.Runs = append(ds.Runs, r)
+		}
+	})
+	b := against(ds, prev)
+	k := kindOf(b.Hotspots, KindMain)
+	var ci, kind float64
+	for _, h := range k.Repos {
+		ci += h.CISeconds
+	}
+	for _, s := range b.Kinds {
+		if s.Kind == KindMain {
+			kind = s.CISeconds
+		}
+	}
+	// 11 repos with a row, cut to 8; the aborted one has none.
+	if len(k.Repos) != hotspotTop || kind != 11*1000+300 || ci > kind || ci != 8*1000 || k.Unplotted != 4 {
+		t.Errorf("rows %d, ci %v of %v, unplotted %d", len(k.Repos), ci, kind, k.Unplotted)
+	}
+	r0, partial := repoOf(k, "kasse/r0"), repoOf(k, "kasse/partial")
+	if !r0.Compared || !r0.PrevComplete {
+		t.Errorf("r0 = %+v", r0)
+	}
+	if !partial.Compared || partial.PrevComplete || partial.FailureChange.Prev == nil {
+		t.Errorf("partial = %+v", partial)
+	}
+}
+
 func TestHotspots(t *testing.T) {
 	ds := data(func(ds *dataset.Dataset) {
 		// slower and flakier: 10 runs of 1000 s, half of them failed
@@ -106,6 +149,17 @@ func TestHotspots(t *testing.T) {
 		t.Errorf("flaky = %+v / %+v", slow, quick)
 	}
 	expectNear(t, "previous failure rate", slow.FailureChange.Prev, 0)
+	// The previous position in the units of the current one: seconds, 0..1.
+	expectNear(t, "previous median", slow.DurationChange.Prev, 400)
+	// CI time as the kind counts it: aborted runs in, outliers out.
+	if slow.CISeconds != 10000 || quick.CISeconds != 2200 || stuck.CISeconds != 0 {
+		t.Errorf("ci seconds = %v / %v / %v", slow.CISeconds, quick.CISeconds, stuck.CISeconds)
+	}
+	// The stuck repo's every run an outlier: no median to draw it at.
+	if !slow.Compared || !slow.PrevComplete || stuck.Compared || stuck.PrevComplete || k.Unplotted != 1 ||
+		!slow.Plotted || stuck.Plotted {
+		t.Errorf("compared = %+v / %+v, unplotted %d", slow, stuck, k.Unplotted)
+	}
 	if stuck.Flaky || stuck.Slow || stuck.WastedSeconds != 0 || stuck.Failures != 2 ||
 		stuck.FailureChange.Reason == nil || *stuck.FailureChange.Reason != ReasonLowSample {
 		t.Errorf("stuck = %+v", stuck)
