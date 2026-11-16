@@ -8,7 +8,8 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import type { Facts, Metrics } from "./api";
+import type { Facts, FlowOutcome, Metrics, RunKind } from "./api";
+import { Build } from "./Build";
 import { Costs } from "./Costs";
 import { Flow } from "./Flow";
 import { initialLanguage } from "./i18n";
@@ -506,9 +507,9 @@ describe("App", () => {
     fireEvent.click(within(tabs).getByRole("tab", { name: /Läufe/ }));
     expect(window.location.search).toBe("?q=kasse-api%3A1.1&tab=runs");
     // The UI's word where the status plainly says it, else the CI's.
-    expect(screen.getByText("Erfolgreich")).toBeInTheDocument();
-    expect(screen.getByText("Fehlgeschlagen")).toBeInTheDocument();
-    expect(screen.getByText("Unstable")).toBeInTheDocument();
+    const runs = screen.getByText("Unstable").closest("table")!;
+    expect(within(runs).getByText("Erfolgreich")).toBeInTheDocument();
+    expect(within(runs).getByText("Fehlgeschlagen")).toBeInTheDocument();
     expect(screen.getAllByText("Releases").length).toBeGreaterThan(0);
   });
 
@@ -1554,6 +1555,154 @@ describe("strip", () => {
     expect(
       within(freq).getByText("Argo CD meldet für das Team noch nicht"),
     ).toBeVisible();
+  });
+});
+
+describe("CI hours", () => {
+  it("draws each kind's split by outcome as the backend computed it", () => {
+    const h = 3600;
+    const m = metrics();
+    const [release, , feature] = m.build.kinds;
+    const link = (
+      kind: RunKind,
+      outcome: FlowOutcome,
+      hours: number,
+      ofKind: number,
+    ) => ({
+      kind,
+      outcome,
+      seconds: hours * h,
+      share_of_kind: ofKind,
+      share: hours / 460,
+    });
+    render(
+      <Build
+        onFacts={() => {}}
+        m={{
+          ...m,
+          build: {
+            ...m.build,
+            kinds: [release, feature],
+            ci_flow: {
+              total_seconds: 460 * h,
+              kinds: [
+                { kind: "release", seconds: 40 * h, share: 40 / 460 },
+                { kind: "feature", seconds: 420 * h, share: 420 / 460 },
+              ],
+              outcomes: [
+                { outcome: "succeeded", seconds: 245 * h, share: 245 / 460 },
+                { outcome: "failed", seconds: 150 * h, share: 150 / 460 },
+                { outcome: "no_verdict", seconds: 40 * h, share: 40 / 460 },
+                { outcome: "outlier", seconds: 25 * h, share: 25 / 460 },
+              ],
+              links: [
+                link("release", "succeeded", 40, 1),
+                link("feature", "succeeded", 205, 205 / 420),
+                link("feature", "failed", 150, 150 / 420),
+                link("feature", "no_verdict", 40, 40 / 420),
+                link("feature", "outlier", 25, 25 / 420),
+              ],
+            },
+          },
+        }}
+      />,
+    );
+    const chart = screen.getByRole("img", {
+      name: /^CI-Zeit von der Lauf-Art zum Ausgang/,
+    });
+    expect(document.body.textContent).not.toMatch(/NaN/);
+    // Failed never by colour alone.
+    expect(within(chart).getByText("▼ Fehlgeschlagen")).toBeInTheDocument();
+    expect(within(chart).getByText("150.0 h · 33 %")).toBeInTheDocument();
+    expect(within(chart).getByText("Ausreisser")).toBeInTheDocument();
+    expect(within(chart).getByText("Ohne Ergebnis")).toBeInTheDocument();
+    // Outliers included, unlike the card's CI time: said, not silent.
+    expect(
+      within(chart).getByText("420.0 h inkl. Ausreisser"),
+    ).toBeInTheDocument();
+    expect(within(chart).getByText("40.0 h")).toBeInTheDocument();
+    // The outlier cut as the stuck runs card words it.
+    expect(
+      screen.getByText(/Ausreisser: Läufe über 6× dem Median ihrer Art/),
+    ).toBeInTheDocument();
+    const links = screen.getAllByTestId("sankey-link");
+    expect(links).toHaveLength(5);
+    // The failed stream is red all the way, the others a gradient.
+    expect(links[2]).toHaveAttribute("fill", "var(--color-danger)");
+    expect(links[1].getAttribute("fill")).toMatch(/^url\(#/);
+    const hits = screen.getAllByTestId("sankey-hit");
+    fireEvent.mouseEnter(hits[2]);
+    const tip = screen.getByRole("tooltip");
+    expect(tip).toHaveTextContent("Feature- und PR-Builds → Fehlgeschlagen");
+    expect(tip).toHaveTextContent("Anteil an Feature- und PR-Builds36 %");
+    expect(tip).toHaveTextContent("Anteil an aller CI-Zeit33 %");
+    fireEvent.mouseLeave(hits[2]);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("keeps a band beside a long outage visible and hoverable", () => {
+    const m = metrics();
+    const total = 10001 * 3600;
+    render(
+      <Build
+        onFacts={() => {}}
+        m={{
+          ...m,
+          build: {
+            ...m.build,
+            ci_flow: {
+              total_seconds: total,
+              kinds: [{ kind: "main", seconds: total, share: 1 }],
+              outcomes: [
+                { outcome: "failed", seconds: 36, share: 36 / total },
+                {
+                  outcome: "outlier",
+                  seconds: total - 36,
+                  share: 1 - 36 / total,
+                },
+              ],
+              links: [
+                {
+                  kind: "main",
+                  outcome: "failed",
+                  seconds: 36,
+                  share_of_kind: 36 / total,
+                  share: 36 / total,
+                },
+                {
+                  kind: "main",
+                  outcome: "outlier",
+                  seconds: total - 36,
+                  share_of_kind: 1 - 36 / total,
+                  share: 1 - 36 / total,
+                },
+              ],
+            },
+          },
+        }}
+      />,
+    );
+    // Drawn MIN_BAND (2px) high, answering over 6px.
+    const [failed, outlier] = screen.getAllByTestId("sankey-hit");
+    expect(failed).toHaveAttribute("stroke-width", "4");
+    expect(outlier).toHaveAttribute("stroke-width", "0");
+  });
+
+  it("draws nothing without CI time", () => {
+    const m = metrics();
+    render(
+      <Build
+        onFacts={() => {}}
+        m={{
+          ...m,
+          build: {
+            ...m.build,
+            ci_flow: { total_seconds: 0, kinds: [], outcomes: [], links: [] },
+          },
+        }}
+      />,
+    );
+    expect(screen.queryByText("Wohin die CI-Stunden fliessen")).toBeNull();
   });
 });
 

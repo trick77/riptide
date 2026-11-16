@@ -577,6 +577,22 @@ export const en = {
     noOutliers: "No outliers in the period.",
     stuckRule:
       "A repo with at least {{min}} runs of its own with a result and a duration must also exceed its own median {{factor}}×: a slow repo is no outlier. Aborted runs still appear.",
+    flow: {
+      title: "Where the CI hours go",
+      sub: "Each kind's CI time by outcome, outliers included{{sep}}band width = hours",
+      outcome: {
+        succeeded: "Succeeded",
+        failed: "Failed",
+        no_verdict: "Without a result",
+        outlier: "Outliers",
+      },
+      tipHours: "CI time",
+      tipOfKind: "Share of {{kind}}",
+      tipOfAll: "Share of all CI time",
+      aria: "CI time from kind of run to outcome: {{parts}}",
+      withOutliers: "{{h}} incl. outliers",
+      rule: "Failed: FAILURE, UNSTABLE, Failed. Without a result: ABORTED, NOT_BUILT, Tekton's None, Jenkins timeouts included. Outliers: {{outliers}} (a repo with enough runs of its own also over its own median). An outlier counts only as an outlier, whatever its result, so the hours here include the outliers the cards above leave out. Each kind's bands show its own split; a node's height only the amount, no comparison between kinds.",
+    },
   },
   quiver: {
     aria: "{{kind}}: each repo from the previous period to now, median duration against failure rate",

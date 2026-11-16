@@ -570,6 +570,22 @@ export const de = {
     noOutliers: "Keine Ausreisser im Zeitraum.",
     stuckRule:
       "Ein Repo mit mindestens {{min}} eigenen Läufen mit Ergebnis und Dauer muss zudem {{factor}}× seinen eigenen Median überschreiten: ein langsames Repo ist kein Ausreisser. Abgebrochene Läufe erscheinen trotzdem.",
+    flow: {
+      title: "Wohin die CI-Stunden fliessen",
+      sub: "CI-Zeit jeder Lauf-Art nach Ausgang, Ausreisser eingerechnet{{sep}}Bandbreite = Stunden",
+      outcome: {
+        succeeded: "Erfolgreich",
+        failed: "Fehlgeschlagen",
+        no_verdict: "Ohne Ergebnis",
+        outlier: "Ausreisser",
+      },
+      tipHours: "CI-Zeit",
+      tipOfKind: "Anteil an {{kind}}",
+      tipOfAll: "Anteil an aller CI-Zeit",
+      aria: "CI-Zeit von der Lauf-Art zum Ausgang: {{parts}}",
+      withOutliers: "{{h}} inkl. Ausreisser",
+      rule: "Fehlgeschlagen: FAILURE, UNSTABLE, Failed. Ohne Ergebnis: ABORTED, NOT_BUILT, Tekton None, Jenkins-Timeouts eingeschlossen. Ausreisser: {{outliers}} (ein Repo mit genug eigenen Läufen zudem über seinem eigenen Median). Ein Ausreisser zählt nur als Ausreisser, egal mit welchem Ergebnis; darum sind hier die Stunden der Ausreisser dabei, die die Karten oben weglassen. Die Bänder jeder Art zeigen ihre eigene Aufteilung, die Höhe eines Knotens nur die Menge: kein Vergleich zwischen den Arten.",
+    },
   },
   quiver: {
     aria: "{{kind}}: jedes Repo von der Vorperiode zu jetzt, Median-Dauer gegen Fehlerquote",

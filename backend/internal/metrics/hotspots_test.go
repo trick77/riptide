@@ -468,6 +468,114 @@ func TestBuildsLeaveAbortedOut(t *testing.T) {
 	}
 }
 
+// A kind's CI time splits by outcome without overlap: a stuck run counts
+// as an outlier only, whether it failed, was aborted or succeeded. The
+// parts sum to the kind's total, the links to the flow's.
+func TestCIFlowSplitsWithoutOverlap(t *testing.T) {
+	ds := data(func(ds *dataset.Dataset) {
+		ds.Runs = runs("kasse/a", 30, 100, 3, "FAILURE")
+		ds.Runs = append(ds.Runs, runs("kasse/c", 2, 200, 2, "ABORTED")...)
+		for i, st := range []string{"FAILURE", "ABORTED", "SUCCESS"} {
+			ds.Runs = append(ds.Runs, run(func(r *dataset.Run) {
+				repo := fmt.Sprintf("kasse/b%d", i)
+				r.Repo, r.PipelineName, r.RunID, r.DurationS, r.Status = s(repo), repo+"/master", "1", n(100000), s(st)
+			}))
+		}
+		for _, r := range runs("kasse/f", 10, 50, 5, "FAILURE") {
+			r.BranchKind, r.Branch = dataset.BranchFeature, "feature/x"
+			ds.Runs = append(ds.Runs, r)
+		}
+		// Clock skew, a finish before the start: no time in any part.
+		ds.Runs = append(ds.Runs, run(func(r *dataset.Run) { r.RunID, r.DurationS, r.Status = "skew", n(-100), s("FAILURE") }))
+		// A kind with only such a run: listed, but no node and no link.
+		ds.Runs = append(ds.Runs, run(func(r *dataset.Run) {
+			r.PipelineName, r.Branch, r.BranchKind, r.DurationS = "kasse-api/release%2F1", "release/1", dataset.BranchRelease, n(-300)
+		}))
+	})
+	b := build(ds, p4(), filter{}, nil)
+	if len(b.Kinds) != 3 || b.Kinds[2].Kind != KindOther || b.Kinds[2].total != 0 {
+		t.Fatalf("kinds = %+v", b.Kinds)
+	}
+	main, feature := b.Kinds[0], b.Kinds[1]
+	if main.succeeded != 2700 || main.WastedSeconds != 300 || main.noVerdict != 400 ||
+		main.OutlierSeconds != 300000 || main.CISeconds != 3400 || main.total != 303400 {
+		t.Errorf("main = %+v", main)
+	}
+	if feature.succeeded != 250 || feature.WastedSeconds != 250 || feature.noVerdict != 0 ||
+		feature.OutlierSeconds != 0 || feature.total != 500 {
+		t.Errorf("feature = %+v", feature)
+	}
+	for _, k := range b.Kinds {
+		if k.succeeded+k.WastedSeconds+k.noVerdict != k.CISeconds || k.CISeconds+k.OutlierSeconds != k.total {
+			t.Errorf("%s: parts do not sum to the total: %+v", k.Kind, k)
+		}
+	}
+	// The skewed run is no duration anywhere: still a failed run, but in no
+	// median, spread or outlier cut.
+	if main.Failed != 5 || main.Duration.N != 30 || kindOf(b.Hotspots, KindMain).Duration.N != 30 {
+		t.Errorf("skewed run as a duration: %+v", main)
+	}
+	if b.Kinds[2].Duration.N != 0 || b.Kinds[2].Runs != 1 {
+		t.Errorf("other = %+v", b.Kinds[2])
+	}
+
+	f := b.CIFlow
+	if f.TotalSeconds != 303900 {
+		t.Errorf("flow total = %v", f.TotalSeconds)
+	}
+	want := []FlowOutcomeShare{
+		{FlowSucceeded, 2950, 2950.0 / 303900}, {FlowFailed, 550, 550.0 / 303900},
+		{FlowNoVerdict, 400, 400.0 / 303900}, {FlowOutlier, 300000, 300000.0 / 303900},
+	}
+	if !slices.Equal(f.Outcomes, want) {
+		t.Errorf("outcomes = %+v", f.Outcomes)
+	}
+	if !slices.Equal(f.Kinds, []FlowKind{{KindMain, 303400, 303400.0 / 303900}, {KindFeature, 500, 500.0 / 303900}}) {
+		t.Errorf("kind nodes = %+v", f.Kinds)
+	}
+	// Each side of the flow reconciles with the total.
+	var kindSum, outcomeSum float64
+	for _, k := range f.Kinds {
+		kindSum += k.Seconds
+	}
+	for _, o := range f.Outcomes {
+		outcomeSum += o.Seconds
+	}
+	if kindSum != f.TotalSeconds || outcomeSum != f.TotalSeconds {
+		t.Errorf("nodes sum to %v and %v, not %v", kindSum, outcomeSum, f.TotalSeconds)
+	}
+	// Only the outcomes a kind has: feature neither aborted nor stuck.
+	var got []string
+	var sum float64
+	ofKind := map[string]float64{}
+	for _, l := range f.Links {
+		got = append(got, l.Kind+">"+l.Outcome)
+		sum += l.Seconds
+		ofKind[l.Kind] += l.ShareOfKind
+	}
+	if !slices.Equal(got, []string{"main>succeeded", "main>failed", "main>no_verdict", "main>outlier",
+		"feature>succeeded", "feature>failed"}) {
+		t.Errorf("links = %v", got)
+	}
+	if sum != f.TotalSeconds {
+		t.Errorf("links sum to %v, not %v", sum, f.TotalSeconds)
+	}
+	for kind, share := range ofKind {
+		expectNear(t, kind+" shares", &share, 1)
+	}
+	if l := f.Links[5]; l.ShareOfKind != 0.5 || l.Share != 250.0/303900 {
+		t.Errorf("feature failed = %+v", l)
+	}
+
+	// No runs, or none with a duration: an empty flow, never a division by 0.
+	empty := build(data(func(ds *dataset.Dataset) {
+		ds.Runs = []dataset.Run{run(func(r *dataset.Run) { r.DurationS = nil })}
+	}), p4(), filter{}, nil).CIFlow
+	if empty.TotalSeconds != 0 || len(empty.Outcomes) != 0 || len(empty.Links) != 0 {
+		t.Errorf("empty flow = %+v", empty)
+	}
+}
+
 // The wait for an agent and the build split only the runs that report when
 // they got one: a run without it, or with one outside the run, has neither,
 // never a wait of 0. Duration stays over all of them; outliers carry their

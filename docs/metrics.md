@@ -449,5 +449,12 @@ broken runs wasted. A run past six times its kind's median and over an
 hour (and, with 3 runs of its repo or more, six times the repo's median) is
 an outlier:
 several repos stuck at the same time point at shared infrastructure, not at
-a repo. The thresholds are starting values, not measured. The shapes are in
+a repo. Where the CI hours went splits each kind's time, outliers
+included, into succeeded, failed (FAILURE, UNSTABLE, Failed), without a
+verdict and outlier, no second twice: an outlier counts as one whatever its
+verdict, so the first three sum to the kind's CI time and all four to its
+time in `ci_flow`; a negative duration (clock skew) is no duration. Hours
+add up across kinds; each share is of the kind's own time or of all of it,
+never one kind's rate against another's. The thresholds are starting
+values, not measured. The shapes are in
 [`backend/api/openapi.yaml`](../backend/api/openapi.yaml).
