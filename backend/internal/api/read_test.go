@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"testing"
 	"time"
@@ -303,6 +304,48 @@ func TestE2ERead(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &f); err != nil || f.PRs.Count != 1 || f.Deploys.Count != 0 {
 		t.Errorf("facts = %s", w.Body)
 	}
+
+	// The analysis: the assessment alone, then a run asked for, then the
+	// run worded and the view on cooldown.
+	w = h.serveUI(newRequest(http.MethodGet, "/api/analysis?team=checkout", nil))
+	expectStatus(t, w, http.StatusOK)
+	validateResponse(t, router, http.MethodGet, "/api/analysis", w)
+	var st struct {
+		State    string          `json:"state"`
+		Running  bool            `json:"running"`
+		Analysis json.RawMessage `json:"analysis"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &st); err != nil || st.State != "none" {
+		t.Fatalf("analysis before a run = %s", w.Body)
+	}
+	ask := func(query string, header bool) *httptest.ResponseRecorder {
+		r := newRequest(http.MethodPost, "/api/analysis?"+query, nil)
+		if header {
+			r.Header.Set(AskHeader, "1")
+		}
+		w := h.serveUI(r)
+		validateResponse(t, router, http.MethodPost, "/api/analysis", w)
+		return w
+	}
+	// Without the page's header, or for a product the data does not know,
+	// nothing is spent.
+	expectStatus(t, ask("team=checkout", false), http.StatusForbidden)
+	expectStatus(t, ask("team=checkout&product=made-up", true), http.StatusUnprocessableEntity)
+	expectStatus(t, ask("team=checkout", true), http.StatusAccepted)
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		w = h.serveUI(newRequest(http.MethodGet, "/api/analysis?team=checkout", nil))
+		if err := json.Unmarshal(w.Body.Bytes(), &st); err != nil {
+			t.Fatal(err)
+		}
+		if !st.Running || time.Now().After(deadline) {
+			break
+		}
+	}
+	validateResponse(t, router, http.MethodGet, "/api/analysis", w)
+	if st.State != "fresh" || string(st.Analysis) == "null" {
+		t.Errorf("analysis after a run = %s", w.Body)
+	}
+	expectStatus(t, ask("team=checkout", true), http.StatusConflict)
 
 	h.store.(*store.Store).Close()
 	for _, path := range []string{"/api/metrics", "/api/facts"} {

@@ -3,8 +3,13 @@
 // computation's tests are the backend's. Synthetic names only.
 
 import type {
+  AnalysisStatus,
+  AnalysisText,
+  Assessment,
   BuildStats,
   Change,
+  Fact,
+  Signal,
   DeployDay,
   DeployFact,
   Facts,
@@ -160,8 +165,13 @@ export function change(
   reason: Change["reason"] = null,
   score: number | null = verdict === "none" ? null : 0,
   directed = true,
+  magnitude: Change["magnitude"] = verdict === "none"
+    ? null
+    : verdict === "same"
+      ? "same"
+      : "minor",
 ): Change {
-  return { prev, verdict, reason, directed, score };
+  return { prev, verdict, reason, directed, score, magnitude };
 }
 
 // A number without a better direction, as the backend sends it: no
@@ -468,22 +478,6 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       rows: [{ label: "kasse", value: 0.75 }],
       reviewed_repos: 1,
     },
-    findings: [
-      {
-        kind: "stage",
-        tone: "hint",
-        stage: "to_prod",
-        run_kind: null,
-        repo: null,
-      },
-      {
-        kind: "first_touch",
-        tone: "talk",
-        stage: null,
-        run_kind: null,
-        repo: null,
-      },
-    ],
     comparison: {
       from: weeks(2 * n)[0].start,
       to: w[0].start,
@@ -676,4 +670,352 @@ export function facts(o: Partial<Facts> = {}): Facts {
     runs: { count: runs.length, rows: runs },
     ...o,
   };
+}
+
+function fact(
+  id: string,
+  label: string,
+  unit: Fact["unit"],
+  value: number | null,
+  prev: number | null = null,
+  verdict: Fact["verdict"] = "none",
+): Fact {
+  return {
+    id,
+    label,
+    unit,
+    value,
+    prev,
+    verdict,
+    magnitude: verdict === "none" ? null : "notable",
+  };
+}
+
+function signal(o: Partial<Signal> & Pick<Signal, "id" | "kind">): Signal {
+  return {
+    tone: "hint",
+    source: "bitbucket",
+    repo: null,
+    run_kind: null,
+    metric: null,
+    stage: null,
+    prev_stage: null,
+    low_sample: false,
+    weight: 1,
+    seen: 0,
+    facts: [],
+    waiting: null,
+    drivers: null,
+    ...o,
+  };
+}
+
+// The assessment of the sample team's closed weeks: a jam that was there
+// before, a steady slow feature build, a review time that doubled through
+// one repo, deploys notably more often, a flaky build resolved, forgotten
+// PRs no wording covers, and Argo CD silent.
+export function assessment(): Assessment {
+  const w = weeks(4);
+  const jam = signal({
+    id: "pr_jam:kasse/kasse-api",
+    kind: "pr_jam",
+    tone: "attention",
+    repo: "kasse/kasse-api",
+    weight: 4,
+    seen: 2,
+    facts: [
+      fact("pr_jam:kasse/kasse-api.long", "open_long", "count", 5, 3, "worse"),
+      fact("pr_jam:kasse/kasse-api.open", "open", "count", 7),
+      fact("pr_jam:kasse/kasse-api.age", "age_p50", "seconds", 12 * 86400),
+    ],
+    waiting: { draft: 0, first_review: 4, review: 0, changes: 1, merge: 0 },
+  });
+  const slow = signal({
+    id: "steady_slow:feature:kasse/kasse-web",
+    kind: "steady_slow",
+    source: "pipeline",
+    repo: "kasse/kasse-web",
+    run_kind: "feature",
+    weight: 3,
+    facts: [
+      fact(
+        "steady_slow:feature:kasse/kasse-web.p50",
+        "build_p50",
+        "seconds",
+        1440,
+        1380,
+        "same",
+      ),
+      fact(
+        "steady_slow:feature:kasse/kasse-web.kind_p50",
+        "kind_p50",
+        "seconds",
+        480,
+      ),
+    ],
+  });
+  return {
+    period: { from: w[0].start, to: w[3].end, weeks: w },
+    previous: { from: w[0].start, to: w[0].start, weeks: [] },
+    gaps: ["argocd"],
+    signals: [
+      signal({
+        id: "data_gap:argocd",
+        kind: "data_gap",
+        tone: "gate",
+        source: "argocd",
+        weight: 10,
+        facts: [fact("data_gap_argocd.silent", "silent_days", "days", 6)],
+      }),
+      jam,
+      signal({
+        id: "change:review_time",
+        kind: "change",
+        tone: "attention",
+        metric: "review_time",
+        weight: 2,
+        facts: [
+          fact(
+            "change:review_time.value",
+            "review_p50",
+            "seconds",
+            9.4 * 3600,
+            4.6 * 3600,
+            "worse",
+          ),
+        ],
+        drivers: [
+          { repo: "kasse/kasse-api", share: 0.7, value: 50400, prev: 18000 },
+        ],
+      }),
+      slow,
+      signal({
+        id: "change:merged_per_week",
+        kind: "change",
+        tone: "good",
+        metric: "merged_per_week",
+        weight: 2,
+        facts: [
+          fact(
+            "change:merged_per_week.value",
+            "merged_per_week",
+            "per_week",
+            11,
+            8.4,
+            "better",
+          ),
+        ],
+      }),
+      signal({
+        id: "resolved:flaky:feature:kasse/policy",
+        kind: "resolved",
+        tone: "good",
+        source: "pipeline",
+        repo: "kasse/policy",
+        run_kind: "feature",
+        metric: "flaky:feature:kasse/policy",
+        weight: 2,
+        facts: [
+          fact(
+            "resolved:flaky:feature:kasse/policy.failure_rate",
+            "failure_rate",
+            "share",
+            0.02,
+            0.14,
+            "better",
+          ),
+        ],
+      }),
+      signal({
+        id: "inactive_prs",
+        kind: "inactive_prs",
+        facts: [fact("inactive_prs.count", "inactive", "count", 4)],
+      }),
+    ],
+    focus: [
+      {
+        repo: "kasse/kasse-api",
+        weight: 7,
+        seen: 2,
+        signals: [jam.id, "change:review_time"],
+        facts: [jam.facts[0]],
+        waiting: jam.waiting,
+      },
+      {
+        repo: "kasse/kasse-web",
+        weight: 3,
+        seen: 0,
+        signals: [slow.id],
+        facts: slow.facts,
+        waiting: null,
+      },
+    ],
+    active: 11,
+    calm: 9,
+    team: [],
+    question: signal({
+      id: "question:first_touch",
+      kind: "question",
+      tone: "talk",
+      metric: "first_touch",
+      facts: [fact("question:first_touch.value", "first_touch", "share", 0.64)],
+    }),
+    ci: {
+      seconds: 82 * 3600,
+      wasted: 12 * 3600,
+      change: {
+        prev: 64 * 3600,
+        verdict: "none",
+        reason: "undirected",
+        directed: false,
+        score: null,
+        magnitude: "notable",
+      },
+      repos: [
+        { repo: "kasse/kasse-web", seconds: 31 * 3600, wasted: 8 * 3600 },
+        { repo: "kasse/kasse-api", seconds: 18 * 3600, wasted: 2 * 3600 },
+        { repo: "kasse/policy", seconds: 11 * 3600, wasted: 3600 },
+      ],
+      other_repos: 8,
+      other_seconds: 22 * 3600,
+      other_wasted: 3600,
+    },
+  };
+}
+
+// The LLM's wording of assessment(), in both languages.
+export function analysisText(): AnalysisText {
+  return {
+    headline: "Ihr liefert öfter – aber Reviews bleiben liegen.",
+    trend: "Über alle aktiven Repos brauchen Reviews länger.",
+    focus: [
+      {
+        repo: "kasse/kasse-api",
+        take: "{{pr_jam:kasse/kasse-api.long}} PRs liegen, und Reviews dauern.",
+        retro: "Warum liegen diese PRs?",
+        lever: "walk_prs",
+      },
+      {
+        repo: "kasse/kasse-web",
+        take: "Konstant der langsamste Build mit {{steady_slow:feature:kasse/kasse-web.p50}}.",
+        retro: null,
+        lever: "inspect_build_log",
+      },
+    ],
+    cards: [
+      {
+        signal: "change:merged_per_week",
+        take: "Mehr PRs kommen durch.",
+        retro: null,
+        lever: "name_what_helped",
+      },
+      {
+        signal: "change:review_time",
+        take: "Seit kurzem bleibt mehr liegen.",
+        retro: "Was war seit dem letzten Mal anders?",
+        lever: "find_what_changed",
+      },
+      {
+        signal: "resolved:flaky:feature:kasse/policy",
+        take: "Die Flaky-Tests sind weg.",
+        retro: null,
+        lever: "name_what_helped",
+      },
+    ],
+    ci: "Mehr als ein Drittel der CI-Zeit geht in kasse-web.",
+    question: "Besprechen wir grosse Änderungen ausserhalb von Bitbucket?",
+  };
+}
+
+// The status /api/analysis answers: no model, the assessment alone, unless
+// overridden.
+export function analysisStatus(
+  o: Partial<AnalysisStatus> = {},
+): AnalysisStatus {
+  return {
+    state: "off",
+    enabled: false,
+    running: false,
+    assessment: assessment(),
+    // As the backend lays out assessment() without an analysis: both focus
+    // repos (their signals covered), the team-wide signals left as cards.
+    layout: {
+      focus: [
+        { repo: "kasse/kasse-api", lever: "walk_prs", tab: "prs" },
+        { repo: "kasse/kasse-web", lever: "inspect_build_log", tab: "runs" },
+      ],
+      cards: [
+        {
+          signal: "change:merged_per_week",
+          column: "good",
+          lever: "name_what_helped",
+        },
+        {
+          signal: "resolved:flaky:feature:kasse/policy",
+          column: "done",
+          lever: "name_what_helped",
+        },
+        { signal: "inactive_prs", column: "bad", lever: "tidy_up" },
+      ],
+      also: [],
+    },
+    analysis: null,
+    failure: null,
+    next_run: null,
+    cooldown_until: null,
+    ...o,
+  };
+}
+
+// A status with a fresh analysis shown, the model set.
+export function analysedStatus(
+  o: Partial<AnalysisStatus> = {},
+): AnalysisStatus {
+  const de = analysisText();
+  return analysisStatus({
+    state: "fresh",
+    enabled: true,
+    next_run: "2026-11-16T05:00:00Z",
+    // As the backend lays out analysisText(): what it words, the forgotten
+    // PRs spotted without words.
+    layout: {
+      focus: [
+        { repo: "kasse/kasse-api", lever: "walk_prs", tab: "prs" },
+        { repo: "kasse/kasse-web", lever: "inspect_build_log", tab: "runs" },
+      ],
+      cards: [
+        {
+          signal: "change:merged_per_week",
+          column: "good",
+          lever: "name_what_helped",
+        },
+        {
+          signal: "change:review_time",
+          column: "bad",
+          lever: "find_what_changed",
+        },
+        {
+          signal: "resolved:flaky:feature:kasse/policy",
+          column: "done",
+          lever: "name_what_helped",
+        },
+      ],
+      also: [{ signal: "inactive_prs", column: "bad", lever: "tidy_up" }],
+    },
+    analysis: {
+      id: 7,
+      created_at: "2026-11-09T05:01:00Z",
+      finished_at: "2026-11-09T05:02:00Z",
+      trigger: "scheduled",
+      model: "mimo-v2.6-pro",
+      cost_usd: "0.007",
+      weeks_old: 0,
+      text: {
+        de,
+        en: { ...de, headline: "You ship more often, but reviews pile up." },
+      },
+      report: { dropped: [], missed: [] },
+    },
+    ...o,
+  });
 }

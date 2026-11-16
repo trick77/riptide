@@ -212,6 +212,32 @@ svg.chart {
   }
 }
 
+/* CI time spent in failed runs, inside a repo's bar: a dark hatch over the
+   repo's own hue, so the hue still tells the repo. */
+.texture-wasted {
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(0, 0, 0, 0.55) 0 2px,
+    transparent 2px 5px
+  );
+}
+
+/* An assessment under way. */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--color-accent-dim);
+  border-top-color: var(--color-accent-strong);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
 @keyframes skeleton-fade {
   50% {
     opacity: 0.45;
@@ -241,7 +267,8 @@ svg.chart {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .skeleton {
+  .skeleton,
+  .spinner {
     animation: none;
   }
   .ring-settle {

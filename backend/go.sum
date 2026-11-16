@@ -30,6 +30,10 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/trick77/ship/kit v0.22.0 h1:TcdewoOha26SzH1ZTTw/QLYzrIHbXxGBJ0ktc5ARixU=
 github.com/trick77/ship/kit v0.22.0/go.mod h1:cE+kQhN2nb5j2ML174YKdGrC41M2GxnILzQLqFupsHE=
+github.com/trick77/toolkit v0.4.0 h1:Wc5p/IH6fiqp3Yuub/USJ7/tE8du7wbUxq9L41/a40U=
+github.com/trick77/toolkit v0.4.0/go.mod h1:8o2jn+f4FxaWh0Z2CLCAuhaEmR+morfaMG/LPjuobJE=
+go.yaml.in/yaml/v3 v3.0.6 h1:zcDfvjXEqTQmpjniUBLc91xYJMB2c4QOFxEF/LCEckM=
+go.yaml.in/yaml/v3 v3.0.6/go.mod h1:HVTZu1O7/Vkt2N+BFy8Zza+lnLsABggaTM2ZpNIGuKg=
 go.yaml.in/yaml/v4 v4.0.0 h1:/LG1pNO84Z4l603j/xMn69CcS5OYhMQ/f7l2LoQUGuw=
 go.yaml.in/yaml/v4 v4.0.0/go.mod h1:aZqd9kCMsGL7AuUv/m/PvWLdg5sjJsZ4oHDEnfPPfY0=
 golang.org/x/sync v0.25.0 h1:dJnifr0nMV8/SBnBvdo4eSGGnrc3O4FFx6IqvtLcmRs=

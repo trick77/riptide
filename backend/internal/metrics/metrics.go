@@ -64,8 +64,6 @@ type Metrics struct {
 	OpenPRs   OpenPRs  `json:"open_prs"`
 	Build     Build    `json:"build"`
 	Costs     Costs    `json:"costs"`
-	// Findings are what the numbers ask the team to look at.
-	Findings []Finding `json:"findings"`
 	// Comparison is the numbers against the previous period.
 	Comparison Comparison `json:"comparison"`
 }
@@ -73,6 +71,13 @@ type Metrics struct {
 // Compute is every metric of the page, ds over p.Period, prev the dataset
 // over p.Previous it is compared with.
 func Compute(ds, prev *dataset.Dataset, p Params) Metrics {
+	m, _ := computeBoth(ds, prev, p)
+	return m
+}
+
+// computeBoth is Compute and the previous period's sections it compared
+// with, for the assessment.
+func computeBoth(ds, prev *dataset.Dataset, p Params) (m, pm Metrics) {
 	// The product as this period's data resolves it, for both periods: a
 	// product the previous one lacks is that product without data, not all.
 	f := newFilter(ds, p)
@@ -82,13 +87,12 @@ func Compute(ds, prev *dataset.Dataset, p Params) Metrics {
 	// The previous period first: every repo's build flags compare with it,
 	// its runs named as this period's.
 	names := newRepoNamer(slices.Concat(ds.Runs, prev.Runs))
-	pm := compute(prev, p.Previous, f, &baseline{repos: names, previous: true})
+	pm = compute(prev, p.Previous, f, &baseline{repos: names, previous: true})
 	base := &baseline{repos: names, kinds: pm.Build.repos, incomplete: buildsIncomplete(ds.Meta, p.Previous.From)}
-	m := compute(ds, p.Period, f, base)
+	m = compute(ds, p.Period, f, base)
 	m.Delivery.Frequency.fillCalendar(p.Period, ds.Meta.DataStart.ArgoCD)
 	m.Comparison = compare(m, pm, p.Previous)
-	m.Findings = findings(m.LeadChain, m.Build, m.Review, m.OpenPRs, m.Comparison.OpenJammed)
-	return m
+	return m, pm
 }
 
 // compute is the page's sections over one period; base as build takes it.

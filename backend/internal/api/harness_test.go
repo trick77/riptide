@@ -22,10 +22,12 @@ import (
 	"github.com/trick77/ship/kit/logging"
 	"github.com/trick77/ship/kit/version"
 
+	"github.com/trick77/riptide/internal/analysis"
 	"github.com/trick77/riptide/internal/config"
 	"github.com/trick77/riptide/internal/dataset"
 	"github.com/trick77/riptide/internal/httpapi"
 	"github.com/trick77/riptide/internal/parse"
+	"github.com/trick77/riptide/internal/store"
 )
 
 // Team keys used across the tests, one per team and source.
@@ -178,6 +180,14 @@ func newHarness(t *testing.T, st Store) *harness {
 		t.Fatalf("%T has no Dataset", st)
 	}
 	deps := Deps{Store: st, Reader: reader, Runtime: rt, Log: log, Now: func() time.Time { return fixedNow }}
+	// Over the real store the analysis is the real service, its model a
+	// fake: the store's SQL and the endpoint's shape under one test.
+	if db, ok := st.(*store.Store); ok {
+		svc := &analysis.Service{Store: db, Load: deps.Dataset, LLM: plainLLM{}, Loc: time.UTC, Log: log,
+			Now: func() time.Time { return fixedNow }}
+		svc.Start(t.Context())
+		deps.Analysis = svc
+	}
 	h.srv = httpapi.New(log, rc.ReadyChecks()...)
 	Register(h.srv, deps)
 	h.ui = httpapi.NewUI(log)
@@ -190,6 +200,18 @@ func (h *harness) serveUI(r *http.Request) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	h.ui.Handler().ServeHTTP(w, r)
 	return w
+}
+
+// plainLLM answers every assessment with a headline and nothing else:
+// valid whatever the signals.
+type plainLLM struct{}
+
+func (plainLLM) Model() string { return "fake-model" }
+
+func (plainLLM) Complete(context.Context, string, string) (analysis.Call, error) {
+	text := analysis.Text{Headline: "Nothing stands out.", Focus: []analysis.FocusText{}, Cards: []analysis.CardText{}}
+	b, err := json.Marshal(analysis.Output{DE: text, EN: text})
+	return analysis.Call{Model: "fake-model", Content: string(b)}, err
 }
 
 type lockedWriter struct {

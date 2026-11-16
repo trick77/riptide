@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -192,14 +193,14 @@ func TestComputeOpenPRsAgainstThePrevious(t *testing.T) {
 	if c := m.Comparison.OpenPRs; c.Verdict != ChangeNone || show(c.Prev) != 3.0 {
 		t.Errorf("open = %+v", c)
 	}
-	found := false
-	for _, f := range m.Findings {
-		if f.Kind == FindingOpenPRs && f.Tone == ToneAttention {
-			found = true
+	// More jammed repos than at the previous end: each jam needs attention.
+	a := Assess(cur, prev, Params{Period: p4(), Previous: PreviousPeriod(4, now, zurich)}, History{})
+	for _, repo := range []string{"kasse/kasse-api", "kasse/kasse-web"} {
+		if !slices.ContainsFunc(a.Signals, func(s Signal) bool {
+			return s.ID == "pr_jam:"+repo && s.Tone == ToneAttention
+		}) {
+			t.Errorf("no attention for %s: %+v", repo, a.Signals)
 		}
-	}
-	if !found {
-		t.Errorf("findings = %+v", m.Findings)
 	}
 }
 

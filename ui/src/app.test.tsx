@@ -8,7 +8,13 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import type { Facts, FlowOutcome, Metrics, RunKind } from "./api";
+import type {
+  AnalysisStatus,
+  Facts,
+  FlowOutcome,
+  Metrics,
+  RunKind,
+} from "./api";
 import { Build } from "./Build";
 import { DayCalendar } from "./calendar";
 import { Costs } from "./Costs";
@@ -20,6 +26,9 @@ import { parseState, stateQuery } from "./state";
 import { Strip } from "./strip";
 import {
   ago,
+  analysedStatus,
+  analysisStatus,
+  assessment,
   change,
   deployFact,
   facts,
@@ -31,7 +40,7 @@ import {
   undirected,
 } from "./test/fixtures";
 
-type Answer = Metrics | Facts | Response;
+type Answer = Metrics | Facts | AnalysisStatus | Response;
 
 // The sample team's answers: per product, bots and search as the backend
 // would compute them.
@@ -87,18 +96,26 @@ function sample(url: URL): Answer {
 }
 
 function mockFetch(
-  answer: (url: URL) => Answer = sample,
+  answer: (url: URL, init?: RequestInit) => Answer = sample,
   teams = ["team-a", "team-b"],
 ) {
   const calls: string[] = [];
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (raw: string) => {
-      calls.push(raw);
+    vi.fn(async (raw: string, init?: RequestInit) => {
+      calls.push(init?.method === "POST" ? `POST ${raw}` : raw);
       const url = new URL(raw, "http://riptide.test");
       if (url.pathname === "/api/teams")
         return new Response(JSON.stringify({ teams }));
-      const a = answer(url);
+      let a = answer(url, init);
+      // The assessment answers on its own unless the test says otherwise:
+      // most answers send the metrics for every path but the facts.
+      if (
+        url.pathname === "/api/analysis" &&
+        !(a instanceof Response) &&
+        !("assessment" in a)
+      )
+        a = analysisStatus();
       return a instanceof Response ? a : new Response(JSON.stringify(a));
     }),
   );
@@ -222,120 +239,160 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
-  it("words the findings and links them to the facts", async () => {
+  it("words the assessment with the model's text", async () => {
     const calls = mockFetch((url) => {
       if (url.pathname === "/api/facts") return facts();
-      const m = metrics();
-      m.lead_chain.stages[0].share = 0.6;
-      m.build.hotspots.kinds[0].repos = [
-        {
-          repo: "kasse/flaky-api",
-          runs: 20,
-          failures: 8,
-          failure_rate: 0.4,
-          failure_change: change("worse", 0.1),
-          wasted_seconds: 7200,
-          duration: spread(20, 600),
-          waiting: noSpread(),
-          building: noSpread(),
-          duration_change: change("same", 600),
-          factor: 1,
-          slow: false,
-          flaky: true,
-          ci_seconds: 12_000,
-          compared: true,
-          prev_complete: true,
-          plotted: true,
-        },
-        {
-          repo: "kasse/slow-api",
-          runs: 12,
-          failures: 0,
-          failure_rate: 0,
-          failure_change: change("same", 0),
-          wasted_seconds: 0,
-          duration: spread(12, 1800),
-          waiting: noSpread(),
-          building: noSpread(),
-          duration_change: change("worse", 600),
-          factor: 3,
-          slow: true,
-          flaky: false,
-          ci_seconds: 21_600,
-          compared: true,
-          prev_complete: true,
-          plotted: true,
-        },
-      ];
-      m.findings = [
-        {
-          kind: "stage",
-          tone: "attention",
-          stage: "coding",
-          run_kind: null,
-          repo: null,
-        },
-        {
-          kind: "flaky",
-          tone: "attention",
-          stage: null,
-          run_kind: "feature",
-          repo: "kasse/flaky-api",
-        },
-        {
-          kind: "slow",
-          tone: "attention",
-          stage: null,
-          run_kind: "feature",
-          repo: "kasse/slow-api",
-        },
-        // a repo the hotspots no longer name: left out, not wrong
-        {
-          kind: "slow",
-          tone: "attention",
-          stage: null,
-          run_kind: "main",
-          repo: "gone",
-        },
-      ];
-      return m;
+      if (url.pathname === "/api/analysis") return analysedStatus();
+      return metrics();
     });
     render(<App />);
-    await screen.findByRole("heading", { name: "Was jetzt?" });
+    const panel = await screen.findByTestId("assessment");
+    const p = within(panel);
     expect(
-      screen.getByText("60 % der Zeit bis PROD liegt in der Etappe «Coding»."),
-    ).toBeInTheDocument();
-    // The thresholds as the backend sent them.
-    expect(
-      screen.getByText(/ab 50 % der Zeit und 10 PRs \(Startwert\)/),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "kasse/flaky-api: 40 % der Feature- und Bugfix-Builds scheitern.",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "kasse/slow-api liefert Feedback 3.0× langsamer als in der Vorperiode.",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "8 von 20 Läufen rot, in der Vorperiode 10 %. Das kostet 2.0 h CI-Zeit und jedes Mal einen Neustart.",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getAllByText("Achtung · Build")).toHaveLength(2);
-    expect(screen.queryByText(/gone/)).toBeNull();
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "Läufe von kasse/flaky-api ansehen →",
+      p.getByRole("heading", {
+        name: "Ihr liefert öfter – aber Reviews bleiben liegen.",
       }),
+    ).toBeInTheDocument();
+    expect(p.getByText("Einordnung: LLM")).toBeInTheDocument();
+    // The stamp and the next scheduled run, both visible.
+    expect(
+      p.getByText(/Einschätzung vom .* · automatisch/),
+    ).toBeInTheDocument();
+    expect(p.getByText(/nächste: /)).toBeInTheDocument();
+    expect(
+      p.getByText(
+        "Argo CD meldet seit 6 Tagen nichts: Aussagen dazu ausgelassen.",
+      ),
+    ).toBeInTheDocument();
+    // The focus, the placeholders filled with the backend's numbers.
+    expect(
+      p.getByText("Im Fokus · 2 von 11 aktiven Repos"),
+    ).toBeInTheDocument();
+    expect(
+      p.getByRole("heading", { name: "kasse/kasse-api" }),
+    ).toBeInTheDocument();
+    expect(
+      p.getByText("5 PRs liegen, und Reviews dauern."),
+    ).toBeInTheDocument();
+    expect(
+      p.getByText("Konstant der langsamste Build mit 24 min."),
+    ).toBeInTheDocument();
+    expect(p.getByText("schon 2 Mal davor")).toBeInTheDocument();
+    expect(p.getByText(/die PRs einzeln durchgehen/)).toBeInTheDocument();
+    // Team-wide, each card in its column.
+    expect(
+      p.getByText("PRs gemerged pro Woche: deutlich besser"),
+    ).toBeInTheDocument();
+    expect(
+      p.getByText("Treiber: kasse/kasse-api trägt 70 % der Zunahme"),
+    ).toBeInTheDocument();
+    expect(p.getByText("kasse/policy (flaky): erledigt")).toBeInTheDocument();
+    // What no wording covers is still spotted.
+    expect(p.getByText("Vergessene PRs")).toBeInTheDocument();
+    expect(p.getByText("Für die nächste Retro")).toBeInTheDocument();
+    // On the focus block and gathered in the retro box.
+    expect(p.getAllByText("Warum liegen diese PRs?")).toHaveLength(2);
+    expect(p.getByText(/mimo-v2.6-pro · 0.007 USD/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/\{\{|\}\}/);
+    fireEvent.click(
+      p.getByRole("button", { name: "Fakten zu kasse/kasse-web ansehen →" }),
     );
-    expect(window.location.search).toBe("?q=kasse%2Fflaky-api&tab=runs");
+    expect(window.location.search).toBe("?q=kasse%2Fkasse-web&tab=runs");
     await waitFor(() =>
-      expect(factsCalls(calls).at(-1)).toMatch(/&q=kasse%2Fflaky-api$/),
+      expect(factsCalls(calls).at(-1)).toMatch(/&q=kasse%2Fkasse-web$/),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Zum Fluss →" }));
+  });
+
+  it("shows the rules' own words without a model", async () => {
+    mockFetch();
+    render(<App />);
+    const p = within(await screen.findByTestId("assessment"));
+    expect(p.getByText("nur Regeln")).toBeInTheDocument();
+    expect(p.queryByRole("button", { name: /einschätzen/ })).toBeNull();
+    expect(
+      p.getByText(
+        "kasse/kasse-api: PRs stauen sich; bereit bis Approval: deutlich schlechter",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      p.getByText("PRs gemerged pro Woche: deutlich besser"),
+    ).toBeInTheDocument();
+    expect(
+      p.getByText(
+        "kasse/kasse-web: 31.0 h von 82.0 h CI-Zeit, davon 8.0 h in roten Läufen.",
+      ),
+    ).toBeInTheDocument();
+    // The question to talk about, no retro questions of a model.
+    expect(
+      p.getByText(
+        "64 % Approvals ohne vorherigen Kommentar: Besprechen wir grosse Änderungen ausserhalb von Bitbucket?",
+      ),
+    ).toBeInTheDocument();
+    expect(p.getByText(/Regelbefunde aus riptide/)).toBeInTheDocument();
+  });
+
+  it("asks for an assessment and shows it running", async () => {
+    let asked = false;
+    const calls = mockFetch((url, init) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis") {
+        if (init?.method === "POST") asked = true;
+        return analysisStatus({
+          state: "none",
+          enabled: true,
+          running: asked,
+        });
+      }
+      return metrics();
+    });
+    render(<App />);
+    const p = within(await screen.findByTestId("assessment"));
+    fireEvent.click(
+      p.getByRole("button", { name: "Für diesen Zeitraum einschätzen" }),
+    );
+    expect(await p.findByRole("button", { name: "läuft …" })).toBeDisabled();
+    expect(p.getByText(/läuft, meist unter einer Minute/)).toBeInTheDocument();
+    expect(calls.filter((c) => c.startsWith("POST /api/analysis"))).toEqual([
+      "POST /api/analysis?team=team-a&weeks=4&tz=Europe%2FZurich",
+    ]);
+  });
+
+  it("keeps polling a run after a failed poll", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let polls = 0;
+      mockFetch((url) => {
+        if (url.pathname === "/api/facts") return facts();
+        if (url.pathname === "/api/analysis") {
+          polls++;
+          if (polls === 1)
+            return analysisStatus({
+              state: "none",
+              enabled: true,
+              running: true,
+            });
+          // A gateway hiccup mid-run, then the finished analysis.
+          if (polls === 2) return new Response("bad gateway", { status: 502 });
+          return analysedStatus();
+        }
+        return metrics();
+      });
+      render(<App />);
+      const p = within(await screen.findByTestId("assessment"));
+      await p.findByRole("button", { name: "läuft …" });
+      // The failed poll plans the next one only once it has failed, an
+      // interval later: advance until the third poll came.
+      for (let i = 0; i < 8 && polls < 3; i++)
+        await vi.advanceTimersByTimeAsync(3100);
+      expect(
+        await p.findByRole("heading", {
+          name: "Ihr liefert öfter – aber Reviews bleiben liegen.",
+        }),
+      ).toBeInTheDocument();
+      expect(polls).toBeGreaterThanOrEqual(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("switches to English and keeps the choice", async () => {
@@ -404,16 +461,30 @@ describe("App", () => {
     expect((await row("d")).getByText("spike")).toBeInTheDocument();
   });
 
-  it("says so when no rule fires", async () => {
-    mockFetch((url) =>
-      url.pathname === "/api/facts" ? facts() : metrics(4, { findings: [] }),
-    );
+  it("says so when nothing stands out", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis") {
+        const a = assessment();
+        return analysisStatus({
+          assessment: {
+            ...a,
+            gaps: [],
+            signals: [],
+            focus: [],
+            question: null,
+            ci: { ...a.ci, seconds: 0, repos: [], other_repos: 0 },
+          },
+        });
+      }
+      return metrics(4);
+    });
     render(<App />);
-    expect(
-      await screen.findByText(
-        "Keine Auffälligkeiten nach den Regeln, die Riptide anwendet.",
-      ),
-    ).toBeInTheDocument();
+    const p = within(await screen.findByTestId("assessment"));
+    expect(p.getByText("Nichts hakt.")).toBeInTheDocument();
+    expect(p.getByText("Nichts bemerkenswert besser.")).toBeInTheDocument();
+    expect(p.queryByText("Für die nächste Retro")).toBeNull();
+    expect(p.queryByText("Wohin die CI-Zeit geht")).toBeNull();
   });
 
   it("asks for a product and bots, keeps them in the URL", async () => {
@@ -1236,7 +1307,8 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "12 W" }));
     await screen.findByRole("heading", { name: "Was jetzt?" });
     fireEvent.click(screen.getByRole("button", { name: "4 W" }));
-    await screen.findByText(/KW 43–46/);
+    // The page's scope and the assessment's closed weeks both name it.
+    await screen.findAllByText(/KW 43–46/);
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
@@ -1722,34 +1794,13 @@ describe("open PRs", () => {
     expect(screen.queryByText(/inaktiv:/)).toBeNull();
   });
 
-  it("words the finding and links the first repo's open PRs", async () => {
-    const calls = mockFetch((url) => {
-      if (url.pathname === "/api/facts") return facts();
-      return metrics(4, {
-        findings: [
-          {
-            kind: "open_prs",
-            tone: "attention",
-            stage: null,
-            run_kind: null,
-            repo: null,
-          },
-        ],
-      });
-    });
+  it("links a jammed focus repo to its open PRs", async () => {
+    const calls = mockFetch();
     render(<App />);
-    expect(
-      await screen.findByText("In 1 Repo stauen sich die PRs."),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Am meisten in kasse/kasse-api: 3 PRs seit 7 Tagen oder länger offen, im Median 12.0 Tage. Noch ohne erstes Review: 2 der 3 PRs im Stau.",
-      ),
-    ).toBeInTheDocument();
+    const p = within(await screen.findByTestId("assessment"));
+    expect(p.getByText("erstes Review 4")).toBeInTheDocument();
     fireEvent.click(
-      screen.getByRole("button", {
-        name: "Offene PRs von kasse/kasse-api ansehen →",
-      }),
+      p.getByRole("button", { name: "Fakten zu kasse/kasse-api ansehen →" }),
     );
     await waitFor(() =>
       expect(factsCalls(calls).at(-1)).toMatch(/&q=kasse%2Fkasse-api$/),

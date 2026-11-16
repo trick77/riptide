@@ -19,7 +19,8 @@ cd backend && go test -race ./...    # DB tests skip without SHIP_TEST_DSN (comp
 - **`riptide.json` is config, not data** (teams + automation rules, PR-edited, hot-reloaded). Never into Postgres.
 - **Team keys: separate file**, mounted in prod, never committed. The bearer **is** the team identity: every webhook tagged `team = caller_team`.
 - **No `service` column, no `service_id` on the wire.** Aggregate by repo / pipeline / app, org-wide by `team`. Dropped; never re-propose.
-- **Metrics computed on read.** No aggregation tables, no rollup jobs in v1.
+- **Metrics computed on read.** No aggregation tables, no rollup jobs in v1. One exception: `team_analyses` and its Monday schedule, LLM text about computed numbers, never the source of one (kept for cost, history, follow-up).
+- **LLM analysis: Go judges, the model words.** Signals, verdicts and focus repos come from `metrics.Assess`. The model sees aliased repos, writes numbers only as `{{fact}}` and picks levers only as glossary keys. A lever never presumes a cause riptide cannot see: tests in a build, a merge freeze behind a jam (user). Here only `mimo-v2.6-pro`; `gpt-6.1-sol` lives in the infra repo, through LiteLLM.
 - **No computation in the browser.** `internal/metrics` computes every number, bucket, percentile, threshold, classification, sort, search and top-N; the UI renders, formats (de-CH) and scales charts only. One source of truth, tested in Go against real Postgres. Weeks are the viewer's calendar: the UI sends `tz`.
 - **Deploy↔commit join = full image reference**, per `docs/correlating-deploys-to-commits.md`. Image **tags are not SHAs**: measured 0 of 4 936 refs, all semver; never parse a SHA out of a tag.
 - **Read "Reading the event tables" in `docs/metrics.md` before any query.** `repo:refs_changed` is ref movement (~15 000 of 16 295 master events were release tooling), and `change_type` means something only on PR events. Never infer intent from an event-type name.

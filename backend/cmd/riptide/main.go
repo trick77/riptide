@@ -5,6 +5,7 @@
 //	riptide version            print the version and exit
 //	riptide onboard-bitbucket  create, update or remove the riptide webhook on Bitbucket repos
 //	riptide check-onboarding   list which repos, pipelines and apps reported in the last hour
+//	riptide analyse            word one team's assessment with the LLM (-dry-run: print its input)
 //	riptide -healthcheck       probe /healthz, exit 0 on a 2xx (liveness: the container healthcheck)
 //	riptide -readycheck        probe /readyz, exit 0 on a 2xx (readiness: the database answers)
 //
@@ -30,6 +31,7 @@ import (
 	"github.com/trick77/ship/kit/run"
 	"github.com/trick77/ship/kit/version"
 
+	"github.com/trick77/riptide/internal/analysis"
 	"github.com/trick77/riptide/internal/api"
 	"github.com/trick77/riptide/internal/config"
 	"github.com/trick77/riptide/internal/httpapi"
@@ -38,7 +40,7 @@ import (
 	"github.com/trick77/riptide/internal/store"
 )
 
-const usage = "usage: riptide [serve|migrate|version|onboard-bitbucket|check-onboarding|-healthcheck|-readycheck]"
+const usage = "usage: riptide [serve|migrate|version|onboard-bitbucket|check-onboarding|analyse|-healthcheck|-readycheck]"
 
 // serviceName is stamped on every log line: the image name.
 const serviceName = "riptide"
@@ -62,6 +64,10 @@ func main() {
 		fmt.Println(version.String())
 	case "onboard-bitbucket":
 		os.Exit(onboarding.Main(args, os.Stdout, os.Stderr))
+	case "analyse":
+		err = withSettings(func(s settings.Settings, log *slog.Logger) error {
+			return analyse(s, log, args, os.Stdout)
+		})
 	case "check-onboarding":
 		err = withSettings(func(s settings.Settings, log *slog.Logger) error {
 			return checkOnboarding(s, log, args, os.Stdout)
@@ -210,6 +216,12 @@ func serve(s settings.Settings, log *slog.Logger) error {
 	go rt.Run(ctx, s.ReloadInterval)
 
 	deps := api.Deps{Store: db, Reader: db, Runtime: rt, Log: log}
+	svc, err := analysisService(ctx, s, db, deps, log)
+	if err != nil {
+		return err
+	}
+	deps.Analysis = svc
+	go svc.Schedule(ctx, deps.TeamNames)
 	collector := httpapi.New(log, db.ReadyChecks()...)
 	api.Register(collector, deps)
 	// The read API gets a listener of its own, never a route on the
@@ -235,6 +247,24 @@ func serve(s settings.Settings, log *slog.Logger) error {
 	}
 	log.Info("riptide_stopped")
 	return nil
+}
+
+// analysisService builds the assessments' service, its model from
+// BACKEND_ANALYSIS_MODEL; without one the page shows the assessment alone.
+// A model named but not usable (no key, no JSON schema) refuses the start.
+func analysisService(ctx context.Context, s settings.Settings, db *store.Store, deps api.Deps, log *slog.Logger) (
+	*analysis.Service, error) {
+	svc := &analysis.Service{Store: db, Load: deps.Dataset, Loc: s.AnalysisLoc, Log: log}
+	if s.AnalysisModel != "" {
+		w, err := analysis.NewWire(s.AnalysisModel, s.AnalysisReasoning, s.Lookup, log, nil)
+		if err != nil {
+			return nil, err
+		}
+		svc.LLM = w
+	}
+	svc.Start(ctx)
+	log.Info("analysis_configured", "model", s.AnalysisModel, "tz", s.AnalysisLoc.String())
+	return svc, nil
 }
 
 // shutdownTimeout is how long a stopping listener drains in-flight requests.

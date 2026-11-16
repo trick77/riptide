@@ -38,6 +38,18 @@ type Settings struct {
 	// Loopback by default, so in the pod only the auth proxy sidecar
 	// reaches it.
 	UIAddr string
+	// AnalysisModel is the llmwire profile id that words the team
+	// assessments; empty switches the analysis off. Its key comes from
+	// llmwire's own LLMWIRE_* variables, read through Lookup.
+	AnalysisModel string
+	// AnalysisReasoning is the model's effort level; empty is llmwire's
+	// balanced intent for the model.
+	AnalysisReasoning string
+	// AnalysisLoc is the calendar the assessments' closed weeks and the
+	// schedule run in.
+	AnalysisLoc *time.Location
+	// Lookup is the environment with ./.env, for llmwire's variables.
+	Lookup Lookup
 }
 
 // Lookup reads one variable; os.LookupEnv in production, a map in tests.
@@ -111,6 +123,13 @@ func Load(lookup Lookup) (Settings, error) {
 		return Settings{}, fmt.Errorf("BACKEND_CONFIG_RELOAD_SECONDS must be a number of seconds in (0, 86400], got %q", raw)
 	}
 	s.ReloadInterval = time.Duration(secs * float64(time.Second))
+	s.AnalysisModel = get("BACKEND_ANALYSIS_MODEL", "")
+	s.AnalysisReasoning = get("BACKEND_ANALYSIS_REASONING", "")
+	tz := get("BACKEND_ANALYSIS_TZ", "Europe/Zurich")
+	if s.AnalysisLoc, err = time.LoadLocation(tz); err != nil {
+		return Settings{}, fmt.Errorf("BACKEND_ANALYSIS_TZ must be an IANA time zone, got %q", tz)
+	}
+	s.Lookup = lookup
 	return s, nil
 }
 

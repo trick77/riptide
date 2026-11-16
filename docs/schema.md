@@ -2,7 +2,7 @@
 
 # Database schema
 
-4 tables, 4 views; the diagram is at the end. Go types are the `model.go` structs whose rows they hold.
+5 tables, 4 views; the diagram is at the end. Go types are the `model.go` structs whose rows they hold.
 
 ## argocd_events
 
@@ -151,6 +151,46 @@ Indexes:
 - `ix_pipeline_events_team_occurred` (`team`, `occurred_at`)
 - `uq_pipeline_events_delivery_id` (`delivery_id`) unique
 
+## team_analyses
+
+Go types:
+
+- `store.Analysis` (internal/store): Analysis is one attempt at wording a team's assessment with the LLM: the view and closed weeks it covers, the assessment worded, the answer.
+
+| Column | Type | Null | Default | PK |
+| --- | --- | --- | --- | --- |
+| `id` | bigint | no | `nextval('team_analyses_id_seq'::regclass)` | 1 |
+| `team` | text | no |  |  |
+| `weeks` | integer | no |  |  |
+| `product` | text | no | `''::text` |  |
+| `bots` | boolean | no | `false` |  |
+| `period_from` | timestamp with time zone | no |  |  |
+| `period_to` | timestamp with time zone | no |  |  |
+| `trigger` | text | no |  |  |
+| `status` | text | no |  |  |
+| `model` | text | no |  |  |
+| `input_hash` | text | yes |  |  |
+| `assessment` | jsonb | yes |  |  |
+| `output` | jsonb | yes |  |  |
+| `report` | jsonb | yes |  |  |
+| `input_tokens` | bigint | yes |  |  |
+| `output_tokens` | bigint | yes |  |  |
+| `cost_nano_usd` | bigint | yes |  |  |
+| `error` | text | yes |  |  |
+| `attempts` | integer | no | `1` |  |
+| `created_at` | timestamp with time zone | no | `now()` |  |
+| `finished_at` | timestamp with time zone | yes |  |  |
+
+Indexes:
+
+- `team_analyses_scheduled` (`team`, `weeks`, `product`, `bots`, `period_to`) unique where `trigger = 'scheduled'::text`
+- `team_analyses_view` (`team`, `weeks`, `product`, `bots`, `created_at`)
+
+Checks:
+
+- `CONSTRAINT team_analyses_status_check CHECK (status = ANY (ARRAY['running'::text, 'done'::text, 'failed'::text]))`
+- `CONSTRAINT team_analyses_trigger_check CHECK (trigger = ANY (ARRAY['scheduled'::text, 'manual'::text]))`
+
 ## Views
 
 - `commit_sightings` (view)
@@ -271,5 +311,28 @@ erDiagram
         character_varying[] image_refs
         character_varying build_type
         timestamp_with_time_zone agent_started_at
+    }
+    team_analyses {
+        bigint id PK
+        text team
+        integer weeks
+        text product
+        boolean bots
+        timestamp_with_time_zone period_from
+        timestamp_with_time_zone period_to
+        text trigger
+        text status
+        text model
+        text input_hash
+        jsonb assessment
+        jsonb output
+        jsonb report
+        bigint input_tokens
+        bigint output_tokens
+        bigint cost_nano_usd
+        text error
+        integer attempts
+        timestamp_with_time_zone created_at
+        timestamp_with_time_zone finished_at
     }
 ```

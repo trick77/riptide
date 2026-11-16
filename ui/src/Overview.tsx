@@ -1,245 +1,32 @@
-// The page's head: what the numbers ask the team to look at, then the
-// DORA numbers Riptide measures, each against the previous period.
+// The page's head: the assessment of the closed weeks (what the numbers
+// raise, worded by an LLM where a model is set), then the DORA numbers
+// Riptide measures, each against the previous period.
 
-import type { TFunction } from "i18next";
-import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import type { Finding, Metrics } from "./api";
-import { stageNames } from "./Flow";
+import type { Metrics, Query } from "./api";
+import { Assessment } from "./Assessment";
 import { dur, durParts, fullDate, num, pct, stage } from "./format";
 import type { Tab } from "./state";
 import { Strip } from "./strip";
 import {
   Compare,
   Direction,
-  Pill,
   SectionHead,
   SubHead,
   Tile,
-  type Tone,
   type Why,
   WhyPanel,
 } from "./ui";
 
 type Props = {
   m: Metrics;
+  query: Query;
   why: string | null;
   onWhy: (key: string) => void;
   onFacts: (tab: Tab, q: string) => void;
 };
 
-const TONE: Record<Finding["tone"], Tone> = {
-  attention: "warn",
-  hint: "none",
-  talk: "none",
-};
-
-// A finding's words: the headline, what it rests on, what to do, the rule
-// that fired, and where its facts are.
-type Words = {
-  area: string;
-  title: ReactNode;
-  body: ReactNode;
-  lever: [string, ReactNode];
-  rule: ReactNode;
-  link: [string, () => void];
-};
-
-function words(
-  t: TFunction,
-  f: Finding,
-  m: Metrics,
-  onFacts: Props["onFacts"],
-  toFlow: () => void,
-): Words | null {
-  const prod = stage(m.delivery.production_stage);
-  const h = m.build.hotspots;
-  if (f.kind === "stage") {
-    const s = m.lead_chain.stages.find((x) => x.key === f.stage);
-    if (!s) return null;
-    const [name, desc] = stageNames(t, m.lead_chain, prod)[s.key];
-    const lc = m.lead_chain;
-    return {
-      area: t("overview.area.flow"),
-      title:
-        s.key === "to_prod"
-          ? t("overview.stageTitleProd", { share: pct(s.share), prod })
-          : t("overview.stageTitle", { share: pct(s.share), prod, name }),
-      body:
-        s.key === "to_prod"
-          ? t("overview.stageBodyProd", {
-              prod,
-              before: dur(lc.before_prod),
-              wait: dur(s.p50),
-            })
-          : t("overview.stageBody", {
-              desc,
-              p50: dur(s.p50),
-              p90: dur(s.p90),
-            }),
-      lever: [t("common.lever"), t(`overview.stageLever.${s.key}`)],
-      rule:
-        f.tone === "attention"
-          ? t("overview.ruleAttention", {
-              share: pct(lc.attention_share),
-              min: lc.min_prs,
-            })
-          : s.low_sample
-            ? t("overview.ruleLowSample", { min: lc.min_prs })
-            : t("overview.ruleHint", {
-                share: pct(lc.attention_share),
-                min: lc.min_prs,
-              }),
-      link: [t("overview.toFlow"), toFlow],
-    };
-  }
-  if (f.kind === "first_touch") {
-    const r = m.review;
-    return {
-      area: t("overview.area.review"),
-      title: t("overview.firstTouchTitle", { rate: pct(r.first_touch_rate) }),
-      body: t("overview.firstTouchBody"),
-      lever: [t("common.teamQuestion"), t("overview.firstTouchQuestion")],
-      rule: t("overview.firstTouchRule", {
-        n: r.approved_on_first_touch,
-        total: r.approved,
-      }),
-      link: [t("overview.toReview"), toFlow],
-    };
-  }
-  if (f.kind === "open_prs") {
-    const o = m.open_prs;
-    // The backend sorts the repos: jammed first, the most long-open PRs
-    // first among them.
-    const top = o.repos[0];
-    if (!top?.jammed) return null;
-    return {
-      area: t("overview.area.flow"),
-      title: t("overview.openTitle", { count: o.jammed }),
-      body: t("overview.openBody", {
-        repo: top.repo,
-        n: top.long,
-        days: o.long_days,
-        p50: dur(top.age.p50),
-        first: o.jammed_waiting.first_review,
-        jammed: o.jammed_long,
-      }),
-      lever: [t("common.lever"), t("overview.openLever")],
-      rule:
-        f.tone === "attention"
-          ? t("overview.openRuleAttention", {
-              min: o.jam_min,
-              days: o.long_days,
-              prev: num(m.comparison.open_jammed.prev ?? 0),
-            })
-          : t("overview.openRuleHint", {
-              min: o.jam_min,
-              days: o.long_days,
-            }),
-      link: [
-        t("overview.openPRsOf", { repo: top.repo }),
-        () => onFacts("prs", top.repo),
-      ],
-    };
-  }
-  const k = h.kinds.find((x) => x.kind === f.run_kind);
-  const repo = k?.repos.find((x) => x.repo === f.repo);
-  if (!k || !repo) return null;
-  const kind = t(`build.kind.${k.kind}`);
-  const link: [string, () => void] = [
-    t("overview.runsOf", { repo: repo.repo }),
-    () => onFacts("runs", repo.repo),
-  ];
-  if (f.kind === "flaky")
-    return {
-      area: t("overview.area.build"),
-      title: t("overview.flakyTitle", {
-        repo: repo.repo,
-        rate: pct(repo.failure_rate),
-        kind,
-      }),
-      body: t("overview.flakyBody", {
-        failures: repo.failures,
-        runs: repo.runs,
-        prevRate: pct(repo.failure_change.prev),
-        hours: num(repo.wasted_seconds / 3600, 1),
-      }),
-      lever: [t("common.lever"), t("overview.flakyLever")],
-      rule: t("overview.flakyRule", {
-        factor: num(h.flaky_factor, 1),
-        points: num(h.flaky_min_points * 100, 0),
-        failures: h.flaky_min_failures,
-        min: h.min_runs,
-      }),
-      link,
-    };
-  return {
-    area: t("overview.area.build"),
-    title: t("overview.slowTitle", {
-      repo: repo.repo,
-      factor: num(repo.factor ?? 0, 1),
-    }),
-    body: t("overview.slowBody", {
-      kind,
-      p50: dur(repo.duration.p50),
-      prevP50: dur(repo.duration_change.prev),
-    }),
-    lever: [t("common.lever"), t("overview.slowLever")],
-    rule: t("overview.slowRule", {
-      factor: num(h.slow_factor, 1),
-      min: h.min_runs,
-    }),
-    link,
-  };
-}
-
-function Findings({ m, onFacts }: Pick<Props, "m" | "onFacts">) {
-  const { t } = useTranslation();
-  const toFlow = () => document.getElementById("fluss")?.scrollIntoView?.();
-  const items = m.findings
-    .map((f) => [f, words(t, f, m, onFacts, toFlow)] as const)
-    .filter((x): x is [Finding, Words] => x[1] != null);
-  if (!items.length)
-    return <p className="m-0 text-[13.5px] text-muted">{t("overview.none")}</p>;
-  return (
-    <ul className="m-0 grid list-none grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-3 p-0">
-      {items.map(([f, w], i) => (
-        <li
-          key={i}
-          className={`flex min-w-0 flex-col gap-2 rounded-ui-lg border border-l-[3px] border-border bg-panel px-4 py-3.5 ${
-            f.tone === "attention"
-              ? "border-l-ochre"
-              : "border-l-elevated-border"
-          }`}
-        >
-          <span className="self-start">
-            <Pill tone={TONE[f.tone]}>
-              {t(`overview.tone.${f.tone}`)} · {w.area}
-            </Pill>
-          </span>
-          <h4 className="m-0 text-[15px] leading-snug font-medium text-ink">
-            {w.title}
-          </h4>
-          <p className="m-0 text-[13px] text-ink-dim">{w.body}</p>
-          <p className="m-0 text-[13px] text-ink-dim">
-            <span className="font-medium text-ink">{w.lever[0]}:</span>{" "}
-            {w.lever[1]}
-          </p>
-          <p className="m-0 text-[11.5px] text-muted">{w.rule}</p>
-          <button
-            type="button"
-            onClick={w.link[1]}
-            className="no-print mt-auto self-start border-0 bg-transparent p-0 text-left text-[13px] text-accent-strong hover:underline"
-          >
-            {w.link[0]}
-          </button>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-export function Overview({ m, why, onWhy, onFacts }: Props) {
+export function Overview({ m, query, why, onWhy, onFacts }: Props) {
   const { t } = useTranslation();
   const bots = m.bots;
   const prod = stage(m.delivery.production_stage);
@@ -325,7 +112,7 @@ export function Overview({ m, why, onWhy, onFacts }: Props) {
         title={t("overview.title")}
         lead={t("overview.intro")}
       />
-      <Findings m={m} onFacts={onFacts} />
+      <Assessment query={query} m={m} onFacts={onFacts} />
       <Strip m={m} />
 
       <SubHead
