@@ -433,7 +433,12 @@ func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
 		out.Hotspots.Kinds = append(out.Hotspots.Kinds, k)
 		out.Hotspots.Outliers = append(out.Hotspots.Outliers, outliers...)
 	}
-	out.CIFlow = ciFlow(out.Kinds)
+	// The previous period's flow is never drawn: no repo split for it.
+	repos := out.repos
+	if base.previous {
+		repos = nil
+	}
+	out.CIFlow = ciFlow(out.Kinds, repos)
 	if !base.previous {
 		out.hint(by)
 	}
@@ -477,6 +482,24 @@ type CIFlow struct {
 	// Links are the kinds' outcomes with time, by kind as Kinds, then by
 	// outcome as Outcomes.
 	Links []FlowLink `json:"links"`
+	// Repos are the FlowTopRepos repos with the most time across kinds,
+	// outliers included like every other number here; the rest fold into
+	// Other*. No verdict: more CI time can be more work.
+	Repos        []FlowRepo `json:"repos"`
+	OtherRepos   int        `json:"other_repos"`
+	OtherSeconds float64    `json:"other_seconds"`
+	OtherFailed  float64    `json:"other_failed"`
+}
+
+// FlowTopRepos are the repos CIFlow names; the rest fold into one.
+const FlowTopRepos = 3
+
+// FlowRepo is one repo's time across kinds, outliers included; Failed is
+// its part in the failed outcome.
+type FlowRepo struct {
+	Repo    string  `json:"repo"`
+	Seconds float64 `json:"seconds"`
+	Failed  float64 `json:"failed"`
 }
 
 // FlowKind is one kind's time, all its outcomes.
@@ -513,8 +536,8 @@ func outcomeSeconds(b BuildStats) [4]float64 {
 
 var flowOutcomes = [4]string{FlowSucceeded, FlowFailed, FlowNoVerdict, FlowOutlier}
 
-func ciFlow(kinds []BuildStats) CIFlow {
-	f := CIFlow{Kinds: []FlowKind{}, Outcomes: []FlowOutcomeShare{}, Links: []FlowLink{}}
+func ciFlow(kinds []BuildStats, repos map[string]map[string]*repoRuns) CIFlow {
+	f := CIFlow{Kinds: []FlowKind{}, Outcomes: []FlowOutcomeShare{}, Links: []FlowLink{}, Repos: []FlowRepo{}}
 	var sums [4]float64
 	for _, b := range kinds {
 		f.TotalSeconds += b.total
@@ -544,6 +567,33 @@ func ciFlow(kinds []BuildStats) CIFlow {
 				})
 			}
 		}
+	}
+	by := map[string]*FlowRepo{}
+	for _, kind := range repos {
+		for repo, rr := range kind {
+			if by[repo] == nil {
+				by[repo] = &FlowRepo{Repo: repo}
+			}
+			by[repo].Seconds += rr.ci + rr.stuck
+			by[repo].Failed += rr.wasted
+		}
+	}
+	all := make([]FlowRepo, 0, len(by))
+	for _, r := range by {
+		if r.Seconds > 0 {
+			all = append(all, *r)
+		}
+	}
+	slices.SortFunc(all, func(x, y FlowRepo) int { return cmp.Or(cmp.Compare(y.Seconds, x.Seconds), cmp.Compare(x.Repo, y.Repo)) })
+	for _, r := range all {
+		// A run without a repo name has no row of its own: it folds.
+		if len(f.Repos) < FlowTopRepos && r.Repo != "" {
+			f.Repos = append(f.Repos, r)
+			continue
+		}
+		f.OtherRepos++
+		f.OtherSeconds += r.Seconds
+		f.OtherFailed += r.Failed
 	}
 	return f
 }
@@ -922,13 +972,14 @@ type repoRuns struct {
 	// timed are the runs with a verdict and a duration, outliers included.
 	timed, counted, failures int
 	wasted                   float64
-	// ci is every run's time, those without a verdict included.
-	ci float64
+	// ci is every run's time, those without a verdict included; stuck the
+	// outliers' time, in no other number of the repo.
+	ci, stuck float64
 }
 
 // byRepo counts the runs per repo. A run without a verdict is no run
 // here, nor its duration, only its CI time; an outlier counts as a run
-// and in the failure rate, but none of its time does.
+// and in the failure rate, its time only in stuck, never in ci or wasted.
 func (kr kindRuns) byRepo() map[string]*repoRuns {
 	repos := map[string]*repoRuns{}
 	for i, r := range kr.runs {
@@ -937,7 +988,9 @@ func (kr kindRuns) byRepo() map[string]*repoRuns {
 			rr = &repoRuns{}
 			repos[kr.repos[i]] = rr
 		}
-		if !kr.stuck[i] {
+		if kr.stuck[i] {
+			rr.stuck += seconds(r)
+		} else {
 			rr.ci += seconds(r)
 		}
 		v := kr.verdicts[i]

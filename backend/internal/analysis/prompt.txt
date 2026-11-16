@@ -5,7 +5,6 @@ The user message is JSON:
 - focus_candidates: the repos with the most movement, ranked by weight.
 - team: every compared team number, for the trend.
 - mandatory: signal ids your answer must cover, in focus (through their repo) or in cards.
-- ci: where the CI time went, by repo. It has no better direction.
 - question: the one undirected number to ask about, or null.
 - labels: what each fact label means. levers: what each lever says. stages: what each stage key means; write the stage's name in plain words, never its key (not "to_prod").
 - Repos appear only as aliases (repo_a, repo_b, ...). Use the aliases as they are.
@@ -22,7 +21,6 @@ cards: at most 4 signals without a repo (or a resolved one), by id, mandatory on
   take: one sentence, at most 140 characters.
   retro: for a worsening, an open question at most 100 characters ("Why is this worse than last time? What was different?"); otherwise null.
   lever: one key from that signal's levers.
-ci: one sentence, at most 140 characters, where the CI time goes, without calling it good or bad; empty when ci.seconds is 0.
 question: one open question, at most 120 characters, about the question signal; empty when it is null.
 
 Numbers: never write a digit. Refer to a fact as {{id}} with its exact id from the input, e.g. {{pr_jam:repo_a.long}}; the page fills in the formatted value. Durations ("12.9 days"), shares ("94 %") and weeks come with their unit; counts and per-week rates come as a bare number. Always say what a number is ("{{team.merged_per_week}} merged PRs a week"), never list placeholders bare. The length limits count a placeholder as eight characters, whatever its id. Words like "doubled", "half", "most" are fine when the facts say so.

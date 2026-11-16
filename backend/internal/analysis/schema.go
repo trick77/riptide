@@ -18,7 +18,6 @@ const (
 	MaxTrend    = 160
 	MaxTake     = 140
 	MaxRetro    = 100
-	MaxCI       = 140
 	MaxQuestion = 120
 	MaxFocus    = 3
 	MaxCards    = 4
@@ -54,7 +53,6 @@ func textSchema() map[string]any {
 			"signal": map[string]any{"type": "string"}, "take": str(MaxTake), "retro": nullableStr(MaxRetro),
 			"lever": map[string]any{"type": "string"},
 		})},
-		"ci":       str(MaxCI),
 		"question": str(MaxQuestion),
 	})
 }

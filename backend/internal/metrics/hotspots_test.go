@@ -468,6 +468,32 @@ func TestBuildsLeaveAbortedOut(t *testing.T) {
 	}
 }
 
+// A run without a repo name never gets a row of its own, however much time
+// it took: it folds into the rest. Without repos (the previous period) the
+// flow has no split at all.
+func TestCIFlowRepos(t *testing.T) {
+	kinds := []BuildStats{{Kind: KindMain, total: 600, succeeded: 600}}
+	repos := map[string]map[string]*repoRuns{KindMain: {
+		"":  {ci: 300},
+		"a": {ci: 100, stuck: 50, wasted: 20},
+		"b": {ci: 80}, "c": {ci: 40}, "d": {ci: 30},
+	}}
+	f := ciFlow(kinds, repos)
+	var names []string
+	for _, r := range f.Repos {
+		names = append(names, r.Repo)
+	}
+	if !slices.Equal(names, []string{"a", "b", "c"}) || f.Repos[0].Seconds != 150 || f.Repos[0].Failed != 20 {
+		t.Errorf("repos = %+v", f.Repos)
+	}
+	if f.OtherRepos != 2 || f.OtherSeconds != 330 {
+		t.Errorf("other = %d, %v", f.OtherRepos, f.OtherSeconds)
+	}
+	if none := ciFlow(kinds, nil); none.Repos == nil || len(none.Repos) != 0 || none.OtherRepos != 0 {
+		t.Errorf("no repos = %+v", none)
+	}
+}
+
 // A kind's CI time splits by outcome without overlap: a stuck run counts
 // as an outlier only, whether it failed, was aborted or succeeded. The
 // parts sum to the kind's total, the links to the flow's.
@@ -565,6 +591,22 @@ func TestCIFlowSplitsWithoutOverlap(t *testing.T) {
 	}
 	if l := f.Links[1]; l.ShareOfKind != 0.5 || l.Share != 250.0/303900 {
 		t.Errorf("feature failed = %+v", l)
+	}
+	// The repos split the same total, outliers in, ties by name: the three
+	// stuck ones named, the rest folded; their failed time is the failed
+	// outcome's.
+	var names []string
+	repoSum, failedSum := f.OtherSeconds, f.OtherFailed
+	for _, r := range f.Repos {
+		names = append(names, r.Repo)
+		repoSum += r.Seconds
+		failedSum += r.Failed
+	}
+	if !slices.Equal(names, []string{"kasse/b0", "kasse/b1", "kasse/b2"}) || f.OtherRepos != 3 {
+		t.Errorf("repos = %+v, %d other", f.Repos, f.OtherRepos)
+	}
+	if repoSum != f.TotalSeconds || failedSum != 550 {
+		t.Errorf("repos sum to %v (failed %v), not %v (550)", repoSum, failedSum, f.TotalSeconds)
 	}
 
 	// No runs, or none with a duration: an empty flow, never a division by 0.

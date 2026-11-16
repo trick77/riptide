@@ -130,7 +130,6 @@ func (c *checker) text(lang string, t Text) (Text, error) {
 		}
 	}
 	field("trend", &t.Trend, MaxTrend)
-	field("ci", &t.CI, MaxCI)
 	field("question", &t.Question, MaxQuestion)
 	retro := func(name string, r *string) *string {
 		if r == nil || strings.TrimSpace(*r) == "" {
@@ -212,7 +211,6 @@ func (c *checker) mirror(out *Output) {
 		}
 	}
 	both(&out.DE.Trend, &out.EN.Trend, "trend")
-	both(&out.DE.CI, &out.EN.CI, "ci")
 	both(&out.DE.Question, &out.EN.Question, "question")
 
 	focus := func(t Text) map[string]bool {
@@ -300,7 +298,7 @@ func (c *checker) covered(t Text) map[string]bool {
 
 // show maps every alias of a checked text back to its repo.
 func (al *aliases) showText(t Text) Text {
-	t.Headline, t.Trend, t.CI, t.Question = al.show(t.Headline), al.show(t.Trend), al.show(t.CI), al.show(t.Question)
+	t.Headline, t.Trend, t.Question = al.show(t.Headline), al.show(t.Trend), al.show(t.Question)
 	showP := func(p *string) *string {
 		if p == nil {
 			return nil

@@ -262,12 +262,6 @@ export const en = {
         first_touch: "Do we discuss big changes outside Bitbucket?",
       },
       also: "Also spotted:",
-      ci: "Where the CI time goes",
-      ciMeta: "{{total}} in {{weeks}} weeks · hatched: failed runs, {{wasted}}",
-      ciOther_one: "{{count}} more",
-      ciOther_other: "{{count}} more",
-      ciRule:
-        "{{repo}}: {{time}} of {{total}} CI time, {{wasted}} of it in failed runs.",
       weeksUnit: "{{n}} weeks",
       lever: {
         walk_prs:
@@ -776,6 +770,13 @@ export const en = {
       tipOfAll: "Share of all CI time",
       aria: "CI time from kind of run to outcome: {{parts}}",
       withOutliers: "{{h}} incl. outliers",
+      repos: "By repo, across run kinds",
+      reposMeta: "hatched: failed, outliers aside",
+      repoFailed: "{{repo}}: {{h}}, {{failed}} of it failed",
+      repoFailedShort: " · {{h}} red",
+      reposOther_one: "{{count}} more",
+      reposOther_other: "{{count}} more",
+      reposAria: "CI time by repo: {{parts}}",
       rule: "Failed: FAILURE, UNSTABLE, Failed. Without a result: ABORTED, NOT_BUILT, Tekton's None, Jenkins timeouts included. Outliers: {{outliers}} (a repo with enough runs of its own also over its own median). An outlier counts only as an outlier, whatever its result, so the hours here include the outliers the cards above leave out. Each kind's bands show its own split; a node's height only the amount, no comparison between kinds.",
     },
   },
