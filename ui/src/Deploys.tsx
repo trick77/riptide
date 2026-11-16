@@ -4,12 +4,12 @@
 import { useTranslation } from "react-i18next";
 import type { Metrics } from "./api";
 import { WeekStack } from "./charts";
-import { num, pct } from "./format";
+import { num, pct, stage } from "./format";
 import { Card, CardHead, Compare, Legend, SectionHead, Swatch } from "./ui";
 
 export function Deploys({ m }: { m: Metrics }) {
   const { t } = useTranslation();
-  const prod = m.delivery.production_stage;
+  const prod = stage(m.delivery.production_stage);
   const freq = m.delivery.frequency;
   const weeks = m.period.weeks;
   return (

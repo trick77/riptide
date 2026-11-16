@@ -6,7 +6,7 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import type { LeadChain, Metrics, StageKey } from "./api";
 import { GroupedBars } from "./charts";
-import { dateTime, dur, durParts, pct } from "./format";
+import { dateTime, dur, durParts, pct, stage } from "./format";
 import { OpenPRs } from "./OpenPRs";
 import type { Tab } from "./state";
 import {
@@ -27,7 +27,7 @@ export function stageNames(
   c: LeadChain,
   prod: string,
 ): Record<StageKey, [string, string]> {
-  const pre = c.pre_environment;
+  const pre = c.pre_environment && stage(c.pre_environment);
   return {
     coding: [t("flow.stage.coding"), t("flow.stage.codingDesc")],
     review: [t("flow.stage.review"), t("flow.stage.reviewDesc")],
@@ -71,7 +71,7 @@ type Props = {
 
 function Chain({ m }: { m: Metrics }) {
   const { t } = useTranslation();
-  const prod = m.delivery.production_stage;
+  const prod = stage(m.delivery.production_stage);
   const chain = m.lead_chain;
   const names = stageNames(t, chain, prod);
   const withData = chain.stages.filter((s) => s.p50 != null);
@@ -88,7 +88,7 @@ function Chain({ m }: { m: Metrics }) {
         <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3">
           <div className="rounded-ui border border-border-soft px-3 py-2.5">
             <div className="text-[13.5px] text-ink-dim">
-              {t("flow.leadTo", { env: pre.environment })}{" "}
+              {t("flow.leadTo", { env: stage(pre.environment) })}{" "}
               <span className="font-medium text-ink tabular-nums">
                 {dur(pre.human.p50)}
               </span>{" "}
@@ -195,7 +195,7 @@ function Chain({ m }: { m: Metrics }) {
 
 export function Flow({ m, why, onWhy, onFacts }: Props) {
   const { t } = useTranslation();
-  const prod = m.delivery.production_stage;
+  const prod = stage(m.delivery.production_stage);
   const r = m.review;
   const c = m.comparison;
   const rv = durParts(r.review.p50);

@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { Finding, Metrics } from "./api";
 import { stageNames } from "./Flow";
-import { dur, durParts, fullDate, num, pct } from "./format";
+import { dur, durParts, fullDate, num, pct, stage } from "./format";
 import type { Tab } from "./state";
 import {
   Compare,
@@ -50,7 +50,7 @@ function words(
   onFacts: Props["onFacts"],
   toFlow: () => void,
 ): Words | null {
-  const prod = m.delivery.production_stage;
+  const prod = stage(m.delivery.production_stage);
   const h = m.build.hotspots;
   if (f.kind === "stage") {
     const s = m.lead_chain.stages.find((x) => x.key === f.stage);
@@ -240,7 +240,7 @@ function Findings({ m, onFacts }: Pick<Props, "m" | "onFacts">) {
 export function Overview({ m, why, onWhy, onFacts }: Props) {
   const { t } = useTranslation();
   const bots = m.bots;
-  const prod = m.delivery.production_stage;
+  const prod = stage(m.delivery.production_stage);
   const freq = m.delivery.frequency;
   const lt = m.delivery.lead_time;
   const c = m.comparison;

@@ -76,6 +76,12 @@ export function ciWord(s: string): string {
   return w.charAt(0).toUpperCase() + w.slice(1);
 }
 
+// A stage as the team says it: INTG, SYST, PROD, whatever case Argo CD
+// reports it in.
+export function stage(name: string): string {
+  return name.toUpperCase();
+}
+
 export function shortSha(sha: string | null): string {
   return sha ? sha.slice(0, 8) : "–";
 }
