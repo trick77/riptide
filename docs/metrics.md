@@ -429,6 +429,11 @@ the last. Below the low-sample threshold the stage lists its waits one
 by one (`durations_s`) instead of the counts (`histogram` null) and the ridgeline draws them as dots, not a
 curve: a density from fewer than `min_prs` (10) values would be invented. The UI smooths the
 curve through the counts; the counts, medians and p90s are the backend's.
+Shares and the hot stage only when some PR reached production
+(`reaches_prod`): without a production wait the medians add up to the time
+to merge, and coding would read as most of a time to production nothing
+reached. A product whose prod deploys predate its CI reports showed exactly
+that; with it go the stage signal and the wait share.
 
 Open PRs list the jammed repos first (3 PRs or more open 7 days or more),
 then by long-open PRs, then by the median age; the top 8 and every repo

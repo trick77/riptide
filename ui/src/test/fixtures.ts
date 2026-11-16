@@ -296,6 +296,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       attention_share: 0.5,
       min_prs: 10,
       before_prod: 1.3 * 86400,
+      reaches_prod: true,
       bucket_bounds_s: STAGE_BOUNDS,
     },
     review: {

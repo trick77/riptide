@@ -2006,6 +2006,7 @@ describe("flow", () => {
             attention_share: 0.5,
             min_prs: 10,
             before_prod: 0,
+            reaches_prod: true,
             bucket_bounds_s: STAGE_BOUNDS,
           },
         }}
@@ -2016,6 +2017,44 @@ describe("flow", () => {
     expect(screen.queryByText(/Bis null/)).toBeNull();
     expect(screen.getByText("gemerged → auf PROD")).toBeInTheDocument();
     // No stage is hot: no lever named.
+    expect(screen.queryByText(/Der Hebel liegt/)).toBeNull();
+  });
+
+  it("names no share of the time to production when no change reached it", () => {
+    const m = metrics();
+    const stages = m.lead_chain.stages
+      .map((s) =>
+        s.key === "to_prod"
+          ? {
+              ...s,
+              n: 0,
+              p50: null,
+              p90: null,
+              low_sample: true,
+              histogram: null,
+              durations_s: [],
+            }
+          : s,
+      )
+      .map((s) => ({ ...s, share: null, hot: false }));
+    render(
+      <Flow
+        why={null}
+        onWhy={() => {}}
+        onFacts={() => {}}
+        m={{
+          ...m,
+          lead_chain: { ...m.lead_chain, stages, reaches_prod: false },
+        }}
+      />,
+    );
+    expect(
+      screen.getByText(/keine Änderung bis PROD verfolgt/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("img", { name: /Anteil an der Zeit/ }),
+    ).toBeNull();
+    expect(screen.queryByText(/der Zeit$/)).toBeNull();
     expect(screen.queryByText(/Der Hebel liegt/)).toBeNull();
   });
 

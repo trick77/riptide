@@ -113,29 +113,35 @@ function Chain({ m }: { m: Metrics }) {
       )}
       {withData.length > 0 ? (
         <>
-          <div
-            role="img"
-            aria-label={t("flow.shareAria", {
-              prod,
-              parts: withData
-                .map((s) => `${names[s.key][0]} ${pct(s.share)}`)
-                .join(", "),
-            })}
-            className="mt-4 flex h-8 gap-0.5"
-          >
-            {withData.map((s, i) => (
-              <div
-                key={s.key}
-                title={`${names[s.key][0]}: ${dur(s.p50)}, ${pct(s.share)}`}
-                className={`flex h-8 min-w-[4px] items-center overflow-hidden px-2 text-xs whitespace-nowrap text-ink first:rounded-l-md last:rounded-r-md ${
-                  s.hot ? "bg-accent-fill" : i % 2 ? "bg-ink-3" : "bg-other"
-                }`}
-                style={{ flex: `${Math.max(s.share ?? 0, 0.004)} 1 0` }}
-              >
-                {s.hot && `${names[s.key][0]} · ${pct(s.share)}`}
-              </div>
-            ))}
-          </div>
+          {chain.reaches_prod ? (
+            <div
+              role="img"
+              aria-label={t("flow.shareAria", {
+                prod,
+                parts: withData
+                  .map((s) => `${names[s.key][0]} ${pct(s.share)}`)
+                  .join(", "),
+              })}
+              className="mt-4 flex h-8 gap-0.5"
+            >
+              {withData.map((s, i) => (
+                <div
+                  key={s.key}
+                  title={`${names[s.key][0]}: ${dur(s.p50)}, ${pct(s.share)}`}
+                  className={`flex h-8 min-w-[4px] items-center overflow-hidden px-2 text-xs whitespace-nowrap text-ink first:rounded-l-md last:rounded-r-md ${
+                    s.hot ? "bg-accent-fill" : i % 2 ? "bg-ink-3" : "bg-other"
+                  }`}
+                  style={{ flex: `${Math.max(s.share ?? 0, 0.004)} 1 0` }}
+                >
+                  {s.hot && `${names[s.key][0]} · ${pct(s.share)}`}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-4 mb-0 rounded-ui border border-border-soft px-3.5 py-2.5 text-[13.5px] text-ink-dim">
+              {t("flow.noProd", { prod })}
+            </p>
+          )}
           <ol className="m-0 mt-3.5 grid list-none grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-2.5 p-0">
             {chain.stages.map((s) => (
               <li

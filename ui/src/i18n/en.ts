@@ -445,6 +445,8 @@ export const en = {
     ofTime: "· {{share}} of the time",
     hot: "The lever is at “{{name}}”",
     hotRest: ": {{share}} of the time to {{prod}}.",
+    noProd:
+      "No change traced to {{prod}} in this period: shares exist only over the whole way.",
     chainNote:
       "Only PRs whose merge commit maps to a deployment reach the last two stages.",
     ridge: {

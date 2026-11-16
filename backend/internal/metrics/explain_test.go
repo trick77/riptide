@@ -294,6 +294,26 @@ func TestCompareWithThePreviousPeriod(t *testing.T) {
 	}
 }
 
+// A worsening whose number is now unknown (no PR reached production, so no
+// wait share) is not resolved: nothing says it got better.
+func TestUnknownNumberResolvesNothing(t *testing.T) {
+	resolved := func(v *float64) bool {
+		a := &assessor{
+			team: []teamChange{{metric: "wait_share", label: "wait_share", unit: UnitShare, source: SourceBitbucket, value: v}},
+			h:    History{Latest: map[string]string{"change:wait_share": ToneAttention}},
+			gaps: map[string]bool{},
+		}
+		a.resolvedSignals()
+		return len(a.out) == 1 && a.out[0].ID == "resolved:change:wait_share"
+	}
+	if resolved(nil) {
+		t.Error("an unknown wait share resolved the worsening")
+	}
+	if !resolved(ptr(0.4)) {
+		t.Error("a known wait share no longer resolves")
+	}
+}
+
 // The longest stage: attention from half the time to production on enough
 // PRs, else a hint (some stage always takes longest); moved, a signal of
 // its own.

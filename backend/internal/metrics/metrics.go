@@ -538,10 +538,12 @@ type Stage struct {
 	Spread
 	// LowSample: fewer than 10 PRs.
 	LowSample bool `json:"low_sample"`
-	// Share is the stage's part of the summed medians; null without data.
+	// Share is the stage's part of the summed medians; null without data or
+	// when the chain does not reach production (Chain.ReachesProd).
 	// All medians zero (one PR through in a second): equal shares.
 	Share *float64 `json:"share"`
-	// Hot is the stage with the largest median.
+	// Hot is the stage with the largest median, only in a chain that
+	// reaches production.
 	Hot bool `json:"hot"`
 	// Histogram is the stage's PRs per StageBounds bucket; null when
 	// LowSample, which sends DurationsS instead.
@@ -600,6 +602,11 @@ type Chain struct {
 	MinPRs         int     `json:"min_prs"`
 	// BeforeProd is the sum of the medians before the last stage.
 	BeforeProd float64 `json:"before_prod"`
+	// ReachesProd: some PR has a production wait. Without one, no stage has
+	// a share or is hot: the medians would add up to the time to merge, and
+	// coding read as most of a time to production nothing reached (a product
+	// whose prod deploys predate its CI reports).
+	ReachesProd bool `json:"reaches_prod"`
 	// BucketBoundsS are StageBounds, every stage's histogram edges.
 	BucketBoundsS []float64 `json:"bucket_bounds_s"`
 }
@@ -629,6 +636,7 @@ func leadChain(c rawChain) Chain {
 		}
 		out.Stages = append(out.Stages, s)
 	}
+	out.ReachesProd = out.Stages[len(out.Stages)-1].P50 != nil
 	if withData == 0 {
 		return out
 	}
@@ -636,6 +644,12 @@ func leadChain(c rawChain) Chain {
 	for i := range out.Stages {
 		s := &out.Stages[i]
 		if s.P50 == nil {
+			continue
+		}
+		if i < len(out.Stages)-1 {
+			out.BeforeProd += *s.P50
+		}
+		if !out.ReachesProd {
 			continue
 		}
 		if total > 0 {
@@ -646,11 +660,10 @@ func leadChain(c rawChain) Chain {
 		if hot < 0 || *s.P50 > *out.Stages[hot].P50 {
 			hot = i
 		}
-		if i < len(out.Stages)-1 {
-			out.BeforeProd += *s.P50
-		}
 	}
-	out.Stages[hot].Hot = true
+	if hot >= 0 {
+		out.Stages[hot].Hot = true
+	}
 	return out
 }
 

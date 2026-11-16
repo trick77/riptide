@@ -574,10 +574,59 @@ func TestChainWithoutAStageBeforeProduction(t *testing.T) {
 	zero := data(func(ds *dataset.Dataset) {
 		ds.PRs = []dataset.PR{pr(func(p *dataset.PR) {
 			p.FirstCommitAt, p.ReadyAt, p.ApprovedAt, p.MergedAt = agoP(2), agoP(2), agoP(2), agoP(2)
+			p.Environments = []dataset.EnvironmentDeploy{{Environment: "prod", FirstDeployedAt: ago(2)}}
 		})}
 	})
 	zc := leadChain(chainOf(zero, p4(), filter{}))
-	expectNear(t, "zero share", stage(zc, StageCoding).Share, 1.0/3)
+	expectNear(t, "zero share", stage(zc, StageCoding).Share, 1.0/4)
+	// The same without production: no shares at all, equal ones neither.
+	zero.PRs[0].Environments = nil
+	zc = leadChain(chainOf(zero, p4(), filter{}))
+	if zc.ReachesProd || stage(zc, StageCoding).Share != nil || stage(zc, StageCoding).Hot {
+		t.Errorf("zero without prod = %+v", zc.Stages)
+	}
+}
+
+// No PR reached production (a product whose prod deploys predate its CI
+// reports): the medians add up to the time to merge, so no stage has a
+// share of the time to production and none is hot.
+func TestChainThatDoesNotReachProduction(t *testing.T) {
+	var prs []dataset.PR
+	for i := range 12 {
+		prs = append(prs, pr(func(p *dataset.PR) {
+			p.PRID = int64(i + 1)
+			p.FirstCommitAt, p.ReadyAt, p.ApprovedAt, p.MergedAt = agoP(10), agoP(5), agoP(4.9), agoP(4.8)
+			p.Environments = []dataset.EnvironmentDeploy{{Environment: "intg", FirstDeployedAt: ago(4.7)}}
+		}))
+	}
+	c := leadChain(chainOf(data(func(ds *dataset.Dataset) { ds.PRs = prs }), p4(), filter{}))
+	if c.ReachesProd {
+		t.Fatal("reaches prod without a production wait")
+	}
+	for _, s := range c.Stages {
+		if s.Share != nil || s.Hot {
+			t.Errorf("%s: share %v, hot %v", s.Key, s.Share, s.Hot)
+		}
+	}
+	// So no slow stage to name and no wait share for the assessment.
+	if hotStage(c) != nil {
+		t.Error("hot stage without production")
+	}
+	if ws, _ := waitShare(c); ws != nil {
+		t.Errorf("wait share = %v", *ws)
+	}
+	// The medians stay: only the shares need the whole way.
+	expectNear(t, "coding p50", stage(c, StageCoding).P50, 5*86400)
+	if c.BeforeProd <= 0 {
+		t.Errorf("before prod = %v", c.BeforeProd)
+	}
+
+	// One PR in production: shares again, the hot stage among them.
+	prs[0].Environments = append(prs[0].Environments, dataset.EnvironmentDeploy{Environment: "prod", FirstDeployedAt: ago(1)})
+	c = leadChain(chainOf(data(func(ds *dataset.Dataset) { ds.PRs = prs }), p4(), filter{}))
+	if !c.ReachesProd || stage(c, StageCoding).Share == nil || !stage(c, StageCoding).Hot {
+		t.Errorf("chain = %+v", c.Stages)
+	}
 }
 
 func TestChainHotfixPastTheStageBefore(t *testing.T) {

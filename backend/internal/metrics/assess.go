@@ -565,7 +565,9 @@ func wipWeeks(m Metrics, merged *float64) *float64 {
 }
 
 // waitShare is the part of the summed stage medians that is not coding:
-// waiting for review, merge and deploys.
+// waiting for review, merge and deploys. Nil when the chain does not reach
+// production: without the production wait it would be a part of the time
+// to merge.
 func waitShare(c Chain) (*float64, bool) {
 	for _, s := range c.Stages {
 		if s.Key == StageCoding && s.Share != nil {
@@ -767,8 +769,10 @@ func (a *assessor) resolvedSignals() {
 			if a.h.Latest[id] != ToneAttention {
 				continue
 			}
+			// A number gone unknown (no PR reached production: no wait
+			// share) is no resolution: say nothing.
 			for _, t := range a.team {
-				if t.metric == rest {
+				if t.metric == rest && t.value != nil {
 					s.Source = t.source
 					s.Facts = []Fact{fact(s.ID+".value", t.label, t.unit, t.value, t.c)}
 				}

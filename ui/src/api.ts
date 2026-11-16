@@ -102,6 +102,8 @@ export type LeadChain = {
   attention_share: number;
   min_prs: number;
   before_prod: number;
+  // Some PR has a production wait; false: no shares, no hot stage.
+  reaches_prod: boolean;
   // The stage histograms' edges in seconds, log-spaced, ascending.
   bucket_bounds_s: number[];
 };
