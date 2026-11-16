@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -16,6 +17,11 @@ func TestPreviousPeriod(t *testing.T) {
 	if prev.Weeks[0].KW != cur.Weeks[0].KW-4 || !near(prev.Span, 4) {
 		t.Errorf("previous weeks = %+v, span %v", prev.Weeks, prev.Span)
 	}
+}
+
+// judge is metric{d, s}.judge, for tables of directions and scales.
+func judge(cur, prev side, d direction, s scale, incomplete bool) Change {
+	return metric{d, s}.judge(cur, prev, incomplete)
 }
 
 func TestJudge(t *testing.T) {
@@ -42,6 +48,9 @@ func TestJudge(t *testing.T) {
 		{"from 0 up", v(1), v(0), up, relative, false, ChangeBetter, ""},
 		{"from 0 down", v(1), v(0), down, relative, false, ChangeWorse, ""},
 		{"0 and 0", v(0), v(0), up, relative, false, ChangeSame, ""},
+		{"a count judges relative", v(2), v(1), down, count, false, ChangeWorse, ""},
+		{"a count from 0", v(1), v(0), down, count, false, ChangeWorse, ""},
+		{"a count within 10 %", v(21), v(20), down, count, false, ChangeSame, ""},
 	}
 	for _, c := range cases {
 		got := judge(c.cur, c.prev, c.d, c.s, c.incomplete)
@@ -55,6 +64,122 @@ func TestJudge(t *testing.T) {
 		// A value it does not compare with is not shown either.
 		if (reason == ReasonIncomplete || reason == ReasonLowSample) && got.Prev != nil {
 			t.Errorf("%s: prev %v shown", c.name, *got.Prev)
+		}
+	}
+}
+
+func TestScore(t *testing.T) {
+	v := func(x float64) side { return side{ptr(x), true} }
+	cases := []struct {
+		name      string
+		cur, prev side
+		d         direction
+		s         scale
+		want      float64
+	}{
+		{"longer is negative", v(41), v(24), down, relative, -math.Log2(41.0 / 24)},
+		{"more often is positive", v(3), v(2), up, relative, math.Log2(1.5)},
+		{"a doubling is the end", v(2), v(1), up, relative, 1},
+		{"past a halving clamps", v(10), v(100), down, relative, 1},
+		{"past a doubling clamps", v(500), v(100), down, relative, -1},
+		{"within the tolerance nothing", v(110), v(100), down, relative, 0},
+		{"just past the tolerance", v(111), v(100), down, relative, -math.Log2(1.11)},
+		{"from 0 up", v(1), v(0), up, relative, 1},
+		{"from 0 down", v(1), v(0), down, relative, -1},
+		{"to 0 down", v(0), v(4), down, relative, 1},
+		{"0 and 0", v(0), v(0), down, relative, 0},
+		{"a share in points", v(0.88), v(0.97), up, points, -0.36},
+		{"failures from 0 % within the tolerance", v(0.03), v(0), down, points, 0},
+		{"success from 100 % within the tolerance", v(0.97), v(1), up, points, 0},
+		{"failures from 0 % past it", v(0.04), v(0), down, points, -0.16},
+		{"a share clamps", v(0.2), v(0.9), up, points, -1},
+		{"a share the same", v(0.5), v(0.5), down, points, 0},
+		// One jammed repo more is no doubling.
+		{"a count from 0 by one is damped", v(1), v(0), down, count, -math.Log2(1.5)},
+		{"a count from 1 by one is damped", v(2), v(1), down, count, -math.Log2(4.0 / 3)},
+		{"a large count barely", v(20), v(10), down, count, -math.Log2(22.0 / 12)},
+		{"a count halving to 0", v(0), v(2), down, count, 1},
+		{"a count the same", v(3), v(3), down, count, 0},
+		{"a count within 10 %", v(21), v(20), down, count, 0},
+	}
+	for _, c := range cases {
+		got := judge(c.cur, c.prev, c.d, c.s, false)
+		if got.Score == nil || !near(*got.Score, c.want) {
+			t.Errorf("%s: score %v, want %v", c.name, got.Score, c.want)
+			continue
+		}
+		if math.Signbit(*got.Score) && *got.Score == 0 {
+			t.Errorf("%s: -0", c.name)
+		}
+		// The score never contradicts the verdict: same is 0, the sign the
+		// verdict's.
+		if got.Verdict == ChangeWorse && *got.Score >= 0 || got.Verdict == ChangeBetter && *got.Score <= 0 ||
+			(got.Verdict == ChangeSame) != (*got.Score == 0) {
+			t.Errorf("%s: score %v, verdict %s", c.name, *got.Score, got.Verdict)
+		}
+	}
+	// No verdict, no score; undirected included.
+	for _, c := range []Change{
+		judge(v(0.5), v(0.2), undirected, points, false),
+		judge(v(1), v(2), up, relative, true),
+		judge(v(1), side{ptr(2.0), false}, up, relative, false),
+		judge(v(1), side{nil, true}, up, relative, false),
+	} {
+		if c.Score != nil {
+			t.Errorf("%+v: score %v", c, *c.Score)
+		}
+	}
+}
+
+func TestDirected(t *testing.T) {
+	v := func(x float64) side { return side{ptr(x), true} }
+	few := side{ptr(1.0), false}
+	for _, c := range []struct {
+		name string
+		got  Change
+		want bool
+	}{
+		{"undirected", judge(v(0.5), v(0.2), undirected, points, false), false},
+		{"undirected, low sample", judge(few, v(0.2), undirected, points, false), false},
+		{"undirected, incomplete", judge(v(1), v(2), undirected, relative, true), false},
+		{"up", judge(v(3), v(2), up, relative, false), true},
+		{"down, low sample", judge(few, v(2), down, relative, false), true},
+		{"down, no value", judge(v(1), side{nil, true}, down, relative, false), true},
+		// The no-value fallbacks read the metric's own direction.
+		{"lead time fallback", leadTimeMetric.none(ReasonNoValue), true},
+		{"repo duration fallback", repoDurationMetric.none(ReasonNoValue), true},
+		{"repo failure fallback", repoFailureMetric.none(ReasonNoValue), true},
+		{"open PRs fallback", openPRsMetric.none(ReasonNoValue), false},
+	} {
+		if c.got.Directed != c.want {
+			t.Errorf("%s: %+v", c.name, c.got)
+		}
+	}
+	params := Params{Period: p4(), Previous: PreviousPeriod(4, now, zurich)}
+	cmp := Compute(leadData(12, 2), leadData(12, 3), params).Comparison
+	for name, c := range map[string]Change{
+		"first touch": cmp.FirstTouch, "untracked": cmp.Untracked, "open PRs": cmp.OpenPRs,
+		"cost per KLOC": cmp.CostPerKloc, "wasted share": cmp.WastedShare,
+	} {
+		if c.Directed {
+			t.Errorf("%s directed: %+v", name, c)
+		}
+	}
+	for name, c := range map[string]Change{
+		"deploy frequency": cmp.DeployFreq, "deploy success": cmp.DeploySuccess, "lead time": cmp.LeadTime,
+		"review": cmp.ReviewTime, "within a day": cmp.WithinDay, "jammed": cmp.OpenJammed,
+	} {
+		if !c.Directed {
+			t.Errorf("%s undirected: %+v", name, c)
+		}
+	}
+
+	// Argo CD silent for the team: nothing measured, not too few.
+	silent := func(ds *dataset.Dataset) { ds.Meta.DataStart.ArgoCD = nil }
+	cmp = Compute(leadData(12, 2, silent), leadData(12, 3, silent), params).Comparison
+	for name, c := range map[string]Change{"frequency": cmp.DeployFreq, "success": cmp.DeploySuccess} {
+		if c.Reason == nil || *c.Reason != ReasonNotReporting || !c.Directed || c.Score != nil {
+			t.Errorf("silent argo %s: %+v", name, c)
 		}
 	}
 }
@@ -80,8 +205,9 @@ func TestCompareWithThePreviousPeriod(t *testing.T) {
 	if c.LeadTime.Verdict != ChangeBetter || c.LeadTime.Prev == nil || *c.LeadTime.Prev != 3*86400 {
 		t.Errorf("lead time = %+v", c.LeadTime)
 	}
+	expectNear(t, "lead time score", c.LeadTime.Score, math.Log2(1.5))
 	// No PRs, runs or reviews in either period: nothing to tell.
-	if c.ReviewTime.Verdict != ChangeNone || *c.ReviewTime.Reason != ReasonLowSample {
+	if c.ReviewTime.Verdict != ChangeNone || *c.ReviewTime.Reason != ReasonLowSample || c.ReviewTime.Score != nil {
 		t.Errorf("review = %+v", c.ReviewTime)
 	}
 	if len(c.Build) != 0 {

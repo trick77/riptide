@@ -19,6 +19,16 @@ const (
 	// a share, 10 % is too coarse (a success rate from 97 % to 88 % has
 	// quadrupled its failures).
 	ShareTolerance = 0.03
+	// SharePointsFull is the change of a share, in points of 0..1, that
+	// scores ±1 like a halving or doubling. Shares score linearly: a ratio
+	// near 0 % or 100 % explodes (0 % to 3 % failures is infinite) on a change
+	// the tolerance calls the same. 25 points keep the tolerance a stub
+	// (0.12), as 10 % is on the log scale (0.14).
+	SharePointsFull = 0.25
+	// CountDamping is added to both sides of a small count before its
+	// ratio: one jammed repo more is no doubling. 0 to 1 scores 0.58, 1 to 2
+	// 0.42, 10 to 20 still 0.87.
+	CountDamping = 2
 )
 
 // eps absorbs float rounding at a threshold, here and in the build flags:
@@ -46,6 +56,9 @@ const (
 	// ReasonUndirected: the number has no better direction; Prev still
 	// tells where it was.
 	ReasonUndirected = "undirected"
+	// ReasonNotReporting: the number's source does not report for the team
+	// yet (Argo CD, for the deploy numbers): nothing measured, not too few.
+	ReasonNotReporting = "not_reporting"
 )
 
 // Change is a number of the page against the previous period.
@@ -56,6 +69,16 @@ type Change struct {
 	Verdict string   `json:"verdict"`
 	// Reason is why the verdict is none; null otherwise.
 	Reason *string `json:"reason"`
+	// Directed: the number has a better direction, whatever the verdict
+	// (an undirected one with too few data says low_sample, not
+	// undirected).
+	Directed bool `json:"directed"`
+	// Score is the change's size, positive better: log2(current /
+	// previous), negated where lower is better, clamped to -1..1 (halving,
+	// doubling). From 0 to anything is ±1, 0 to 0 is 0; shares score their
+	// points per SharePointsFull, counts damped by CountDamping. 0 when the
+	// verdict is same, null when it is none.
+	Score *float64 `json:"score"`
 }
 
 // KindChange is a kind of run against the previous period's runs of the
@@ -104,13 +127,68 @@ const (
 )
 
 // scale is how a change is measured: relative for durations and rates,
-// in points for shares.
+// in points for shares; a count judges as relative, but scores damped.
 type scale int
 
 const (
 	relative scale = iota
 	points
+	count
 )
+
+// metric is a compared number: which way it gets better and how its change
+// is measured. Each number's one definition: its verdict, score, directed
+// and no-value fallback all read it.
+type metric struct {
+	d direction
+	s scale
+}
+
+// metricID names a compared number; def is its definition, a literal no
+// caller can reassign.
+type metricID int
+
+const (
+	deployFreqMetric metricID = iota
+	deploySuccessMetric
+	leadTimeMetric
+	reviewTimeMetric
+	withinDayMetric
+	firstTouchMetric
+	untrackedMetric
+	openPRsMetric
+	openJammedMetric
+	costPerKlocMetric
+	wastedShareMetric
+	buildSuccessMetric
+	repoDurationMetric
+	repoFailureMetric
+)
+
+func (id metricID) def() metric {
+	return [...]metric{
+		deployFreqMetric:    {up, relative},
+		deploySuccessMetric: {up, points},
+		leadTimeMetric:      {down, relative},
+		reviewTimeMetric:    {down, relative},
+		withinDayMetric:     {up, points},
+		firstTouchMetric:    {undirected, points},
+		untrackedMetric:     {undirected, points},
+		openPRsMetric:       {undirected, count},
+		openJammedMetric:    {down, count},
+		costPerKlocMetric:   {undirected, relative},
+		wastedShareMetric:   {undirected, points},
+		buildSuccessMetric:  {up, points},
+		repoDurationMetric:  {down, relative},
+		repoFailureMetric:   {down, points},
+	}[id]
+}
+
+func (id metricID) judge(cur, prev side, incomplete bool) Change {
+	return id.def().judge(cur, prev, incomplete)
+}
+
+func (id metricID) none(reason string) Change { return id.def().none(reason) }
 
 // side is one period's value and whether it rests on enough data.
 type side struct {
@@ -118,45 +196,78 @@ type side struct {
 	ok bool
 }
 
-func none(reason string) Change { return Change{Verdict: ChangeNone, Reason: ptr(reason)} }
+func (m metric) none(reason string) Change {
+	return Change{Verdict: ChangeNone, Reason: ptr(reason), Directed: m.d != undirected}
+}
 
 // judge compares cur with prev. incomplete is the previous period's data
 // not covering it.
-func judge(cur, prev side, d direction, s scale, incomplete bool) Change {
+func (m metric) judge(cur, prev side, incomplete bool) Change {
 	switch {
 	case incomplete:
-		return none(ReasonIncomplete)
+		return m.none(ReasonIncomplete)
 	case !cur.ok || !prev.ok:
-		return none(ReasonLowSample)
+		return m.none(ReasonLowSample)
 	case cur.v == nil || prev.v == nil:
-		return none(ReasonNoValue)
+		return m.none(ReasonNoValue)
 	}
-	c := Change{Prev: prev.v}
+	d := m.d
+	c := Change{Prev: prev.v, Directed: d != undirected}
 	if d == undirected {
 		c.Verdict, c.Reason = ChangeNone, ptr(ReasonUndirected)
 		return c
 	}
-	delta := *cur.v - *prev.v
+	c.Verdict = changeVerdict(*cur.v, *prev.v, d, m.s)
+	// Within the tolerance the change is noise: no bar on either side.
+	s := 0.0
+	if c.Verdict != ChangeSame {
+		s = score(*cur.v, *prev.v, d, m.s)
+	}
+	c.Score = &s
+	return c
+}
+
+// changeVerdict is Change.Verdict of cur against prev, d not undirected.
+func changeVerdict(cur, prev float64, d direction, s scale) string {
+	delta := cur - prev
 	switch s {
-	case relative:
+	case relative, count:
 		// From 0 there is no relative change, but there is a direction: a
 		// team that starts deploying moves, one that stays at 0 does not.
-		if *prev.v == 0 && *cur.v == 0 || *prev.v != 0 && math.Abs(delta / *prev.v) <= Tolerance+eps {
-			c.Verdict = ChangeSame
-			return c
+		if prev == 0 && cur == 0 || prev != 0 && math.Abs(delta/prev) <= Tolerance+eps {
+			return ChangeSame
 		}
 	case points:
 		if math.Abs(delta) <= ShareTolerance+eps {
-			c.Verdict = ChangeSame
-			return c
+			return ChangeSame
 		}
 	}
 	if (delta > 0) == (d == up) {
-		c.Verdict = ChangeBetter
-	} else {
-		c.Verdict = ChangeWorse
+		return ChangeBetter
 	}
-	return c
+	return ChangeWorse
+}
+
+// score is Change.Score of cur against prev, d not undirected.
+func score(cur, prev float64, d direction, s scale) float64 {
+	var x float64
+	switch {
+	case s == points:
+		x = (cur - prev) / SharePointsFull
+	case s == count:
+		x = math.Log2((cur + CountDamping) / (prev + CountDamping))
+	case cur == prev:
+	case prev == 0 || cur == 0:
+		// No ratio, but a direction: past any doubling or halving.
+		x = math.Copysign(1, cur-prev)
+	default:
+		x = math.Log2(cur / prev)
+	}
+	if d == down {
+		x = -x
+	}
+	// +0 for no change: JSON writes a negated zero as -0.
+	return math.Max(-1, math.Min(1, x)) + 0
 }
 
 // before reports whether a source's data starts after from, or not at all:
@@ -178,40 +289,44 @@ func compare(cur, prev Metrics, period Period) Comparison {
 		// A first deploy is no release. Right after Argo CD started, most
 		// revisions are first deploys and the rate reads low; one new App
 		// later on costs a single release and still compares.
-		DeployFreq: judge(side{ptr(cf.PerWeek), !cf.LowSample && cf.ArgoReporting},
-			side{ptr(pf.PerWeek), !pf.LowSample && pf.ArgoReporting}, up, relative,
+		DeployFreq: deployFreqMetric.judge(side{ptr(cf.PerWeek), !cf.LowSample && cf.ArgoReporting},
+			side{ptr(pf.PerWeek), !pf.LowSample && pf.ArgoReporting},
 			argo || pf.FirstSeen > pf.Releases || cf.FirstSeen > cf.Releases),
-		DeploySuccess: judge(side{cf.SuccessRate, cf.Finished >= lowSample},
-			side{pf.SuccessRate, pf.Finished >= lowSample}, up, points, argo),
+		DeploySuccess: deploySuccessMetric.judge(side{cf.SuccessRate, cf.Finished >= lowSample},
+			side{pf.SuccessRate, pf.Finished >= lowSample}, argo),
 		LeadTime: leadChange(cur.Delivery.LeadTime, prev.Delivery.LeadTime, argo || bitbucket),
 	}
+	if !cf.ArgoReporting {
+		out.DeployFreq = deployFreqMetric.none(ReasonNotReporting)
+		out.DeploySuccess = deploySuccessMetric.none(ReasonNotReporting)
+	}
 	if c, p := cur.Delivery.LeadTimePre, prev.Delivery.LeadTimePre; c != nil {
-		ch := none(ReasonNoValue)
+		ch := leadTimeMetric.none(ReasonNoValue)
 		if p != nil && p.Environment == c.Environment {
 			ch = leadChange(*c, *p, argo || bitbucket)
 		}
 		out.LeadTimePre = &ch
 	}
 	cr, pr := cur.Review, prev.Review
-	out.ReviewTime = judge(side{cr.Review.P50, cr.Review.N >= lowSample},
-		side{pr.Review.P50, pr.Review.N >= lowSample}, down, relative, bitbucket)
-	out.WithinDay = judge(side{cr.WithinDay.Rate, cr.WithinDay.N >= lowSample},
-		side{pr.WithinDay.Rate, pr.WithinDay.N >= lowSample}, up, points, bitbucket)
-	out.FirstTouch = judge(side{cr.FirstTouchRate, cr.Approved >= lowSample},
-		side{pr.FirstTouchRate, pr.Approved >= lowSample}, undirected, points, bitbucket)
-	out.Untracked = judge(side{cr.UntrackedRate, cr.Merged >= lowSample},
-		side{pr.UntrackedRate, pr.Merged >= lowSample}, undirected, points, bitbucket)
+	out.ReviewTime = reviewTimeMetric.judge(side{cr.Review.P50, cr.Review.N >= lowSample},
+		side{pr.Review.P50, pr.Review.N >= lowSample}, bitbucket)
+	out.WithinDay = withinDayMetric.judge(side{cr.WithinDay.Rate, cr.WithinDay.N >= lowSample},
+		side{pr.WithinDay.Rate, pr.WithinDay.N >= lowSample}, bitbucket)
+	out.FirstTouch = firstTouchMetric.judge(side{cr.FirstTouchRate, cr.Approved >= lowSample},
+		side{pr.FirstTouchRate, pr.Approved >= lowSample}, bitbucket)
+	out.Untracked = untrackedMetric.judge(side{cr.UntrackedRate, cr.Merged >= lowSample},
+		side{pr.UntrackedRate, pr.Merged >= lowSample}, bitbucket)
 	// A count, no sample: both periods' ends count whatever is open.
 	co, po := cur.OpenPRs, prev.OpenPRs
-	out.OpenPRs = judge(side{ptr(float64(co.Open)), true}, side{ptr(float64(po.Open)), true},
-		undirected, relative, bitbucket)
-	out.OpenJammed = judge(side{ptr(float64(co.Jammed)), true}, side{ptr(float64(po.Jammed)), true},
-		down, relative, bitbucket)
+	out.OpenPRs = openPRsMetric.judge(side{ptr(float64(co.Open)), true}, side{ptr(float64(po.Open)), true},
+		bitbucket)
+	out.OpenJammed = openJammedMetric.judge(side{ptr(float64(co.Jammed)), true},
+		side{ptr(float64(po.Jammed)), true}, bitbucket)
 	cc, pc := cur.Costs, prev.Costs
-	out.CostPerKloc = judge(side{cc.PerKloc, cc.MergedReviews >= lowSample},
-		side{pc.PerKloc, pc.MergedReviews >= lowSample}, undirected, relative, noergler)
-	out.WastedShare = judge(side{cc.WastedShare, cc.MergedReviews >= lowSample},
-		side{pc.WastedShare, pc.MergedReviews >= lowSample}, undirected, points, noergler)
+	out.CostPerKloc = costPerKlocMetric.judge(side{cc.PerKloc, cc.MergedReviews >= lowSample},
+		side{pc.PerKloc, pc.MergedReviews >= lowSample}, noergler)
+	out.WastedShare = wastedShareMetric.judge(side{cc.WastedShare, cc.MergedReviews >= lowSample},
+		side{pc.WastedShare, pc.MergedReviews >= lowSample}, noergler)
 
 	out.Build = []KindChange{}
 	for _, b := range cur.Build.Kinds {
@@ -223,8 +338,8 @@ func compare(cur, prev Metrics, period Period) Comparison {
 		}
 		kc := KindChange{
 			Kind: b.Kind,
-			Success: judge(side{b.SuccessRate, b.Runs >= lowSample},
-				side{p.SuccessRate, p.Runs >= lowSample}, up, points, builds),
+			Success: buildSuccessMetric.judge(side{b.SuccessRate, b.Runs >= lowSample},
+				side{p.SuccessRate, p.Runs >= lowSample}, builds),
 			Compared: cur.Build.compared[b.Kind],
 		}
 		// The hotspots keep every flagged repo past their cut to the top.
@@ -256,6 +371,6 @@ func buildsIncomplete(meta dataset.Meta, from time.Time) bool {
 }
 
 func leadChange(c, p LeadTimes, incomplete bool) Change {
-	return judge(side{c.Human.P50, c.Human.N >= lowSample}, side{p.Human.P50, p.Human.N >= lowSample},
-		down, relative, incomplete)
+	return leadTimeMetric.judge(side{c.Human.P50, c.Human.N >= lowSample},
+		side{p.Human.P50, p.Human.N >= lowSample}, incomplete)
 }

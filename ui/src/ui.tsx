@@ -76,6 +76,19 @@ export function SectionHead({
   );
 }
 
+// A block's head inside a section: its title and one line on how to read
+// it.
+export function SubHead({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="mt-7 flex flex-wrap items-baseline gap-x-3.5 gap-y-1">
+      <h4 className="m-0 font-serif text-[19px] font-medium text-ink">
+        {title}
+      </h4>
+      <span className="text-[13px] text-muted">{text}</span>
+    </div>
+  );
+}
+
 const VERDICT_TONE: Record<Exclude<Change["verdict"], "none">, Tone> = {
   better: "ok",
   worse: "warn",

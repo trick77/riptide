@@ -8,11 +8,13 @@ import type { Finding, Metrics } from "./api";
 import { stageNames } from "./Flow";
 import { dur, durParts, fullDate, num, pct, stage } from "./format";
 import type { Tab } from "./state";
+import { Strip } from "./strip";
 import {
   Compare,
   Direction,
   Pill,
   SectionHead,
+  SubHead,
   Tile,
   type Tone,
   type Why,
@@ -324,15 +326,12 @@ export function Overview({ m, why, onWhy, onFacts }: Props) {
         lead={t("overview.intro")}
       />
       <Findings m={m} onFacts={onFacts} />
+      <Strip m={m} />
 
-      <div className="mt-7 flex flex-wrap items-baseline gap-x-3.5 gap-y-1">
-        <h4 className="m-0 font-serif text-[19px] font-medium text-ink">
-          {t("overview.throughput")}
-        </h4>
-        <span className="text-[13px] text-muted">
-          {t("overview.throughputText")}
-        </span>
-      </div>
+      <SubHead
+        title={t("overview.throughput")}
+        text={t("overview.throughputText")}
+      />
       <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3">
         <Tile
           label={t("overview.freq.label")}

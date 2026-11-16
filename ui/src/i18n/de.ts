@@ -94,9 +94,21 @@ export const de = {
     incomplete:
       "kein Vergleich: die Daten der Vorperiode sind nicht vollständig, oder Erstdeploys überwiegen",
     no_value: "kein Vergleich: ein Wert fehlt",
+    not_reporting: "kein Vergleich: Argo CD meldet für das Team noch nicht",
     previous: "Vorperiode",
     now: "jetzt",
     undirected: "ohne Richtung",
+  },
+  strip: {
+    title: "Gegen die Vorperiode",
+    text: "Links schlechter, rechts besser; die Länge ist die Grösse der Veränderung, gekappt bei Halbierung oder Verdoppelung. Kennzahlen ohne Richtung fehlen.",
+    aria: "Jede Kennzahl gegen die Vorperiode",
+    reason: {
+      low_sample: "zu wenig Daten",
+      incomplete: "Vorperiode unvollständig",
+      no_value: "kein Wert",
+    },
+    buildSuccess: "Erfolgsquote, {{kind}}",
   },
   why: {
     button: "Was heisst das?",

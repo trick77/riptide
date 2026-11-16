@@ -13,6 +13,7 @@ import { Costs } from "./Costs";
 import { Flow } from "./Flow";
 import { initialLanguage } from "./i18n";
 import { parseState, stateQuery } from "./state";
+import { Strip } from "./strip";
 import {
   ago,
   change,
@@ -22,6 +23,7 @@ import {
   noSpread,
   prFact,
   spread,
+  undirected,
 } from "./test/fixtures";
 
 type Answer = Metrics | Facts | Response;
@@ -119,6 +121,7 @@ describe("App", () => {
     await screen.findByRole("tablist", { name: "Faktentabelle" });
     for (const h of [
       "Was jetzt?",
+      "Gegen die Vorperiode",
       "Throughput und Instability",
       "Wo wartet eine Änderung?",
       "Wie gleichmässig kommt Code nach PROD?",
@@ -149,7 +152,7 @@ describe("App", () => {
     expect(
       screen.getByText(/1 Erstdeploy ohne Vergleichswert/),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Lead Time bis INTG/)).toBeInTheDocument();
+    expect(screen.getByText(/Lead Time bis INTG:/)).toBeInTheDocument();
     expect(screen.getAllByText(/wenig belastbar/).length).toBeGreaterThan(0);
     // The DORA names, and the side Riptide cannot measure.
     expect(
@@ -198,7 +201,7 @@ describe("App", () => {
     expect(screen.getByText("Besser")).toBeInTheDocument();
     expect(screen.getByText("Schlechter")).toBeInTheDocument();
     expect(screen.getAllByText("Unverändert").length).toBeGreaterThan(0);
-    expect(screen.getByText("ohne Richtung")).toBeInTheDocument();
+    expect(screen.getAllByText("ohne Richtung").length).toBeGreaterThan(0);
     expect(
       screen.getAllByText(
         "kein Vergleich: zu wenig Daten in einer der beiden Perioden",
@@ -1325,6 +1328,125 @@ describe("flow", () => {
     expect(screen.getByText("gemerged → auf PROD")).toBeInTheDocument();
     // No stage is hot: no lever named.
     expect(screen.queryByText(/Der Hebel liegt/)).toBeNull();
+  });
+});
+
+describe("strip", () => {
+  it("draws the backend's scores, worse to the left and red, no undirected row", () => {
+    const m = metrics();
+    render(
+      <Strip
+        m={{
+          ...m,
+          comparison: {
+            ...m.comparison,
+            lead_time_pre: change("none", null, "incomplete"),
+            review_time: change("better", 7200, null, 0.4),
+          },
+        }}
+      />,
+    );
+    const rows = screen.getAllByTestId("strip-row");
+    // freq, lead, lead to intg, deploy success, review, within a day,
+    // jammed, three kinds; first touch and open PRs have no direction.
+    expect(rows).toHaveLength(10);
+    expect(screen.queryByText("Approval ohne Kommentar")).toBeNull();
+    expect(screen.queryByText("Offene PRs")).toBeNull();
+    expect(screen.getByText("◀ Schlechter")).toBeInTheDocument();
+
+    const lead = rows[1];
+    expect(within(lead).getByText("Lead Time bis PROD")).toBeInTheDocument();
+    const now = within(lead).getByText("2.0 Tage");
+    expect(now).toHaveClass("text-danger-ink");
+    expect(now.style.right).toContain("50%");
+    const bar = within(lead).getByRole("img", {
+      name: "Lead Time bis PROD: 2.0 Tage, Schlechter",
+    });
+    expect(bar).toHaveAttribute("tabindex", "0");
+
+    const review = rows[4];
+    const better = within(review).getByText("2.4 h");
+    expect(better).toHaveClass("text-muted");
+    expect(better.style.left).toContain("50%");
+
+    expect(within(rows[2]).getByText("Vorperiode unvollständig")).toBeVisible();
+    expect(within(rows[5]).getByText("zu wenig Daten")).toBeInTheDocument();
+    expect(within(rows[7]).getByText("Erfolgsquote, Releases")).toBeVisible();
+
+    fireEvent.mouseEnter(bar);
+    const tip = screen.getByRole("tooltip");
+    expect(tip).toHaveTextContent("Lead Time bis PROD");
+    expect(tip).toHaveTextContent("jetzt2.0 Tage");
+    expect(tip).toHaveTextContent("Vorperiode1.0 Tage");
+    expect(tip).toHaveTextContent("Schlechter");
+    expect(bar).toHaveAccessibleDescription(/Vorperiode1\.0 Tage/);
+    fireEvent.mouseLeave(bar);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(bar).not.toHaveAttribute("aria-describedby");
+
+    // One tooltip at a time: the last hover or focus wins, and only that
+    // row points at it.
+    const reviewBar = within(rows[4]).getByRole("img");
+    fireEvent.focus(bar);
+    fireEvent.mouseEnter(reviewBar);
+    expect(screen.getAllByRole("tooltip")).toHaveLength(1);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Review-Zeit");
+    expect(reviewBar).toHaveAttribute("aria-describedby");
+    expect(bar).not.toHaveAttribute("aria-describedby");
+    fireEvent.mouseLeave(reviewBar);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    fireEvent.focus(bar);
+    fireEvent.blur(bar);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+
+    // A same verdict: a tick on the centre line, no bar on either side.
+    const success = rows[3];
+    expect(within(success).getByTestId("strip-tick")).toBeInTheDocument();
+    expect(within(success).queryByTestId("strip-bar")).toBeNull();
+    expect(within(success).getByText("75 %").style.left).toBe(
+      "calc(50% + 6px)",
+    );
+  });
+
+  it("takes its rows from the backend's direction, not the verdict", () => {
+    const m = metrics();
+    render(
+      <Strip
+        m={{
+          ...m,
+          comparison: {
+            ...m.comparison,
+            deploy_frequency: undirected(0.1),
+            within_day: undirected(null, "low_sample"),
+            review_time: change("none", null, "low_sample"),
+          },
+        }}
+      />,
+    );
+    const rows = screen.getAllByTestId("strip-row");
+    expect(rows).toHaveLength(8);
+    expect(screen.queryByText("Deploy-Frequenz")).toBeNull();
+    expect(screen.queryByText("Innert 24 h gemerged")).toBeNull();
+    expect(within(rows[3]).getByText("zu wenig Daten")).toBeVisible();
+  });
+
+  it("says when Argo CD does not report yet, not too few data", () => {
+    const m = metrics();
+    render(
+      <Strip
+        m={{
+          ...m,
+          comparison: {
+            ...m.comparison,
+            deploy_frequency: change("none", null, "not_reporting"),
+          },
+        }}
+      />,
+    );
+    const freq = screen.getAllByTestId("strip-row")[0];
+    expect(
+      within(freq).getByText("Argo CD meldet für das Team noch nicht"),
+    ).toBeVisible();
   });
 });
 

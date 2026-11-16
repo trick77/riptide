@@ -102,9 +102,21 @@ export const en = {
     incomplete:
       "no comparison: the previous period's data is incomplete, or first deploys dominate",
     no_value: "no comparison: a value is missing",
+    not_reporting: "no comparison: Argo CD does not report for the team yet",
     previous: "Previous period",
     now: "now",
     undirected: "no direction",
+  },
+  strip: {
+    title: "Against the previous period",
+    text: "Worse to the left, better to the right; the length is the size of the change, capped at halving or doubling. Numbers without a direction are left out.",
+    aria: "Each number against the previous period",
+    reason: {
+      low_sample: "too little data",
+      incomplete: "previous period incomplete",
+      no_value: "no value",
+    },
+    buildSuccess: "Success rate, {{kind}}",
   },
   why: {
     button: "What does this mean?",

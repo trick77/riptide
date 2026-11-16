@@ -117,13 +117,25 @@ function kindHotspots(
   };
 }
 
-// A comparison verdict as the backend sends it.
+// A comparison verdict as the backend sends it, for a number with a
+// better direction; undirected() for one without.
 export function change(
   verdict: Change["verdict"],
   prev: number | null = null,
   reason: Change["reason"] = null,
+  score: number | null = verdict === "none" ? null : 0,
+  directed = true,
 ): Change {
-  return { prev, verdict, reason };
+  return { prev, verdict, reason, directed, score };
+}
+
+// A number without a better direction, as the backend sends it: no
+// verdict, `undirected` once both periods compare, else why not.
+export function undirected(
+  prev: number | null,
+  reason: Exclude<Change["reason"], null> = "undirected",
+): Change {
+  return change("none", prev, reason, null, false);
 }
 
 const lowSample = change("none", null, "low_sample");
@@ -371,17 +383,17 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
     comparison: {
       from: weeks(2 * n)[0].start,
       to: w[0].start,
-      deploy_frequency: change("better", 0.1),
+      deploy_frequency: change("better", 0.1, null, 1),
       deploy_success: change("same", 0.75),
-      lead_time: change("worse", 86400),
+      lead_time: change("worse", 86400, null, -0.6),
       lead_time_pre: lowSample,
       review_time: lowSample,
       within_day: lowSample,
-      first_touch: change("none", 0.5, "undirected"),
-      untracked: lowSample,
-      cost_per_kloc: change("none", null, "incomplete"),
-      wasted_share: lowSample,
-      open_prs: change("same", 3),
+      first_touch: undirected(0.5),
+      untracked: undirected(null, "low_sample"),
+      cost_per_kloc: undirected(null, "incomplete"),
+      wasted_share: undirected(null, "low_sample"),
+      open_prs: undirected(3),
       open_jammed: change("same", 1),
       build: [
         {
