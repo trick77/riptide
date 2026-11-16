@@ -14,7 +14,6 @@ type Analysis struct {
 	Team       string
 	Weeks      int
 	Product    string // empty: all products
-	Bots       bool
 	PeriodFrom time.Time
 	PeriodTo   time.Time
 	Trigger    string // scheduled | manual

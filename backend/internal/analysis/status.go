@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/trick77/riptide/internal/metrics"
+	"github.com/trick77/riptide/internal/store"
 )
 
 // Shown is the analysis a view shows: when, how, what it cost, its text.
@@ -170,11 +172,14 @@ type Status struct {
 	Layout   Layout   `json:"layout"`
 	Analysis *Shown   `json:"analysis"`
 	Failure  *Failure `json:"failure"`
-	// NextRun is when the schedule words the view next; null for a view it
-	// does not run (a product, bots).
+	// NextRun is when the schedule words the view next; null without a
+	// model, and for a product it leaves out (no data, no activity, unknown).
 	NextRun *time.Time `json:"next_run"`
 	// CooldownUntil is when the view takes a manual run again.
 	CooldownUntil *time.Time `json:"cooldown_until"`
+	// Zone is the calendar the closed weeks are cut in: the page shows
+	// their days there, not in the viewer's.
+	Zone string `json:"zone"`
 }
 
 // usd formats nano-USD with three decimals.
@@ -188,12 +193,11 @@ func usd(nano *int64) *string {
 
 // Status is the view's analysis as the page shows it.
 func (s *Service) Status(ctx context.Context, v View) (Status, error) {
-	st := Status{State: StateOff, Enabled: s.LLM != nil}
+	st := Status{State: StateOff, Enabled: s.LLM != nil, Zone: ianaZone(s.Loc)}
+	// The product list for next_run and the assessment read the same
+	// window: once.
+	ctx = withLoads(ctx)
 	cur, _ := s.periods(v.Weeks)
-	if scheduled(v) {
-		next := s.NextRun(v.Weeks)
-		st.NextRun = &next
-	}
 	if s.LLM != nil {
 		st.State = StateNone
 		if last, err := s.Store.LatestAttempt(ctx, v); err != nil {
@@ -223,6 +227,9 @@ func (s *Service) Status(ctx context.Context, v View) (Status, error) {
 		var a metrics.Assessment
 		if old <= MaxAge(v.Weeks) && json.Unmarshal(r.Output, &out) == nil && json.Unmarshal(r.Assessment, &a) == nil {
 			_ = json.Unmarshal(r.Report, &rep)
+			if err := s.backfillCompared(ctx, v, r, &a); err != nil {
+				return st, err
+			}
 			st.State, st.Assessment = StateFresh, a
 			if old > 0 {
 				st.State = StateOlder
@@ -238,6 +245,7 @@ func (s *Service) Status(ctx context.Context, v View) (Status, error) {
 			}
 			// German and English word the same items: validate mirrors them.
 			st.Layout = layout(a, &out.DE)
+			s.nextRun(ctx, v, &st)
 			return st, nil
 		}
 	}
@@ -246,7 +254,61 @@ func (s *Service) Status(ctx context.Context, v View) (Status, error) {
 		return st, err
 	}
 	st.Assessment, st.Layout = a, layout(a, nil)
+	s.nextRun(ctx, v, &st)
 	return st, nil
+}
+
+// nextRun sets when the schedule words the view next, if it does: all
+// products always, a product only with data in the window and a repo
+// active in it, as tick and run decide.
+func (s *Service) nextRun(ctx context.Context, v View, st *Status) {
+	if s.LLM == nil {
+		return
+	}
+	if v.Product != "" {
+		n := s.now()
+		if quiet(v, st.Assessment) ||
+			!slices.Contains(s.productsFor(ctx, v.Team, v.Weeks, weekStart(n, s.Loc), n, false), v.Product) {
+			return
+		}
+	}
+	next := s.NextRun(v.Weeks)
+	st.NextRun = &next
+}
+
+// backfillCompared reads Compared from the view's history for an analysis
+// stored before the field: unmarshalled, it would read false and claim no
+// earlier week was assessed. Once per row: the page polls. Only rows from
+// before the field, so the memo stays as small as their number.
+func (s *Service) backfillCompared(ctx context.Context, v View, r store.Analysis, a *metrics.Assessment) error {
+	var probe struct {
+		Compared *bool `json:"compared"`
+	}
+	// The row unmarshalled into a just before: it is JSON.
+	_ = json.Unmarshal(r.Assessment, &probe)
+	if probe.Compared != nil {
+		return nil
+	}
+	if c, ok := s.compared.Load(r.ID); ok {
+		a.Compared = c.(bool)
+		return nil
+	}
+	h, err := s.history(ctx, v, r.PeriodTo)
+	if err != nil {
+		return err
+	}
+	a.Compared = h.Runs > 0
+	s.compared.Store(r.ID, a.Compared)
+	return nil
+}
+
+// ianaZone is loc's IANA name for the page; empty for "Local", which no
+// browser knows: the page then shows the days in the viewer's zone.
+func ianaZone(loc *time.Location) string {
+	if loc == nil || loc.String() == "Local" {
+		return ""
+	}
+	return loc.String()
 }
 
 // cacheFor is how long a view's assessment of closed weeks is served from

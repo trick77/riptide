@@ -87,7 +87,7 @@ func loadZone(name string) (*time.Location, error) {
 }
 
 // view is a read request's parsed query: whose data, which period, which
-// product and bots.
+// product.
 type view struct {
 	team string
 	now  time.Time
@@ -132,19 +132,10 @@ func (d Deps) readView(w http.ResponseWriter, r *http.Request) (view, bool) {
 		}
 		loc = l
 	}
-	var bots bool
-	switch q.Get("bots") {
-	case "", "0", "false":
-	case "1", "true":
-		bots = true
-	default:
-		httpapi.WriteDetail(w, http.StatusUnprocessableEntity, "bots must be 0 or 1")
-		return view{}, false
-	}
 	now := d.now().UTC().Truncate(time.Second)
 	return view{team: team, now: now, cfg: cfg, params: metrics.Params{
 		Period: metrics.NewPeriod(weeks, now, loc), Previous: metrics.PreviousPeriod(weeks, now, loc),
-		Product: strings.TrimSpace(q.Get("product")), Bots: bots, JiraURL: cfg.JiraBaseURL,
+		Product: strings.TrimSpace(q.Get("product")), JiraURL: cfg.JiraBaseURL,
 	}}, true
 }
 

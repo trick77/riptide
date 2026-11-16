@@ -137,6 +137,9 @@ type Signal struct {
 	// LowSample: the signal rests on fewer than 10 cases (a stage's PRs);
 	// shown, never a headline.
 	LowSample bool `json:"low_sample"`
+	// Sample is the cases the signal rests on, where counted (a stage's PRs):
+	// the page says how few, not only that LowSample.
+	Sample *int `json:"sample"`
 	// Weight ranks the signals and the focus.
 	Weight int `json:"weight"`
 	// Seen is how many earlier assessments of the same window raised it,
@@ -184,6 +187,8 @@ type CISplit struct {
 type History struct {
 	Seen   map[string]int
 	Latest map[string]string
+	// Runs are the earlier assessments read; none: the view's first.
+	Runs int
 }
 
 // Assessment is the overview's "what now" over closed weeks.
@@ -205,6 +210,9 @@ type Assessment struct {
 	// Question is the one number to talk about.
 	Question *Signal `json:"question"`
 	CI       CISplit `json:"ci"`
+	// Compared: an assessment of the view for an earlier week was there to
+	// tell what is resolved; without one, nothing can be.
+	Compared bool `json:"compared"`
 }
 
 // WeekStart is the Monday 00:00 of t's week in loc: where ClosedPeriod
@@ -291,7 +299,7 @@ func (a *assessor) run() Assessment {
 	})
 	out := Assessment{
 		Period: a.p.Period, Previous: a.p.Previous, Gaps: append([]string{}, slices.Sorted(maps.Keys(a.gaps))...),
-		Signals: a.out, Question: a.question(), CI: a.ciSplit(),
+		Signals: a.out, Question: a.question(), CI: a.ciSplit(), Compared: a.h.Runs > 0,
 	}
 	out.Focus, out.Active, out.Calm = a.focus()
 	out.Team = []Fact{}
@@ -661,7 +669,7 @@ func (a *assessor) reviewDrivers() []Driver {
 // the breakdown counts them.
 func (a *assessor) reviewByRepo(ds *dataset.Dataset, p Period) map[string][]float64 {
 	out := map[string][]float64{}
-	for _, pr := range mergedPRs(ds, p, a.f, false) {
+	for _, pr := range mergedPRs(ds, p, a.f) {
 		if pr.ReadyAt == nil {
 			continue
 		}
@@ -695,7 +703,7 @@ func (a *assessor) flowSignals() {
 		}
 		a.add(Signal{
 			ID: "slow_stage:" + cur.Key, Kind: SignalStage, Tone: tone, Source: SourceBitbucket, Weight: w,
-			Stage: ptr(cur.Key), LowSample: cur.LowSample,
+			Stage: ptr(cur.Key), LowSample: cur.LowSample, Sample: ptr(cur.N),
 			Facts: []Fact{plain("slow_stage.share", "stage_share", UnitShare, cur.Share),
 				plain("slow_stage.p50", "stage_p50", UnitSeconds, cur.P50),
 				plain("slow_stage.p90", "stage_p90", UnitSeconds, cur.P90)},
@@ -902,7 +910,7 @@ func (a *assessor) focus() (out []FocusRepo, active, calm int) {
 // period, in the product.
 func (a *assessor) activeRepos() map[string]bool {
 	out := map[string]bool{}
-	for _, pr := range mergedPRs(a.ds, a.p.Period, a.f, a.f.bots) {
+	for _, pr := range mergedPRs(a.ds, a.p.Period, a.f) {
 		out[pr.Repo] = true
 	}
 	for _, r := range a.m.OpenPRs.Repos {

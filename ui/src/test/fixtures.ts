@@ -249,7 +249,6 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       { key: "portal", repos: ["portal/portal-web"], apps: [] },
     ],
     product: null,
-    bots: false,
     delivery: {
       production_stage: "prod",
       pre_environment: "intg",
@@ -311,7 +310,6 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       cycle_histogram: {
         upper_bounds_s: [900, 3600, 14400, 86400, 259200],
         human: [0, 0, 0, 1, 0, 0],
-        bot: [0, 0, 0, 1, 0, 0],
       },
       within_day: { count: 1, n: 1, rate: 1 },
       change_mix: mix,
@@ -545,7 +543,6 @@ export function prFact(o: Partial<PRFact> = {}): PRFact {
     jira_prefix: [],
     jira_more: 0,
     gitops: false,
-    bot: false,
     change_type: "feature",
     state: "merged",
     review_s: 0.1 * 86400,
@@ -701,6 +698,7 @@ function signal(o: Partial<Signal> & Pick<Signal, "id" | "kind">): Signal {
     stage: null,
     prev_stage: null,
     low_sample: false,
+    sample: null,
     weight: 1,
     seen: 0,
     facts: [],
@@ -880,6 +878,7 @@ export function assessment(): Assessment {
       other_seconds: 22 * 3600,
       other_wasted: 3600,
     },
+    compared: true,
   };
 }
 
@@ -963,6 +962,7 @@ export function analysisStatus(
     failure: null,
     next_run: null,
     cooldown_until: null,
+    zone: "Europe/Zurich",
     ...o,
   };
 }

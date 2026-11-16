@@ -73,7 +73,6 @@ export const de = {
     allProducts: "Alle Produkte",
     repos_one: "{{count}} Repo",
     repos_other: "{{count}} Repos",
-    bots: "Bots einbeziehen",
     reposHead: "Repos",
     appsHead: "Argo-Apps",
     none: "keine",
@@ -125,15 +124,14 @@ export const de = {
   },
   overview: {
     eyebrow: "Überblick",
-    title: "Was jetzt?",
+    title: "Einschätzung",
     intro:
-      "Was die Zahlen der abgeschlossenen Wochen aufwerfen, und die wenigen Repos mit der meisten Bewegung. Jede Zahl und jedes Urteil stammt von riptide; ist ein Modell eingerichtet, formuliert ein LLM sie.",
+      "Was die letzten {{weeks}} ganzen Wochen zeigen, und wo sich am meisten bewegt.",
     assess: {
-      weeks: "KW {{from}}–{{to}}, abgeschlossen",
-      badgeLLM: "Einordnung: LLM",
-      badgeRules: "nur Regeln",
+      weeks: "KW {{from}}–{{to}}",
+      withoutCurrent: "ohne die laufende Woche",
       ask: "↻ Neu einschätzen",
-      askFirst: "Für diesen Zeitraum einschätzen",
+      askFirst: "Jetzt einschätzen",
       running: "läuft …",
       cooldown: "Wieder möglich ab {{time}}",
       madeAt: "Einschätzung vom {{date}}",
@@ -155,20 +153,30 @@ export const de = {
         argocd: "Argo CD",
         noergler: "noergler",
       },
-      focus: "Im Fokus · {{shown}} von {{active}} aktiven Repos",
-      calmLLM: "{{calm}} ohne Auffälligkeiten: nicht ans Modell gegeben",
-      calmRules: "{{calm}} ohne Auffälligkeiten",
-      teamWide: "Team-weit",
+      focus: "Im Fokus",
+      calm_one: "{{count}} weiteres aktives Repo ohne Auffälligkeiten",
+      calm_other: "{{count}} weitere aktive Repos ohne Auffälligkeiten",
+      scopeAll: "Team, alle Produkte",
+      scopeProduct: "Produkt {{product}}",
       col: {
         good: "Läuft",
         bad: "Hakt",
-        done: "Seit letzter Analyse",
+        done: "Erledigt",
       },
+      rest: "Sonst:",
       empty: {
-        good: "Nichts bemerkenswert besser.",
-        bad: "Nichts hakt.",
-        done: "Seit der letzten Analyse nichts erledigt.",
+        good: "nichts bemerkenswert besser",
+        bad: "nichts hakt",
+        done: "seit der letzten Einschätzung nichts erledigt",
+        first: "keine frühere Woche eingeschätzt, noch kein Vergleich",
       },
+      lowSample_one: "wenig belastbar · {{count}} PR",
+      lowSample_other: "wenig belastbar · {{count}} PRs",
+      waitingAll_one: "{{count}} wartet auf {{what}}",
+      waitingAll_other: "alle {{count}} warten auf {{what}}",
+      waitingOn: "wartet auf {{what}}: {{count}}",
+      allDraft_one: "{{count}} ist ein Entwurf",
+      allDraft_other: "alle {{count}} sind Entwürfe",
       seen_one: "schon {{count}} Mal davor",
       seen_other: "schon {{count}} Mal davor",
       kind: {
@@ -211,8 +219,7 @@ export const de = {
           "Die Quelle meldet seit vor dem Periodenende nichts; ihre Zahlen sagen nichts über die Arbeit.",
         pr_jam:
           "Drei oder mehr PRs seit einer Woche oder länger offen. Warum sie liegen, steht nicht in den Daten: ein Freeze, eine Abhängigkeit, Ferien oder niemand fühlt sich zuständig.",
-        slow_stage:
-          "Die Etappe mit dem längsten Median. Eine gibt es immer, darum «Achtung» erst ab der Hälfte der Zeit bis Produktion und 10 PRs.",
+        slow_stage: "Die Etappe mit dem längsten Median bis Produktion.",
         slower_build:
           "Der Median-Lauf dauert anderthalbmal so lang wie in der Vorperiode oder länger: langsamer als das Repo selbst, nicht als andere. Was im Build langsamer wurde, steht nicht in den Daten.",
         steady_slow:
@@ -238,13 +245,12 @@ export const de = {
         resolved:
           "Die letzte Einschätzung hat es aufgeworfen; jetzt ist es weg.",
       },
-      why: "Warum?",
       factsOf: "Fakten zu {{repo}} ansehen →",
       driver: "Treiber: {{repo}} trägt {{share}} der Zunahme",
       prev: "vorher {{v}}",
       retro: "Retro",
       retroBox: "Für die nächste Retro",
-      copy: "Als Retro-Board kopieren",
+      copy: "Als Markdown kopieren",
       copied: "kopiert",
       question: "Frage ans Team",
       questionFixed: {
@@ -264,9 +270,6 @@ export const de = {
       ciOther_other: "{{count}} weitere",
       ciRule:
         "{{repo}}: {{time}} von {{total}} CI-Zeit, davon {{wasted}} in roten Läufen.",
-      meta: "{{weeks}} · {{model}} · {{cost}} · LLM, kann irren: jede Zahl kommt aus riptide",
-      metaUnpriced: "ohne Preis",
-      metaRules: "{{weeks}} · Regelbefunde aus riptide, ohne LLM-Einordnung",
       weeksUnit: "{{n}} Wochen",
       lever: {
         walk_prs:
@@ -378,7 +381,6 @@ export const de = {
         "die langsamsten 10 %: über {{p90}} · {{count}} Commit von Menschen",
       slowest_other:
         "die langsamsten 10 %: über {{p90}} · {{count}} Commits von Menschen",
-      bots: " · Bots typischerweise {{p50}} ({{n}})",
       directionWhy: "schnelleres Feedback von echten Nutzern",
       lowSample: "Weniger als 10 Commits: wenig belastbar",
       means:
@@ -476,15 +478,13 @@ export const de = {
       note: "Ganz links zählen auch kürzere Wartezeiten mit, ganz rechts auch längere.",
     },
     people: "Menschen",
-    bots: "Bots",
     eyebrow: "Vom Commit nach {{prod}} · nur App-Repos",
     title: "Wo wartet eine Änderung?",
     lead: "Die Zeit bis zum Nutzer, aufgeteilt in Etappen. Wo die meiste Zeit liegt, liegt der Hebel; die kurzen Etappen zu beschleunigen, bringt wenig.",
     fwLeadTime: "Change lead time, aufgeschlüsselt",
     reviewTitle: "Review: schnell, aber wie gründlich?",
     reviewSub:
-      "Beide Zahlen zusammen lesen: wer nur auf eine optimiert, winkt durch oder bremst. Nur PRs von Menschen{{bots}}.",
-    reviewSubBots: "; Bots im Histogramm separat",
+      "Beide Zahlen zusammen lesen: wer nur auf eine optimiert, winkt durch oder bremst. Nur PRs von Menschen.",
     review: {
       label: "Review-Zeit",
       question: "Wie lange wartet ein PR auf das erste Approval?",
@@ -541,8 +541,7 @@ export const de = {
   },
   open: {
     title: "Offene PRs: wo staut es sich?",
-    sub: "Stand {{at}}, egal wann geöffnet. Ab {{days}} Tagen offen gilt ein PR als lang offen, ab {{min}} lang offenen im selben Repo staut es sich. Ohne GitOps-Repos{{bots}}.",
-    subBots: ", Bots mitgezählt",
+    sub: "Stand {{at}}, egal wann geöffnet. Ab {{days}} Tagen offen gilt ein PR als lang offen, ab {{min}} lang offenen im selben Repo staut es sich. Ohne GitOps-Repos und Bots.",
     jammed: {
       label: "Repos im Stau",
       question:
@@ -652,9 +651,8 @@ export const de = {
     lead: "Welche Arten von PRs im Zeitraum gemerged wurden, nach Branch-Präfix: ein Anteil an PRs, nicht an Zeit. Kein Zielwert: wichtig ist, ob der Mix zum Plan des Teams passt.",
     fwImpact: "Impact, Näherung für «Zeit für Neues»",
     cardTitle: "PRs nach Art, gemerged im Zeitraum",
-    cardSub_one: "{{count}} PR im Zeitraum, {{bots}}",
-    cardSub_other: "{{count}} PRs im Zeitraum, {{bots}}",
-    botsIn: "Bots eingeschlossen",
+    cardSub_one: "{{count}} PR im Zeitraum, ohne Bots",
+    cardSub_other: "{{count}} PRs im Zeitraum, ohne Bots",
     aria: "Arbeitsmix: {{parts}}",
     barTitle_one: "{{label}}: {{count}} PR, {{share}}",
     barTitle_other: "{{label}}: {{count}} PRs, {{share}}",
@@ -872,7 +870,6 @@ export const de = {
     colDuration: "Dauer",
     colImages: "Images",
     notOnProd: "Nein",
-    bot: " · Bot",
     ...terms.de,
   },
   frameworks: {

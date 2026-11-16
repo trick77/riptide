@@ -21,17 +21,16 @@ type Params struct {
 	// Product is a Bitbucket project key; empty, or one the dataset does
 	// not know, is all products.
 	Product string
-	// Bots counts bots' PRs in (on their own series where a chart has one).
-	Bots bool
 	// JiraURL is the config's jira.base_url: Jira keys link there.
 	JiraURL string
 }
 
-// filter is the product and bot selection, the product resolved against
-// the dataset.
+// filter is the product selection, resolved against the dataset. Bots'
+// PRs are never counted in (user, 2026-11-16: the numbers mirror the
+// team's own work; a switch for them only distorted review time and
+// throughput).
 type filter struct {
 	product string
-	bots    bool
 }
 
 func (f filter) in(project *string) bool {
@@ -41,7 +40,7 @@ func (f filter) in(project *string) bool {
 func (f filter) inKey(project string) bool { return f.product == "" || project == f.product }
 
 func newFilter(ds *dataset.Dataset, p Params) filter {
-	f := filter{bots: p.Bots}
+	var f filter
 	if slices.ContainsFunc(ds.Products, func(x dataset.Product) bool { return x.Key == p.Product }) {
 		f.product = p.Product
 	}
@@ -55,9 +54,7 @@ type Metrics struct {
 	Products []dataset.Product `json:"products"`
 	// Product is the product shown; null for all, also when the one asked
 	// for has no data in the window.
-	Product *string `json:"product"`
-	// Bots is whether bots' PRs are counted in, as asked.
-	Bots      bool     `json:"bots"`
+	Product   *string  `json:"product"`
 	Delivery  Delivery `json:"delivery"`
 	LeadChain Chain    `json:"lead_chain"`
 	Review    Review   `json:"review"`
@@ -97,16 +94,15 @@ func computeBoth(ds, prev *dataset.Dataset, p Params) (m, pm Metrics) {
 
 // compute is the page's sections over one period; base as build takes it.
 func compute(ds *dataset.Dataset, period Period, f filter, base *baseline) Metrics {
-	humans := mergedPRs(ds, period, f, false)
+	humans := mergedPRs(ds, period, f)
 	ch := chain(ds, humans)
 	m := Metrics{
 		Meta:      ds.Meta,
 		Period:    period,
 		Products:  ds.Products,
-		Bots:      f.bots,
 		Delivery:  delivery(ds, period, f, ch),
 		LeadChain: leadChain(ch),
-		Review:    review(humans, mergedPRs(ds, period, f, f.bots), period, ch),
+		Review:    review(humans, period, ch),
 		OpenPRs:   openSection(ds, f),
 		Build:     build(ds, period, f, base),
 		Costs:     costs(ds, f),
@@ -430,12 +426,12 @@ func delivery(ds *dataset.Dataset, p Period, f filter, ch rawChain) Delivery {
 
 // ---- PRs -------------------------------------------------------------------
 
-// mergedPRs are the PRs merged in the period, GitOps promotions left out,
-// bots only if asked.
-func mergedPRs(ds *dataset.Dataset, p Period, f filter, bots bool) []dataset.PR {
+// mergedPRs are the people's PRs merged in the period, GitOps promotions
+// and bots left out.
+func mergedPRs(ds *dataset.Dataset, p Period, f filter) []dataset.PR {
 	var out []dataset.PR
 	for _, pr := range ds.PRs {
-		if !pr.GitOps && (bots || !pr.Bot) && pr.State == "merged" && f.inKey(pr.Project) && p.In(pr.MergedAt) {
+		if !pr.GitOps && !pr.Bot && pr.State == "merged" && f.inKey(pr.Project) && p.In(pr.MergedAt) {
 			out = append(out, pr)
 		}
 	}
@@ -730,7 +726,6 @@ type Histograms struct {
 	// last bucket, past the last bound, is open.
 	UpperBoundsS []float64 `json:"upper_bounds_s"`
 	Human        []int     `json:"human"`
-	Bot          []int     `json:"bot"`
 }
 
 // Review is the code-review section.
@@ -742,8 +737,8 @@ type Review struct {
 	Approved             int      `json:"approved"`
 	ApprovedOnFirstTouch int      `json:"approved_on_first_touch"`
 	FirstTouchRate       *float64 `json:"first_touch_rate"`
-	// Merged are the merged PRs, bots per the filter; Untracked those
-	// without a Jira key.
+	// Merged are the people's merged PRs; Untracked those without a Jira
+	// key.
 	Merged         int        `json:"merged"`
 	Untracked      int        `json:"untracked"`
 	UntrackedRate  *float64   `json:"untracked_rate"`
@@ -777,15 +772,11 @@ type MixShare struct {
 // exclusive, as the histogram's bounds, so the two agree at 24 h.
 const Day = 86400.0
 
-// review is the section over the human PRs merged in the period and those
-// counted per the bot filter, both from mergedPRs.
-func review(humans, withBots []dataset.PR, p Period, ch rawChain) Review {
-	var bots []dataset.PR
+// review is the section over the human PRs merged in the period, from
+// mergedPRs.
+func review(humans []dataset.PR, p Period, ch rawChain) Review {
 	untracked := 0
-	for _, pr := range withBots {
-		if pr.Bot {
-			bots = append(bots, pr)
-		}
+	for _, pr := range humans {
 		if len(pr.JiraKeys) == 0 {
 			untracked++
 		}
@@ -797,7 +788,7 @@ func review(humans, withBots []dataset.PR, p Period, ch rawChain) Review {
 			within++
 		}
 	}
-	mix := changeMix(withBots, p)
+	mix := changeMix(humans, p)
 	var total MixWeek
 	for _, w := range mix {
 		total.Feature += w.Feature
@@ -812,17 +803,13 @@ func review(humans, withBots []dataset.PR, p Period, ch rawChain) Review {
 		Approved:             ch.approved,
 		ApprovedOnFirstTouch: ch.approvedOnFirstTouch,
 		FirstTouchRate:       ratio(ch.approvedOnFirstTouch, ch.approved),
-		Merged:               len(withBots),
+		Merged:               len(humans),
 		Untracked:            untracked,
-		UntrackedRate:        ratio(untracked, len(withBots)),
-		CycleHistogram: Histograms{
-			UpperBoundsS: CycleBuckets,
-			Human:        histogram(cycle),
-			Bot:          histogram(cycleTimes(bots)),
-		},
-		WithinDay: Share{Count: within, N: len(cycle), Rate: ratio(within, len(cycle))},
-		ChangeMix: mix,
-		MixTotal:  total,
+		UntrackedRate:        ratio(untracked, len(humans)),
+		CycleHistogram:       Histograms{UpperBoundsS: CycleBuckets, Human: histogram(cycle)},
+		WithinDay:            Share{Count: within, N: len(cycle), Rate: ratio(within, len(cycle))},
+		ChangeMix:            mix,
+		MixTotal:             total,
 		MixShare: MixShare{
 			Feature: ratio(total.Feature, all), Bugfix: ratio(total.Bugfix, all),
 			Hotfix: ratio(total.Hotfix, all), Other: ratio(total.Other, all),

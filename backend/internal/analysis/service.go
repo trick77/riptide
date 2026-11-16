@@ -80,7 +80,7 @@ func MaxAge(weeks int) int {
 	return 1
 }
 
-// View is a page view: team, window, product, bots.
+// View is a page view: team, window, product.
 type View = store.AnalysisView
 
 // Service runs and serves the analyses.
@@ -106,6 +106,13 @@ type Service struct {
 	// cache keeps a view's assessment of the current closed weeks briefly:
 	// the page polls while a run is under way, and the weeks are closed.
 	cache sync.Map
+	// products holds, per team, window and week, the products the schedule
+	// words: read once a week, not every tick.
+	products sync.Map
+	// settledAt holds, per view, the week its scheduled run settled.
+	settledAt sync.Map
+	// compared holds Compared per analysis id for rows stored before it.
+	compared sync.Map
 	// manual are the start times of the recent manual runs, all views.
 	manualMu sync.Mutex
 	manual   []time.Time
@@ -137,8 +144,8 @@ func (s *Service) assess(ctx context.Context, v View) (metrics.Assessment, error
 	var ds, pds *dataset.Dataset
 	var errs [2]error
 	var wg sync.WaitGroup
-	wg.Go(func() { ds, errs[0] = s.Load(ctx, v.Team, cur) })
-	wg.Go(func() { pds, errs[1] = s.Load(ctx, v.Team, prev) })
+	wg.Go(func() { ds, errs[0] = s.load(ctx, v.Team, cur) })
+	wg.Go(func() { pds, errs[1] = s.load(ctx, v.Team, prev) })
 	wg.Wait()
 	if err := errors.Join(errs[:]...); err != nil {
 		return metrics.Assessment{}, err
@@ -147,7 +154,7 @@ func (s *Service) assess(ctx context.Context, v View) (metrics.Assessment, error
 	if err != nil {
 		return metrics.Assessment{}, err
 	}
-	return metrics.Assess(ds, pds, metrics.Params{Period: cur, Previous: prev, Product: v.Product, Bots: v.Bots}, h), nil
+	return metrics.Assess(ds, pds, metrics.Params{Period: cur, Previous: prev, Product: v.Product}, h), nil
 }
 
 // history reads the view's done analyses before to: the latest one's
@@ -188,7 +195,7 @@ func (s *Service) history(ctx context.Context, v View, to time.Time) (metrics.Hi
 	if len(runs) == 0 {
 		return h, nil
 	}
-	h.Latest = runs[0].ids
+	h.Latest, h.Runs = runs[0].ids, len(runs)
 	// In a row means on the window's schedule: a run missed (failed, the
 	// pod down) is a gap, and the streak ends there.
 	gap := time.Duration(MaxAge(v.Weeks)) * 7 * 24 * time.Hour
@@ -222,6 +229,13 @@ var errBusy = errors.New("an analysis of this view is under way or was just aske
 // errOff: no model configured.
 var errOff = errors.New("no analysis model configured")
 
+// errQuiet: a scheduled product view without a repo active in the window.
+var errQuiet = errors.New("no activity in the product")
+
+// quiet reports whether a product view has no repo with a merged PR, a run
+// or an open PR in the window: the schedule leaves it out.
+func quiet(v View, a metrics.Assessment) bool { return v.Product != "" && a.Active == 0 }
+
 // IsOff reports whether err is the refusal of a service without a model.
 func IsOff(err error) bool { return errors.Is(err, errOff) }
 
@@ -243,13 +257,19 @@ func (s *Service) Run(ctx context.Context, v View, trigger string) error {
 // run is Run with the view's inflight mark already held.
 func (s *Service) run(ctx context.Context, v View, trigger string) error {
 	started := time.Now()
-	log := s.Log.With("team", v.Team, "weeks", v.Weeks, "product", v.Product, "bots", v.Bots, "trigger", trigger,
+	log := s.Log.With("team", v.Team, "weeks", v.Weeks, "product", v.Product, "trigger", trigger,
 		"model", s.LLM.Model())
 
 	a, err := s.assess(ctx, v)
 	if err != nil {
 		log.ErrorContext(ctx, "analysis_failed", "stage", "assess", logging.Err(err))
 		return err
+	}
+	// A product listed only for bots' PRs, or data outside what counts,
+	// has nothing to word: no paid call on the schedule.
+	if trigger == TriggerScheduled && quiet(v, a) {
+		log.InfoContext(ctx, "analysis_skipped", "reason", "no_activity")
+		return errQuiet
 	}
 	digest, al, err := buildDigest(a)
 	if err != nil {
@@ -340,7 +360,7 @@ func deref(p *int64) int64 {
 }
 
 func viewKey(v View) string {
-	return v.Team + "|" + strconv.Itoa(v.Weeks) + "|" + v.Product + "|" + strconv.FormatBool(v.Bots)
+	return v.Team + "|" + strconv.Itoa(v.Weeks) + "|" + v.Product
 }
 
 // Ask starts a manual run of the view in the background, unless one is
@@ -412,7 +432,7 @@ func (s *Service) releaseManual() {
 }
 
 // ManualPerHour caps the manual runs across all views and teams: the
-// cooldown is per view, and the bots and product toggles make several. Per
+// cooldown is per view, and the products and windows make several. Per
 // process: riptide runs one replica (infra repo); with N the cap is N×.
 const ManualPerHour = 10
 

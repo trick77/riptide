@@ -232,10 +232,7 @@ function FactsTables({
             )}
           </>,
           <Mono className="whitespace-nowrap">{p.repo}</Mono>,
-          <span className="text-muted">
-            {prType(p)}
-            {p.bot ? t("facts.bot") : ""}
-          </span>,
+          <span className="text-muted">{prType(p)}</span>,
           dur(p.review_s),
           dur(p.cycle_s),
           p.merged_at

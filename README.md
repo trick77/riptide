@@ -21,7 +21,7 @@ is a JSON file changed by pull request, not an admin UI.
 **The team page**
 
 - One page per team, a mirror for the team, not a ranking of teams or people
-- Leads with "What now?": the findings riptide's rules raise, each naming its
+- Leads with the assessment: the findings riptide's rules raise, each naming its
   rule and number and linking to the facts behind it, plus a conversation
   starter
 - Sections by question: Flow (where a change waits, from first commit to
@@ -187,7 +187,7 @@ On the UI listener, shapes in [`backend/api/openapi.yaml`](backend/api/openapi.y
 
 - `GET /api/teams`: the configured teams
 - `GET /api/metrics?team=&weeks=4|12|26&tz=`: the page's numbers, the
-  previous period and the findings; `product=` and `bots=1` narrow or widen it
+  previous period and the findings; `product=` narrows it (bots' PRs never count)
 - `GET /api/facts`: the same parameters plus `q`, the PRs, deploys and runs
   behind the numbers
 

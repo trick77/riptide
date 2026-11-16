@@ -73,7 +73,6 @@ export function OpenPRs({
           at: dateTime(o.at),
           days: o.long_days,
           min: o.jam_min,
-          bots: m.bots ? t("open.subBots") : "",
         })}
       />
       <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-3">

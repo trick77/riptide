@@ -122,7 +122,7 @@ type OpenRepo struct {
 }
 
 // OpenPRs are the PRs open at the period's end: GitOps promotions left out,
-// bots only if asked. Open, Long, Age and the waits leave the inactive ones
+// bots left out. Open, Long, Age and the waits leave the inactive ones
 // out.
 type OpenPRs struct {
 	// At is the instant: the period's end, now for the current one.
@@ -167,7 +167,7 @@ func openInactive(pr dataset.OpenPR, at time.Time) bool {
 func openPRs(ds *dataset.Dataset, f filter) []dataset.OpenPR {
 	var out []dataset.OpenPR
 	for _, pr := range ds.OpenPRs {
-		if f.inKey(pr.Project) && (f.bots || !pr.Bot) {
+		if f.inKey(pr.Project) && !pr.Bot {
 			out = append(out, pr)
 		}
 	}

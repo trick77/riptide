@@ -132,11 +132,10 @@ export default function App() {
         team,
         weeks: state.weeks,
         product: state.product,
-        bots: state.bots,
       }
     : null;
   const key = query
-    ? `${query.team}|${query.weeks}|${query.product ?? ""}|${query.bots}`
+    ? `${query.team}|${query.weeks}|${query.product ?? ""}`
     : null;
   const search = useSettled(state.q.trim(), SEARCH_DELAY_MS);
 
@@ -147,7 +146,7 @@ export default function App() {
   const factsQuery: Query | null =
     query && current ? { ...query, product: current.product } : null;
   const factsKey = factsQuery
-    ? `${factsQuery.team}|${factsQuery.weeks}|${factsQuery.product ?? ""}|${factsQuery.bots}|${search}`
+    ? `${factsQuery.team}|${factsQuery.weeks}|${factsQuery.product ?? ""}|${search}`
     : null;
   const facts = useLoad(factsKey, (signal) =>
     fetchFacts(factsQuery!, search, signal),
@@ -293,6 +292,49 @@ export default function App() {
           aria-label={t("page.filter")}
           className="no-print mt-5 flex flex-col gap-3 rounded-ui-lg border border-border bg-panel px-4 py-3.5"
         >
+          {/* The product is the frame of the whole page: tabs, not one
+              chip among the filters (user, 2026-11-16). */}
+          <div
+            role="group"
+            aria-label={t("page.product")}
+            className="-mx-4 -mt-3.5 flex flex-wrap gap-x-1 border-b border-border px-2"
+          >
+            {[
+              {
+                key: null as string | null,
+                label: t("page.allProducts"),
+                count: `${products.length}`,
+              },
+            ]
+              .concat(
+                products.map((p) => ({
+                  key: p.key,
+                  label: p.key,
+                  count: t("page.repos", { count: p.repos.length }),
+                })),
+              )
+              .map((c) => {
+                const on = product === c.key;
+                return (
+                  <button
+                    key={c.key ?? "*"}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => set({ product: c.key })}
+                    className={`-mb-px inline-flex items-baseline gap-1.5 border-0 border-b-2 bg-transparent px-3.5 pt-3 pb-2.5 text-[14px] ${
+                      on
+                        ? "border-accent text-ink"
+                        : "border-transparent text-muted hover:text-ink"
+                    }`}
+                  >
+                    <span>{c.label}</span>
+                    <span className="font-mono text-[11px] text-faint">
+                      {c.count}
+                    </span>
+                  </button>
+                );
+              })}
+          </div>
           <div className="flex flex-wrap items-center gap-x-[18px] gap-y-2.5">
             <div
               role="group"
@@ -315,65 +357,6 @@ export default function App() {
                 </button>
               ))}
             </div>
-            <div
-              role="group"
-              aria-label={t("page.product")}
-              className="flex flex-wrap gap-1.5"
-            >
-              {[
-                {
-                  key: null as string | null,
-                  label: t("page.allProducts"),
-                  count: `${products.length}`,
-                },
-              ]
-                .concat(
-                  products.map((p) => ({
-                    key: p.key,
-                    label: p.key,
-                    count: t("page.repos", { count: p.repos.length }),
-                  })),
-                )
-                .map((c) => {
-                  const on = product === c.key;
-                  return (
-                    <button
-                      key={c.key ?? "*"}
-                      type="button"
-                      aria-pressed={on}
-                      onClick={() => set({ product: c.key })}
-                      className={`inline-flex h-[30px] items-center gap-[7px] rounded-full border px-3 text-[13px] ${
-                        on
-                          ? "border-accent-fill bg-accent/15 text-ink"
-                          : "border-border bg-bg text-ink-dim"
-                      }`}
-                    >
-                      <span>{c.label}</span>
-                      <span
-                        className={`font-mono text-[11px] ${on ? "text-accent-strong" : "text-muted"}`}
-                      >
-                        {c.count}
-                      </span>
-                    </button>
-                  );
-                })}
-            </div>
-            <button
-              type="button"
-              aria-pressed={state.bots}
-              onClick={() => set({ bots: !state.bots })}
-              className={`inline-flex h-[30px] items-center gap-2 rounded-full border px-3 text-[13px] ${
-                state.bots
-                  ? "border-s3 bg-s3/15 text-ink"
-                  : "border-border bg-bg text-muted"
-              }`}
-            >
-              <span
-                aria-hidden="true"
-                className={`size-2 rounded-full ${state.bots ? "bg-s3" : "bg-transparent shadow-[inset_0_0_0_1.5px] shadow-faint"}`}
-              />
-              {t("page.bots")}
-            </button>
           </div>
           {sel && (
             <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1.5 border-t border-border-soft pt-2.5 text-[12.5px] text-muted">

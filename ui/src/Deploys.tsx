@@ -135,10 +135,7 @@ export function Mix({ m }: { m: Metrics }) {
       <Card>
         <CardHead
           title={t("mix.cardTitle")}
-          sub={t("mix.cardSub", {
-            count: r.merged,
-            bots: m.bots ? t("mix.botsIn") : t("common.withoutBots"),
-          })}
+          sub={t("mix.cardSub", { count: r.merged })}
         />
         {shown.length ? (
           <>

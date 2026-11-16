@@ -163,7 +163,6 @@ Go types:
 | `team` | text | no |  |  |
 | `weeks` | integer | no |  |  |
 | `product` | text | no | `''::text` |  |
-| `bots` | boolean | no | `false` |  |
 | `period_from` | timestamp with time zone | no |  |  |
 | `period_to` | timestamp with time zone | no |  |  |
 | `trigger` | text | no |  |  |
@@ -183,8 +182,8 @@ Go types:
 
 Indexes:
 
-- `team_analyses_scheduled` (`team`, `weeks`, `product`, `bots`, `period_to`) unique where `trigger = 'scheduled'::text`
-- `team_analyses_view` (`team`, `weeks`, `product`, `bots`, `created_at`)
+- `team_analyses_scheduled` (`team`, `weeks`, `product`, `period_to`) unique where `trigger = 'scheduled'::text`
+- `team_analyses_view` (`team`, `weeks`, `product`, `created_at`)
 
 Checks:
 
@@ -317,7 +316,6 @@ erDiagram
         text team
         integer weeks
         text product
-        boolean bots
         timestamp_with_time_zone period_from
         timestamp_with_time_zone period_to
         text trigger

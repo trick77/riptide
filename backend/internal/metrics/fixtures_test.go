@@ -123,11 +123,11 @@ func data(mod ...func(*dataset.Dataset)) *dataset.Dataset {
 
 // chainOf and reviewOf are the sections as Compute builds them.
 func chainOf(ds *dataset.Dataset, p Period, f filter) rawChain {
-	return chain(ds, mergedPRs(ds, p, f, false))
+	return chain(ds, mergedPRs(ds, p, f))
 }
 
 func reviewOf(ds *dataset.Dataset, p Period, f filter) Review {
-	return review(mergedPRs(ds, p, f, false), mergedPRs(ds, p, f, f.bots), p, chainOf(ds, p, f))
+	return review(mergedPRs(ds, p, f), p, chainOf(ds, p, f))
 }
 
 func near(a, b float64) bool { return math.Abs(a-b) < 1e-6*math.Max(1, math.Abs(b)) }

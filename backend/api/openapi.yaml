@@ -283,7 +283,6 @@ paths:
         - $ref: "#/components/parameters/ReadWeeks"
         - $ref: "#/components/parameters/ReadTZ"
         - $ref: "#/components/parameters/ReadProduct"
-        - $ref: "#/components/parameters/ReadBots"
       responses:
         "200":
           description: The metrics.
@@ -301,7 +300,7 @@ paths:
       summary: The single facts behind the numbers, searched
       description: |
         The team's PRs, deploys and CI runs of the period, newest first,
-        filtered by product, bots (PRs only) and a case-insensitive search;
+        filtered by product (bots' PRs left out) and a case-insensitive search;
         each table the first 300 matches and how many matched.
 
         No authentication of its own: the UI listener is reached through the
@@ -319,7 +318,6 @@ paths:
             Send the `product` /api/metrics answered; the facts read no lead
             times or reviews, so they cannot tell every product the page knows.
           schema: { type: string }
-        - $ref: "#/components/parameters/ReadBots"
         - name: q
           in: query
           required: false
@@ -358,7 +356,6 @@ paths:
         - $ref: "#/components/parameters/ReadWeeks"
         - $ref: "#/components/parameters/ReadTZ"
         - $ref: "#/components/parameters/ReadProduct"
-        - $ref: "#/components/parameters/ReadBots"
       responses:
         "200":
           description: The assessment, worded where there is an analysis.
@@ -385,7 +382,6 @@ paths:
         - $ref: "#/components/parameters/ReadWeeks"
         - $ref: "#/components/parameters/ReadTZ"
         - $ref: "#/components/parameters/ReadProduct"
-        - $ref: "#/components/parameters/ReadBots"
       responses:
         "202":
           description: Started.
@@ -406,7 +402,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "422":
-          description: "`team` missing, `weeks`, `tz` or `bots` unreadable, or a `product` the team's data does not know."
+          description: "`team` missing, `weeks` or `tz` unreadable, or a `product` the team's data does not know."
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -451,7 +447,7 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     ReadBadQuery:
-      description: "`team` missing, or `weeks`, `tz` or `bots` unreadable."
+      description: "`team` missing, or `weeks` or `tz` unreadable."
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -486,12 +482,6 @@ components:
       required: false
       description: A product key; one without data in the period, or none, is all products.
       schema: { type: string }
-    ReadBots:
-      name: bots
-      in: query
-      required: false
-      description: "`1` counts bots' PRs in (on their own series where a chart has one)."
-      schema: { type: string, enum: ["0", "1", "true", "false"] }
 
   schemas:
     Error:
@@ -753,7 +743,7 @@ components:
     Metrics:
       type: object
       additionalProperties: false
-      required: [meta, period, products, product, bots, delivery, lead_chain, review, open_prs, build, costs,
+      required: [meta, period, products, product, delivery, lead_chain, review, open_prs, build, costs,
                  comparison]
       properties:
         meta: { $ref: "#/components/schemas/Meta" }
@@ -764,7 +754,6 @@ components:
         product:
           type: [string, "null"]
           description: The product shown; null for all, also when the one asked for has no data in the period.
-        bots: { type: boolean, description: "Bots' PRs counted in, as asked." }
         delivery: { $ref: "#/components/schemas/Delivery" }
         lead_chain: { $ref: "#/components/schemas/LeadChain" }
         review: { $ref: "#/components/schemas/Review" }
@@ -912,8 +901,8 @@ components:
       type: object
       description: |
         The PRs open at the period's end, whenever opened (every other PR
-        number counts a PR once merged), GitOps promotions left out, bots'
-        only with `bots=1`. Read from the events before `at` only: the
+        number counts a PR once merged), GitOps promotions and bots left
+        out. Read from the events before `at` only: the
         previous period's end reads what was open then, plus the PRs open
         all along that riptide heard of only later. Age from the PR's
         creation date as Bitbucket sends it. A PR with no event for
@@ -1150,21 +1139,20 @@ components:
         approved: { type: integer }
         approved_on_first_touch: { type: integer }
         first_touch_rate: { $ref: "#/components/schemas/NullableNumber" }
-        merged: { type: integer, description: "Merged PRs, bots per the filter." }
+        merged: { type: integer, description: "Merged PRs, people's only." }
         untracked: { type: integer, description: "Of those, without a Jira key." }
         untracked_rate: { $ref: "#/components/schemas/NullableNumber" }
         cycle_histogram:
           type: object
           description: PRs per cycle-time bucket; one count more than bounds, the last bucket open.
           additionalProperties: false
-          required: [upper_bounds_s, human, bot]
+          required: [upper_bounds_s, human]
           properties:
             upper_bounds_s:
               type: array
               description: Each bucket's upper bound in seconds, exclusive, ascending.
               items: { type: number }
             human: { type: array, items: { type: integer } }
-            bot: { type: array, items: { type: integer } }
         within_day:
           $ref: "#/components/schemas/Share"
           description: Of the PRs in `cycle`, those merged under 24 h after opening (exclusive, as the histogram's bounds).
@@ -1695,7 +1683,7 @@ components:
         inactive ones after them; then a PR opened or merged in the period,
         newest merge or opening first.
       additionalProperties: false
-      required: [repo, pr_id, title, title_parts, jira_prefix, jira_more, gitops, bot, change_type, state, review_s,
+      required: [repo, pr_id, title, title_parts, jira_prefix, jira_more, gitops, change_type, state, review_s,
                  cycle_s, merged_at, prod_at, to_prod_s, age_s, waiting, idle_s]
       properties:
         repo: { type: string }
@@ -1711,7 +1699,6 @@ components:
           items: { $ref: "#/components/schemas/JiraRef" }
         jira_more: { type: integer, minimum: 0, description: "Keys the title does not show beyond jira_prefix." }
         gitops: { type: boolean, description: A GitOps repo's promotion PR. }
-        bot: { type: boolean }
         change_type: { type: [string, "null"] }
         state: { type: string, enum: [open, merged, declined, deleted] }
         review_s: { $ref: "#/components/schemas/NullableSeconds" }
@@ -1840,7 +1827,7 @@ components:
         closed week, `older` an older one within its window's schedule,
         `none` none to show, `off` no model configured.
       additionalProperties: false
-      required: [state, enabled, running, assessment, layout, analysis, failure, next_run, cooldown_until]
+      required: [state, enabled, running, assessment, layout, analysis, failure, next_run, cooldown_until, zone]
       properties:
         state: { type: string, enum: [fresh, older, none, off] }
         layout:
@@ -1887,10 +1874,11 @@ components:
             - type: "null"
         next_run:
           $ref: "#/components/schemas/NullableInstant"
-          description: When the schedule words the view next; null for a view it does not run (a product, bots).
+          description: When the schedule words the view next; null without a model, and for a product the schedule leaves out.
         cooldown_until:
           $ref: "#/components/schemas/NullableInstant"
           description: When the view takes a manual run again; null when it does now.
+        zone: { type: string, description: "The IANA zone the closed weeks are cut in, the page shows their days there; empty for Local, then the viewer's." }
 
     LayoutCard:
       type: object
@@ -1970,11 +1958,11 @@ components:
     Assessment:
       type: object
       description: |
-        The overview's "what now" over closed weeks: signals ranked (gates
+        The overview's assessment over closed weeks: signals ranked (gates
         first), the focus candidates by weight, the team numbers, where the
         CI time went. Every number and verdict computed by riptide.
       additionalProperties: false
-      required: [period, previous, gaps, signals, focus, active, calm, team, question, ci]
+      required: [period, previous, gaps, signals, focus, active, calm, team, question, ci, compared]
       properties:
         period: { $ref: "#/components/schemas/Period" }
         previous: { $ref: "#/components/schemas/Period" }
@@ -2029,6 +2017,9 @@ components:
             other_repos: { type: integer }
             other_seconds: { type: number }
             other_wasted: { type: number }
+        compared:
+          type: boolean
+          description: An assessment of the view for an earlier week was there to tell what is resolved.
 
     Signal:
       type: object
@@ -2037,8 +2028,8 @@ components:
         `gate` silences a source, `attention` and `hint` are stuck, `good`
         runs, `talk` is a question without a verdict.
       additionalProperties: false
-      required: [id, kind, tone, source, repo, run_kind, metric, stage, prev_stage, low_sample, weight, seen, facts, waiting,
-                 drivers]
+      required: [id, kind, tone, source, repo, run_kind, metric, stage, prev_stage, low_sample, sample, weight, seen, facts,
+                 waiting, drivers]
       properties:
         id: { type: string }
         kind:
@@ -2053,6 +2044,7 @@ components:
         stage: { type: [string, "null"] }
         prev_stage: { type: [string, "null"] }
         low_sample: { type: boolean, description: "Rests on fewer than 10 cases (a stage's PRs): shown, never a headline." }
+        sample: { type: [integer, "null"], description: "The cases it rests on, where counted (a stage's PRs); null otherwise." }
         weight: { type: integer }
         seen: { type: integer, description: "How many earlier assessments of the window raised it, in a row." }
         facts: { type: array, minItems: 1, items: { $ref: "#/components/schemas/Fact" }, description: The first is the hero number. }

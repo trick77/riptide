@@ -323,6 +323,14 @@ func TestStageSignals(t *testing.T) {
 	if got := signals(chain(StageToProd, 0.9, true), same); got != "slow_stage:to_prod:hint " {
 		t.Errorf("few PRs = %q", got)
 	}
+	// The signal says how many PRs it rests on, few or not.
+	few := chain(StageToProd, 0.9, true)
+	few.Stages[1].N = 7
+	a := &assessor{m: Metrics{LeadChain: few}, gaps: map[string]bool{}}
+	a.flowSignals()
+	if s := a.out[0]; s.Sample == nil || *s.Sample != 7 || !s.LowSample {
+		t.Errorf("sample of a low-sample stage = %v, low %v", s.Sample, s.LowSample)
+	}
 	if got := signals(chain(StageCoding, 0.6, false), same); got != "slow_stage:coding:attention bottleneck_moved:hint " {
 		t.Errorf("moved = %q", got)
 	}

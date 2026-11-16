@@ -206,7 +206,6 @@ type PRFact struct {
 	JiraPrefix []JiraRef   `json:"jira_prefix"`
 	JiraMore   int         `json:"jira_more"`
 	GitOps     bool        `json:"gitops"`
-	Bot        bool        `json:"bot"`
 	ChangeType *string     `json:"change_type"`
 	State      string      `json:"state"`
 	// ReviewS is ready to approval, CycleS opened to merged, ToProdS merged
@@ -304,7 +303,7 @@ type Table[T any] struct {
 }
 
 // Facts is the /api/facts body: the single facts behind every number,
-// newest first, filtered by product, bots (PRs only) and the search.
+// newest first, filtered by product and the search; bots' PRs left out.
 type Facts struct {
 	ProductionStage string            `json:"production_stage"`
 	Limit           int               `json:"limit"`
@@ -448,7 +447,7 @@ func factPRs(ds *dataset.Dataset) []factPR {
 // given: the facts read no lead times or reviews, so their products are not
 // all of the page's; the UI sends the product /api/metrics resolved.
 func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
-	f := filter{product: p.Product, bots: p.Bots}
+	f := filter{product: p.Product}
 	m := newMatcher(q)
 	prod := ds.Meta.ProductionStage
 
@@ -464,7 +463,7 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 		// when there is a search.
 		PRs: table(prs, func(x factPR) bool {
 			pr := x.pr
-			if !f.inKey(pr.Project) || (!f.bots && pr.Bot) {
+			if !f.inKey(pr.Project) || pr.Bot {
 				return false
 			}
 			if m == "" {
@@ -484,7 +483,7 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 			return PRFact{
 				Repo: pr.Repo, PRID: pr.PRID, Title: pr.Title, TitleParts: parts,
 				JiraPrefix: keys, JiraMore: more,
-				GitOps: pr.GitOps, Bot: pr.Bot, ChangeType: pr.ChangeType,
+				GitOps: pr.GitOps, ChangeType: pr.ChangeType,
 				State:   pr.State,
 				ReviewS: wait(pr.ReadyAt, pr.ApprovedAt), CycleS: wait(pr.OpenedAt, pr.MergedAt),
 				MergedAt: pr.MergedAt, ProdAt: prodAt, ToProdS: wait(pr.MergedAt, prodAt),

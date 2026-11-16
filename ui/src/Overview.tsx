@@ -28,7 +28,6 @@ type Props = {
 
 export function Overview({ m, query, why, onWhy, onFacts }: Props) {
   const { t } = useTranslation();
-  const bots = m.bots;
   const prod = stage(m.delivery.production_stage);
   const freq = m.delivery.frequency;
   const lt = m.delivery.lead_time;
@@ -110,7 +109,7 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
         id="h-ueberblick"
         eyebrow={t("overview.eyebrow")}
         title={t("overview.title")}
-        lead={t("overview.intro")}
+        lead={t("overview.intro", { weeks: query.weeks })}
       />
       <Assessment query={query} m={m} onFacts={onFacts} />
       <Strip m={m} />
@@ -165,15 +164,12 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
             lt.human.p50 == null ? "" : t("common.typical", { unit: lead.unit })
           }
           note={
-            (lt.human.n === 0
+            lt.human.n === 0
               ? t("overview.lead.noHuman")
               : t("overview.lead.slowest", {
                   p90: dur(lt.human.p90),
                   count: lt.human.n,
-                })) +
-            (bots && lt.bot.n > 0
-              ? t("overview.lead.bots", { p50: dur(lt.bot.p50), n: lt.bot.n })
-              : "")
+                })
           }
           direction={
             <Direction

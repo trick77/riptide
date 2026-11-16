@@ -1,8 +1,8 @@
-// The overview's "what now": the assessment of the closed weeks, as the
-// backend computed and judged it (/api/analysis), worded by an LLM where a
-// model is set, by the rules' own texts where not. Every number, verdict,
-// focus repo and column comes from the backend; the browser formats them
-// and scales the bars.
+// The overview's assessment of the closed weeks, as the backend computed
+// and judged it (/api/analysis), worded by an LLM where a model is set, by
+// the rules' own texts where not. Every number, verdict, focus repo and
+// column comes from the backend; the browser formats them and scales the
+// bars. The page never says who worded it (user, 2026-11-16: "slop").
 
 import type { TFunction } from "i18next";
 import { useEffect, useState } from "react";
@@ -38,11 +38,17 @@ import type { Tab } from "./state";
 const POLL_MS = 3000;
 // Small meta text: plain spaces around the middot are fine there.
 const SEP = ` ${String.fromCharCode(0x00b7)} `;
+// In a heading an en space each side: plain spaces read cramped (user).
+const EN = String.fromCharCode(0x2002);
+const HEAD_SEP = `${EN}${String.fromCharCode(0x00b7)}${EN}`;
 
 // The column, lever and facts tab of an item are the backend's (layout):
 // the page only shows them.
 type Column = LayoutCard["column"];
+const COLUMNS: Column[] = ["good", "bad", "done"];
 
+// What a jam waits on, in the order of the wait chain: one shade of the
+// validated sequential ramp per step, the draft grey.
 const WAIT_ORDER: PRWaiting[] = [
   "first_review",
   "review",
@@ -51,13 +57,15 @@ const WAIT_ORDER: PRWaiting[] = [
   "draft",
 ];
 const WAIT_COLOR: Record<PRWaiting, string> = {
-  first_review: "bg-s4",
-  review: "bg-s3",
-  changes: "bg-s1",
-  merge: "bg-s2",
+  first_review: "bg-seq-4",
+  review: "bg-seq-3",
+  changes: "bg-seq-2",
+  merge: "bg-seq-1",
   draft: "bg-other",
 };
-const CI_COLOR = ["bg-s4", "bg-s1", "bg-s2"];
+// The repos ranked by CI time: the same ramp, the largest brightest; the
+// series ramp's fixed order would put no rank in the colours.
+const CI_COLOR = ["bg-seq-4", "bg-seq-3", "bg-seq-2"];
 
 const VERDICT_TEXT: Record<Fact["verdict"], string> = {
   better: "text-online",
@@ -66,10 +74,13 @@ const VERDICT_TEXT: Record<Fact["verdict"], string> = {
   none: "text-muted",
 };
 
-const COLUMN_STYLE: Record<Column, { border: string; dot: string }> = {
-  good: { border: "border-l-online", dot: "bg-online" },
-  bad: { border: "border-l-danger-ink", dot: "bg-danger-ink" },
-  done: { border: "border-l-s1", dot: "bg-s1" },
+const COLUMN_STYLE: Record<Column, { border: string; tag: string }> = {
+  good: { border: "border-l-online", tag: "border-online/45 text-online" },
+  bad: {
+    border: "border-l-danger-ink",
+    tag: "border-danger-ink/45 text-danger-ink",
+  },
+  done: { border: "border-l-s1", tag: "border-s1/45 text-s1" },
 };
 
 export function fmtFact(
@@ -139,6 +150,17 @@ function weeksLabel(t: TFunction, a: AssessmentData): string {
   return t("overview.assess.weeks", { from: w[0].kw, to: w[w.length - 1].kw });
 }
 
+// The period's calendar days: its first Monday to its last Sunday, in the
+// zone the weeks were cut in (a viewer west of it would see a Sunday
+// start). A week's end is the next Monday 00:00, so the day shown is the
+// instant before it.
+function daysLabel(a: AssessmentData, zone?: string): string {
+  const w = a.period.weeks;
+  if (!w.length) return "";
+  const last = new Date(new Date(w[w.length - 1].end).getTime() - 1);
+  return `${dayMonth(new Date(w[0].start), zone)}–${dayMonth(last, zone)}`;
+}
+
 // The rule title of a signal, its words filled from the signal itself.
 function signalTitle(t: TFunction, s: Signal, m: Metrics): string {
   const prod = stage(m.delivery.production_stage);
@@ -198,35 +220,65 @@ function Seen({ n }: { n: number }) {
   const { t } = useTranslation();
   if (n <= 0) return null;
   return (
-    <span className="ml-1.5 inline-block rounded-full border border-ochre/40 px-1.5 align-[2px] font-mono text-[10.5px] text-ochre">
+    <span className="inline-block rounded-full border border-ochre/40 px-1.5 font-mono text-[10.5px] text-ochre">
       {t("overview.assess.seen", { count: n })}
     </span>
   );
 }
 
+// LowSample says how few cases the signal rests on, where the backend
+// counted them.
+function LowSample({ s }: { s: Signal }) {
+  const { t } = useTranslation();
+  if (!s.low_sample) return null;
+  return (
+    <span className="inline-block rounded-full border border-border px-1.5 font-mono text-[10.5px] text-muted">
+      {s.sample != null
+        ? t("overview.assess.lowSample", { count: s.sample })
+        : t("common.lowSample")}
+    </span>
+  );
+}
+
+// WaitingBar is what a jam waits on: one line when all wait on the same,
+// a bar with its legend when they differ.
 function WaitingBar({ w }: { w: WaitingCounts }) {
   const { t } = useTranslation();
   const parts = WAIT_ORDER.filter((k) => w[k] > 0);
   const total = parts.reduce((s, k) => s + w[k], 0);
   if (!total) return null;
+  if (parts.length === 1)
+    return (
+      <p className="my-1.5 text-[13px] text-muted">
+        {parts[0] === "draft"
+          ? t("overview.assess.allDraft", { count: total })
+          : t("overview.assess.waitingAll", {
+              count: total,
+              what: t(`overview.assess.waiting.${parts[0]}`),
+            })}
+      </p>
+    );
   return (
     <div className="my-1.5">
-      <div className="flex h-2 overflow-hidden rounded bg-track">
+      <div className="flex h-2 gap-0.5">
         {parts.map((k) => (
           <span
             key={k}
-            className={WAIT_COLOR[k]}
-            style={{ width: `${(w[k] / total) * 100}%` }}
+            className={`rounded-sm ${WAIT_COLOR[k]}`}
+            style={{ flex: w[k] }}
           />
         ))}
       </div>
-      <div className="mt-1 flex flex-wrap gap-x-2.5 font-mono text-[11px] text-muted">
+      <div className="mt-1 flex flex-wrap gap-x-3 font-mono text-[11px] text-muted">
         {parts.map((k) => (
           <span key={k}>
             <i
               className={`mr-1 inline-block size-2 rounded-sm ${WAIT_COLOR[k]}`}
             />
-            {t(`overview.assess.waiting.${k}`)} {w[k]}
+            {t("overview.assess.waitingOn", {
+              what: t(`overview.assess.waiting.${k}`),
+              count: w[k],
+            })}
           </span>
         ))}
       </div>
@@ -286,16 +338,13 @@ function Retro({ q }: { q: string | null }) {
   );
 }
 
-function Why({ text }: { text: string }) {
-  const { t } = useTranslation();
-  if (!text) return null;
+// A small heading of the section: one level, sentence case.
+function SubHead({ title, aside }: { title: string; aside?: string | null }) {
   return (
-    <details className="mt-1.5 text-[12.5px] text-faint">
-      <summary className="cursor-pointer text-muted">
-        {t("overview.assess.why")}
-      </summary>
-      <p className="mt-1 mb-0">{text}</p>
-    </details>
+    <div className="mt-6 mb-2.5 flex flex-wrap items-baseline justify-between gap-3">
+      <h4 className="m-0 text-[13px] font-medium text-ink">{title}</h4>
+      {aside && <span className="text-[12px] text-faint">{aside}</span>}
+    </div>
   );
 }
 
@@ -310,63 +359,69 @@ type FocusView = {
   take: string;
   retro: string | null;
   lever: string;
-  why: string;
 };
 
 function FocusBlock({
   f,
-  i,
+  wide,
   onFacts,
 }: {
   f: FocusView;
-  i: number;
+  // wide: the only repo in focus, its numbers beside its words.
+  wide: boolean;
   onFacts: OnFacts;
 }) {
   const { t } = useTranslation();
   const first = f.r.facts[0];
   return (
-    <article className="min-w-0 rounded-ui-lg border border-border bg-[linear-gradient(180deg,rgba(236,126,126,.06),transparent_40%)] px-4 pt-4 pb-3">
-      <div className="mb-3 flex flex-wrap items-baseline gap-2.5">
-        <span className="font-serif text-[26px] leading-none text-danger-ink">
-          {i + 1}
-        </span>
-        <h4 className="m-0 font-mono text-[18px] font-semibold break-all text-ink">
-          {f.r.repo}
-        </h4>
-        <span className="rounded-full border border-danger-ink/40 px-2 font-mono text-[11px] tracking-[.06em] text-danger-ink uppercase">
-          {f.rank}
-        </span>
-        <Seen n={f.seen} />
+    <article
+      className={`min-w-0 rounded-ui-lg border border-border bg-bg/40 px-4 pt-4 pb-3 ${
+        wide ? "md:grid md:grid-cols-[minmax(220px,1fr)_2fr] md:gap-x-7" : ""
+      }`}
+    >
+      <div className="min-w-0">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <h4 className="m-0 font-mono text-[16px] font-semibold break-all text-ink">
+            {f.r.repo}
+          </h4>
+          <span className="rounded-full border border-danger-ink/40 px-2 font-mono text-[10.5px] tracking-[.06em] text-danger-ink uppercase">
+            {f.rank}
+          </span>
+          <Seen n={f.seen} />
+        </div>
+        <div className="mb-2 grid grid-cols-[repeat(auto-fit,minmax(110px,1fr))] gap-2.5">
+          {f.r.facts.slice(0, 3).map((x) => (
+            <div key={x.id} className="flex min-w-0 flex-col">
+              <span className="font-serif text-[26px] leading-tight text-ink tabular-nums">
+                {fmtFact(t, x.unit, x.value)}
+              </span>
+              <span className="text-xs leading-snug text-muted">
+                {t(`overview.assess.label.${x.label}`, {
+                  defaultValue: x.label,
+                })}
+              </span>
+              <Prev f={x} />
+            </div>
+          ))}
+        </div>
+        {f.r.waiting ? (
+          <WaitingBar w={f.r.waiting} />
+        ) : (
+          first && <CompareBars f={first} />
+        )}
       </div>
-      <div className="mb-2 grid grid-cols-[repeat(auto-fit,minmax(110px,1fr))] gap-2.5">
-        {f.r.facts.slice(0, 3).map((x) => (
-          <div key={x.id} className="flex min-w-0 flex-col">
-            <span className="font-serif text-[26px] leading-tight text-ink tabular-nums">
-              {fmtFact(t, x.unit, x.value)}
-            </span>
-            <span className="text-xs leading-snug text-muted">
-              {t(`overview.assess.label.${x.label}`, { defaultValue: x.label })}
-            </span>
-            <Prev f={x} />
-          </div>
-        ))}
+      <div className="min-w-0">
+        <p className="my-2 text-sm text-ink-dim">{f.take}</p>
+        <Retro q={f.retro} />
+        <Lever k={f.lever} />
+        <button
+          type="button"
+          onClick={() => onFacts(f.tab, f.r.repo)}
+          className="no-print mt-1.5 border-0 bg-transparent p-0 text-left text-[13px] text-accent-strong hover:underline"
+        >
+          {t("overview.assess.factsOf", { repo: f.r.repo })}
+        </button>
       </div>
-      {f.r.waiting ? (
-        <WaitingBar w={f.r.waiting} />
-      ) : (
-        first && <CompareBars f={first} />
-      )}
-      <p className="my-2 text-sm text-ink-dim">{f.take}</p>
-      <Retro q={f.retro} />
-      <Lever k={f.lever} />
-      <Why text={f.why} />
-      <button
-        type="button"
-        onClick={() => onFacts(f.tab, f.r.repo)}
-        className="no-print mt-1.5 border-0 bg-transparent p-0 text-left text-[13px] text-accent-strong hover:underline"
-      >
-        {t("overview.assess.factsOf", { repo: f.r.repo })}
-      </button>
     </article>
   );
 }
@@ -378,7 +433,6 @@ type CardView = {
   take: string;
   retro: string | null;
   lever: string;
-  why: string;
 };
 
 function Card({ c }: { c: CardView }) {
@@ -387,16 +441,19 @@ function Card({ c }: { c: CardView }) {
   const d = c.s.drivers?.[0];
   return (
     <article
-      className={`mb-3 rounded-ui border border-l-[3px] border-border bg-panel px-3.5 pt-3.5 pb-3 ${COLUMN_STYLE[c.column].border}`}
+      className={`min-w-0 rounded-ui border border-l-[3px] border-border bg-panel px-3.5 pt-3 pb-3 ${COLUMN_STYLE[c.column].border}`}
     >
+      <div className="mb-2 flex flex-wrap items-center gap-1.5">
+        <span
+          className={`rounded-full border px-1.5 font-mono text-[10.5px] tracking-[.06em] uppercase ${COLUMN_STYLE[c.column].tag}`}
+        >
+          {t(`overview.assess.col.${c.column}`)}
+        </span>
+        <LowSample s={c.s} />
+        <Seen n={c.s.seen} />
+      </div>
       <p className="m-0 mb-2.5 text-[15px] leading-snug font-semibold text-ink">
         {c.title}
-        <Seen n={c.s.seen} />
-        {c.s.low_sample && (
-          <span className="ml-1.5 inline-block rounded-full border border-border px-1.5 align-[2px] font-mono text-[10.5px] text-muted">
-            {t("common.lowSample")}
-          </span>
-        )}
       </p>
       {f && (
         <div className="mb-2 flex flex-wrap items-baseline gap-2">
@@ -418,7 +475,6 @@ function Card({ c }: { c: CardView }) {
       <p className="my-2 text-sm text-ink-dim">{c.take}</p>
       <Retro q={c.retro} />
       <Lever k={c.lever} />
-      <Why text={c.why} />
     </article>
   );
 }
@@ -451,25 +507,21 @@ function CIBlock({
       })
     : "";
   return (
-    <div className="mt-6">
-      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-3">
-        <span className="font-mono text-xs tracking-[.08em] text-muted uppercase">
-          {t("overview.assess.ci")}
-        </span>
-        <span className="text-[12.5px] text-faint">
-          {t("overview.assess.ciMeta", {
-            total: ciHours(ci.seconds),
-            weeks: a.period.weeks.length,
-            wasted: ciHours(ci.wasted),
-          })}
-        </span>
-      </div>
-      <div className="flex h-3.5 gap-0.5 overflow-hidden rounded">
+    <div>
+      <SubHead
+        title={t("overview.assess.ci")}
+        aside={t("overview.assess.ciMeta", {
+          total: ciHours(ci.seconds),
+          weeks: a.period.weeks.length,
+          wasted: ciHours(ci.wasted),
+        })}
+      />
+      <div className="flex h-3 gap-0.5">
         {rows.map((r) => (
           <span
             key={r.repo}
             title={`${r.repo}: ${ciHours(r.seconds)}`}
-            className={`relative block h-full ${r.color}`}
+            className={`relative block h-full overflow-hidden rounded-sm ${r.color}`}
             style={{ flex: r.seconds }}
           >
             {r.wasted > 0 && (
@@ -481,7 +533,7 @@ function CIBlock({
           </span>
         ))}
       </div>
-      <div className="mt-1.5 flex flex-wrap gap-x-2.5 font-mono text-[11px] text-muted">
+      <div className="mt-1.5 flex flex-wrap gap-x-3 font-mono text-[11px] text-muted">
         {rows.map((r) => (
           <span key={r.repo}>
             <i className={`mr-1 inline-block size-2 rounded-sm ${r.color}`} />
@@ -521,13 +573,6 @@ function words(
     const s = byId.get(r.signals[0]);
     return s ? t(`overview.assess.kind.${s.kind}`) : "";
   };
-  const whyOf = (r: FocusRepo) =>
-    r.signals
-      .map((id) => byId.get(id))
-      .filter((s): s is Signal => s != null)
-      .map((s) => ruleText(t, s))
-      .filter(Boolean)
-      .join(" ");
   const question = a.question
     ? `${fmtFact(t, a.question.facts[0]?.unit ?? "count", a.question.facts[0]?.value ?? null)} ${t(
         `overview.assess.label.${a.question.facts[0]?.label ?? ""}`,
@@ -557,7 +602,6 @@ function words(
           : sigs.map((s) => signalTitle(t, s, m)).join("; "),
         retro: ft?.retro ? fill(t, ft.retro, facts) : null,
         lever: lf.lever,
-        why: whyOf(r),
       },
     ];
   });
@@ -573,7 +617,6 @@ function words(
         take: ct ? fill(t, ct.take, facts) : ruleText(t, s),
         retro: ct?.retro ? fill(t, ct.retro, facts) : null,
         lever: lc.lever,
-        why: ct ? ruleText(t, s) : "",
       },
     ];
   });
@@ -623,8 +666,11 @@ function Panel({
   ].filter((x): x is readonly [string, string] => x[0] != null);
 
   const copy = () => {
+    // Team and product in the head: copies of several tabs end up on one
+    // board.
+    const scope = m.product ?? t("page.allProducts");
     const lines = [
-      `## Retro-Input riptide${SEP}${weeks}`,
+      `## Retro-Input riptide${HEAD_SEP}${m.meta.team}${HEAD_SEP}${scope}${HEAD_SEP}${weeks}`,
       "",
       ...retros.map(([q, ctx]) => `- ${q} (${ctx})`),
       ...(w.question ? [`- ${w.question}`] : []),
@@ -637,14 +683,25 @@ function Panel({
     }
   };
 
-  const columns: Column[] = ["good", "bad", "done"];
+  // The columns without a card, in one quiet line. "Resolved" needs an
+  // assessment of an earlier week; without a model there never is one, so
+  // the line says nothing about it then.
+  const rest = COLUMNS.filter(
+    (col) =>
+      !w.cards.some((c) => c.column === col) && (col !== "done" || st.enabled),
+  ).map((col) =>
+    col === "done" && !a.compared
+      ? t("overview.assess.empty.first")
+      : t(`overview.assess.empty.${col}`),
+  );
+
   const button =
     st.enabled &&
     (st.running ? (
       <button
         type="button"
         disabled
-        className="no-print inline-flex items-center gap-2 rounded-ui-sm border border-border bg-active px-3 py-1 text-[13px] text-ink-dim opacity-70"
+        className="no-print inline-flex items-center gap-2 rounded-ui-sm border border-border-soft bg-transparent px-2.5 py-1 text-[12.5px] text-faint"
       >
         <span className="spinner" aria-hidden="true" />
         {t("overview.assess.running")}
@@ -659,11 +716,7 @@ function Panel({
             ? t("overview.assess.cooldown", { time: clock(st.cooldown_until!) })
             : undefined
         }
-        className={`no-print rounded-ui-sm border px-3 py-1 text-[13px] disabled:opacity-60 ${
-          shown
-            ? "border-border bg-active text-ink-dim hover:border-accent"
-            : "border-accent bg-accent-dim text-ink"
-        }`}
+        className="no-print rounded-ui-sm border border-border-soft bg-transparent px-2.5 py-1 text-[12.5px] text-faint hover:border-border hover:text-muted disabled:opacity-60"
       >
         {shown ? t("overview.assess.ask") : t("overview.assess.askFirst")}
       </button>
@@ -672,28 +725,25 @@ function Panel({
   return (
     <div
       data-testid="assessment"
-      className="relative overflow-hidden rounded-ui-lg border border-border bg-panel px-6 pt-5 pb-4 before:absolute before:inset-x-0 before:top-0 before:h-0.5 before:bg-[linear-gradient(90deg,var(--color-accent-strong),transparent_70%)]"
+      className="rounded-ui-lg border border-border bg-panel px-6 pt-5 pb-5"
     >
-      <div className="flex flex-wrap items-center gap-2.5">
-        <span className="flex-1 font-mono text-xs tracking-[.08em] text-muted uppercase">
-          {weeks}
-        </span>
-        <span className="rounded-full border border-border px-2.5 py-px font-mono text-[11px] text-muted">
-          {shown
-            ? t("overview.assess.badgeLLM")
-            : t("overview.assess.badgeRules")}
-        </span>
-        {button}
-      </div>
-      {(shown || st.next_run) && (
-        <p className="mt-1.5 mb-0 text-[12.5px] text-muted">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+        <p className="m-0 text-[12.5px] text-muted">
+          <span
+            title={t("overview.assess.withoutCurrent")}
+            className="cursor-help border-b border-dotted border-faint"
+          >
+            {weeks}
+            {SEP}
+            {daysLabel(a, st.zone || undefined)}
+          </span>
           {shown && (
             <>
+              {SEP}
               {t("overview.assess.madeAt", {
                 date: stamp(shown.finished_at, lang),
               })}
-              {SEP}
-              {t(`overview.assess.trigger.${shown.trigger}`)}
+              , {t(`overview.assess.trigger.${shown.trigger}`)}
               {shown.weeks_old > 0 && (
                 <>
                   {SEP}
@@ -704,11 +754,15 @@ function Panel({
               )}
             </>
           )}
-          {shown && st.next_run && SEP}
-          {st.next_run &&
-            t("overview.assess.next", { date: stamp(st.next_run, lang) })}
+          {st.next_run && (
+            <>
+              {SEP}
+              {t("overview.assess.next", { date: stamp(st.next_run, lang) })}
+            </>
+          )}
         </p>
-      )}
+        {button}
+      </div>
       {st.running && (
         <p className="mt-3 mb-0 flex items-center gap-2 rounded-ui-sm border border-border bg-active px-3 py-2 text-[13.5px] text-ink-dim">
           <span className="spinner" aria-hidden="true" />
@@ -724,7 +778,7 @@ function Panel({
       )}
 
       {w.headline && (
-        <h3 className="mt-3.5 mb-1.5 max-w-[36ch] font-serif text-[clamp(22px,2.4vw,30px)] leading-[1.2] font-normal tracking-[-.01em] text-ink">
+        <h3 className="mt-4 mb-1.5 max-w-[36ch] font-serif text-[clamp(22px,2.4vw,30px)] leading-[1.2] font-normal tracking-[-.01em] text-ink">
           {w.headline}
         </h3>
       )}
@@ -742,124 +796,110 @@ function Panel({
         </p>
       ))}
       {w.trend && (
-        <p className="mt-2.5 mb-0 max-w-[70ch] text-[15.5px] text-ink-dim">
+        <p className="mt-2 mb-0 max-w-[70ch] text-[15px] text-ink-dim">
           {w.trend}
         </p>
       )}
 
       {w.focus.length > 0 && (
-        <div className="mt-3.5">
-          <div className="mb-2.5 flex flex-wrap items-baseline justify-between gap-3">
-            <span className="font-mono text-xs tracking-[.08em] text-muted uppercase">
-              {t("overview.assess.focus", {
-                shown: w.focus.length,
-                active: a.active,
-              })}
-            </span>
-            <span className="text-[12.5px] text-faint">
-              {t(
-                shown ? "overview.assess.calmLLM" : "overview.assess.calmRules",
-                { calm: a.calm },
-              )}
-            </span>
-          </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            {w.focus.map((f, i) => (
-              <FocusBlock key={f.r.repo} f={f} i={i} onFacts={onFacts} />
+        <>
+          <SubHead
+            title={t("overview.assess.focus")}
+            aside={
+              a.calm > 0 ? t("overview.assess.calm", { count: a.calm }) : null
+            }
+          />
+          <div
+            className={`grid gap-3 ${w.focus.length > 1 ? "md:grid-cols-[repeat(auto-fit,minmax(260px,1fr))]" : ""}`}
+          >
+            {w.focus.map((f) => (
+              <FocusBlock
+                key={f.r.repo}
+                f={f}
+                wide={w.focus.length === 1}
+                onFacts={onFacts}
+              />
             ))}
           </div>
-        </div>
+        </>
       )}
 
-      <div className="mt-5 font-mono text-xs tracking-[.08em] text-muted uppercase">
-        {t("overview.assess.teamWide")}
-      </div>
-      <div className="mt-2.5 grid gap-4 md:grid-cols-3">
-        {columns.map((col) => {
-          const cs = w.cards.filter((c) => c.column === col);
-          return (
-            <div key={col} className="min-w-0">
-              <h4 className="m-0 mb-2.5 flex items-center gap-2 font-mono text-xs font-normal tracking-[.08em] text-muted uppercase">
-                <i
-                  className={`inline-block size-2 rounded-full ${COLUMN_STYLE[col].dot}`}
-                />
-                {t(`overview.assess.col.${col}`)}
-              </h4>
-              {cs.length ? (
-                cs.map((c) => <Card key={c.s.id} c={c} />)
-              ) : (
-                <div className="rounded-ui border border-l-[3px] border-border border-l-axis bg-panel px-3.5 py-3 text-[13.5px] text-muted">
-                  {t(`overview.assess.empty.${col}`)}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+      {w.focus.length > 0 ? (
+        <SubHead
+          title={
+            m.product
+              ? t("overview.assess.scopeProduct", { product: m.product })
+              : t("overview.assess.scopeAll")
+          }
+        />
+      ) : (
+        <div className="mt-5" />
+      )}
+      {w.cards.length > 0 && (
+        <div className="grid gap-3 md:grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
+          {COLUMNS.flatMap((col) =>
+            w.cards
+              .filter((c) => c.column === col)
+              .map((c) => <Card key={c.s.id} c={c} />),
+          )}
+        </div>
+      )}
+      {rest.length > 0 && (
+        <p className="mt-2.5 mb-0 text-[13px] text-faint">
+          <span className="mr-1 font-medium text-muted">
+            {t("overview.assess.rest")}
+          </span>
+          {rest.join(SEP)}.
+        </p>
+      )}
 
       <CIBlock a={a} sentence={w.ci} />
 
-      <div className="mt-4 flex flex-col gap-2.5 border-t border-border-soft pt-3">
-        {(retros.length > 0 || w.question) && (
-          <div className="rounded-ui border border-s3/35 bg-s3/5 px-3.5 py-3">
-            <div className="mb-2 flex flex-wrap items-center gap-2.5">
-              <b className="flex-1 font-semibold text-ink">
-                {t("overview.assess.retroBox")}
-              </b>
-              <button
-                type="button"
-                onClick={copy}
-                className="no-print rounded-ui-sm border border-border bg-active px-3 py-1 text-[13px] text-ink-dim hover:border-accent"
-              >
-                {t("overview.assess.copy")}
-              </button>
-              {copied && (
-                <span className="font-mono text-xs text-online">
-                  {t("overview.assess.copied")}
-                </span>
-              )}
-            </div>
-            <ol className="m-0 grid gap-1 pl-5 font-serif text-base text-ink-dim">
-              {retros.map(([q, ctx]) => (
-                <li key={q}>
-                  {q}
-                  <small className="ml-1.5 font-mono text-[11px] text-faint">
-                    {ctx}
-                  </small>
-                </li>
-              ))}
-              {w.question && <li>{w.question}</li>}
-            </ol>
-          </div>
-        )}
-        {also.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5 text-[13px] text-muted">
-            {t("overview.assess.also")}
-            {also.map(({ s, column }) => (
-              <span
-                key={s.id}
-                className="rounded-full border border-border bg-panel px-2.5 py-0.5 text-[12.5px] text-ink-dim"
-              >
-                <i
-                  className={`mr-1.5 inline-block size-1.5 rounded-full align-[1px] ${COLUMN_STYLE[column].dot}`}
-                />
-                {signalTitle(t, s, m)}
+      {(retros.length > 0 || w.question) && (
+        <div className="mt-6 rounded-ui border border-border bg-bg/40 px-4 py-3">
+          <div className="mb-2 flex flex-wrap items-center gap-2.5">
+            <b className="flex-1 text-[13px] font-medium text-ink">
+              {t("overview.assess.retroBox")}
+            </b>
+            {copied && (
+              <span className="font-mono text-xs text-online">
+                {t("overview.assess.copied")}
               </span>
-            ))}
+            )}
+            <button
+              type="button"
+              onClick={copy}
+              className="no-print rounded-ui-sm border border-border bg-active px-3 py-1 text-[13px] text-ink-dim hover:border-accent"
+            >
+              {t("overview.assess.copy")}
+            </button>
           </div>
-        )}
-        <div className="text-xs text-faint">
-          {shown
-            ? t("overview.assess.meta", {
-                weeks,
-                model: shown.model,
-                cost: shown.cost_usd
-                  ? `${shown.cost_usd} USD`
-                  : t("overview.assess.metaUnpriced"),
-              })
-            : t("overview.assess.metaRules", { weeks })}
+          <ol className="m-0 grid gap-1 pl-5 font-serif text-base text-ink-dim">
+            {retros.map(([q, ctx]) => (
+              <li key={q}>
+                {q}
+                <small className="ml-1.5 font-mono text-[11px] text-faint">
+                  {ctx}
+                </small>
+              </li>
+            ))}
+            {w.question && <li>{w.question}</li>}
+          </ol>
         </div>
-      </div>
+      )}
+      {also.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[13px] text-muted">
+          {t("overview.assess.also")}
+          {also.map(({ s, column }) => (
+            <span
+              key={s.id}
+              className={`rounded-full border px-2.5 py-0.5 text-[12.5px] ${COLUMN_STYLE[column].tag}`}
+            >
+              {signalTitle(t, s, m)}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -875,8 +915,8 @@ export function Assessment({
   m: Metrics;
   onFacts: OnFacts;
 }) {
-  const { team, weeks, product, bots } = query;
-  const key = `${team}|${weeks}|${product ?? ""}|${bots}`;
+  const { team, weeks, product } = query;
+  const key = `${team}|${weeks}|${product ?? ""}`;
   const [st, setSt] = useState<{ key: string; data: AnalysisStatus } | null>(
     null,
   );
@@ -888,19 +928,18 @@ export function Assessment({
 
   useEffect(() => {
     const ctl = new AbortController();
-    fetchAnalysis({ team, weeks, product, bots }, ctl.signal)
-      .then((data) =>
-        setSt({ key: `${team}|${weeks}|${product ?? ""}|${bots}`, data }),
-      )
+    const k = `${team}|${weeks}|${product ?? ""}`;
+    fetchAnalysis({ team, weeks, product }, ctl.signal)
+      .then((data) => setSt({ key: k, data }))
       .catch((e: unknown) => {
         if (!ctl.signal.aborted)
           setFailure({
-            key: `${team}|${weeks}|${product ?? ""}|${bots}`,
+            key: k,
             msg: e instanceof Error ? e.message : String(e),
           });
       });
     return () => ctl.abort();
-  }, [team, weeks, product, bots, tick]);
+  }, [team, weeks, product, tick]);
 
   const current = st?.key === key ? st.data : null;
   const running = current?.running ?? false;
@@ -914,7 +953,7 @@ export function Assessment({
 
   const ask = () => {
     setAskFailure(null);
-    askAnalysis({ team, weeks, product, bots })
+    askAnalysis({ team, weeks, product })
       .then((data) => setSt({ key, data }))
       .catch((e: unknown) =>
         setAskFailure(e instanceof Error ? e.message : String(e)),
