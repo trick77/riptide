@@ -350,14 +350,6 @@ export type OpenPRs = {
   repos: OpenRepo[];
 };
 
-export type Finding = {
-  kind: "stage" | "flaky" | "slow" | "first_touch" | "open_prs";
-  tone: "attention" | "hint" | "talk";
-  stage: StageKey | null;
-  run_kind: RunKind | null;
-  repo: string | null;
-};
-
 export type Change = {
   prev: number | null;
   verdict: "better" | "worse" | "same" | "none";
@@ -373,6 +365,8 @@ export type Change = {
   // -1..1, positive better: log2(now / previous), negated where lower is
   // better, clamped at halving / doubling; null without a verdict.
   score: number | null;
+  // How far it moved: notable past 25 % (5 points for a share).
+  magnitude: "same" | "minor" | "notable" | null;
 };
 
 // A kind of run against the previous period: its success rate, and how
@@ -415,7 +409,6 @@ export type Metrics = {
   open_prs: OpenPRs;
   build: Build;
   costs: Costs;
-  findings: Finding[];
   comparison: Comparison;
 };
 
@@ -543,6 +536,187 @@ function params(v: Query): URLSearchParams {
 
 export function fetchMetrics(v: Query, signal?: AbortSignal): Promise<Metrics> {
   return getJSON<Metrics>(`/api/metrics?${params(v)}`, signal);
+}
+
+// ---- The overview's assessment and its LLM wording (/api/analysis) -------
+
+export type FactUnit =
+  "seconds" | "share" | "count" | "per_week" | "weeks" | "usd" | "days";
+
+// One number of a signal, judged by the backend against the previous
+// period; text refers to it as {{id}}.
+export type Fact = {
+  id: string;
+  label: string;
+  unit: FactUnit;
+  value: number | null;
+  prev: number | null;
+  verdict: Change["verdict"];
+  magnitude: Change["magnitude"];
+};
+
+export type SignalKind =
+  | "data_gap"
+  | "pr_jam"
+  | "slow_stage"
+  | "slower_build"
+  | "steady_slow"
+  | "flaky"
+  | "change"
+  | "bottleneck_moved"
+  | "throughput_instability"
+  | "agent_wait"
+  | "shared_stall"
+  | "inactive_prs"
+  | "resync_share"
+  | "resolved"
+  | "question";
+
+export type SignalTone = "gate" | "attention" | "hint" | "good" | "talk";
+
+export type Driver = {
+  repo: string;
+  share: number;
+  value: number | null;
+  prev: number | null;
+};
+
+export type Signal = {
+  id: string;
+  kind: SignalKind;
+  tone: SignalTone;
+  source: string;
+  repo: string | null;
+  run_kind: RunKind | null;
+  metric: string | null;
+  stage: StageKey | null;
+  prev_stage: StageKey | null;
+  low_sample: boolean;
+  weight: number;
+  seen: number;
+  facts: Fact[];
+  waiting: WaitingCounts | null;
+  drivers: Driver[] | null;
+};
+
+// A team-wide signal as the page shows it: its column and lever are the
+// backend's.
+export type LayoutCard = {
+  signal: string;
+  column: "good" | "bad" | "done";
+  lever: string;
+};
+
+export type FocusRepo = {
+  repo: string;
+  weight: number;
+  seen: number;
+  signals: string[];
+  facts: Fact[];
+  waiting: WaitingCounts | null;
+};
+
+export type CISplit = {
+  seconds: number;
+  wasted: number;
+  change: Change;
+  repos: { repo: string; seconds: number; wasted: number }[];
+  other_repos: number;
+  other_seconds: number;
+  other_wasted: number;
+};
+
+export type Assessment = {
+  period: Period;
+  previous: Period;
+  gaps: string[];
+  signals: Signal[];
+  focus: FocusRepo[];
+  active: number;
+  calm: number;
+  team: Fact[];
+  question: Signal | null;
+  ci: CISplit;
+};
+
+export type FocusText = {
+  repo: string;
+  take: string;
+  retro: string | null;
+  lever: string;
+};
+
+export type CardText = {
+  signal: string;
+  take: string;
+  retro: string | null;
+  lever: string;
+};
+
+export type AnalysisText = {
+  headline: string;
+  trend: string;
+  focus: FocusText[];
+  cards: CardText[];
+  ci: string;
+  question: string;
+};
+
+export type ShownAnalysis = {
+  id: number;
+  created_at: string;
+  finished_at: string;
+  trigger: "scheduled" | "manual";
+  model: string;
+  cost_usd: string | null;
+  weeks_old: number;
+  text: { de: AnalysisText; en: AnalysisText };
+  report: { dropped: string[]; missed: string[] };
+};
+
+export type AnalysisStatus = {
+  state: "fresh" | "older" | "none" | "off";
+  enabled: boolean;
+  running: boolean;
+  assessment: Assessment;
+  // What the page shows where, chosen by the backend.
+  layout: {
+    focus: { repo: string; lever: string; tab: "prs" | "runs" }[];
+    cards: LayoutCard[];
+    also: LayoutCard[];
+  };
+  analysis: ShownAnalysis | null;
+  failure: { at: string; detail: string } | null;
+  next_run: string | null;
+  cooldown_until: string | null;
+};
+
+export function fetchAnalysis(
+  v: Query,
+  signal?: AbortSignal,
+): Promise<AnalysisStatus> {
+  return getJSON<AnalysisStatus>(`/api/analysis?${params(v)}`, signal);
+}
+
+// Starts an analysis of the view; the backend answers 202 with the status,
+// 409 when one is under way, was just asked for, or no model is set.
+export async function askAnalysis(v: Query): Promise<AnalysisStatus> {
+  const res = await fetch(`/api/analysis?${params(v)}`, {
+    method: "POST",
+    // The backend refuses a POST without it: a cross-site form cannot set it.
+    headers: { Accept: "application/json", "X-Riptide-Ask": "1" },
+  });
+  if (!res.ok) {
+    let detail = res.statusText || `HTTP ${res.status}`;
+    try {
+      const body = (await res.json()) as { detail?: unknown };
+      if (typeof body.detail === "string") detail = body.detail;
+    } catch {
+      // not JSON
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as AnalysisStatus;
 }
 
 export function fetchFacts(

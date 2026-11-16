@@ -112,6 +112,17 @@ Environment (a `.env` in the working directory fills in what is unset):
 | `BACKEND_UI_ALLOW_REMOTE` | `false` | allow a non-loopback `BACKEND_UI_ADDR` |
 | `BACKEND_LOG_LEVEL` | `INFO` | |
 | `BACKEND_ENV` | `dev` | stamped on every log line as `env` |
+| `BACKEND_ANALYSIS_MODEL` | empty (off) | llmwire profile id that words the overview's assessment; locally `mimo-v2.6-pro`, deployed `gpt-6.1-sol` through LiteLLM (infra repo) |
+| `BACKEND_ANALYSIS_REASONING` | empty (balanced) | the model's effort level |
+| `BACKEND_ANALYSIS_TZ` | `Europe/Zurich` | calendar of the assessed closed weeks and the Monday schedule |
+
+The model's key is llmwire's own variable, `LLMWIRE_<PROVIDER>_API_KEY`
+(locally `LLMWIRE_MIMO_API_KEY`), or `LLMWIRE_LITELLM_BASE_URL` /
+`_API_KEY` / `_MODELS` behind a gateway. A named model without a key, or
+without strict JSON schema support, refuses the start.
+`riptide analyse -team <team> [-weeks 4] [-dry-run]` words one view from
+the shell: `-dry-run` prints the model's input (repos aliased) and calls
+nothing.
 
 [`config/riptide.json`](config/riptide.json) holds the teams,
 `environments.production_stage` (the namespace suffix that counts as

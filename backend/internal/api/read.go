@@ -30,6 +30,8 @@ func RegisterUI(srv *httpapi.Server, d Deps) {
 	srv.HandleFunc("GET /api/teams", d.teams)
 	srv.HandleFunc("GET /api/metrics", d.metrics)
 	srv.HandleFunc("GET /api/facts", d.facts)
+	srv.HandleFunc("GET /api/analysis", d.analysisStatus)
+	srv.HandleFunc("POST /api/analysis", d.analysisAsk)
 	// Under /api nothing else exists. Explicit, because the SPA's catch-all
 	// on "GET /" would otherwise answer an unknown /api path with the
 	// shell's 404 instead of {"detail": ...}.

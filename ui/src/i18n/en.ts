@@ -135,74 +135,208 @@ export const en = {
     eyebrow: "Overview",
     title: "What now?",
     intro:
-      "Findings from the rules Riptide applies, plus a fixed conversation starter. Each names its rule and number and leads to the facts behind it.",
-    none: "Nothing stands out under the rules Riptide applies.",
-    tone: {
-      attention: "Attention",
-      hint: "Hint",
-      talk: "Conversation starter",
+      "What the numbers of the closed weeks raise, and the few repos that move most. Every number and every verdict is riptide's; where a model is set, an LLM words them.",
+    assess: {
+      weeks: "CW {{from}}–{{to}}, closed",
+      badgeLLM: "Wording: LLM",
+      badgeRules: "rules only",
+      ask: "↻ Assess again",
+      askFirst: "Assess this period",
+      running: "running …",
+      cooldown: "Can be asked again from {{time}}",
+      madeAt: "Assessment of {{date}}",
+      trigger: {
+        scheduled: "scheduled",
+        manual: "on request",
+      },
+      next: "next: {{date}}",
+      older_one: "as of {{count}} week ago",
+      older_other: "as of {{count}} weeks ago",
+      runningNote:
+        "The assessment of {{weeks}} is running, usually under a minute.",
+      failed: "The last assessment failed: {{detail}}",
+      askFailed: "Could not start the assessment: {{detail}}",
+      gap: "{{source}} has been silent for {{days}} days: its numbers are left out.",
+      source: {
+        bitbucket: "Bitbucket",
+        pipeline: "CI",
+        argocd: "Argo CD",
+        noergler: "noergler",
+      },
+      focus: "In focus · {{shown}} of {{active}} active repos",
+      calmLLM: "{{calm}} without anything notable: not given to the model",
+      calmRules: "{{calm}} without anything notable",
+      teamWide: "Team-wide",
+      col: {
+        good: "Running well",
+        bad: "Stuck",
+        done: "Since the last assessment",
+      },
+      empty: {
+        good: "Nothing notably better.",
+        bad: "Nothing stuck.",
+        done: "Nothing resolved since the last assessment.",
+      },
+      seen_one: "seen {{count}} time before",
+      seen_other: "seen {{count}} times before",
+      kind: {
+        data_gap: "data gap",
+        pr_jam: "PR jam",
+        slow_stage: "longest stage",
+        slower_build: "got slower",
+        steady_slow: "steady slow build",
+        flaky: "flaky",
+        change: "notable change",
+        bottleneck_moved: "bottleneck moved",
+        throughput_instability: "throughput vs. stability",
+        agent_wait: "agent wait",
+        shared_stall: "shared stall",
+        inactive_prs: "forgotten PRs",
+        resync_share: "syncs without images",
+        resolved: "resolved",
+        question: "question",
+      },
+      title: {
+        data_gap: "{{source}} silent",
+        pr_jam: "{{repo}}: PRs pile up",
+        slow_stage: "Most of the time sits in “{{stage}}”",
+        slower_build: "{{repo}}: {{kind}} slower than last period",
+        steady_slow: "{{repo}}: {{kind}} among the slowest again",
+        flaky: "{{repo}}: {{kind}} fail more often",
+        changeGood: "{{label}}: notably better",
+        changeBad: "{{label}}: notably worse",
+        bottleneck_moved: "The bottleneck moved to “{{stage}}”",
+        throughput_instability: "Throughput and stability drift apart",
+        agent_wait: "{{kind}} wait for build agents",
+        shared_stall: "Runs of several repos stuck at once",
+        inactive_prs: "Forgotten PRs",
+        resync_share: "Production syncs without new images",
+        resolved: "{{what}}: resolved",
+        question: "{{label}}",
+      },
+      rule: {
+        data_gap:
+          "The source stopped reporting before the period's end; nothing about it says anything about the work.",
+        pr_jam:
+          "Three or more PRs open a week or longer. Why they wait is not in the data: a freeze, a dependency, holidays or nobody feeling responsible.",
+        slow_stage:
+          "The stage with the longest median. There always is one, so attention only from half the time to production and 10 PRs on.",
+        slower_build:
+          "The median run takes one and a half times as long as last period or longer: slower than the repo itself, not than others. What inside the build got slower is not in the data.",
+        steady_slow:
+          "Among the slowest of its kind in this period and the previous one, slower than the kind's median: slow as a habit, not as a change.",
+        flaky:
+          "Fails far more often than in the previous period. Whether tests, infrastructure or real breakage is not in the data.",
+        changeGood:
+          "Moved past the notable threshold against the previous period.",
+        changeBad:
+          "Moved past the notable threshold against the previous period. Why is not in the data.",
+        bottleneck_moved:
+          "The stage that takes longest is another one than in the previous period.",
+        throughput_instability:
+          "Deploy frequency and deploy success moved in opposite directions: more throughput with rising instability is no progress.",
+        agent_wait:
+          "Half the run time or more is waiting for an agent: the platform's capacity, not the build.",
+        shared_stall:
+          "Several repos' runs got stuck at the same time: shared CI infrastructure, not one repo.",
+        inactive_prs:
+          "Open PRs without any event for 30 days, apart from any jam.",
+        resync_share:
+          "Half the production syncs or more brought no new images: deploys that ship nothing.",
+        resolved: "The latest assessment raised it; it is gone now.",
+      },
+      why: "Why?",
+      factsOf: "View the facts of {{repo}} →",
+      driver: "Driver: {{repo}} carries {{share}} of the rise",
+      prev: "before {{v}}",
+      retro: "Retro",
+      retroBox: "For the next retro",
+      copy: "Copy as retro board",
+      copied: "copied",
+      question: "Question for the team",
+      questionFixed: {
+        feature_share: "Is the share of feature work where we want it?",
+        untracked: "PRs without a Jira key: on purpose or forgotten?",
+        wasted_share: "Why do we review PRs we then drop?",
+        cost_per_kloc: "Is the review spend worth what it finds?",
+        open_prs: "More work under way, or more left lying?",
+        first_touch: "Do we discuss big changes outside Bitbucket?",
+      },
+      also: "Also spotted:",
+      ci: "Where the CI time goes",
+      ciMeta: "{{total}} in {{weeks}} weeks · hatched: failed runs, {{wasted}}",
+      ciOther_one: "{{count}} more",
+      ciOther_other: "{{count}} more",
+      ciRule:
+        "{{repo}}: {{time}} of {{total}} CI time, {{wasted}} of it in failed runs.",
+      meta: "{{weeks}} · {{model}} · {{cost}} · LLM, may err: every number comes from riptide",
+      metaUnpriced: "unpriced",
+      metaRules: "{{weeks}} · rules from riptide, without LLM wording",
+      weeksUnit: "{{n}} weeks",
+      lever: {
+        walk_prs:
+          "walk through the PRs one by one: review, merge, close or park them on purpose",
+        ask_why_waiting:
+          "find out what they wait on: a freeze, a dependency, or nobody feeling responsible",
+        inspect_build_log:
+          "look in the build log of the slowest runs which step takes the time",
+        inspect_failures:
+          "look at the failed runs: the same failure each time, or a different one",
+        platform_agents: "raise the agent capacity with the platform team",
+        platform_stall: "report the stalls to the platform team",
+        find_what_changed:
+          "first find out what changed, then agree on something",
+        name_what_helped: "name what helped, so it stays",
+        look_at_stage: "look at the stage that now takes longest",
+        check_failed_deploys: "look at the failed deploys",
+        tidy_up: "close the old PRs or park them on purpose",
+        check_resyncs: "find out where the syncs without new images come from",
+        check_source: "check the source's connection",
+      },
+      label: {
+        silent_days: "silent",
+        open_long: "PRs open ≥ 7 days",
+        open: "open PRs",
+        age_p50: "median age",
+        failure_rate: "runs failed",
+        wasted: "CI time in failed runs",
+        runs: "runs",
+        build_p50: "median run",
+        kind_p50: "typical run of the kind",
+        build_wait_p50: "waiting for an agent",
+        build_work_p50: "building",
+        deploy_per_week: "releases per week",
+        deploy_success: "deploys succeeded",
+        lead_time_p50: "lead time",
+        review_p50: "ready to approval",
+        within_day: "merged within a day",
+        jammed_repos: "jammed repos",
+        build_success: "runs succeeded",
+        merged_per_week: "PRs merged per week",
+        wip_weeks: "of work standing open",
+        wait_share: "of the lead time waiting",
+        stage_share: "of the lead time",
+        stage_p50: "stage median",
+        stage_p90: "slowest 10 % from",
+        resync_share: "syncs without new images",
+        syncs: "syncs",
+        inactive: "PRs silent 30 days",
+        stall_groups: "stalls across repos",
+        feature_share: "feature PRs",
+        untracked: "PRs without a Jira key",
+        wasted_share: "review spend on dropped PRs",
+        cost_per_kloc: "review spend per 1000 lines",
+        open_prs: "open PRs",
+        first_touch: "approvals without a prior comment",
+      },
+      waiting: {
+        draft: "draft",
+        first_review: "first review",
+        review: "review",
+        changes: "changes",
+        merge: "merge",
+      },
     },
-    area: {
-      flow: "Flow",
-      review: "Review",
-      build: "Build",
-    },
-    stageLever: {
-      coding:
-        "smaller steps, open the PR earlier so review and deploy start earlier",
-      review: "agree on review times in the team, cut PRs smaller",
-      merge: "merge right after the approval; check merge checks and sign-offs",
-      to_pre: "deploy to the pre-environment automatically after the merge",
-      to_prod:
-        "smaller, more frequent releases; check whether PROD is tied to a fixed date",
-    },
-    stageTitleProd:
-      "{{share}} of the time to {{prod}}, the code is finished and only waits for the deployment.",
-    stageTitle:
-      "{{share}} of the time to {{prod}} is spent in the “{{name}}” stage.",
-    stageBodyProd:
-      "A change is typically finished after {{before}}; then it typically waits {{wait}} for the deployment.",
-    stageBody: "{{desc}}: typically {{p50}}, the slowest 10 % over {{p90}}.",
-    ruleAttention:
-      "Rule: stage with the longest median, from {{share}} of the time and {{min}} PRs (starting value)",
-    ruleLowSample:
-      "Rule: stage with the longest median. Below {{min}} PRs too thin for “Attention”, hence only a hint",
-    ruleHint:
-      "Rule: stage with the longest median. There always is one, hence only a hint; “Attention” from {{share}} of the time and {{min}} PRs",
-    toFlow: "To the flow →",
-    firstTouchTitle: "{{rate}} of approvals come without a prior comment.",
-    firstTouchBody:
-      "The value is neither good nor bad: well-practised pairs approve without a comment, and so does anyone who waves changes through.",
-    firstTouchQuestion: "Do we discuss big changes outside Bitbucket?",
-    firstTouchRule:
-      "Always shown: no threshold, no direction · {{n}} of {{total}} approvals",
-    toReview: "To the review →",
-    openTitle_one: "PRs pile up in {{count}} repo.",
-    openTitle_other: "PRs pile up in {{count}} repos.",
-    openBody:
-      "Most in {{repo}}: {{n}} PRs open {{days}} days or longer, median {{p50}}. Still without a first review: {{first}} of the {{jammed}} jammed PRs.",
-    openLever: "bring old PRs up in the daily: review, merge or close them",
-    openRuleAttention:
-      "Rule: a jam is {{min}} or more PRs open {{days}} days or longer in the same repo; “Attention” when more repos are jammed than at the end of the previous period ({{prev}}), otherwise a hint",
-    openRuleHint:
-      "Rule: a jam is {{min}} or more PRs open {{days}} days or longer in the same repo; “Attention” when more repos are jammed than at the end of the previous period",
-    openPRsOf: "View open PRs of {{repo}} →",
-    runsOf: "View the runs of {{repo}} →",
-    flakyTitle: "{{repo}}: {{rate}} of {{kind}} fail.",
-    flakyBody:
-      "{{failures}} of {{runs}} runs red, {{prevRate}} in the previous period. That costs {{hours}} h of CI time and a restart each time.",
-    flakyLever:
-      "find and isolate unstable tests instead of just restarting runs",
-    flakyRule:
-      "Rule: flagged from {{factor}}× its own rate of the previous period and {{points}} points above it, at most halfway to 100 %, with {{failures}} red runs or more, from {{min}} runs in both periods (starting value)",
-    slowTitle:
-      "{{repo}} delivers feedback {{factor}}× slower than in the previous period.",
-    slowBody:
-      "{{kind}} typically take {{p50}}, {{prevP50}} in the previous period. That is how long whoever pushes waits.",
-    slowLever:
-      "use the build cache, run tests in parallel, move slow integration tests out of the PR build",
-    slowRule:
-      "Rule: median from {{factor}}× its own of the previous period, from {{min}} runs in both periods (starting value)",
     sinceNote:
       "Argo CD only reports since {{date}}: the weeks before are empty, the rate applies from then on.",
     sinceLow: " Less than a week of data: not very reliable.",

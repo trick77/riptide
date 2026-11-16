@@ -3,6 +3,7 @@ package metrics
 import (
 	"fmt"
 	"math"
+	"slices"
 	"testing"
 	"time"
 
@@ -274,7 +275,7 @@ func TestCompareWithThePreviousPeriod(t *testing.T) {
 		t.Errorf("no build type = %+v", c.Build)
 	}
 	// The repo against its own previous period, end to end: twice as slow
-	// is one slower repo, and a finding.
+	// is one slower repo, and a signal.
 	slower := builds(nil, 0)
 	for i := range slower.Runs {
 		slower.Runs[i].DurationS = n(1200)
@@ -283,8 +284,9 @@ func TestCompareWithThePreviousPeriod(t *testing.T) {
 	if c := sm.Comparison.Build; len(c) != 1 || c[0].Slower != 1 || c[0].Compared != 1 {
 		t.Errorf("slower = %+v", c)
 	}
-	if len(sm.Findings) == 0 || sm.Findings[0].Kind != FindingSlow {
-		t.Errorf("findings = %+v", sm.Findings)
+	sa := Assess(slower, builds(nil, month), params, History{})
+	if !slices.ContainsFunc(sa.Signals, func(s Signal) bool { return s.Kind == SignalSlower && s.Tone == ToneAttention }) {
+		t.Errorf("signals = %+v", sa.Signals)
 	}
 	c = Compute(builds(agoP(30), 0), builds(agoP(30), month), params).Comparison
 	if len(c.Build) != 1 || c.Build[0].Success.Reason == nil || *c.Build[0].Success.Reason != ReasonIncomplete {
@@ -292,106 +294,40 @@ func TestCompareWithThePreviousPeriod(t *testing.T) {
 	}
 }
 
-func TestFindings(t *testing.T) {
-	share := func(x float64) *float64 { return &x }
-	chain := func(hot float64) Chain {
+// The longest stage: attention from half the time to production on enough
+// PRs, else a hint (some stage always takes longest); moved, a signal of
+// its own.
+func TestStageSignals(t *testing.T) {
+	chain := func(key string, hot float64, low bool) Chain {
 		return Chain{Stages: []Stage{
-			{Key: StageReview, Share: share(1 - hot)},
-			{Key: StageToProd, Share: share(hot), Hot: true},
+			{Key: StageReview, Share: ptr(1 - hot)},
+			{Key: key, Share: ptr(hot), Hot: true, LowSample: low},
 		}}
 	}
-	factor := func(x float64) *float64 { return &x }
-	b := Build{Hotspots: Hotspots{Kinds: []KindHotspots{
-		{Kind: KindFeature, Repos: []RepoHotspot{
-			{Repo: "kasse/e2e", Flaky: true, WastedSeconds: 100},
-			{Repo: "kasse/api", Slow: true, Factor: factor(2.6)},
-		}},
-		{Kind: KindMain, Repos: []RepoHotspot{
-			{Repo: "kasse/web", Flaky: true, WastedSeconds: 900},
-			// flagged twice: once is enough
-			{Repo: "kasse/e2e", Flaky: true, WastedSeconds: 50},
-		}},
-	}}}
-	reviewed := Review{Approved: 4}
-	kinds := func(fs []Finding) string {
+	signals := func(cur, prev Chain) string {
+		a := &assessor{m: Metrics{LeadChain: cur}, pm: Metrics{LeadChain: prev}, gaps: map[string]bool{}}
+		a.flowSignals()
 		out := ""
-		for _, f := range fs {
-			out += f.Kind + ":" + f.Tone
-			if f.Repo != nil {
-				out += ":" + *f.Repo
-			}
-			out += " "
+		for _, s := range a.out {
+			out += s.ID + ":" + s.Tone + " "
 		}
 		return out
 	}
-
-	// The waiting stage first, the worst flaky repo next, capped at three,
-	// then the question to talk about.
-	same := Change{Verdict: ChangeSame}
-	got := kinds(findings(chain(0.86), b, reviewed, OpenPRs{Long: 3, Jammed: 1}, same))
-	want := "stage:attention flaky:attention:kasse/web flaky:attention:kasse/e2e first_touch:talk "
-	if got != want {
-		t.Errorf("findings = %q, want %q", got, want)
+	same := chain(StageToProd, 0.86, false)
+	if got := signals(same, same); got != "slow_stage:to_prod:attention " {
+		t.Errorf("past half = %q", got)
 	}
-	// Under half the time, or on fewer than 10 PRs: a hint, after the repos.
-	got = kinds(findings(chain(0.4), Build{}, reviewed, OpenPRs{}, same))
-	if got != "stage:hint first_touch:talk " {
-		t.Errorf("hint = %q", got)
+	if got := signals(chain(StageToProd, 0.4, false), same); got != "slow_stage:to_prod:hint " {
+		t.Errorf("under half = %q", got)
 	}
-	few := chain(0.9)
-	few.Stages[1].LowSample = true
-	if got = kinds(findings(few, Build{}, reviewed, OpenPRs{}, same)); got != "stage:hint first_touch:talk " {
+	if got := signals(chain(StageToProd, 0.9, true), same); got != "slow_stage:to_prod:hint " {
 		t.Errorf("few PRs = %q", got)
 	}
-	// Nothing at all: no findings, no question without approvals.
-	if fs := findings(Chain{}, Build{}, Review{}, OpenPRs{}, Change{Verdict: ChangeNone}); len(fs) != 0 {
-		t.Errorf("empty = %+v", fs)
+	if got := signals(chain(StageCoding, 0.6, false), same); got != "slow_stage:coding:attention bottleneck_moved:hint " {
+		t.Errorf("moved = %q", got)
 	}
-}
-
-// Jammed repos: attention when more than at the previous period's end,
-// after the repos; else a hint after the stage's. Long-open PRs in no
-// jammed repo: nothing.
-func TestFindingsTieGoesToFeature(t *testing.T) {
-	// Flaky as release and feature with the same waste: one finding, the
-	// feature build's, as build() orders the kinds.
-	same := []RepoHotspot{{Repo: "kasse/web", Flaky: true, WastedSeconds: 900}}
-	b := Build{Hotspots: Hotspots{Kinds: []KindHotspots{
-		{Kind: KindFeature, Repos: same}, {Kind: KindRelease, Repos: same},
-	}}}
-	fs := findings(Chain{}, b, Review{}, OpenPRs{}, Change{Verdict: ChangeNone})
-	if len(fs) != 1 || *fs[0].RunKind != KindFeature {
-		t.Errorf("findings = %+v", fs)
-	}
-}
-
-func TestFindingsOpenPRs(t *testing.T) {
-	hint := Chain{Stages: []Stage{{Key: StageReview, Share: ptr(0.4), Hot: true}}}
-	kinds := func(fs []Finding) string {
-		out := ""
-		for _, f := range fs {
-			out += f.Kind + ":" + f.Tone + " "
-		}
-		return out
-	}
-	flaky := Build{Hotspots: Hotspots{Kinds: []KindHotspots{{Kind: KindMain, Repos: []RepoHotspot{
-		{Repo: "kasse/web", Flaky: true, WastedSeconds: 900},
-	}}}}}
-	if got := kinds(findings(hint, flaky, Review{}, OpenPRs{Long: 3, Jammed: 1}, Change{Verdict: ChangeWorse})); got != "flaky:attention open_prs:attention stage:hint " {
-		t.Errorf("more than before = %q", got)
-	}
-	for _, v := range []string{ChangeSame, ChangeBetter, ChangeNone} {
-		if got := kinds(findings(hint, Build{}, Review{}, OpenPRs{Long: 3, Jammed: 1}, Change{Verdict: v})); got != "stage:hint open_prs:hint " {
-			t.Errorf("%s = %q", v, got)
-		}
-	}
-	// None long open, or no repo jammed: nothing, whatever the comparison
-	// says.
-	if got := kinds(findings(Chain{}, Build{}, Review{}, OpenPRs{Open: 4}, Change{Verdict: ChangeWorse})); got != "" {
-		t.Errorf("none long open = %q", got)
-	}
-	if got := kinds(findings(Chain{}, Build{}, Review{}, OpenPRs{Open: 9, Long: 5}, Change{Verdict: ChangeWorse})); got != "" {
-		t.Errorf("none jammed = %q", got)
+	if got := signals(Chain{}, Chain{}); got != "" {
+		t.Errorf("no PRs = %q", got)
 	}
 }
 

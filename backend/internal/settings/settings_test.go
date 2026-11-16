@@ -20,13 +20,35 @@ func TestDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The analysis is off without a model; its weeks are Zurich's.
+	if s.AnalysisModel != "" || s.AnalysisReasoning != "" || s.AnalysisLoc.String() != "Europe/Zurich" || s.Lookup == nil {
+		t.Errorf("analysis settings = %q %q %v", s.AnalysisModel, s.AnalysisReasoning, s.AnalysisLoc)
+	}
+	s.AnalysisLoc, s.Lookup = nil, nil
 	want := Settings{
 		DBURL: "postgres://riptide:riptide@localhost:5432/riptide", ConfigPath: "config/riptide.json",
 		TeamKeysPath: "config/team-keys.json", LogLevel: "INFO", Env: "dev",
 		ReloadInterval: 30 * time.Second, ListenAddr: ":8000", UIAddr: "127.0.0.1:8080",
 	}
-	if s != want {
+	if s.DBURL != want.DBURL || s.ConfigPath != want.ConfigPath || s.TeamKeysPath != want.TeamKeysPath ||
+		s.LogLevel != want.LogLevel || s.Env != want.Env || s.ReloadInterval != want.ReloadInterval ||
+		s.ListenAddr != want.ListenAddr || s.UIAddr != want.UIAddr {
 		t.Errorf("settings = %+v", s)
+	}
+}
+
+func TestAnalysisSettings(t *testing.T) {
+	s, err := Load(lookup(map[string]string{
+		"BACKEND_ANALYSIS_MODEL": "mimo-v2.6-pro", "BACKEND_ANALYSIS_REASONING": "low", "BACKEND_ANALYSIS_TZ": "UTC",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.AnalysisModel != "mimo-v2.6-pro" || s.AnalysisReasoning != "low" || s.AnalysisLoc != time.UTC {
+		t.Errorf("analysis settings = %q %q %v", s.AnalysisModel, s.AnalysisReasoning, s.AnalysisLoc)
+	}
+	if _, err := Load(lookup(map[string]string{"BACKEND_ANALYSIS_TZ": "Mars/Olympus"})); err == nil {
+		t.Error("a bad zone loaded")
 	}
 }
 

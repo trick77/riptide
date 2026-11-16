@@ -335,6 +335,83 @@ paths:
         "422": { $ref: "#/components/responses/ReadBadQuery" }
         "500": { $ref: "#/components/responses/ReadFailed" }
 
+  /api/analysis:
+    get:
+      tags: [read]
+      operationId: analysis
+      summary: The overview's assessment and its LLM wording
+      description: |
+        The patterns the team's numbers raise over its last closed weeks
+        (never the running one), the repos that move most and where the CI
+        time went, and the LLM's wording of them where there is one for the
+        view: the newest of the same window, within its schedule's age.
+        Every number and verdict is riptide's; the text refers to numbers
+        as `{{fact id}}` placeholders. The weeks are the analysis' calendar
+        (BACKEND_ANALYSIS_TZ), whatever `tz` says, so one stored analysis
+        serves every viewer.
+
+        No authentication of its own: the UI listener is reached through the
+        auth proxy only.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ReadTeam"
+        - $ref: "#/components/parameters/ReadWeeks"
+        - $ref: "#/components/parameters/ReadTZ"
+        - $ref: "#/components/parameters/ReadProduct"
+        - $ref: "#/components/parameters/ReadBots"
+      responses:
+        "200":
+          description: The assessment, worded where there is an analysis.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AnalysisStatus" }
+        "404": { $ref: "#/components/responses/ReadUnknownTeam" }
+        "422": { $ref: "#/components/responses/ReadBadQuery" }
+        "500": { $ref: "#/components/responses/ReadFailed" }
+    post:
+      tags: [read]
+      operationId: askAnalysis
+      summary: Word the view's assessment now
+      description: |
+        Starts an LLM run for the view in the background and answers with
+        its status, `running` set; poll GET until it is not. One per view
+        at a time and per ten minutes, whoever asks: the UI listener knows
+        nobody; ten per hour across all views. Unchanged input is not asked
+        again. Send `X-Riptide-Ask: 1`: a cross-site form cannot, so it cannot
+        spend.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ReadTeam"
+        - $ref: "#/components/parameters/ReadWeeks"
+        - $ref: "#/components/parameters/ReadTZ"
+        - $ref: "#/components/parameters/ReadProduct"
+        - $ref: "#/components/parameters/ReadBots"
+      responses:
+        "202":
+          description: Started.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AnalysisStatus" }
+        "403":
+          description: "`X-Riptide-Ask: 1` missing."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/ReadUnknownTeam" }
+        "409":
+          description: |
+            A run of the view is under way or was asked for within ten
+            minutes, the hour's ten runs are taken, or no model is configured.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: "`team` missing, `weeks`, `tz` or `bots` unreadable, or a `product` the team's data does not know."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/ReadFailed" }
+
 components:
   securitySchemes:
     teamKey:
@@ -677,7 +754,7 @@ components:
       type: object
       additionalProperties: false
       required: [meta, period, products, product, bots, delivery, lead_chain, review, open_prs, build, costs,
-                 findings, comparison]
+                 comparison]
       properties:
         meta: { $ref: "#/components/schemas/Meta" }
         period: { $ref: "#/components/schemas/Period" }
@@ -694,41 +771,7 @@ components:
         open_prs: { $ref: "#/components/schemas/OpenPRs" }
         build: { $ref: "#/components/schemas/Build" }
         costs: { $ref: "#/components/schemas/Costs" }
-        findings:
-          type: array
-          description: |
-            What the numbers ask the team to look at: attention first (a
-            stage taking half the time to production or more, on 10 PRs or
-            more, flaky repos by
-            wasted CI time, slow repos by factor, a repo once, more PRs open
-            a week or longer than at the previous period's end), the hints
-            after them (the stage, PRs open a week or longer), at most 3;
-            then the first-touch rate to talk about, when any PR was
-            approved.
-          items: { $ref: "#/components/schemas/Finding" }
         comparison: { $ref: "#/components/schemas/Comparison" }
-
-    Finding:
-      type: object
-      description: The UI words a finding from `kind` and reads its numbers off the section it names.
-      additionalProperties: false
-      required: [kind, tone, stage, run_kind, repo]
-      properties:
-        kind:
-          type: string
-          enum: [stage, flaky, slow, first_touch, open_prs]
-          description: "`open_prs`: PRs open a week or longer; its numbers are `open_prs`'."
-        tone: { type: string, enum: [attention, hint, talk] }
-        stage:
-          type: [string, "null"]
-          enum: [coding, review, merge, to_pre, to_prod, null]
-          description: The lead chain's hot stage, for `stage`.
-        run_kind:
-          oneOf:
-            - { $ref: "#/components/schemas/RunKind" }
-            - { type: "null" }
-          description: The kind whose hotspots name the repo, for `flaky` and `slow`.
-        repo: { type: [string, "null"] }
 
     Change:
       type: object
@@ -736,7 +779,7 @@ components:
         A number against the previous period. Durations and rates count as
         the same within 10 % of the previous value, shares within 3 points.
       additionalProperties: false
-      required: [prev, verdict, reason, directed, score]
+      required: [prev, verdict, reason, directed, score, magnitude]
       properties:
         directed:
           type: boolean
@@ -771,6 +814,14 @@ components:
             `no_value`: a value missing. `undirected`: no better direction;
             `prev` is set. `not_reporting`: the source (Argo CD, for the
             deploy numbers) does not report for the team yet.
+        magnitude:
+          type: [string, "null"]
+          enum: [same, minor, notable, null]
+          description: |
+            How far it moved: `same` within the tolerance, `notable` past 25 %
+            (5 points for a share, counts damped as for the score), `minor`
+            between. Undirected numbers have one too. Null when the verdict is
+            none for any reason but `undirected`.
 
     Comparison:
       type: object
@@ -1780,3 +1831,258 @@ components:
         key: { type: string, description: "The Bitbucket project key, lowercased." }
         repos: { type: array, items: { type: string } }
         apps: { type: array, items: { type: string } }
+
+    AnalysisStatus:
+      type: object
+      description: |
+        A view's assessment over its closed weeks and, where there is one,
+        the analysis that words it. `state`: `fresh` an analysis of the last
+        closed week, `older` an older one within its window's schedule,
+        `none` none to show, `off` no model configured.
+      additionalProperties: false
+      required: [state, enabled, running, assessment, layout, analysis, failure, next_run, cooldown_until]
+      properties:
+        state: { type: string, enum: [fresh, older, none, off] }
+        layout:
+          type: object
+          description: |
+            What the page shows where, decided by the backend: the focus
+            repos and the cards in order (what the analysis words, or the
+            first 3 candidates and 4 team-wide signals), and the signals
+            spotted without words. Gates and the question are in neither.
+          additionalProperties: false
+          required: [focus, cards, also]
+          properties:
+            focus:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [repo, lever, tab]
+                properties:
+                  repo: { type: string }
+                  lever: { type: string, description: "The model's lever key where it worded the repo, the rules' otherwise." }
+                  tab: { type: string, enum: [prs, runs], description: The facts table the repo links to. }
+            cards: { type: array, items: { $ref: "#/components/schemas/LayoutCard" } }
+            also:
+              type: array
+              description: The signals spotted without words, as chips.
+              items: { $ref: "#/components/schemas/LayoutCard" }
+        enabled: { type: boolean, description: A model is configured; the page offers to ask. }
+        running: { type: boolean, description: An attempt is under way. }
+        assessment: { $ref: "#/components/schemas/Assessment" }
+        analysis:
+          oneOf:
+            - $ref: "#/components/schemas/Analysis"
+            - type: "null"
+        failure:
+          description: The latest attempt, failed after what is shown; null otherwise.
+          oneOf:
+            - type: object
+              additionalProperties: false
+              required: [at, detail]
+              properties:
+                at: { $ref: "#/components/schemas/Instant" }
+                detail: { type: string }
+            - type: "null"
+        next_run:
+          $ref: "#/components/schemas/NullableInstant"
+          description: When the schedule words the view next; null for a view it does not run (a product, bots).
+        cooldown_until:
+          $ref: "#/components/schemas/NullableInstant"
+          description: When the view takes a manual run again; null when it does now.
+
+    LayoutCard:
+      type: object
+      description: A team-wide signal as shown, its column and lever chosen by the backend.
+      additionalProperties: false
+      required: [signal, column, lever]
+      properties:
+        signal: { type: string, description: A signal id. }
+        column: { type: string, enum: [good, bad, done] }
+        lever: { type: string, description: "The model's lever key where it worded the card, the rules' otherwise." }
+
+    Analysis:
+      type: object
+      description: The analysis shown, in both languages.
+      additionalProperties: false
+      required: [id, created_at, finished_at, trigger, model, cost_usd, weeks_old, text, report]
+      properties:
+        id: { type: integer }
+        created_at: { $ref: "#/components/schemas/Instant" }
+        finished_at: { $ref: "#/components/schemas/Instant" }
+        trigger: { type: string, enum: [scheduled, manual] }
+        model: { type: string, description: The llmwire profile id asked. }
+        cost_usd:
+          type: [string, "null"]
+          description: Three decimals; the gateway's figure, or the list price for a vendor called directly. Null when unpriced.
+        weeks_old: { type: integer, minimum: 0, description: How many closed weeks older than the last one. }
+        text:
+          type: object
+          additionalProperties: false
+          required: [de, en]
+          properties:
+            de: { $ref: "#/components/schemas/AnalysisText" }
+            en: { $ref: "#/components/schemas/AnalysisText" }
+        report:
+          type: object
+          additionalProperties: false
+          required: [dropped, missed]
+          properties:
+            dropped: { type: array, items: { type: string }, description: "What the validator left out, and why." }
+            missed: { type: array, items: { type: string }, description: Mandatory signal ids the text does not cover. }
+
+    AnalysisText:
+      type: object
+      description: |
+        The analysis in one language. Numbers appear only as `{{fact id}}`
+        placeholders; a lever is a key the page words.
+      additionalProperties: false
+      required: [headline, trend, focus, cards, ci, question]
+      properties:
+        headline: { type: string }
+        trend: { type: string }
+        focus:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [repo, take, retro, lever]
+            properties:
+              repo: { type: string }
+              take: { type: string }
+              retro: { type: [string, "null"] }
+              lever: { type: string }
+        cards:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [signal, take, retro, lever]
+            properties:
+              signal: { type: string, description: A signal id of the assessment. }
+              take: { type: string }
+              retro: { type: [string, "null"] }
+              lever: { type: string }
+        ci: { type: string }
+        question: { type: string }
+
+    Assessment:
+      type: object
+      description: |
+        The overview's "what now" over closed weeks: signals ranked (gates
+        first), the focus candidates by weight, the team numbers, where the
+        CI time went. Every number and verdict computed by riptide.
+      additionalProperties: false
+      required: [period, previous, gaps, signals, focus, active, calm, team, question, ci]
+      properties:
+        period: { $ref: "#/components/schemas/Period" }
+        previous: { $ref: "#/components/schemas/Period" }
+        gaps:
+          type: array
+          description: Sources silent for 7 days or more at the period's end; their signals are left out.
+          items: { type: string, enum: [bitbucket, pipeline, argocd, noergler] }
+        signals: { type: array, items: { $ref: "#/components/schemas/Signal" } }
+        focus:
+          type: array
+          description: The repos with the most movement, at most 5; the page shows 3.
+          items:
+            type: object
+            additionalProperties: false
+            required: [repo, weight, seen, signals, facts, waiting]
+            properties:
+              repo: { type: string }
+              weight: { type: integer }
+              seen: { type: integer, description: "The most earlier assessments in a row of any of its signals." }
+              signals: { type: array, items: { type: string } }
+              facts: { type: array, items: { $ref: "#/components/schemas/Fact" } }
+              waiting:
+                oneOf:
+                  - $ref: "#/components/schemas/WaitingCounts"
+                  - type: "null"
+        active: { type: integer, description: "Repos with a merged PR, a run or an open PR in the period." }
+        calm: { type: integer, description: Those of them without a signal. }
+        team: { type: array, items: { $ref: "#/components/schemas/Fact" } }
+        question:
+          oneOf:
+            - $ref: "#/components/schemas/Signal"
+            - type: "null"
+        ci:
+          type: object
+          description: The period's CI time by repo across kinds, outliers aside; no better direction.
+          additionalProperties: false
+          required: [seconds, wasted, change, repos, other_repos, other_seconds, other_wasted]
+          properties:
+            seconds: { type: number }
+            wasted: { type: number, description: Time of failed runs. }
+            change: { $ref: "#/components/schemas/Change" }
+            repos:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [repo, seconds, wasted]
+                properties:
+                  repo: { type: string }
+                  seconds: { type: number }
+                  wasted: { type: number }
+            other_repos: { type: integer }
+            other_seconds: { type: number }
+            other_wasted: { type: number }
+
+    Signal:
+      type: object
+      description: |
+        A pattern the numbers raise. `id` is stable across periods. Tones:
+        `gate` silences a source, `attention` and `hint` are stuck, `good`
+        runs, `talk` is a question without a verdict.
+      additionalProperties: false
+      required: [id, kind, tone, source, repo, run_kind, metric, stage, prev_stage, low_sample, weight, seen, facts, waiting,
+                 drivers]
+      properties:
+        id: { type: string }
+        kind:
+          type: string
+          enum: [data_gap, pr_jam, slow_stage, slower_build, steady_slow, flaky, change, bottleneck_moved,
+                 throughput_instability, agent_wait, shared_stall, inactive_prs, resync_share, resolved, question]
+        tone: { type: string, enum: [gate, attention, hint, good, talk] }
+        source: { type: string, enum: [bitbucket, pipeline, argocd, noergler] }
+        repo: { type: [string, "null"] }
+        run_kind: { type: [string, "null"] }
+        metric: { type: [string, "null"], description: "The number of a change or question, the signal id a resolved one was." }
+        stage: { type: [string, "null"] }
+        prev_stage: { type: [string, "null"] }
+        low_sample: { type: boolean, description: "Rests on fewer than 10 cases (a stage's PRs): shown, never a headline." }
+        weight: { type: integer }
+        seen: { type: integer, description: "How many earlier assessments of the window raised it, in a row." }
+        facts: { type: array, minItems: 1, items: { $ref: "#/components/schemas/Fact" }, description: The first is the hero number. }
+        waiting:
+          oneOf:
+            - $ref: "#/components/schemas/WaitingCounts"
+            - type: "null"
+        drivers:
+          type: array
+          description: The repos that carry a worsening, a rough split.
+          items:
+            type: object
+            additionalProperties: false
+            required: [repo, share, value, prev]
+            properties:
+              repo: { type: string }
+              share: { type: number, minimum: 0, maximum: 1 }
+              value: { $ref: "#/components/schemas/NullableNumber" }
+              prev: { $ref: "#/components/schemas/NullableNumber" }
+
+    Fact:
+      type: object
+      description: A number of a signal, against the previous period's where it has one.
+      additionalProperties: false
+      required: [id, label, unit, value, prev, verdict, magnitude]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        unit: { type: string, enum: [seconds, share, count, per_week, weeks, usd, days] }
+        value: { $ref: "#/components/schemas/NullableNumber" }
+        prev: { $ref: "#/components/schemas/NullableNumber" }
+        verdict: { type: string, enum: [better, worse, same, none] }
+        magnitude: { type: [string, "null"], enum: [same, minor, notable, null] }

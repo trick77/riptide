@@ -127,78 +127,212 @@ export const de = {
     eyebrow: "Überblick",
     title: "Was jetzt?",
     intro:
-      "Befunde aus den Regeln, die Riptide anwendet, dazu ein fester Gesprächsanlass. Jeder nennt Regel und Zahl und führt zu den Fakten dahinter.",
-    none: "Keine Auffälligkeiten nach den Regeln, die Riptide anwendet.",
-    tone: {
-      attention: "Achtung",
-      hint: "Hinweis",
-      talk: "Gesprächsanlass",
+      "Was die Zahlen der abgeschlossenen Wochen aufwerfen, und die wenigen Repos mit der meisten Bewegung. Jede Zahl und jedes Urteil stammt von riptide; ist ein Modell eingerichtet, formuliert ein LLM sie.",
+    assess: {
+      weeks: "KW {{from}}–{{to}}, abgeschlossen",
+      badgeLLM: "Einordnung: LLM",
+      badgeRules: "nur Regeln",
+      ask: "↻ Neu einschätzen",
+      askFirst: "Für diesen Zeitraum einschätzen",
+      running: "läuft …",
+      cooldown: "Wieder möglich ab {{time}}",
+      madeAt: "Einschätzung vom {{date}}",
+      trigger: {
+        scheduled: "automatisch",
+        manual: "auf Knopfdruck",
+      },
+      next: "nächste: {{date}}",
+      older_one: "Stand vor {{count}} Woche",
+      older_other: "Stand vor {{count}} Wochen",
+      runningNote:
+        "Die Einschätzung für {{weeks}} läuft, meist unter einer Minute.",
+      failed: "Die letzte Einschätzung ist fehlgeschlagen: {{detail}}",
+      askFailed: "Einschätzung nicht gestartet: {{detail}}",
+      gap: "{{source}} meldet seit {{days}} Tagen nichts: Aussagen dazu ausgelassen.",
+      source: {
+        bitbucket: "Bitbucket",
+        pipeline: "Die CI",
+        argocd: "Argo CD",
+        noergler: "noergler",
+      },
+      focus: "Im Fokus · {{shown}} von {{active}} aktiven Repos",
+      calmLLM: "{{calm}} ohne Auffälligkeiten: nicht ans Modell gegeben",
+      calmRules: "{{calm}} ohne Auffälligkeiten",
+      teamWide: "Team-weit",
+      col: {
+        good: "Läuft",
+        bad: "Hakt",
+        done: "Seit letzter Analyse",
+      },
+      empty: {
+        good: "Nichts bemerkenswert besser.",
+        bad: "Nichts hakt.",
+        done: "Seit der letzten Analyse nichts erledigt.",
+      },
+      seen_one: "schon {{count}} Mal davor",
+      seen_other: "schon {{count}} Mal davor",
+      kind: {
+        data_gap: "Datenlücke",
+        pr_jam: "PR-Stau",
+        slow_stage: "längste Etappe",
+        slower_build: "langsamer geworden",
+        steady_slow: "Dauerläufer",
+        flaky: "flaky",
+        change: "wichtige Veränderung",
+        bottleneck_moved: "Engpass gewandert",
+        throughput_instability: "Throughput gegen Stabilität",
+        agent_wait: "Agent-Wartezeit",
+        shared_stall: "gemeinsame Hänger",
+        inactive_prs: "vergessene PRs",
+        resync_share: "Syncs ohne Images",
+        resolved: "erledigt",
+        question: "Frage",
+      },
+      title: {
+        data_gap: "{{source}} meldet nichts",
+        pr_jam: "{{repo}}: PRs stauen sich",
+        slow_stage: "Die meiste Zeit liegt in der Etappe «{{stage}}»",
+        slower_build: "{{repo}}: {{kind}} langsamer als in der Vorperiode",
+        steady_slow: "{{repo}}: {{kind}} wieder unter den langsamsten",
+        flaky: "{{repo}}: {{kind}} scheitern öfter",
+        changeGood: "{{label}}: deutlich besser",
+        changeBad: "{{label}}: deutlich schlechter",
+        bottleneck_moved: "Der Engpass ist zu «{{stage}}» gewandert",
+        throughput_instability: "Throughput und Stabilität laufen auseinander",
+        agent_wait: "{{kind}} warten auf Build-Agents",
+        shared_stall: "Läufe mehrerer Repos hingen gleichzeitig",
+        inactive_prs: "Vergessene PRs",
+        resync_share: "Syncs nach Produktion ohne neue Images",
+        resolved: "{{what}}: erledigt",
+        question: "{{label}}",
+      },
+      rule: {
+        data_gap:
+          "Die Quelle meldet seit vor dem Periodenende nichts; ihre Zahlen sagen nichts über die Arbeit.",
+        pr_jam:
+          "Drei oder mehr PRs seit einer Woche oder länger offen. Warum sie liegen, steht nicht in den Daten: ein Freeze, eine Abhängigkeit, Ferien oder niemand fühlt sich zuständig.",
+        slow_stage:
+          "Die Etappe mit dem längsten Median. Eine gibt es immer, darum «Achtung» erst ab der Hälfte der Zeit bis Produktion und 10 PRs.",
+        slower_build:
+          "Der Median-Lauf dauert anderthalbmal so lang wie in der Vorperiode oder länger: langsamer als das Repo selbst, nicht als andere. Was im Build langsamer wurde, steht nicht in den Daten.",
+        steady_slow:
+          "In dieser und der vorherigen Periode unter den langsamsten ihrer Art und langsamer als deren Median: langsam als Gewohnheit, nicht als Veränderung.",
+        flaky:
+          "Scheitert viel öfter als in der Vorperiode. Ob Tests, Infrastruktur oder echte Fehler, steht nicht in den Daten.",
+        changeGood:
+          "Über der Schwelle für eine wichtige Veränderung gegenüber der Vorperiode.",
+        changeBad:
+          "Über der Schwelle für eine wichtige Veränderung gegenüber der Vorperiode. Warum, steht nicht in den Daten.",
+        bottleneck_moved:
+          "Die Etappe, die am längsten dauert, ist eine andere als in der Vorperiode.",
+        throughput_instability:
+          "Deploy-Frequenz und Deploy-Erfolg bewegen sich gegenläufig: mehr Throughput bei steigender Instabilität ist kein Fortschritt.",
+        agent_wait:
+          "Die Hälfte der Laufzeit oder mehr ist Warten auf einen Agent: die Kapazität der Plattform, nicht der Build.",
+        shared_stall:
+          "Läufe mehrerer Repos hingen gleichzeitig: gemeinsame CI-Infrastruktur, nicht ein Repo.",
+        inactive_prs:
+          "Offene PRs ohne jedes Ereignis seit 30 Tagen, getrennt vom Stau.",
+        resync_share:
+          "Die Hälfte der Syncs nach Produktion oder mehr brachte keine neuen Images: Deploys, die nichts ausliefern.",
+        resolved:
+          "Die letzte Einschätzung hat es aufgeworfen; jetzt ist es weg.",
+      },
+      why: "Warum?",
+      factsOf: "Fakten zu {{repo}} ansehen →",
+      driver: "Treiber: {{repo}} trägt {{share}} der Zunahme",
+      prev: "vorher {{v}}",
+      retro: "Retro",
+      retroBox: "Für die nächste Retro",
+      copy: "Als Retro-Board kopieren",
+      copied: "kopiert",
+      question: "Frage ans Team",
+      questionFixed: {
+        feature_share: "Liegt der Anteil Feature-Arbeit da, wo wir ihn wollen?",
+        untracked: "PRs ohne Jira-Key: Absicht oder vergessen?",
+        wasted_share: "Warum reviewen wir PRs, die wir dann verwerfen?",
+        cost_per_kloc: "Ist der Review-Aufwand das wert, was er findet?",
+        open_prs: "Mehr Arbeit unterwegs, oder mehr liegen gelassen?",
+        first_touch:
+          "Besprechen wir grosse Änderungen ausserhalb von Bitbucket?",
+      },
+      also: "Ausserdem erkannt:",
+      ci: "Wohin die CI-Zeit geht",
+      ciMeta:
+        "{{total}} in {{weeks}} Wochen · schraffiert: rote Läufe, {{wasted}}",
+      ciOther_one: "{{count}} weiteres",
+      ciOther_other: "{{count}} weitere",
+      ciRule:
+        "{{repo}}: {{time}} von {{total}} CI-Zeit, davon {{wasted}} in roten Läufen.",
+      meta: "{{weeks}} · {{model}} · {{cost}} · LLM, kann irren: jede Zahl kommt aus riptide",
+      metaUnpriced: "ohne Preis",
+      metaRules: "{{weeks}} · Regelbefunde aus riptide, ohne LLM-Einordnung",
+      weeksUnit: "{{n}} Wochen",
+      lever: {
+        walk_prs:
+          "die PRs einzeln durchgehen: reviewen, mergen, schliessen oder bewusst parken",
+        ask_why_waiting:
+          "klären, worauf sie warten: ein Freeze, eine Abhängigkeit, oder niemand fühlt sich zuständig",
+        inspect_build_log:
+          "im Build-Log der langsamsten Läufe nachsehen, welche Stufe die Zeit braucht",
+        inspect_failures:
+          "die roten Läufe ansehen: jedes Mal derselbe Fehler oder ein anderer?",
+        platform_agents:
+          "mit dem Plattform-Team die Agent-Kapazität ansprechen",
+        platform_stall: "die Hänger dem Plattform-Team melden",
+        find_what_changed:
+          "erst klären, was sich geändert hat, dann etwas vereinbaren",
+        name_what_helped: "benennen, was geholfen hat, damit es bleibt",
+        look_at_stage: "die Etappe ansehen, die jetzt am längsten dauert",
+        check_failed_deploys: "die fehlgeschlagenen Deploys ansehen",
+        tidy_up: "die alten PRs schliessen oder bewusst parken",
+        check_resyncs: "klären, woher die Syncs ohne neue Images kommen",
+        check_source: "die Anbindung der Quelle prüfen",
+      },
+      label: {
+        silent_days: "ohne Meldung",
+        open_long: "PRs ≥ 7 Tage offen",
+        open: "offene PRs",
+        age_p50: "Median-Alter",
+        failure_rate: "Läufe rot",
+        wasted: "CI-Zeit in roten Läufen",
+        runs: "Läufe",
+        build_p50: "Median-Lauf",
+        kind_p50: "typischer Lauf dieser Art",
+        build_wait_p50: "Warten auf einen Agent",
+        build_work_p50: "Bauen",
+        deploy_per_week: "Releases pro Woche",
+        deploy_success: "Deploys erfolgreich",
+        lead_time_p50: "Lead Time",
+        review_p50: "bereit bis Approval",
+        within_day: "innert eines Tages gemerged",
+        jammed_repos: "Repos im Stau",
+        build_success: "Läufe erfolgreich",
+        merged_per_week: "PRs gemerged pro Woche",
+        wip_weeks: "Arbeit offen",
+        wait_share: "der Lead Time wartend",
+        stage_share: "der Lead Time",
+        stage_p50: "Median der Etappe",
+        stage_p90: "langsamste 10 % ab",
+        resync_share: "Syncs ohne neue Images",
+        syncs: "Syncs",
+        inactive: "PRs seit 30 Tagen still",
+        stall_groups: "gemeinsame Hänger",
+        feature_share: "Feature-PRs",
+        untracked: "PRs ohne Jira-Key",
+        wasted_share: "Review-Aufwand für verworfene PRs",
+        cost_per_kloc: "Review-Aufwand pro 1000 Zeilen",
+        open_prs: "offene PRs",
+        first_touch: "Approvals ohne vorherigen Kommentar",
+      },
+      waiting: {
+        draft: "Entwurf",
+        first_review: "erstes Review",
+        review: "Review",
+        changes: "Änderungen",
+        merge: "Merge",
+      },
     },
-    area: {
-      flow: "Fluss",
-      review: "Review",
-      build: "Build",
-    },
-    stageLever: {
-      coding:
-        "kleinere Schritte, früher einen PR öffnen, damit Review und Deploy früher beginnen",
-      review: "Review-Zeiten im Team vereinbaren, PRs kleiner schneiden",
-      merge:
-        "nach dem Approval gleich mergen; Merge-Checks und Freigaben prüfen",
-      to_pre: "nach dem Merge automatisch auf die Vor-Umgebung deployen",
-      to_prod:
-        "kleinere, häufigere Releases; prüfen, ob PROD an einen festen Termin gebunden ist",
-    },
-    stageTitleProd:
-      "{{share}} der Zeit bis {{prod}} ist der Code fertig und wartet nur noch auf das Deployment.",
-    stageTitle:
-      "{{share}} der Zeit bis {{prod}} liegt in der Etappe «{{name}}».",
-    stageBodyProd:
-      "Bis eine Änderung fertig ist, vergehen typischerweise {{before}}; danach wartet sie typischerweise {{wait}} auf das Deployment.",
-    stageBody:
-      "{{desc}}: typischerweise {{p50}}, die langsamsten 10 % über {{p90}}.",
-    ruleAttention:
-      "Regel: Etappe mit dem längsten Median, ab {{share}} der Zeit und {{min}} PRs (Startwert)",
-    ruleLowSample:
-      "Regel: Etappe mit dem längsten Median. Unter {{min}} PRs zu wenig belastbar für «Achtung», darum nur ein Hinweis",
-    ruleHint:
-      "Regel: Etappe mit dem längsten Median. Eine gibt es immer, darum nur ein Hinweis; «Achtung» ab {{share}} der Zeit und {{min}} PRs",
-    toFlow: "Zum Fluss →",
-    firstTouchTitle:
-      "{{rate}} der Approvals erfolgen ohne vorherigen Kommentar.",
-    firstTouchBody:
-      "Der Wert ist weder gut noch schlecht: Eingespielte Pairs approven ohne Kommentar, wer durchwinkt, ebenfalls.",
-    firstTouchQuestion:
-      "Besprechen wir grosse Änderungen ausserhalb von Bitbucket?",
-    firstTouchRule:
-      "Steht immer da: kein Grenzwert, keine Richtung · {{n}} von {{total}} Approvals",
-    toReview: "Zum Review →",
-    openTitle_one: "In {{count}} Repo stauen sich die PRs.",
-    openTitle_other: "In {{count}} Repos stauen sich die PRs.",
-    openBody:
-      "Am meisten in {{repo}}: {{n}} PRs seit {{days}} Tagen oder länger offen, im Median {{p50}}. Noch ohne erstes Review: {{first}} der {{jammed}} PRs im Stau.",
-    openLever: "alte PRs im Daily ansprechen: reviewen, mergen oder schliessen",
-    openRuleAttention:
-      "Regel: Stau ab {{min}} PRs im selben Repo, die {{days}} Tage oder länger offen sind; «Achtung», wenn mehr Repos im Stau sind als am Ende der Vorperiode ({{prev}}), sonst ein Hinweis",
-    openRuleHint:
-      "Regel: Stau ab {{min}} PRs im selben Repo, die {{days}} Tage oder länger offen sind; «Achtung», wenn mehr Repos im Stau sind als am Ende der Vorperiode",
-    openPRsOf: "Offene PRs von {{repo}} ansehen →",
-    runsOf: "Läufe von {{repo}} ansehen →",
-    flakyTitle: "{{repo}}: {{rate}} der {{kind}} scheitern.",
-    flakyBody:
-      "{{failures}} von {{runs}} Läufen rot, in der Vorperiode {{prevRate}}. Das kostet {{hours}} h CI-Zeit und jedes Mal einen Neustart.",
-    flakyLever:
-      "instabile Tests finden und isolieren, statt Läufe einfach neu zu starten",
-    flakyRule:
-      "Regel: auffällig ab {{factor}}× der eigenen Quote der Vorperiode und {{points}} Prozentpunkte darüber, höchstens halbwegs bis 100 %, mit mindestens {{failures}} roten Läufen, ab {{min}} Läufen in beiden Perioden (Startwert)",
-    slowTitle:
-      "{{repo}} liefert Feedback {{factor}}× langsamer als in der Vorperiode.",
-    slowBody:
-      "{{kind}} dauern typischerweise {{p50}}, in der Vorperiode {{prevP50}}. So lange wartet, wer pusht.",
-    slowLever:
-      "Build-Cache nutzen, Tests parallelisieren, langsame Integrationstests aus dem PR-Build nehmen",
-    slowRule:
-      "Regel: Median ab {{factor}}× der eigenen Vorperiode, ab {{min}} Läufen in beiden Perioden (Startwert)",
     sinceNote:
       "Argo CD meldet erst seit {{date}}: die Wochen davor sind leer, die Rate gilt ab dann.",
     sinceLow: " Weniger als eine Woche Daten: wenig belastbar.",

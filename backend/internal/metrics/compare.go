@@ -29,6 +29,20 @@ const (
 	// ratio: one jammed repo more is no doubling. 0 to 1 scores 0.58, 1 to 2
 	// 0.42, 10 to 20 still 0.87.
 	CountDamping = 2
+	// NotableChange is the relative change past which a duration, rate or
+	// count is worth naming at all: the tolerance tells noise from movement,
+	// this tells movement from news. A starting value, user-chosen
+	// 2026-11-16 ("not 1 % less than last period").
+	NotableChange = 0.25
+	// NotableShareChange is the same for a share, in points of 0..1.
+	NotableShareChange = 0.05
+)
+
+// Magnitudes of a Change with a verdict.
+const (
+	MagnitudeSame    = "same"
+	MagnitudeMinor   = "minor"
+	MagnitudeNotable = "notable"
 )
 
 // eps absorbs float rounding at a threshold, here and in the build flags:
@@ -79,6 +93,11 @@ type Change struct {
 	// points per SharePointsFull, counts damped by CountDamping. 0 when the
 	// verdict is same, null when it is none.
 	Score *float64 `json:"score"`
+	// Magnitude is how far it moved: same within the tolerance, notable past
+	// NotableChange (NotableShareChange for a share), minor between. Null
+	// when the verdict is none. Undirected numbers have one too, so a large
+	// shift can still be asked about.
+	Magnitude *string `json:"magnitude"`
 }
 
 // KindChange is a kind of run against the previous period's runs of the
@@ -212,7 +231,7 @@ func (m metric) judge(cur, prev side, incomplete bool) Change {
 		return m.none(ReasonNoValue)
 	}
 	d := m.d
-	c := Change{Prev: prev.v, Directed: d != undirected}
+	c := Change{Prev: prev.v, Directed: d != undirected, Magnitude: ptr(magnitude(*cur.v, *prev.v, m.s))}
 	if d == undirected {
 		c.Verdict, c.Reason = ChangeNone, ptr(ReasonUndirected)
 		return c
@@ -246,6 +265,34 @@ func changeVerdict(cur, prev float64, d direction, s scale) string {
 		return ChangeBetter
 	}
 	return ChangeWorse
+}
+
+// magnitude is Change.Magnitude of cur against prev. A count moves
+// relative, damped as its score is: one jammed repo more is no news.
+func magnitude(cur, prev float64, s scale) string {
+	delta := math.Abs(cur - prev)
+	var moved, notable bool
+	switch s {
+	case points:
+		moved, notable = delta > ShareTolerance+eps, delta+eps >= NotableShareChange
+	case count:
+		r := math.Abs((cur+CountDamping)/(prev+CountDamping) - 1)
+		moved, notable = prev != cur && (prev == 0 || delta/prev > Tolerance+eps), r+eps >= NotableChange
+	case relative:
+		if prev == 0 {
+			// From 0 there is no ratio, but any move is news.
+			moved, notable = cur != 0, cur != 0
+		} else {
+			moved, notable = delta/prev > Tolerance+eps, delta/prev+eps >= NotableChange
+		}
+	}
+	switch {
+	case notable && moved:
+		return MagnitudeNotable
+	case moved:
+		return MagnitudeMinor
+	}
+	return MagnitudeSame
 }
 
 // score is Change.Score of cur against prev, d not undirected.

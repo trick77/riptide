@@ -45,9 +45,11 @@ type Store interface {
 type Deps struct {
 	Store Store
 	// Reader serves the UI listener's read API.
-	Reader  Reader
-	Runtime *config.Runtime
-	Log     *slog.Logger
+	Reader Reader
+	// Analysis serves the overview's assessment and its LLM wording.
+	Analysis Analyst
+	Runtime  *config.Runtime
+	Log      *slog.Logger
 	// Now is the clock for occurred_at fallbacks; time.Now when nil.
 	Now func() time.Time
 }

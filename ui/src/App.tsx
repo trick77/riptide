@@ -423,7 +423,13 @@ export default function App() {
         )}
         {m && (
           <>
-            <Overview m={m} why={why} onWhy={onWhy} onFacts={onFacts} />
+            <Overview
+              m={m}
+              query={query!}
+              why={why}
+              onWhy={onWhy}
+              onFacts={onFacts}
+            />
             <Flow m={m} why={why} onWhy={onWhy} onFacts={onFacts} />
             <Deploys m={m} />
             <Mix m={m} />

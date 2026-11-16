@@ -378,7 +378,8 @@ zone, the current one running to now: deploy frequency, lead times and their
 breakdown, code review, the PRs open at the period's end, builds per kind
 of run with their hotspots, and
 noergler costs; each against the same number of whole weeks right before
-(a second read of that window), and the findings the page leads with.
+(a second read of that window). What the page leads with is
+`/api/analysis`, below.
 `product=<key>` narrows it to one Bitbucket project,
 `bots=1` counts bots' PRs in. `GET /api/facts` takes the same parameters
 plus `q` and returns the PRs, deploys and runs behind the numbers, newest
@@ -483,3 +484,50 @@ add up across kinds; each share is of the kind's own time or of all of it,
 never one kind's rate against another's. The thresholds are starting
 values, not measured. The shapes are in
 [`backend/api/openapi.yaml`](../backend/api/openapi.yaml).
+
+### The overview's assessment and its LLM wording
+
+`GET /api/analysis` (same query) is the overview's "what now". It covers
+the last *closed* weeks (`BACKEND_ANALYSIS_TZ`, never the running week)
+against the same number before. `metrics.Assess` raises the signals:
+
+- a jam (3 PRs open 7 days or more in a repo; attention when it was jammed
+  at the previous end too, or more repos are);
+- the lead-time stage with the longest median (attention from half the
+  time to production on 10 PRs, else a hint), and a repo slower than its
+  own previous period (1.5 times its median, as the hotspots flag it);
+- a steady slow build: among a kind's 3 slowest repos in both periods and
+  slower than the kind's median. No factor, since a kind mixes toolchains;
+- flaky repos, as the hotspots flag them;
+- a notable change: a directed team number past 25 % (5 points for a
+  share), the review time's worsening split by repo. That covers deploys,
+  lead time, review, within-day, jammed repos, build success per kind,
+  merged PRs per week, open PRs over that throughput (weeks of work
+  standing open) and the waiting part of the lead time;
+- a moved bottleneck, deploy frequency and success moving opposite ways,
+  agent waits of half a run or more, several repos stuck at once,
+  forgotten PRs, re-syncs over half the syncs;
+- what the latest analysis of the window raised and is gone now.
+
+A source silent for 7 days at the end is a gap: its signals are left out.
+The repos are ranked by their signals' weight; a jam or a steady slow build
+alone makes a candidate, and repos without a signal stay out of it. The
+undirected number that moved most is the question, else the approvals
+without a comment. Where the CI time went is a split by repo without a
+verdict. Starting values, user-chosen 2026-11-16, not measured.
+
+The model (`BACKEND_ANALYSIS_MODEL`) words this and nothing else:
+
+- it sees repos under an alias;
+- it writes numbers only as `{{fact id}}`, which the page fills in;
+- it picks levers only from the glossary, and none presumes a cause riptide
+  cannot see.
+
+The validator drops what breaks a rule: a digit, an unknown fact, a
+foreign lever, a sharp s, a repo outside the candidates or an overlong text.
+It lists the top 3 signals the text missed; the page shows them as "also
+spotted". The schedule words every team's default view after its week
+closes, Monday 06:00: 4 weeks weekly, 12 every second week, 26 monthly.
+The page shows the newest analysis of the same window while it is no
+older than its schedule's gap; without one, the same signals with the rule
+texts.
