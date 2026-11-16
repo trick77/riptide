@@ -39,9 +39,11 @@ infra repo), those PRs are opened and merged within minutes, mostly without an
 approval, and carry no branch prefix. In one month's data they were 146 of 265
 human PRs: blended in, PR cycle time read 10 min instead of 45, 136 PRs seemed
 merged unreviewed where the app repos had none, and the change mix was half
-`other`. They already count on the deploy side. Leave them out of every PR
-metric; the GitOps repos are the ones whose commits Argo CD deploys, so no list
-of names is needed:
+`other`. They already count on the deploy side. A promotion is mechanical even
+when a human opens and merges it, and so is a CI run in a GitOps repo, which
+only checks one. Leave both out of every PR and build metric; only the review
+spend total keeps them, with their spend on its own line. The GitOps repos are
+the ones whose commits Argo CD deploys, so no list of names is needed:
 
 ```sql
 -- GitOps repos: their commits are what argocd_events.revision points at.

@@ -247,6 +247,9 @@ type RunFact struct {
 	Status  *string `json:"status"`
 	Verdict string  `json:"verdict"`
 	Outcome *string `json:"outcome"`
+	// GitOps: a run in a GitOps repo, a stage promotion's check; listed,
+	// counted nowhere.
+	GitOps bool `json:"gitops"`
 }
 
 // Run outcomes: a status that plainly says succeeded or failed, which the
@@ -454,6 +457,7 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 	prs := factPRs(ds)
 	deploys := newestFirst(ds.Deploys, func(d dataset.Deploy) *time.Time { return &d.At })
 	runs := newestFirst(ds.Runs, runAt)
+	gitops := gitopsRun(ds)
 
 	return Facts{
 		ProductionStage: prod,
@@ -521,7 +525,7 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 			return RunFact{
 				PipelineName: r.PipelineName, RunID: r.RunID, Kind: RunKind(r, ds.Meta.BuildTypeFrom),
 				CommitSHA: r.CommitSHA, DurationS: r.DurationS, ImageRefs: r.ImageRefs, Status: r.Status,
-				Verdict: verdict(r), Outcome: runOutcome(r),
+				Verdict: verdict(r), Outcome: runOutcome(r), GitOps: gitops(r),
 			}
 		}),
 	}

@@ -28,7 +28,7 @@ func factsData() *dataset.Dataset {
 			// approved before it was ready: the wait is unknown, not negative
 			pr(func(p *dataset.PR) {
 				p.PRID, p.OpenedAt, p.ReadyAt, p.ApprovedAt, p.MergedAt = 5, agoP(5), agoP(2), agoP(3), agoP(4)
-				p.GitOps = true
+				p.GitOps, p.Repo = true, "kasse/kasse-gitops"
 			}),
 		}
 		ds.Deploys = []dataset.Deploy{
@@ -94,6 +94,23 @@ func TestFacts(t *testing.T) {
 	}
 	if fmt.Sprint(runs) != "[3:main:success 2:main:failure 1:main:success 4:main:success]" {
 		t.Errorf("runs = %v", runs)
+	}
+	for _, r := range f.Runs.Rows {
+		if r.GitOps {
+			t.Errorf("run %s gitops", r.RunID)
+		}
+	}
+	// A GitOps repo's run is listed, flagged: by its commit, or by its name
+	// when Bitbucket never saw the commit.
+	ds.Runs = append(ds.Runs,
+		run(func(r *dataset.Run) { r.RunID, r.Repo, r.PipelineName = "8", nil, "kasse-gitops/master" }),
+		run(func(r *dataset.Run) { r.RunID, r.GitOps, r.Repo = "9", true, s("kasse/kasse-gitops") }))
+	flagged := map[string]bool{}
+	for _, r := range ComputeFacts(ds, all(), "").Runs.Rows {
+		flagged[r.RunID] = r.GitOps
+	}
+	if !flagged["8"] || !flagged["9"] || flagged["1"] {
+		t.Errorf("gitops runs = %v", flagged)
 	}
 }
 

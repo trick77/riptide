@@ -71,7 +71,17 @@ function JiraKey({ jira }: { jira: JiraRef }) {
 
 type Col = { label: string; right?: boolean };
 
-function Table({ cols, rows }: { cols: Col[]; rows: ReactNode[][] }) {
+// dim fades a row's content, not its border: stage promotions are listed but
+// count nowhere.
+function Table({
+  cols,
+  rows,
+  dim,
+}: {
+  cols: Col[];
+  rows: ReactNode[][];
+  dim?: boolean[];
+}) {
   return (
     <table className="w-full min-w-[760px] border-separate border-spacing-0 text-[13.5px]">
       <thead>
@@ -90,7 +100,11 @@ function Table({ cols, rows }: { cols: Col[]; rows: ReactNode[][] }) {
       </thead>
       <tbody>
         {rows.map((r, i) => (
-          <tr key={i} className="hover:bg-active">
+          <tr
+            key={i}
+            className="hover:bg-active"
+            data-dim={dim?.[i] ? "" : undefined}
+          >
             {r.map((cell, j) => (
               <td
                 key={j}
@@ -98,7 +112,7 @@ function Table({ cols, rows }: { cols: Col[]; rows: ReactNode[][] }) {
                   j < r.length - 1 ? "pr-2.5" : ""
                 }`}
               >
-                {cell}
+                {dim?.[i] ? <span className="opacity-55">{cell}</span> : cell}
               </td>
             ))}
           </tr>
@@ -206,6 +220,7 @@ function FactsTables({
           { label: t("facts.colToProd", { prod }), right: true },
           { label: t("facts.colStatus") },
         ]}
+        dim={facts.prs.rows.map((p) => p.gitops)}
         rows={facts.prs.rows.map((p) => [
           <>
             {p.jira_prefix.map((j) => (
@@ -298,6 +313,7 @@ function FactsTables({
           { label: t("facts.colImages") },
           { label: t("facts.colStatus") },
         ]}
+        dim={facts.runs.rows.map((r) => r.gitops)}
         rows={facts.runs.rows.map((r) => [
           <Mono className="whitespace-nowrap">{r.pipeline_name}</Mono>,
           <span className="text-muted">#{r.run_id}</span>,

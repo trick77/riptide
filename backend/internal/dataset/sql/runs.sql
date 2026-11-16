@@ -7,7 +7,19 @@
 -- Bitbucket rows join on the App-repo commit SHA (docs/metrics.md). One repository
 -- per run, however many events carry the SHA (a push and the PR's events).
 --
+-- `gitops` flags a run in a GitOps repo, as in prs.sql: a stage promotion's
+-- check is mechanical, not the team's build; Go leaves it out of the build
+-- numbers.
+--
 -- $1 team, $2 window start (inclusive), $3 window end (exclusive).
+WITH gitops_repos AS (
+  -- GitOps repos: their commits are what argocd_events.revision points at
+  -- (docs/metrics.md, "Reading the event tables"). Over all data, not the window.
+  SELECT DISTINCT repo_full_name
+  FROM bitbucket_events
+  WHERE commit_sha IN (SELECT revision FROM argocd_events)
+    AND repo_full_name IS NOT NULL
+)
 SELECT p.source,
        p.pipeline_name,
        p.build_type,
@@ -20,7 +32,8 @@ SELECT p.source,
        p.duration_seconds AS duration_s,
        r.repo_full_name AS repo,
        split_part(r.repo_full_name, '/', 1) AS project,
-       p.image_refs::text[] AS image_refs
+       p.image_refs::text[] AS image_refs,
+       coalesce(r.repo_full_name IN (SELECT repo_full_name FROM gitops_repos), false) AS gitops
 FROM pipeline_events p
 LEFT JOIN LATERAL (
   SELECT b.repo_full_name

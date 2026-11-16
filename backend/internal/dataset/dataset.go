@@ -253,6 +253,8 @@ type Run struct {
 	Repo           *string    `json:"repo" db:"repo"`
 	Project        *string    `json:"project" db:"project"`
 	ImageRefs      []string   `json:"image_refs" db:"image_refs"`
+	// GitOps: a run in a GitOps repo, a stage promotion's check.
+	GitOps bool `json:"gitops" db:"gitops"`
 }
 
 // Review is one PR's final noergler rollup. CostUSD is the stored decimal
