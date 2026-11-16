@@ -15,6 +15,7 @@ import { Costs } from "./Costs";
 import { Flow } from "./Flow";
 import { stepLook } from "./heatmap";
 import { initialLanguage } from "./i18n";
+import { keepLabels } from "./marimekko";
 import { parseState, stateQuery } from "./state";
 import { Strip } from "./strip";
 import {
@@ -1389,10 +1390,13 @@ describe("open PRs", () => {
     expect(screen.getByText("12.0 Tage")).toBeInTheDocument();
     // In the backend's order, chart and table, zero counts left out; the
     // jam marked.
+    expect(
+      screen
+        .getAllByTestId("mekko-col")
+        .map((c) => c.getAttribute("aria-label")?.split(":")[0]),
+    ).toEqual(["kasse/kasse-api", "portal/portal-web"]);
     const rows = screen.getAllByText(/^(kasse\/kasse-api|portal\/portal-web)$/);
     expect(rows.map((r) => r.textContent)).toEqual([
-      "kasse/kasse-api",
-      "portal/portal-web",
       "kasse/kasse-api",
       "portal/portal-web",
     ]);
@@ -1421,7 +1425,7 @@ describe("open PRs", () => {
     const cols = within(chart).getAllByTestId("mekko-col");
     expect(cols.map((c) => c.style.flex)).toEqual(["3 1 0px", "1 1 0px"]);
     // At least 22px per open PR: past that it scrolls.
-    expect(chart.style.minWidth).toBe(`${64 + 42 + 4 * 22 + 3}px`);
+    expect(chart.style.minWidth).toBe(`${42 + 4 * 22 + 3}px`);
     // kasse-api: first review at the foot, the merge on top; its 3
     // long-open PRs marked.
     const api = within(cols[0]).getAllByTestId("mekko-seg");
@@ -1464,6 +1468,201 @@ describe("open PRs", () => {
     expect(
       screen.getByText("Entwurf (wartet nicht aufs Team)"),
     ).toBeInTheDocument();
+  });
+
+  // Two long names of one project, the end telling them apart, and a
+  // one-PR repo beside them.
+  function longNames(): Metrics {
+    const m = metrics();
+    const [, one] = m.open_prs.repos;
+    const repo = (name: string, open: number) => ({
+      ...one,
+      repo: name,
+      open,
+      waiting: { ...one.waiting, first_review: open },
+    });
+    return {
+      ...m,
+      open_prs: {
+        ...m.open_prs,
+        repos: [
+          repo("fleetops/fleet-telematics-ingest-service", 9),
+          repo("fleetops/fleet-telematics-ingest-ui", 8),
+          repo("portal/portal-web", 1),
+        ],
+      },
+    };
+  }
+
+  // The columns' row as wide as a laid-out page would render it.
+  function rowWidth(w: number) {
+    return vi
+      .spyOn(HTMLElement.prototype, "clientWidth", "get")
+      .mockReturnValue(w);
+  }
+
+  it("names every column under it, wrapped whole, never rotated", () => {
+    const spy = rowWidth(900);
+    render(
+      <Flow why={null} onWhy={() => {}} onFacts={() => {}} m={longNames()} />,
+    );
+    spy.mockRestore();
+    const chart = screen.getByRole("group", {
+      name: "Offene PRs pro Repo, nach dem, worauf sie warten",
+    });
+    const cols = within(chart).getAllByTestId("mekko-col");
+    // The project on its own line, the name whole with a break after every
+    // "-": the ends that tell the two apart are there.
+    const names = cols.map((c) => {
+      const label = within(c).getByTestId("mekko-label");
+      const [project, name] = Array.from(label.children);
+      return [
+        project.textContent,
+        name.textContent,
+        name.querySelectorAll("wbr").length,
+      ];
+    });
+    expect(names).toEqual([
+      ["fleetops", "fleet-telematics-ingest-service", 3],
+      ["fleetops", "fleet-telematics-ingest-ui", 3],
+      ["portal", "portal-web", 1],
+    ]);
+    // Horizontal, in the flow, the full name on hover.
+    expect(chart.querySelector("[class*='rotate']")).toBeNull();
+    expect(
+      within(cols[1]).getByTitle("fleetops/fleet-telematics-ingest-ui"),
+    ).toBeInTheDocument();
+    // Every name fits: no numbers, not in the table either.
+    expect(screen.queryAllByTestId("repo-no")).toEqual([]);
+  });
+
+  it("numbers the columns once one is too narrow, the table rows the same", () => {
+    // Unmeasured: the narrowest the chart gets, 22px for the one-PR repo.
+    render(
+      <Flow why={null} onWhy={() => {}} onFacts={() => {}} m={longNames()} />,
+    );
+    const chart = screen.getByRole("group", {
+      name: "Offene PRs pro Repo, nach dem, worauf sie warten",
+    });
+    const cols = within(chart).getAllByTestId("mekko-col");
+    expect(
+      cols.map((c) => within(c).getByTestId("repo-no").textContent),
+    ).toEqual(["1", "2", "3"]);
+    // The narrow column only its number, the wide ones their names too.
+    expect(
+      cols.map((c) => within(c).queryByTestId("mekko-label") != null),
+    ).toEqual([true, true, false]);
+    // The number before the repo in its table row.
+    const row = screen.getByText("portal/portal-web").parentElement!;
+    expect(within(row).getByTestId("repo-no")).toHaveTextContent("3");
+    expect(
+      within(
+        screen.getByText("fleetops/fleet-telematics-ingest-service")
+          .parentElement!,
+      ).getByTestId("repo-no"),
+    ).toHaveTextContent("1");
+  });
+
+  // What the browser measured in a column's probe: `cut` says which part
+  // ("name" clamped, "project" ellipsised) overflowed for which repo.
+  function measured(cut: (repo: string, part: string) => boolean) {
+    const over = (el: HTMLElement) => {
+      const repo =
+        el
+          .closest("[data-testid=mekko-col]")
+          ?.getAttribute("aria-label")
+          ?.split(":")[0] ?? "";
+      return el.dataset.fit && cut(repo, el.dataset.fit) ? 10_000 : 0;
+    };
+    return [
+      rowWidth(900),
+      vi
+        .spyOn(HTMLElement.prototype, "scrollHeight", "get")
+        .mockImplementation(function (this: HTMLElement) {
+          return over(this);
+        }),
+      vi
+        .spyOn(HTMLElement.prototype, "scrollWidth", "get")
+        .mockImplementation(function (this: HTMLElement) {
+          return over(this);
+        }),
+    ];
+  }
+
+  function shown() {
+    return screen
+      .getAllByTestId("mekko-col")
+      .map((c) =>
+        within(c).queryByTestId("mekko-label")
+          ? "name"
+          : within(c).getByTestId("repo-no").textContent,
+      );
+  }
+
+  it("numbers a column whose name the clamp would cut short", () => {
+    const spies = measured(
+      (repo, part) =>
+        repo === "fleetops/fleet-telematics-ingest-ui" && part === "name",
+    );
+    render(
+      <Flow why={null} onWhy={() => {}} onFacts={() => {}} m={longNames()} />,
+    );
+    spies.forEach((s) => s.mockRestore());
+    // Its "-ui" would be gone: a number, matched in the table.
+    expect(shown()).toEqual(["name", "2", "name"]);
+    expect(
+      within(
+        screen.getByText("fleetops/fleet-telematics-ingest-ui").parentElement!,
+      ).getByTestId("repo-no"),
+    ).toHaveTextContent("2");
+  });
+
+  it("numbers columns whose cut project keys could be the same", () => {
+    const m = longNames();
+    const [a, b] = m.open_prs.repos;
+    const two = (x: string, y: string): Metrics => ({
+      ...m,
+      open_prs: {
+        ...m.open_prs,
+        repos: [
+          { ...a, repo: x },
+          { ...b, repo: y },
+        ],
+      },
+    });
+    const spies = measured((_, part) => part === "project");
+    const { unmount } = render(
+      <Flow
+        why={null}
+        onWhy={() => {}}
+        onFacts={() => {}}
+        m={two("fleetops-north/ingest-api", "fleetops-south/ingest-api")}
+      />,
+    );
+    expect(shown()).toEqual(["1", "2"]);
+    unmount();
+    // One project for all: its key cut hides nothing.
+    render(
+      <Flow
+        why={null}
+        onWhy={() => {}}
+        onFacts={() => {}}
+        m={two("fleetops/ingest-api", "fleetops/ingest-ui")}
+      />,
+    );
+    spies.forEach((s) => s.mockRestore());
+    expect(shown()).toEqual(["name", "name"]);
+  });
+
+  it("gives a lost name back only well wider, so a scrollbar cannot flip it", () => {
+    const lost = new Map<string, number>();
+    const at = (width: number, fits: boolean) =>
+      keepLabels([{ repo: "a/b", width, fits }], lost).label[0];
+    expect(at(100, false)).toBe(false);
+    // Fits again 15px wider, as a page scrollbar gone would make it.
+    expect(at(115, true)).toBe(false);
+    expect(at(124, true)).toBe(true);
+    expect(at(100, true)).toBe(true);
   });
 
   it("keeps a sliver segment without the gap, so the column stays 100 %", () => {

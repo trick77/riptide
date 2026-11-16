@@ -3,10 +3,17 @@
 // the PRs wait on, the jams first; inactive ones apart. The backend counts,
 // sorts and cuts, this renders.
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Metrics, PRWaiting, WaitingCounts } from "./api";
 import { dateTime, dur, num } from "./format";
-import { OpenMekko } from "./marimekko";
+import {
+  Breakable,
+  guessLabels,
+  type MekkoLabels,
+  OpenMekko,
+  RepoNo,
+} from "./marimekko";
 import type { Tab } from "./state";
 import { Card, CardHead, Compare, Direction, Mono, Pill, Tile } from "./ui";
 
@@ -53,6 +60,11 @@ export function OpenPRs({
   const { t } = useTranslation();
   const o = m.open_prs;
   const c = m.comparison;
+  // Which chart columns show their name, as the chart measured them: a
+  // column too narrow for its name gets a number, the table's rows the
+  // same. Kept here only as the chart reports a change.
+  const [measured, setLabels] = useState<MekkoLabels | null>(null);
+  const labels = measured ?? guessLabels(o.repos);
   return (
     <Card className="mt-3">
       <CardHead
@@ -136,7 +148,7 @@ export function OpenPRs({
           </button>
         </p>
       )}
-      <OpenMekko o={o} waits={WAITS} />
+      <OpenMekko o={o} waits={WAITS} labels={labels} onLabels={setLabels} />
       {o.repos.length ? (
         <div className="mt-3 overflow-x-auto">
           <div className="grid min-w-[720px] grid-cols-[minmax(150px,1.3fr)_64px_64px_104px_minmax(200px,2fr)_64px_120px] items-center gap-x-3.5">
@@ -156,14 +168,19 @@ export function OpenPRs({
                 {head}
               </div>
             ))}
-            {o.repos.map((r) => (
+            {o.repos.map((r, i) => (
               <div key={r.repo} className="contents">
                 <div
-                  className={`${CELL} flex items-center gap-2 overflow-hidden`}
+                  className={`${CELL} flex flex-wrap items-center gap-x-2 gap-y-1 overflow-hidden`}
                 >
-                  <Mono className="text-[12px] whitespace-nowrap text-ink-dim">
-                    {r.repo}
-                  </Mono>
+                  {/* Wrapped after - _ /, never cut: the end tells repos
+                      apart. The jam mark wraps below when short of room. */}
+                  <span className="flex min-w-0 items-baseline gap-2">
+                    {labels.numbered && <RepoNo n={i + 1} />}
+                    <Mono className="min-w-0 text-[12px] wrap-break-word text-ink-dim">
+                      <Breakable text={r.repo} />
+                    </Mono>
+                  </span>
                   {r.jammed && <Pill tone="warn">{t("open.jam")}</Pill>}
                 </div>
                 <div className={`${CELL} text-right`}>{num(r.open)}</div>
