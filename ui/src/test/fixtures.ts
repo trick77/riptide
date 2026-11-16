@@ -5,6 +5,7 @@
 import type {
   BuildStats,
   Change,
+  DeployDay,
   DeployFact,
   Facts,
   KindHotspots,
@@ -158,6 +159,25 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
     deployWeeks[n - 2].sync = 1;
   }
   deployWeeks[n - 1].release = 1;
+  // The release on Wednesday of KW 46; Friday on is after NOW.
+  const monday = Date.UTC(2026, 10, 9) - (n - 1) * 7 * DAY;
+  const days = Array.from({ length: 7 * n }, (_, i) => ({
+    date: new Date(monday + i * DAY).toISOString().slice(0, 10),
+    releases: 0,
+    step: 0 as DeployDay["step"],
+    no_data: i > 7 * (n - 1) + 3,
+  }));
+  days[7 * (n - 1) + 2] = { ...days[7 * (n - 1) + 2], releases: 1, step: 1 };
+  // Thursday (today, not over) to Sunday have one whole day with data less.
+  const weekdays = Array.from({ length: 7 }, (_, d) => {
+    const releases = d === 2 ? 1 : 0;
+    const count = d < 3 ? n : n - 1;
+    return {
+      releases,
+      days: count,
+      per_day: count ? releases / count : null,
+    };
+  });
   const mix = zeroWeeks({ feature: 0, bugfix: 0, hotfix: 0, other: 0 });
   mix[n - 1].feature = 1;
   return {
@@ -211,6 +231,9 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
         success_rate: 0.75,
         argo_reporting: true,
         median_week: 1,
+        days,
+        no_data_days: 3,
+        weekdays,
       },
       lead_time: {
         environment: "prod",

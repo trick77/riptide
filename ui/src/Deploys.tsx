@@ -1,8 +1,10 @@
 // How evenly code reaches production: releases per week against the
-// team's own median week, and the mix of work merged.
+// team's own median week, per day as a calendar, and the mix of work
+// merged.
 
 import { useTranslation } from "react-i18next";
 import type { Metrics } from "./api";
+import { DayCalendar } from "./calendar";
 import { WeekStack } from "./charts";
 import { num, pct, stage } from "./format";
 import { Card, CardHead, Compare, Legend, SectionHead, Swatch } from "./ui";
@@ -70,6 +72,37 @@ export function Deploys({ m }: { m: Metrics }) {
             firstSeen: t("common.firstDeploys", { count: freq.first_seen }),
           })}
         </p>
+      </Card>
+      <Card className="mt-3">
+        <CardHead
+          title={t("calendar.cardTitle", { prod })}
+          sub={t("calendar.cardSub")}
+          right={
+            freq.argo_reporting && (
+              <Legend>
+                <Swatch className="bg-cell-empty" label={t("calendar.none")} />
+                <Swatch className="bg-seq-1" label="1" />
+                <Swatch className="bg-seq-2" label="2" />
+                <Swatch className="bg-seq-3" label="3" />
+                <Swatch className="bg-seq-4" label={t("calendar.four")} />
+                <Swatch className="texture-gap" label={t("calendar.noData")} />
+              </Legend>
+            )
+          }
+        />
+        {freq.argo_reporting ? (
+          <DayCalendar
+            weeks={weeks}
+            days={freq.days}
+            weekdays={freq.weekdays}
+            noDataDays={freq.no_data_days}
+            prod={prod}
+          />
+        ) : (
+          <p className="mt-3.5 mb-0 text-[13.5px] text-muted">
+            {t("overview.freq.notReporting")}
+          </p>
+        )}
       </Card>
     </section>
   );

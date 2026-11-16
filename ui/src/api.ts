@@ -46,6 +46,25 @@ export type DeployFrequency = {
   success_rate: number | null;
   argo_reporting: boolean;
   median_week: number | null;
+  // The period's weeks day by day, Monday first, 7 per week.
+  days: DeployDay[];
+  no_data_days: number;
+  // Releases per weekday over the days with data, Monday first.
+  weekdays: DeployWeekday[];
+};
+
+export type DeployWeekday = {
+  releases: number;
+  days: number;
+  per_day: number | null;
+};
+
+// One local calendar day's releases; step is the shade, 0 to 4.
+export type DeployDay = {
+  date: string;
+  releases: number;
+  step: 0 | 1 | 2 | 3 | 4;
+  no_data: boolean;
 };
 
 export type LeadTimes = {

@@ -942,7 +942,7 @@ components:
       description: Successful production syncs in the period, counted once per GitOps revision.
       additionalProperties: false
       required: [releases, syncs, first_seen, resyncs, per_week, low_sample, since, weeks, succeeded, failed,
-                 finished, success_rate, argo_reporting, median_week]
+                 finished, success_rate, argo_reporting, median_week, days, no_data_days, weekdays]
       properties:
         releases: { type: integer, description: Revisions that brought new images. }
         syncs: { type: integer, description: All revisions. }
@@ -980,6 +980,44 @@ components:
           description: |
             Median of the releases per week over the whole weeks Argo CD
             reported all of, the running week left out.
+        days:
+          type: array
+          description: |
+            Releases per calendar day in the viewer's zone, each in the day of
+            its first deploy: the period's weeks Monday first, 7 per week,
+            the running week's days after now included.
+          items:
+            type: object
+            additionalProperties: false
+            required: [date, releases, step, no_data]
+            properties:
+              date: { type: string, format: date, description: The local calendar date. }
+              releases: { type: integer, minimum: 0 }
+              step:
+                type: integer
+                enum: [0, 1, 2, 3, 4]
+                description: The day's shade, 0 none, 4 four releases or more.
+              no_data:
+                type: boolean
+                description: After the period's end or before Argo CD reported.
+        no_data_days: { type: integer, minimum: 0, description: The days with `no_data`. }
+        weekdays:
+          type: array
+          description: |
+            Releases per weekday over the whole days with data, Monday first:
+            today and Argo CD's first day are not whole.
+          minItems: 7
+          maxItems: 7
+          items:
+            type: object
+            additionalProperties: false
+            required: [releases, days, per_day]
+            properties:
+              releases: { type: integer, minimum: 0 }
+              days: { type: integer, minimum: 0, description: The weekday's whole days with data. }
+              per_day:
+                $ref: "#/components/schemas/NullableNumber"
+                description: Releases per day with data; null without one.
 
     LeadTimes:
       type: object

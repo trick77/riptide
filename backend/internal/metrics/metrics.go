@@ -84,6 +84,7 @@ func Compute(ds, prev *dataset.Dataset, p Params) Metrics {
 	pm := compute(prev, p.Previous, f, &baseline{repos: names, previous: true})
 	base := &baseline{repos: names, kinds: pm.Build.repos, incomplete: buildsIncomplete(ds.Meta, p.Previous.From)}
 	m := compute(ds, p.Period, f, base)
+	m.Delivery.Frequency.fillCalendar(p.Period, ds.Meta.DataStart.ArgoCD)
 	m.Comparison = compare(m, pm, p.Previous)
 	m.Findings = findings(m.LeadChain, m.Build, m.Review, m.OpenPRs, m.Comparison.OpenJammed)
 	return m
@@ -168,6 +169,93 @@ type DeployFrequency struct {
 	// Argo CD reported all of: the running week and one Argo CD started in
 	// would read low. Null without such a week.
 	MedianWeek *float64 `json:"median_week"`
+	// Days are the releases per day, the period's weeks Monday first, 7 per
+	// week: a release train or a gap shows where the weekly bars stay even.
+	Days []DeployDay `json:"days"`
+	// NoDataDays counts the Days without data.
+	NoDataDays int `json:"no_data_days"`
+	// Weekdays are the releases per weekday over the whole days with data,
+	// Monday first: a weekday the running week has not reached yet, or one
+	// before Argo CD reported, is not a day without a release.
+	Weekdays [7]DeployWeekday `json:"weekdays"`
+
+	// releaseAt is each release's first deploy in the period, for the days.
+	releaseAt []time.Time
+	// unplaced counts releases no day took (see fillCalendar).
+	unplaced int
+}
+
+// DeployWeekday is one weekday's releases over the period's whole days with
+// data (fillCalendar).
+type DeployWeekday struct {
+	Releases int `json:"releases"`
+	// Days are the weekday's whole days with data.
+	Days int `json:"days"`
+	// PerDay is Releases over Days; null without a day with data.
+	PerDay *float64 `json:"per_day"`
+}
+
+// DeployDay is one calendar day's releases in the viewer's zone, each in
+// the day of its first deploy in the period, as Weeks counts them.
+type DeployDay struct {
+	// Date is the local calendar date, YYYY-MM-DD.
+	Date     string `json:"date"`
+	Releases int    `json:"releases"`
+	// Step is the day's shade: 0 none, 1 to 3, 4 for four or more.
+	Step int `json:"step"`
+	// NoData: the day is after the period's end or before Argo CD reported,
+	// so no release is no news, not a gap.
+	NoData bool `json:"no_data"`
+}
+
+// maxStep is the darkest shade a day gets: four releases or more.
+const maxStep = 4
+
+// fillCalendar sets Days, NoDataDays and Weekdays from the releases
+// deployFrequency found, argoStart being when Argo CD's data starts. The
+// page's period only: the previous one is compared by its totals.
+//
+// A day has data from Argo CD's first event on to the period's end. Argo
+// CD's data end says nothing here: an outage and a team that did not deploy
+// both send no events. The weekday rates count whole days with data only:
+// today is not over yet, and on Argo CD's first day the hours before its
+// first event are unknown; both cells still show their releases.
+func (d *DeployFrequency) fillCalendar(p Period, argoStart *time.Time) {
+	days := p.calendar()
+	d.Days = make([]DeployDay, len(days))
+	whole := make([]bool, len(days))
+	for i, c := range days {
+		noData := !c.start.Before(p.To) || argoStart == nil || !c.end.After(*argoStart)
+		d.Days[i] = DeployDay{Date: c.start.Format(time.DateOnly), NoData: noData}
+		whole[i] = !noData && !c.end.After(p.To) && !c.start.Before(*argoStart)
+	}
+	for _, at := range d.releaseAt {
+		i := dayIndex(days, p.WeekIndex(at), at)
+		if i < 0 {
+			// Weeks and days cut in different zones: never in a period
+			// NewPeriod made, but no request fails over it.
+			d.unplaced++
+			continue
+		}
+		d.Days[i].Releases++
+	}
+	for i, day := range d.Days {
+		d.Days[i].Step = min(day.Releases, maxStep)
+		if day.NoData {
+			d.NoDataDays++
+		}
+		if whole[i] {
+			wd := &d.Weekdays[i%7]
+			wd.Releases += day.Releases
+			wd.Days++
+		}
+	}
+	for i := range d.Weekdays {
+		wd := &d.Weekdays[i]
+		if wd.Days > 0 {
+			wd.PerDay = ptr(float64(wd.Releases) / float64(wd.Days))
+		}
+	}
 }
 
 func deployFrequency(ds *dataset.Dataset, p Period, f filter, env string) DeployFrequency {
@@ -210,6 +298,7 @@ func deployFrequency(ds *dataset.Dataset, p Period, f filter, env string) Deploy
 		case classRelease:
 			w.Release++
 			out.Releases++
+			out.releaseAt = append(out.releaseAt, firstAt[rev])
 		case classFirstSeen:
 			w.FirstSeen++
 			out.FirstSeen++

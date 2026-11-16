@@ -467,6 +467,34 @@ export const en = {
     aria: "Releases to {{prod}} per week: {{parts}}",
     note: "{{resyncs}} and {{firstSeen}} do not count; what they are is under “What does this mean?” at the deployment frequency. The typical week is the median over the whole weeks in which Argo CD reported.",
   },
+  calendar: {
+    cardTitle: "Releases to {{prod}} per day",
+    cardSub:
+      "Each release on the day of its first deployment; on the right, each weekday's releases per whole day with data",
+    none: "no release",
+    four: "4 and more",
+    noData: "no data",
+    weekdayCell_one: "{{perDay}}: {{releases}} on {{count}} day",
+    weekdayCell_other: "{{perDay}}: {{releases}} on {{count}} days",
+    weekdayTitle_one:
+      "{{day}}: {{releases}} releases on {{count}} whole day with data",
+    weekdayTitle_other:
+      "{{day}}: {{releases}} releases on {{count}} whole days with data",
+    noDataDays_one: "{{count}} day without data",
+    noDataDays_other: "{{count}} days without data",
+    perDay: "per whole day with data",
+    tableCaption: "Releases to {{prod}} per day; {{noData}}",
+    week: "Week",
+    days: {
+      mon: "Mon",
+      tue: "Tue",
+      wed: "Wed",
+      thu: "Thu",
+      fri: "Fri",
+      sat: "Sat",
+      sun: "Sun",
+    },
+  },
   mix: {
     feature: "Feature",
     bugfix: "Bugfix",
