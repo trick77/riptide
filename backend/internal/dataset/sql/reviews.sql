@@ -8,19 +8,12 @@
 -- them too. Flagged, not dropped: the spend is real, only its per-change
 -- figures leave it out.
 --
--- $1 team, $2 window start (inclusive), $3 window end (exclusive).
-WITH gitops_repos AS (
-  -- GitOps repos: their commits are what argocd_events.revision points at
-  -- (docs/metrics.md, "Reading the event tables"). Over all data, not the window.
-  SELECT DISTINCT repo_full_name
-  FROM bitbucket_events
-  WHERE commit_sha IN (SELECT revision FROM argocd_events)
-    AND repo_full_name IS NOT NULL
-)
+-- $1 team, $2 window start (inclusive), $3 window end (exclusive), $4 the
+-- GitOps repos (sql/gitops.sql).
 SELECT r.pr_key,
        r.repo,
        split_part(r.repo, '/', 1) AS project,
-       coalesce(r.repo IN (SELECT repo_full_name FROM gitops_repos), false) AS gitops,
+       coalesce(r.repo = ANY($4::text[]), false) AS gitops,
        r.outcome,
        r.cost_usd::text AS cost_usd,
        r.lines_added,

@@ -10,7 +10,8 @@
 -- riptide's automation detection on the opener's login and display name, as
 -- for commits. The merge commit's deploys are joined in Go.
 --
--- $1 team, $2 window start (inclusive), $3 window end (exclusive).
+-- $1 team, $2 window start (inclusive), $3 window end (exclusive), $4 the
+-- GitOps repos (sql/gitops.sql).
 WITH non_human_identities AS (
   -- Accounts senders declared as non-human (docs/metrics.md, pickup-time query):
   -- is_automated is decided at ingest, so rows written before an identity
@@ -22,14 +23,6 @@ WITH non_human_identities AS (
   SELECT DISTINCT lower(actor_handle)
   FROM pipeline_events
   WHERE actor_handle IS NOT NULL AND actor_account_kind IN ('bot', 'service')
-),
-gitops_repos AS (
-  -- GitOps repos: their commits are what argocd_events.revision points at
-  -- (docs/metrics.md, "Reading the event tables"). Over all data, not the window.
-  SELECT DISTINCT repo_full_name
-  FROM bitbucket_events
-  WHERE commit_sha IN (SELECT revision FROM argocd_events)
-    AND repo_full_name IS NOT NULL
 ),
 window_prs AS (
   SELECT DISTINCT repo_full_name, pr_id
@@ -155,7 +148,7 @@ SELECT c.repo_full_name AS repo,
        split_part(c.repo_full_name, '/', 1) AS project,
        c.pr_id,
        c.title,
-       c.repo_full_name IN (SELECT repo_full_name FROM gitops_repos) AS gitops,
+       c.repo_full_name = ANY($4::text[]) AS gitops,
        coalesce(c.automated, false)
          OR EXISTS (SELECT 1 FROM non_human_identities n WHERE n.handle = lower(c.pr_opener)) AS bot,
        c.change_type,

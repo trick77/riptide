@@ -658,6 +658,7 @@ func TestBuilds(t *testing.T) {
 	}
 	// A GitOps repo's run, a stage promotion's check, counts nowhere.
 	promo := buildData()
+	promo.GitOpsRepos = []string{"kasse/kasse-gitops"}
 	promo.Runs = append(promo.Runs,
 		run(func(r *dataset.Run) {
 			r.GitOps, r.Repo, r.PipelineName = true, s("kasse/kasse-gitops"), "kasse-gitops/master"

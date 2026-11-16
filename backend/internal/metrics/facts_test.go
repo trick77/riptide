@@ -102,6 +102,19 @@ func TestFacts(t *testing.T) {
 	}
 	// A GitOps repo's run is listed, flagged: by its commit, or by its name
 	// when Bitbucket never saw the commit.
+	ds.GitOpsRepos = []string{"kasse/kasse-gitops"}
+	for _, r := range ComputeFacts(ds, all(), "").Runs.Rows {
+		if r.GitOps {
+			t.Errorf("run %s gitops", r.RunID)
+		}
+	}
+	// No run of the repo resolved: the pipeline's head names it.
+	ds.Runs = append(ds.Runs, run(func(r *dataset.Run) { r.RunID, r.Repo, r.PipelineName = "7", nil, "kasse-gitops/master" }))
+	for _, r := range ComputeFacts(ds, all(), "").Runs.Rows {
+		if r.GitOps != (r.RunID == "7") {
+			t.Errorf("run %s gitops %v", r.RunID, r.GitOps)
+		}
+	}
 	ds.Runs = append(ds.Runs,
 		run(func(r *dataset.Run) { r.RunID, r.Repo, r.PipelineName = "8", nil, "kasse-gitops/master" }),
 		run(func(r *dataset.Run) { r.RunID, r.GitOps, r.Repo = "9", true, s("kasse/kasse-gitops") }))
