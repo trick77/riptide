@@ -117,9 +117,6 @@ export function FrameworkMap() {
           </tbody>
         </table>
       </div>
-      <p className="mt-2.5 mb-0 max-w-[110ch] text-xs text-muted">
-        {t("frameworks.footnote")}
-      </p>
     </section>
   );
 }

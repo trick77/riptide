@@ -272,9 +272,6 @@ export default function App() {
                 weeks: weeks.length,
               })}
             </p>
-            <p className="mt-1 mb-0 max-w-[75ch] text-[13.5px] text-ink-dim">
-              {t("page.mirror")}
-            </p>
             <p className="mt-1 mb-0 text-[12.5px] text-faint">
               {t("page.dataAsOf")}{" "}
               {SOURCES.map(([k, label]) => {
@@ -378,7 +375,6 @@ export default function App() {
                   {a}
                 </Mono>
               ))}
-              <span className="basis-full text-faint">{t("page.mapping")}</span>
             </div>
           )}
         </section>
@@ -430,10 +426,6 @@ export default function App() {
             <FrameworkMap />
           </>
         )}
-
-        <footer className="mt-10 border-t border-border-soft pt-3.5 text-xs text-faint">
-          {t("page.footer")}
-        </footer>
       </main>
     </div>
   );

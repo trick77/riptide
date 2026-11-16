@@ -143,11 +143,6 @@ function KindCard({ b, low, m }: { b: BuildStats; low: number; m: Metrics }) {
       <div className="text-[11.5px] text-muted">
         {t(`build.kindNote.${b.kind}`)}
       </div>
-      {lead && (
-        <div className="text-xs text-accent-strong">
-          {t("build.featureWhy")}
-        </div>
-      )}
       <div className="mt-1 flex flex-wrap gap-x-5 gap-y-1">
         <div className="text-xs text-muted">
           <div className={`${big} font-medium text-ink tabular-nums`}>
@@ -651,7 +646,6 @@ export function Build({
         id="h-build"
         eyebrow={t("build.eyebrow")}
         title={t("build.title")}
-        lead={t("build.lead")}
         frameworks={[
           ["DevEx", "Feedback loops"],
           ["Core 4", t("build.fwEffectiveness")],
