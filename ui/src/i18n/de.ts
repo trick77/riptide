@@ -253,8 +253,7 @@ export const de = {
         wasted_share: "Warum reviewen wir PRs, die wir dann verwerfen?",
         cost_per_kloc: "Ist der Review-Aufwand das wert, was er findet?",
         open_prs: "Mehr Arbeit unterwegs, oder mehr liegen gelassen?",
-        first_touch:
-          "Besprechen wir grosse Änderungen ausserhalb von Bitbucket?",
+        first_touch: "Passt das zu unserer Art zu reviewen?",
       },
       also: "Ausserdem erkannt:",
       weeksUnit: "{{n}} Wochen",

@@ -128,7 +128,7 @@ var labels = map[string]string{
 	"wasted_share":    "share of AI review spend on PRs declined or deleted; no better direction",
 	"cost_per_kloc":   "AI review spend per 1000 changed lines; no better direction",
 	"open_prs":        "open PRs at the period's end; no better direction",
-	"first_touch":     "share of approvals given without a prior comment; no better direction",
+	"first_touch":     "share of approvals given without a prior comment; a PR that needs no change is approved without one; no better direction",
 }
 
 // stageText names the lead-time stages, so the text says what a stage is

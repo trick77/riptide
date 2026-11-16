@@ -21,7 +21,7 @@ cards: at most 4 signals without a repo (or a resolved one), by id, mandatory on
   take: one sentence, at most 140 characters.
   retro: for a worsening, an open question at most 100 characters ("Why is this worse than last time? What was different?"); otherwise null.
   lever: one key from that signal's levers.
-question: one open question, at most 120 characters, about the question signal; empty when it is null.
+question: one open question, at most 120 characters, about the question signal: when its fact's magnitude is minor or notable, what the change means for the team, not the level; otherwise whether the number fits how the team works. Empty when it is null.
 
 Numbers: never write a digit. Refer to a fact as {{id}} with its exact id from the input, e.g. {{pr_jam:repo_a.long}}; the page fills in the formatted value. Durations ("12.9 days"), shares ("94 %") and weeks come with their unit; counts and per-week rates come as a bare number. Always say what a number is ("{{team.merged_per_week}} merged PRs a week"), never list placeholders bare. The length limits count a placeholder as eight characters, whatever its id. Words like "doubled", "half", "most" are fine when the facts say so.
 
@@ -29,7 +29,7 @@ Rules:
 - Name a cause only when the data shows it. riptide sees a run's duration, status and agent wait, not its steps or tests; a PR's events, not why it waits (a freeze, a release date, a dependency, holidays). Where the cause is unknown, say so or ask.
 - A verdict of none, low sample or incomplete is no trend: do not call it better or worse.
 - A signal with low_sample true rests on fewer than ten cases: say so in its card, and never make it the headline.
-- An undirected number (no better direction) is never good or bad: ask about it.
+- An undirected number (no better direction) is never good or bad, never too high or too low: ask what it, or its change, means for the team, never what explains or causes it.
 - Compare the team only with its own previous period. No DORA levels, no benchmarks, no other teams, no individuals.
 - Build numbers belong to their run kind: never compare a feature build with a release build.
 - Never infer change fail rate, rework rate or recovery time; riptide does not measure them.

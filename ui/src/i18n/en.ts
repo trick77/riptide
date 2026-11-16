@@ -259,7 +259,7 @@ export const en = {
         wasted_share: "Why do we review PRs we then drop?",
         cost_per_kloc: "Is the review spend worth what it finds?",
         open_prs: "More work under way, or more left lying?",
-        first_touch: "Do we discuss big changes outside Bitbucket?",
+        first_touch: "Does that fit how we review?",
       },
       also: "Also spotted:",
       weeksUnit: "{{n}} weeks",

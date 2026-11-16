@@ -415,8 +415,10 @@ func TestChain(t *testing.T) {
 			pr(func(p *dataset.PR) {
 				p.PRID, p.ApprovedOnFirstTouch, p.ApprovedAt, p.ReadyAt, p.MergedAt = 2, false, agoP(1.5), agoP(2), agoP(1.4)
 			}),
-			// a bot's PR and a draft never made ready drop out
+			// a bot's PR, a stage promotion and a draft never made ready
+			// drop out, approvals without a comment included
 			pr(func(p *dataset.PR) { p.PRID, p.Bot = 3, true }),
+			pr(func(p *dataset.PR) { p.PRID, p.GitOps = 6, true }),
 			pr(func(p *dataset.PR) { p.PRID, p.ReadyAt = 4, nil }),
 			// a commit after ready (rebased): no coding stage, never negative
 			pr(func(p *dataset.PR) {
