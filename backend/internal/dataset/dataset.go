@@ -156,6 +156,9 @@ type OpenPR struct {
 	ChangeType *string   `json:"change_type" db:"change_type"`
 	JiraKeys   []string  `json:"jira_keys" db:"jira_keys"`
 	OpenedAt   time.Time `json:"opened_at" db:"opened_at"`
+	// LastEventAt is its latest event before the window's end, any kind,
+	// or its creation.
+	LastEventAt time.Time `json:"last_event_at" db:"last_event_at"`
 	// ReadyAt is the pickup clock start; nil for a draft never made ready.
 	ReadyAt *time.Time `json:"ready_at" db:"ready_at"`
 	Draft   bool       `json:"draft" db:"draft"`
@@ -402,7 +405,7 @@ func (d *Dataset) utc() {
 	}
 	for i := range d.OpenPRs {
 		o := &d.OpenPRs[i]
-		ptrs = append(ptrs, &o.OpenedAt, o.ReadyAt)
+		ptrs = append(ptrs, &o.OpenedAt, &o.LastEventAt, o.ReadyAt)
 	}
 	for i := range d.Deploys {
 		ptrs = append(ptrs, &d.Deploys[i].At)

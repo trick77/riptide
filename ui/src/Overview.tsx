@@ -107,26 +107,33 @@ function words(
   }
   if (f.kind === "open_prs") {
     const o = m.open_prs;
-    // The backend sorts the repos: the first has the most long-open PRs.
+    // The backend sorts the repos: jammed first, the most long-open PRs
+    // first among them.
     const top = o.repos[0];
-    if (!top) return null;
+    if (!top?.jammed) return null;
     return {
       area: t("overview.area.flow"),
-      title: t("overview.openTitle", { count: o.long, days: o.long_days }),
+      title: t("overview.openTitle", { count: o.jammed }),
       body: t("overview.openBody", {
         repo: top.repo,
         n: top.long,
-        oldest: dur(top.oldest_s),
-        first: o.long_waiting.first_review,
+        days: o.long_days,
+        p50: dur(top.age.p50),
+        first: o.jammed_waiting.first_review,
+        jammed: o.jammed_long,
       }),
       lever: [t("common.lever"), t("overview.openLever")],
       rule:
         f.tone === "attention"
           ? t("overview.openRuleAttention", {
+              min: o.jam_min,
               days: o.long_days,
-              prev: num(m.comparison.open_long.prev ?? 0),
+              prev: num(m.comparison.open_jammed.prev ?? 0),
             })
-          : t("overview.openRuleHint", { days: o.long_days }),
+          : t("overview.openRuleHint", {
+              min: o.jam_min,
+              days: o.long_days,
+            }),
       link: [
         t("overview.openPRsOf", { repo: top.repo }),
         () => onFacts("prs", top.repo),

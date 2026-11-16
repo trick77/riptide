@@ -83,7 +83,7 @@ func Compute(ds, prev *dataset.Dataset, p Params) Metrics {
 	base := &baseline{repos: names, kinds: pm.Build.repos, incomplete: buildsIncomplete(ds.Meta, p.Previous.From)}
 	m := compute(ds, p.Period, f, base)
 	m.Comparison = compare(m, pm, p.Previous)
-	m.Findings = findings(m.LeadChain, m.Build, m.Review, m.OpenPRs, m.Comparison.OpenLong)
+	m.Findings = findings(m.LeadChain, m.Build, m.Review, m.OpenPRs, m.Comparison.OpenJammed)
 	return m
 }
 

@@ -1,6 +1,7 @@
 // The PRs open at the period's end: every other PR number counts a PR once
 // merged, so a PR left open for weeks shows only here. Per repo, with what
-// the PRs wait on; the backend counts, sorts and cuts, this renders.
+// the PRs wait on, the jams first; inactive ones apart. The backend counts,
+// sorts and cuts, this renders.
 
 import { useTranslation } from "react-i18next";
 import type { Metrics, PRWaiting, WaitingCounts } from "./api";
@@ -58,26 +59,31 @@ export function OpenPRs({
         sub={t("open.sub", {
           at: dateTime(o.at),
           days: o.long_days,
+          min: o.jam_min,
           bots: m.bots ? t("open.subBots") : "",
         })}
       />
       <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-3">
         <Tile
-          label={t("open.long.label")}
-          question={t("open.long.question", { days: o.long_days })}
-          value={num(o.long)}
-          unit={t("open.long.unit", { count: o.open })}
+          label={t("open.jammed.label")}
+          question={t("open.jammed.question", {
+            min: o.jam_min,
+            days: o.long_days,
+          })}
+          value={num(o.jammed)}
+          unit={t("open.jammed.unit", { count: o.jammed_long })}
+          note={t("open.jammed.note", { count: o.long })}
           direction={
             <Direction
               arrow="down"
-              label={t("open.long.direction")}
-              why={t("open.long.directionWhy")}
+              label={t("open.jammed.direction")}
+              why={t("open.jammed.directionWhy")}
             />
           }
           compare={
             <Compare
-              change={c.open_long}
-              now={num(o.long)}
+              change={c.open_jammed}
+              now={num(o.jammed)}
               format={(v) => num(v)}
             />
           }
@@ -117,15 +123,28 @@ export function OpenPRs({
           <Waits w={o.long_waiting} />
         </div>
       )}
+      {o.inactive > 0 && (
+        <p className="mt-2 mb-0 text-[13px] text-muted">
+          {t("open.inactive", { count: o.inactive, days: o.inactive_days })}{" "}
+          <button
+            type="button"
+            onClick={() => onFacts("prs", t("facts.prWaiting.inactive"))}
+            className="no-print border-0 bg-transparent p-0 text-[13px] text-accent-strong hover:underline"
+          >
+            {t("open.viewInactive")}
+          </button>
+        </p>
+      )}
       {o.repos.length ? (
         <div className="mt-3 overflow-x-auto">
-          <div className="grid min-w-[640px] grid-cols-[minmax(150px,1.3fr)_64px_64px_96px_minmax(200px,2fr)_120px] items-center gap-x-3.5">
+          <div className="grid min-w-[720px] grid-cols-[minmax(150px,1.3fr)_64px_64px_104px_minmax(200px,2fr)_64px_120px] items-center gap-x-3.5">
             {[
               [t("open.colRepo"), false],
               [t("open.colOpen"), true],
               [t("open.colLong", { days: o.long_days }), true],
-              [t("open.colOldest"), true],
+              [t("open.colMedian"), true],
               [t("open.colWaiting"), false],
+              [t("open.colInactive"), true],
               ["", false],
             ].map(([head, right], i) => (
               <div
@@ -137,22 +156,30 @@ export function OpenPRs({
             ))}
             {o.repos.map((r) => (
               <div key={r.repo} className="contents">
-                <div className={`${CELL} overflow-hidden`}>
+                <div
+                  className={`${CELL} flex items-center gap-2 overflow-hidden`}
+                >
                   <Mono className="text-[12px] whitespace-nowrap text-ink-dim">
                     {r.repo}
                   </Mono>
+                  {r.jammed && <Pill tone="warn">{t("open.jam")}</Pill>}
                 </div>
                 <div className={`${CELL} text-right`}>{num(r.open)}</div>
                 <div
-                  className={`${CELL} text-right ${r.long > 0 ? "text-ochre" : "text-muted"}`}
+                  className={`${CELL} text-right ${r.jammed ? "text-ochre" : r.long > 0 ? "text-ink-dim" : "text-muted"}`}
                 >
                   {num(r.long)}
                 </div>
                 <div className={`${CELL} text-right text-ink-dim`}>
-                  {dur(r.oldest_s)}
+                  {dur(r.age.p50)}
                 </div>
                 <div className={CELL}>
                   <Waits w={r.waiting} />
+                </div>
+                <div
+                  className={`${CELL} text-right ${r.inactive > 0 ? "text-ink-dim" : "text-muted"}`}
+                >
+                  {num(r.inactive)}
                 </div>
                 <div className={`${CELL} text-right`}>
                   <button

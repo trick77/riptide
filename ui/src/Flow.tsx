@@ -265,11 +265,14 @@ export function Flow({ m, why, onWhy, onFacts }: Props) {
       query: "docs/metrics.md · PR cycle time",
     },
     open: {
-      title: t("open.long.label"),
+      title: t("open.jammed.label"),
       means: t("open.why.means"),
       watch: t("open.why.watch"),
       lever: t("open.why.lever"),
-      def: t("open.why.def", { days: m.open_prs.long_days }),
+      def: t("open.why.def", {
+        days: m.open_prs.long_days,
+        min: m.open_prs.jam_min,
+      }),
       basis: t("open.why.basis", {
         count: m.open_prs.open,
         at: dateTime(m.open_prs.at),
@@ -279,7 +282,9 @@ export function Flow({ m, why, onWhy, onFacts }: Props) {
         t("common.withoutBots"),
         "non_human_identities",
       ],
-      coverage: t("open.why.coverage"),
+      coverage: t("open.why.coverage", {
+        inactive: m.open_prs.inactive_days,
+      }),
       query: "docs/metrics.md · Open PR age",
     },
   };

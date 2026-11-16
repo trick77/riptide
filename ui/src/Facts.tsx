@@ -206,7 +206,9 @@ function FactsTables({
             {p.waiting && (
               <span className="text-[12.5px] whitespace-nowrap text-muted">
                 {t(`facts.prWaiting.${p.waiting}`)} ·{" "}
-                {t("facts.openFor", { age: dur(p.age_s) })}
+                {p.waiting === "inactive"
+                  ? t("facts.idleFor", { idle: dur(p.idle_s) })
+                  : t("facts.openFor", { age: dur(p.age_s) })}
               </span>
             )}
           </span>,

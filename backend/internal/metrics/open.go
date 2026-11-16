@@ -16,6 +16,17 @@ const (
 	// not measured (2026-11-15: open "for days or even a week++" is the
 	// congestion to see).
 	OpenLongDays = 7
+	// OpenJamMin: a repo with this many long-open PRs is jammed. One or two
+	// are single PRs left lying, not a queue, and a PR whose close event
+	// Bitbucket never delivered (it happens, 2026-11-16) is one more long
+	// open PR: alone it never makes a jam. Chosen, not measured.
+	OpenJamMin = 3
+	// OpenInactiveDays: an open PR with no event this many days is
+	// inactive, counted apart, not open. riptide cannot tell a lost close
+	// event from a PR nobody touches; without this, the lost ones pile up
+	// for good. Chosen, not measured: well past OpenLongDays, so a PR is
+	// long open for weeks before it can go inactive.
+	OpenInactiveDays = 30
 	// openTop: the repos kept past the long-open ones.
 	openTop = 8
 )
@@ -32,6 +43,9 @@ const (
 	WaitReview = "review"
 	// WaitFirstReview: nobody looked at it yet.
 	WaitFirstReview = "first_review"
+	// WaitInactive: no event for OpenInactiveDays; the PR table's word
+	// only, never counted as a wait.
+	WaitInactive = "inactive"
 )
 
 // waitsOn is what an open PR waits on. A reviewer's needs-work holds the
@@ -74,40 +88,77 @@ func (w *Waiting) add(on string) {
 	}
 }
 
-// OpenRepo is one repo's open PRs.
+func (w *Waiting) plus(o Waiting) {
+	w.Draft += o.Draft
+	w.FirstReview += o.FirstReview
+	w.Review += o.Review
+	w.Changes += o.Changes
+	w.Merge += o.Merge
+}
+
+// first ranks true before false in a sort.
+func first(b bool) int {
+	if b {
+		return -1
+	}
+	return 0
+}
+
+// OpenRepo is one repo's open PRs, the inactive ones apart.
 type OpenRepo struct {
 	Repo string `json:"repo"`
 	Open int    `json:"open"`
 	// Long are those open OpenLongDays or more.
 	Long int `json:"long"`
-	// OldestS is the oldest one's age.
-	OldestS float64 `json:"oldest_s"`
-	// Age is over the repo's open PRs.
-	Age     Spread  `json:"age"`
-	Waiting Waiting `json:"waiting"`
+	// Jammed: Long reaches OpenJamMin.
+	Jammed bool `json:"jammed"`
+	// Age is over the repo's open PRs: the median, never the oldest, which
+	// one PR alone decides.
+	Age      Spread  `json:"age"`
+	Waiting  Waiting `json:"waiting"`
+	Inactive int     `json:"inactive"`
 }
 
 // OpenPRs are the PRs open at the period's end: GitOps promotions left out,
-// bots only if asked.
+// bots only if asked. Open, Long, Age and the waits leave the inactive ones
+// out.
 type OpenPRs struct {
 	// At is the instant: the period's end, now for the current one.
-	At       time.Time `json:"at"`
-	LongDays int       `json:"long_days"`
-	Open     int       `json:"open"`
-	Long     int       `json:"long"`
-	Age      Spread    `json:"age"`
-	Waiting  Waiting   `json:"waiting"`
-	// LongWaiting is what the long-open ones wait on.
-	LongWaiting Waiting `json:"long_waiting"`
-	// Repos: the repos with a long-open PR, by how many, then by the
-	// oldest; then the rest the same way, the top openTop and every one
-	// with a long-open PR.
+	At           time.Time `json:"at"`
+	LongDays     int       `json:"long_days"`
+	JamMin       int       `json:"jam_min"`
+	InactiveDays int       `json:"inactive_days"`
+	Open         int       `json:"open"`
+	Long         int       `json:"long"`
+	// Jammed counts the jammed repos, JammedLong their long-open PRs.
+	Jammed     int     `json:"jammed"`
+	JammedLong int     `json:"jammed_long"`
+	Inactive   int     `json:"inactive"`
+	Age        Spread  `json:"age"`
+	Waiting    Waiting `json:"waiting"`
+	// LongWaiting is what the long-open ones wait on, JammedWaiting the
+	// jammed repos' long-open ones.
+	LongWaiting   Waiting `json:"long_waiting"`
+	JammedWaiting Waiting `json:"jammed_waiting"`
+	// Repos: the repos with an open PR, inactive ones aside; the jammed
+	// first, then by long-open PRs, then by the median age; the top openTop
+	// and every one with a long-open PR.
 	Repos []OpenRepo `json:"repos"`
 }
 
 // openAge is an open PR's age at the instant; never negative.
 func openAge(pr dataset.OpenPR, at time.Time) float64 {
 	return max(at.Sub(pr.OpenedAt).Seconds(), 0)
+}
+
+// openIdle is the time since an open PR's last event; never negative.
+func openIdle(pr dataset.OpenPR, at time.Time) float64 {
+	return max(at.Sub(pr.LastEventAt).Seconds(), 0)
+}
+
+// openInactive: no event for OpenInactiveDays.
+func openInactive(pr dataset.OpenPR, at time.Time) bool {
+	return openIdle(pr, at) >= OpenInactiveDays*24*60*60
 }
 
 // openPRs is the dataset's PRs open at its end, for the page's filter.
@@ -124,20 +175,27 @@ func openPRs(ds *dataset.Dataset, f filter) []dataset.OpenPR {
 func openSection(ds *dataset.Dataset, f filter) OpenPRs {
 	at := ds.Meta.To
 	long := float64(OpenLongDays * 24 * 60 * 60)
-	out := OpenPRs{At: at, LongDays: OpenLongDays, Repos: []OpenRepo{}}
+	out := OpenPRs{At: at, LongDays: OpenLongDays, JamMin: OpenJamMin, InactiveDays: OpenInactiveDays,
+		Repos: []OpenRepo{}}
 	var ages []float64
 	type repoAcc struct {
-		row  OpenRepo
-		ages []float64
+		row         OpenRepo
+		ages        []float64
+		longWaiting Waiting
 	}
 	repos := map[string]*repoAcc{}
 	for _, pr := range openPRs(ds, f) {
-		age, on := openAge(pr, at), waitsOn(pr)
 		r := repos[pr.Repo]
 		if r == nil {
 			r = &repoAcc{row: OpenRepo{Repo: pr.Repo}}
 			repos[pr.Repo] = r
 		}
+		if openInactive(pr, at) {
+			out.Inactive++
+			r.row.Inactive++
+			continue
+		}
+		age, on := openAge(pr, at), waitsOn(pr)
 		out.Open++
 		r.row.Open++
 		out.Waiting.add(on)
@@ -146,19 +204,30 @@ func openSection(ds *dataset.Dataset, f filter) OpenPRs {
 			out.Long++
 			r.row.Long++
 			out.LongWaiting.add(on)
+			r.longWaiting.add(on)
 		}
-		r.row.OldestS = max(r.row.OldestS, age)
 		ages = append(ages, age)
 		r.ages = append(r.ages, age)
 	}
 	out.Age = spread(ages)
 	rows := make([]OpenRepo, 0, len(repos))
 	for _, r := range repos {
+		// A repo with inactive PRs alone: in the inactive count only.
+		if r.row.Open == 0 {
+			continue
+		}
 		r.row.Age = spread(r.ages)
+		r.row.Jammed = r.row.Long >= OpenJamMin
+		if r.row.Jammed {
+			out.Jammed++
+			out.JammedLong += r.row.Long
+			out.JammedWaiting.plus(r.longWaiting)
+		}
 		rows = append(rows, r.row)
 	}
 	slices.SortFunc(rows, func(a, b OpenRepo) int {
-		return cmp.Or(cmp.Compare(b.Long, a.Long), cmp.Compare(b.OldestS, a.OldestS), cmp.Compare(a.Repo, b.Repo))
+		return cmp.Or(cmp.Compare(first(a.Jammed), first(b.Jammed)), cmp.Compare(b.Long, a.Long),
+			cmp.Compare(*b.Age.P50, *a.Age.P50), cmp.Compare(b.Inactive, a.Inactive), cmp.Compare(a.Repo, b.Repo))
 	})
 	for i, r := range rows {
 		if i < openTop || r.Long > 0 {

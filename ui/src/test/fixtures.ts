@@ -270,13 +270,25 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
     open_prs: {
       at: w[w.length - 1].end,
       long_days: 7,
-      open: 3,
-      long: 2,
+      jam_min: 3,
+      inactive_days: 30,
+      open: 4,
+      long: 3,
+      jammed: 1,
+      jammed_long: 3,
+      inactive: 1,
       age: { n: 3, p50: 9 * 86400, p90: 28 * 86400 },
-      waiting: { draft: 0, first_review: 2, review: 0, changes: 0, merge: 1 },
+      waiting: { draft: 0, first_review: 3, review: 0, changes: 0, merge: 1 },
       long_waiting: {
         draft: 0,
-        first_review: 1,
+        first_review: 2,
+        review: 0,
+        changes: 0,
+        merge: 1,
+      },
+      jammed_waiting: {
+        draft: 0,
+        first_review: 2,
         review: 0,
         changes: 0,
         merge: 1,
@@ -284,23 +296,24 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       repos: [
         {
           repo: "kasse/kasse-api",
-          open: 2,
-          long: 2,
-          oldest_s: 30 * 86400,
-          age: { n: 2, p50: 19.5 * 86400, p90: 28 * 86400 },
+          open: 3,
+          long: 3,
+          jammed: true,
+          age: { n: 3, p50: 12 * 86400, p90: 28 * 86400 },
           waiting: {
             draft: 0,
-            first_review: 1,
+            first_review: 2,
             review: 0,
             changes: 0,
             merge: 1,
           },
+          inactive: 1,
         },
         {
           repo: "portal/portal-web",
           open: 1,
           long: 0,
-          oldest_s: 2 * 86400,
+          jammed: false,
           age: { n: 1, p50: 2 * 86400, p90: 2 * 86400 },
           waiting: {
             draft: 0,
@@ -309,6 +322,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
             changes: 0,
             merge: 0,
           },
+          inactive: 0,
         },
       ],
     },
@@ -354,7 +368,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       cost_per_kloc: change("none", null, "incomplete"),
       wasted_share: lowSample,
       open_prs: change("same", 3),
-      open_long: change("same", 2),
+      open_jammed: change("same", 1),
       build: [
         {
           kind: "release",
@@ -400,6 +414,7 @@ export function prFact(o: Partial<PRFact> = {}): PRFact {
     to_prod_s: 0.8 * 86400,
     age_s: null,
     waiting: null,
+    idle_s: null,
     ...o,
   };
 }
@@ -453,6 +468,7 @@ export function facts(o: Partial<Facts> = {}): Facts {
       to_prod_s: null,
       age_s: 2 * 86400,
       waiting: "first_review",
+      idle_s: 86400,
     }),
   ];
   const deploys = [

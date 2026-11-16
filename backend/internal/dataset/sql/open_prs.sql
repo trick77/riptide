@@ -14,6 +14,12 @@
 -- and it would read as a new long-open one now.
 -- What it waits on comes from the events before T only.
 --
+-- Last event: the latest before T of any kind, or the creation when later:
+-- riptide cannot tell a PR whose close event was lost from one nobody
+-- touches, Go counts both as inactive after a while. A PR heard of only
+-- after T has T: its later event shows it alive, and its creation would
+-- make it inactive then and active now, a jam all along read as new.
+--
 -- Opened: the PR's createdDate, which every PR event carries, so a PR
 -- opened before ingestion started has its age too; else its pr:opened.
 -- GitOps repos left out (stage promotions, docs/metrics.md). `bot` and the
@@ -58,6 +64,7 @@ pr_events AS MATERIALIZED (
 status AS (
   SELECT repo_full_name, pr_id,
          bool_or(before) AS seen,
+         max(occurred_at) FILTER (WHERE before) AS latest_at,
          (array_agg(id ORDER BY occurred_at DESC, id DESC) FILTER (WHERE before))[1] AS latest_id,
          (array_agg(event_type ORDER BY occurred_at DESC, id DESC) FILTER (WHERE before))[1] AS latest_type,
          (array_agg(state ORDER BY occurred_at DESC, id DESC) FILTER (WHERE before AND state IS NOT NULL))[1]
@@ -72,7 +79,7 @@ status AS (
   GROUP BY repo_full_name, pr_id
 ),
 open_keys AS (
-  SELECT s.repo_full_name, s.pr_id, s.seen, s.created_at, coalesce(s.latest_id, s.next_id) AS payload_id
+  SELECT s.repo_full_name, s.pr_id, s.seen, s.created_at, s.latest_at, coalesce(s.latest_id, s.next_id) AS payload_id
   FROM status s
   WHERE CASE WHEN s.seen
              THEN NOT s.closed AND s.latest_type <> 'pr:declined'
@@ -123,7 +130,7 @@ details AS (
   GROUP BY o.repo_full_name, o.pr_id
 ),
 prs AS (
-  SELECT o.repo_full_name, o.pr_id, o.seen, o.created_at, d.opened_event_at, d.ready_event_at, d.opened_author,
+  SELECT o.repo_full_name, o.pr_id, o.seen, o.created_at, o.latest_at, d.opened_event_at, d.ready_event_at, d.opened_author,
          d.opened_display_name, d.automated, d.change_type, d.touches, d.opened_jira_keys,
          l.payload->'pullRequest' AS pull, l.jira_keys AS latest_jira_keys,
          -- A PR not seen before T: what it looked like then is unknown.
@@ -147,6 +154,9 @@ SELECT p.repo_full_name AS repo,
               WHERE x <> ''
               ORDER BY x)::text[] AS jira_keys,
        coalesce(p.created_at, p.opened_event_at) AS opened_at,
+       -- See "Last event" above.
+       CASE WHEN p.seen THEN greatest(p.latest_at, coalesce(p.created_at, p.opened_event_at)) ELSE $2 END
+           AS last_event_at,
        -- Not a draft at T and no ready event (opened before ingestion, or
        -- made ready without the flip the parser recognises): ready from
        -- its creation.

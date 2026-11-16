@@ -165,15 +165,15 @@ export const en = {
     firstTouchRule:
       "Always shown: no threshold, no direction · {{n}} of {{total}} approvals",
     toReview: "To the review →",
-    openTitle_one: "{{count}} PR has been open {{days}} days or longer.",
-    openTitle_other: "{{count}} PRs have been open {{days}} days or longer.",
+    openTitle_one: "PRs pile up in {{count}} repo.",
+    openTitle_other: "PRs pile up in {{count}} repos.",
     openBody:
-      "Most in {{repo}}: {{n}}, the oldest open for {{oldest}}. Still without a first review: {{first}} of the long-open ones.",
+      "Most in {{repo}}: {{n}} PRs open {{days}} days or longer, median {{p50}}. Still without a first review: {{first}} of the {{jammed}} jammed PRs.",
     openLever: "bring old PRs up in the daily: review, merge or close them",
     openRuleAttention:
-      "Rule: “Attention” when more PRs are open {{days}} days or longer than at the end of the previous period ({{prev}}), otherwise a hint",
+      "Rule: a jam is {{min}} or more PRs open {{days}} days or longer in the same repo; “Attention” when more repos are jammed than at the end of the previous period ({{prev}}), otherwise a hint",
     openRuleHint:
-      "Rule: every PR open {{days}} days or longer; “Attention” when there are more than at the end of the previous period",
+      "Rule: a jam is {{min}} or more PRs open {{days}} days or longer in the same repo; “Attention” when more repos are jammed than at the end of the previous period",
     openPRsOf: "View open PRs of {{repo}} →",
     runsOf: "View the runs of {{repo}} →",
     flakyTitle: "{{repo}}: {{rate}} of {{kind}} fail.",
@@ -382,15 +382,19 @@ export const en = {
   },
   open: {
     title: "Open PRs: where do they pile up?",
-    sub: "As of {{at}}, whenever opened. A PR open {{days}} days or more counts as long open. GitOps repos left out{{bots}}.",
+    sub: "As of {{at}}, whenever opened. A PR open {{days}} days or more counts as long open; {{min}} long-open ones in the same repo are a jam. GitOps repos left out{{bots}}.",
     subBots: ", bots counted in",
-    long: {
-      label: "Long open",
-      question: "How many PRs have been open {{days}} days or longer?",
-      unit_one: "of {{count}} open PR",
-      unit_other: "of {{count}} open PRs",
+    jammed: {
+      label: "Jammed repos",
+      question:
+        "In how many repos have {{min}} or more PRs been open {{days}} days or longer?",
+      unit_one: "with {{count}} long-open PR",
+      unit_other: "with {{count}} long-open PRs",
+      note_one: "{{count}} PR long open in all",
+      note_other: "{{count}} PRs long open in all",
       direction: "fewer is better",
-      directionWhy: "a long-open PR is work left lying",
+      directionWhy:
+        "several PRs left lying in the same repo are a jam; a single one is a single case",
     },
     all: {
       label: "Open PRs",
@@ -400,11 +404,18 @@ export const en = {
       directionWhy: "more open PRs can also mean more work under way",
     },
     longWaitOn: "The long-open ones wait on:",
+    inactive_one:
+      "{{count}} PR inactive: no event for {{days}} days, in no number above. A lost merge event looks the same.",
+    inactive_other:
+      "{{count}} PRs inactive: no event for {{days}} days, in no number above. A lost merge event looks the same.",
+    viewInactive: "View →",
+    jam: "Jam",
     colRepo: "Repo",
     colOpen: "Open",
     colLong: "≥ {{days}} d",
-    colOldest: "Oldest",
+    colMedian: "Median age",
     colWaiting: "Waiting on",
+    colInactive: "Inactive",
     viewPRs: "View PRs →",
     none: "No PR was open at the end of the period.",
     why: {
@@ -414,11 +425,11 @@ export const en = {
         "several long-open PRs in the same repo wait for a first review: a reviewer is missing there, or the PRs are too big.",
       lever:
         "name reviewers when opening, bring old PRs up in the daily, close PRs nobody needs anymore.",
-      def: "PRs open at the end of the period: opened before it, neither merged, declined nor deleted. Age from the PR's creation date, long open from {{days}} days.",
+      def: "PRs open at the end of the period: opened before it, neither merged, declined nor deleted. Age from the PR's creation date, long open from {{days}} days, a jam from {{min}} long-open ones in the same repo. Per repo the median age, never the oldest: one alone decides that.",
       basis_one: "{{count}} open PR, as of {{at}}.",
       basis_other: "{{count}} open PRs, as of {{at}}.",
       coverage:
-        "A PR whose merge or closing Bitbucket never reported stays open; a PR without any event since data began is missing.",
+        "A PR whose merge or closing Bitbucket never reported stays open until, after {{inactive}} days without an event, it counts as inactive; alone it never makes a jam. A PR without any event since data began is missing.",
     },
   },
   deploys: {
@@ -581,8 +592,10 @@ export const en = {
     tabRuns: "Runs",
     filtered: "filtered by “{{q}}”",
     newest: "Newest first",
-    openFirst: "Open ones first, oldest on top; then the newest",
+    openFirst:
+      "Open ones first, oldest on top, inactive after; then the newest",
     openFor: "open for {{age}}",
+    idleFor: "no event for {{idle}}",
     firstOf: " · the first {{limit}} of {{count}}",
     noHits: "No hits for “{{q}}”.",
     empty: "No entries in the period.",

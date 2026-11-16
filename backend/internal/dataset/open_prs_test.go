@@ -151,6 +151,12 @@ func TestDatasetOpenPRs(t *testing.T) {
 	if !byID[32].Bot {
 		t.Error("#32 is no bot's")
 	}
+	// The last event before the end, any kind: #23's merge came after.
+	for id, want := range map[int64]time.Time{21: days(-29), 23: days(1), 25: days(3), 27: days(5)} {
+		if got := byID[id].LastEventAt; !got.Equal(want) || got.Location() != time.UTC {
+			t.Errorf("#%d last event %v, want %v", id, got, want)
+		}
+	}
 
 	// The previous period's end reads what was open then: #21, and the
 	// PRs open all along riptide heard of only later (#27, #33, #36), as
@@ -170,6 +176,14 @@ func TestDatasetOpenPRs(t *testing.T) {
 	}
 	if o := byID[27]; o.Touched || o.ReadyAt != nil || !o.OpenedAt.Equal(days(-60)) {
 		t.Errorf("previous #27 = %+v", o)
+	}
+	// Heard of only later: its later event shows it alive, never inactive
+	// at the end.
+	if o := byID[27]; !o.LastEventAt.Equal(t0) {
+		t.Errorf("previous #27 last event %v", o.LastEventAt)
+	}
+	if o := byID[21]; !o.LastEventAt.Equal(days(-29)) {
+		t.Errorf("previous #21 last event %v", o.LastEventAt)
 	}
 
 	// Products: a repo with only an open PR is a product's repo.
