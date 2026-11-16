@@ -121,7 +121,7 @@ describe("App", () => {
       "Was jetzt?",
       "Throughput und Instability",
       "Wo wartet eine Änderung?",
-      "Wie gleichmässig kommt Code nach prod?",
+      "Wie gleichmässig kommt Code nach PROD?",
       "Woran arbeitet das Team?",
       "Wie schnell und verlässlich ist das Feedback?",
       "Was kosten die KI-Reviews?",
@@ -149,7 +149,7 @@ describe("App", () => {
     expect(
       screen.getByText(/1 Erstdeploy ohne Vergleichswert/),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Lead Time bis intg/)).toBeInTheDocument();
+    expect(screen.getByText(/Lead Time bis INTG/)).toBeInTheDocument();
     expect(screen.getAllByText(/wenig belastbar/).length).toBeGreaterThan(0);
     // The DORA names, and the side Riptide cannot measure.
     expect(
@@ -171,7 +171,7 @@ describe("App", () => {
     expect(screen.getByText("pro revision")).toBeInTheDocument();
     expect(screen.getByText("Genauer hinschauen, wenn")).toBeInTheDocument();
     for (const [i, title] of [
-      [1, "Lead Time bis prod"],
+      [1, "Lead Time bis PROD"],
       [2, "Deploy-Erfolg"],
       [3, "Review-Zeit"],
       [4, "Approval ohne Kommentar"],
@@ -287,7 +287,7 @@ describe("App", () => {
     render(<App />);
     await screen.findByRole("heading", { name: "Was jetzt?" });
     expect(
-      screen.getByText("60 % der Zeit bis prod liegt in der Etappe «Coding»."),
+      screen.getByText("60 % der Zeit bis PROD liegt in der Etappe «Coding»."),
     ).toBeInTheDocument();
     // The thresholds as the backend sent them.
     expect(
@@ -1236,7 +1236,7 @@ describe("flow", () => {
     expect(document.body.textContent).not.toMatch(/NaN/);
     expect(screen.getAllByText(/25 % der Zeit/)).toHaveLength(4);
     expect(screen.queryByText(/Bis null/)).toBeNull();
-    expect(screen.getByText("gemerged → auf prod")).toBeInTheDocument();
+    expect(screen.getByText("gemerged → auf PROD")).toBeInTheDocument();
     // No stage is hot: no lever named.
     expect(screen.queryByText(/Der Hebel liegt/)).toBeNull();
   });

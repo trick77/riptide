@@ -10,7 +10,7 @@ import type {
   PRFact,
   RunFact,
 } from "./api";
-import { ciWord, dateTime, dur, shortImage, shortSha } from "./format";
+import { ciWord, dateTime, dur, shortImage, shortSha, stage } from "./format";
 import terms from "./i18n/terms.json";
 import type { Tab } from "./state";
 import { Mono, Pill, SectionHead, type Tone } from "./ui";
@@ -174,7 +174,7 @@ function FactsTables({
   onTab: (t: Tab) => void;
 }) {
   const { t } = useTranslation();
-  const prod = facts.production_stage;
+  const prod = stage(facts.production_stage);
   const counts: Record<Tab, number> = {
     prs: facts.prs.count,
     deploys: facts.deploys.count,
@@ -275,7 +275,9 @@ function FactsTables({
             {dateTime(d.at)}
           </span>,
           <Mono className="whitespace-nowrap">{d.app}</Mono>,
-          <span className="text-muted">{d.environment ?? "–"}</span>,
+          <span className="text-muted">
+            {d.environment ? stage(d.environment) : "–"}
+          </span>,
           <Mono className="text-muted">{shortSha(d.revision)}</Mono>,
           <Mono>
             {d.new_images.length

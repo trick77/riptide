@@ -142,14 +142,14 @@ export const en = {
       merge: "merge right after the approval; check merge checks and sign-offs",
       to_pre: "deploy to the pre-environment automatically after the merge",
       to_prod:
-        "smaller, more frequent releases; check whether prod is tied to a fixed date",
+        "smaller, more frequent releases; check whether PROD is tied to a fixed date",
     },
     stageTitleProd:
-      "{{share}} of the time to {{prod}} is finished code waiting for the deploy to {{prod}}.",
+      "{{share}} of the time to {{prod}}, the code is finished and only waits for the deployment.",
     stageTitle:
       "{{share}} of the time to {{prod}} is spent in the “{{name}}” stage.",
     stageBodyProd:
-      "Up to {{prod}}, a change typically takes {{before}}; then it typically waits {{wait}}.",
+      "A change is typically finished after {{before}}; then it typically waits {{wait}} for the deployment.",
     stageBody: "{{desc}}: typically {{p50}}, the slowest 10 % over {{p90}}.",
     ruleAttention:
       "Rule: stage with the longest median, from {{share}} of the time and {{min}} PRs (starting value)",
@@ -217,7 +217,7 @@ export const en = {
       watch:
         "the weeks swing widely or releases stop: then changes pile up into big releases.",
       lever:
-        "smaller changes, automated deploys, no fixed release date for prod.",
+        "smaller changes, automated deploys, no fixed release date for PROD.",
       def: "Successful deploys to {{prod}} whose images differ from the previous deploy of the same Argo app, counted once per GitOps revision, divided by the weeks in the period in which Argo CD reported.",
       basis:
         "{{releases}}, {{resyncs}} and {{firstSeen}} from {{syncs}}. A release that updates several apps through the same GitOps revision counts once.",
@@ -628,7 +628,7 @@ export const en = {
     lead: "Riptide measures from the tools' data what can be measured without a survey: two of the five DORA metrics, DX Core 4 in part. SPACE and DevEx also need surveys.",
     row: {
       freq: "Deployment frequency",
-      lead: "Lead time to prod",
+      lead: "Lead time to PROD",
       stages: "Flow by stage",
       dsucc: "Deploy success",
       review: "Review time, merged within 24 h",

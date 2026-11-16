@@ -55,6 +55,7 @@ cd backend && go test -race ./...    # DB tests skip without SHIP_TEST_DSN (comp
 ## UI (`ui/`, embedded)
 
 - **German and English, de-CH number and date formats in both** (user, 2026-11-15: "datumsformat ändert sich nicht, das bleibt immer CH"). Language switch kept identical to ../noergler's (user: "an beiden orten einheitlich"). Facts search matches both languages' words, so a shared `?q=` link works for every reader.
+- **Stages always upper case on screen** (INTG, SYST, PROD), filter lines included, via `stage()` in `format.ts`; data, API and config keep Argo CD's case (user, 2026-11-16: "immer wenn wir im ui eine stage zeigen, ist sie gross").
 - **Build numbers never across run kinds.** User: releases skip tests, feature builds fail more.
 - **Compare a team with its previous period only**, never DORA levels, survey distributions or other teams: DORA dropped its levels in 2025, survey numbers go stale (user: outdated "wollen wir auf keinen fall"). DORA terms as dora.dev names them now.
 - Screenshots or numbers from a real import never into the repo or a PR.

@@ -135,14 +135,14 @@ export const de = {
         "nach dem Approval gleich mergen; Merge-Checks und Freigaben prüfen",
       to_pre: "nach dem Merge automatisch auf die Vor-Umgebung deployen",
       to_prod:
-        "kleinere, häufigere Releases; prüfen, ob prod an einen festen Termin gebunden ist",
+        "kleinere, häufigere Releases; prüfen, ob PROD an einen festen Termin gebunden ist",
     },
     stageTitleProd:
-      "{{share}} der Zeit bis {{prod}} wartet fertiger Code auf das Deploy nach {{prod}}.",
+      "{{share}} der Zeit bis {{prod}} ist der Code fertig und wartet nur noch auf das Deployment.",
     stageTitle:
       "{{share}} der Zeit bis {{prod}} liegt in der Etappe «{{name}}».",
     stageBodyProd:
-      "Bis vor {{prod}} braucht eine Änderung typischerweise {{before}}, danach wartet sie typischerweise {{wait}}.",
+      "Bis eine Änderung fertig ist, vergehen typischerweise {{before}}; danach wartet sie typischerweise {{wait}} auf das Deployment.",
     stageBody:
       "{{desc}}: typischerweise {{p50}}, die langsamsten 10 % über {{p90}}.",
     ruleAttention:
@@ -212,7 +212,7 @@ export const de = {
       watch:
         "die Wochen stark schwanken oder Releases ausbleiben: dann sammeln sich Änderungen zu grossen Releases.",
       lever:
-        "kleinere Änderungen, automatisierte Deploys, kein fester Release-Termin für prod.",
+        "kleinere Änderungen, automatisierte Deploys, kein fester Release-Termin für PROD.",
       def: "Erfolgreiche Deploys auf {{prod}}, deren Images sich vom vorherigen Deploy derselben Argo-App unterscheiden, einmal pro GitOps-Revision gezählt, geteilt durch die Wochen im Zeitraum, in denen Argo CD meldete.",
       basis:
         "{{releases}}, {{resyncs}} und {{firstSeen}} aus {{syncs}}. Aktualisiert ein Release mehrere Apps über dieselbe GitOps-Revision, zählt es einmal.",
@@ -623,7 +623,7 @@ export const de = {
     lead: "Riptide misst aus den Daten der Tools, was ohne Umfrage messbar ist: von den fünf DORA-Metriken zwei, DX Core 4 teilweise. SPACE und DevEx brauchen zusätzlich Befragungen.",
     row: {
       freq: "Deploy-Frequenz",
-      lead: "Lead Time bis prod",
+      lead: "Lead Time bis PROD",
       stages: "Fluss nach Etappen",
       dsucc: "Deploy-Erfolg",
       review: "Review-Zeit, innert 24 h gemerged",
