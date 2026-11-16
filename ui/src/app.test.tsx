@@ -25,6 +25,7 @@ import {
   metrics,
   noSpread,
   prFact,
+  STAGE_BOUNDS,
   spread,
   undirected,
 } from "./test/fixtures";
@@ -1512,7 +1513,15 @@ describe("open PRs", () => {
 
 describe("flow", () => {
   it("draws the shares the backend computed, no stage it left out", () => {
-    const zero = { n: 1, p50: 0, p90: 0, low_sample: true, hot: false };
+    const zero = {
+      n: 1,
+      p50: 0,
+      p90: 0,
+      low_sample: true,
+      hot: false,
+      histogram: null,
+      durations_s: [0],
+    };
     const m = metrics();
     render(
       <Flow
@@ -1531,6 +1540,7 @@ describe("flow", () => {
             attention_share: 0.5,
             min_prs: 10,
             before_prod: 0,
+            bucket_bounds_s: STAGE_BOUNDS,
           },
         }}
       />,
@@ -1541,6 +1551,154 @@ describe("flow", () => {
     expect(screen.getByText("gemerged → auf PROD")).toBeInTheDocument();
     // No stage is hot: no lever named.
     expect(screen.queryByText(/Der Hebel liegt/)).toBeNull();
+  });
+
+  it("draws a stage's spread as a curve, a few PRs one by one", () => {
+    const m = metrics();
+    const coding = m.lead_chain.stages[0];
+    const many = {
+      ...coding,
+      n: 30,
+      low_sample: false,
+      durations_s: null,
+      histogram: STAGE_BOUNDS.slice(1).map((_, i) =>
+        i > 12 && i < 18 ? 6 : 0,
+      ),
+    };
+    const few = {
+      ...m.lead_chain.stages[4],
+      n: 3,
+      durations_s: [3600, 3700, 86400],
+    };
+    const none = {
+      ...m.lead_chain.stages[2],
+      n: 0,
+      p50: null,
+      p90: null,
+      share: null,
+      durations_s: [],
+    };
+    const { rerender } = render(
+      <Flow
+        why={null}
+        onWhy={() => {}}
+        onFacts={() => {}}
+        m={{
+          ...m,
+          lead_chain: {
+            ...m.lead_chain,
+            stages: [
+              many,
+              m.lead_chain.stages[1],
+              none,
+              m.lead_chain.stages[3],
+              few,
+            ],
+          },
+        }}
+      />,
+    );
+    const rows = screen.getAllByTestId("ridge-row");
+    expect(rows).toHaveLength(5);
+    // The curve's row has no dots; the others one per PR, none without PRs.
+    expect(screen.getAllByTestId("ridge-dot")).toHaveLength(1 + 1 + 3);
+    expect(
+      screen.getAllByText("unter 10 PRs: einzelne PRs statt Kurve"),
+    ).toHaveLength(3);
+    // In the drawing and in the screen-reader table.
+    expect(screen.getAllByText("keine PRs")).toHaveLength(2);
+    // Typical value and slowest 10 % labelled on the hot stage only, in
+    // the app's words, never "Median" / "p90".
+    expect(screen.getByText("1.0 Tage, typischer Wert")).toBeInTheDocument();
+    expect(screen.getAllByText(/^[\d.]+ \S+, typischer Wert$/)).toHaveLength(1);
+    expect(document.body.textContent).not.toMatch(/Median 1|p90/);
+    expect(screen.getByText("4 W")).toBeInTheDocument();
+    fireEvent.mouseEnter(rows[4]);
+    // The drawing is hidden from assistive tech, its tooltip with it.
+    const tip = screen.getByRole("tooltip", { hidden: true });
+    expect(tip).toHaveTextContent("Warten auf PROD");
+    expect(tip).toHaveTextContent("PRs3");
+    expect(tip).toHaveTextContent("typischer Wert16.8 h");
+    expect(tip).toHaveTextContent("die langsamsten 10 %: über16.8 h");
+    expect(document.body.textContent).not.toMatch(/NaN/);
+    // Assistive tech gets the numbers once, as a table; a stage without
+    // PRs reads as such, not as dashes.
+    const table = screen.getByRole("table", { name: "Wartezeit je Etappe" });
+    const merge = within(table).getByRole("row", { name: /^Merge/ });
+    expect(merge).toHaveTextContent("Merge0keine PRs");
+    expect(
+      within(table).getByRole("row", { name: /^Warten auf PROD/ }),
+    ).toHaveTextContent("Warten auf PROD316.8 h16.8 h");
+    // New data drops the hover on the old rows.
+    rerender(
+      <Flow
+        why={null}
+        onWhy={() => {}}
+        onFacts={() => {}}
+        m={{
+          ...m,
+          lead_chain: { ...m.lead_chain, stages: [many, none] },
+        }}
+      />,
+    );
+    expect(screen.queryByRole("tooltip", { hidden: true })).toBeNull();
+  });
+
+  it("finds every PR a free spot, also at the plot's right end", () => {
+    const m = metrics();
+    const stages = [...m.lead_chain.stages];
+    // Nine waits past the axis' end: they all pile on its right edge.
+    stages[4] = {
+      ...stages[4],
+      n: 9,
+      durations_s: Array.from({ length: 9 }, (_, i) => 5e6 + i),
+    };
+    render(
+      <Flow
+        why={null}
+        onWhy={() => {}}
+        onFacts={() => {}}
+        m={{ ...m, lead_chain: { ...m.lead_chain, stages } }}
+      />,
+    );
+    const xy = screen
+      .getAllByTestId("ridge-dot")
+      .slice(-9)
+      .map((d) => [Number(d.getAttribute("cx")), Number(d.getAttribute("cy"))]);
+    expect(new Set(xy.map((p) => p.join())).size).toBe(9);
+    // Inside the plot (jsdom lays out nothing: 640 px wide).
+    for (const [x] of xy) expect(x).toBeLessThanOrEqual(640);
+  });
+
+  it("puts a hot dot stage's numbers above its dots, every PR a dot", () => {
+    const m = metrics();
+    const stages = m.lead_chain.stages.map((s) => ({ ...s, hot: false }));
+    // Seven PRs at nearly the same wait: no two dots on one spot.
+    stages[4] = {
+      ...stages[4],
+      hot: true,
+      n: 7,
+      durations_s: [3600, 3600, 3600, 3600, 3610, 3620, 3630],
+    };
+    render(
+      <Flow
+        why={null}
+        onWhy={() => {}}
+        onFacts={() => {}}
+        m={{ ...m, lead_chain: { ...m.lead_chain, stages } }}
+      />,
+    );
+    const dots = screen
+      .getAllByTestId("ridge-dot")
+      .slice(-7)
+      .map((d) => `${d.getAttribute("cx")},${d.getAttribute("cy")}`);
+    expect(new Set(dots).size).toBe(7);
+    expect(
+      screen.getByText(
+        `16.8 h, typischer Wert${String.fromCharCode(0x2002)}·${String.fromCharCode(0x2002)}die langsamsten 10 %: über 16.8 h`,
+        { normalizer: (s) => s },
+      ),
+    ).toBeInTheDocument();
   });
 });
 

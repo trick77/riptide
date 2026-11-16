@@ -51,13 +51,39 @@ export const noSpread = (): Spread => ({ n: 0, p50: null, p90: null });
 
 const none: Spread = { n: 0, p50: null, p90: null };
 
+// The backend's stage histogram edges: 5 min to 28 days, log-spaced.
+export const STAGE_BOUNDS = [
+  300, 452, 680, 1023, 1540, 2317, 3488, 5249, 7901, 11892, 17899, 26940, 40548,
+  61029, 91856, 138254, 208089, 313198, 471400, 709513, 1067901, 1607316,
+  2419200,
+];
+
+// A stage's histogram with every PR in the bucket holding p50.
+export function stageHistogram(s: Spread): number[] {
+  const h = STAGE_BOUNDS.slice(1).map(() => 0);
+  if (s.p50 != null) {
+    const i = STAGE_BOUNDS.findIndex((b) => b > s.p50!) - 1;
+    h[Math.min(Math.max(i, 0), h.length - 1)] = s.n;
+  }
+  return h;
+}
+
 function stage(
   key: Stage["key"],
   s: Spread,
   share: number,
   hot = false,
 ): Stage {
-  return { key, ...s, low_sample: s.n < 10, share, hot };
+  const low = s.n < 10;
+  return {
+    key,
+    ...s,
+    low_sample: low,
+    share,
+    hot,
+    histogram: low ? null : stageHistogram(s),
+    durations_s: low ? Array.from({ length: s.n }, () => s.p50 ?? 0) : null,
+  };
 }
 
 function kindStats(
@@ -260,6 +286,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       attention_share: 0.5,
       min_prs: 10,
       before_prod: 1.3 * 86400,
+      bucket_bounds_s: STAGE_BOUNDS,
     },
     review: {
       cycle: spread(1, 0.2 * 86400),

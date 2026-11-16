@@ -8,6 +8,7 @@ import type { LeadChain, Metrics, StageKey } from "./api";
 import { GroupedBars } from "./charts";
 import { dateTime, dur, durParts, pct, stage } from "./format";
 import { OpenPRs } from "./OpenPRs";
+import { StageRidge } from "./ridgeline";
 import type { Tab } from "./state";
 import {
   Card,
@@ -305,6 +306,10 @@ export function Flow({ m, why, onWhy, onFacts }: Props) {
         ]}
       />
       <Chain m={m} />
+      <StageRidge
+        chain={m.lead_chain}
+        names={stageNames(t, m.lead_chain, prod)}
+      />
 
       <Card className="mt-3">
         <CardHead

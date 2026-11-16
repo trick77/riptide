@@ -89,6 +89,11 @@ export type Stage = Spread & {
   low_sample: boolean;
   share: number | null;
   hot: boolean;
+  // PRs per bucket_bounds_s bucket; out-of-range waits in the end buckets.
+  // Null when low_sample (durations_s instead).
+  histogram: number[] | null;
+  // The waits in seconds, ascending, only when low_sample.
+  durations_s: number[] | null;
 };
 
 export type LeadChain = {
@@ -97,6 +102,8 @@ export type LeadChain = {
   attention_share: number;
   min_prs: number;
   before_prod: number;
+  // The stage histograms' edges in seconds, log-spaced, ascending.
+  bucket_bounds_s: number[];
 };
 
 export type MixWeek = {
