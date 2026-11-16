@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 import type { HeatCell, HeatClass, Hotspots, KindHotspots, Week } from "./api";
 import { labelEvery } from "./charts";
 import { num, pct } from "./format";
+import { SrTable } from "./ui";
 
 type Look = { className: string; style?: CSSProperties };
 
@@ -167,10 +168,8 @@ export function FailureHeatmap({
         {t("heat.title")}
       </div>
       <div className="text-[12.5px] text-muted">{t("heat.sub")}</div>
-      {/* The numbers for a screen reader, keyboard or touch: the grid
-          below only draws them. */}
-      <table className="sr-only">
-        <caption>{t("heat.aria", { kind })}</caption>
+      {/* The numbers for a screen reader: the grid below only draws them. */}
+      <SrTable caption={t("heat.aria", { kind })}>
         <thead>
           <tr>
             <th scope="col">{t("heat.colRepo")}</th>
@@ -191,7 +190,7 @@ export function FailureHeatmap({
             </tr>
           ))}
         </tbody>
-      </table>
+      </SrTable>
       <div
         aria-hidden="true"
         data-testid="heat-map"

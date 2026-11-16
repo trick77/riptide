@@ -183,6 +183,26 @@ export function Card({
   );
 }
 
+// A chart's numbers for a screen reader only. A table sizes itself to its
+// content whatever sr-only's 1px box says and widens the page; the block
+// wrapper clips it. Never put sr-only on the table itself.
+export function SrTable({
+  caption,
+  children,
+}: {
+  caption: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="sr-only">
+      <table>
+        <caption>{caption}</caption>
+        {children}
+      </table>
+    </div>
+  );
+}
+
 export function CardHead({
   title,
   sub,

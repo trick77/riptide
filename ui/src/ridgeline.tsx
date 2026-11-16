@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 import type { LeadChain, Stage, StageKey } from "./api";
 import { Tip } from "./charts";
 import { dur, num } from "./format";
-import { Card, CardHead } from "./ui";
+import { Card, CardHead, SrTable } from "./ui";
 
 // Drawn in rendered px: the plot measures its width, so dots and labels
 // keep their size on a phone as on a wide screen.
@@ -342,8 +342,7 @@ export function StageRidge({
       <CardHead title={t("flow.ridge.title")} sub={t("flow.ridge.sub")} />
       {/* For assistive tech the numbers once, as a table; the drawing and
           its tooltip are hidden from it. */}
-      <table className="sr-only">
-        <caption>{t("flow.ridge.caption")}</caption>
+      <SrTable caption={t("flow.ridge.caption")}>
         <thead>
           <tr>
             <th scope="col">{t("flow.ridge.colStage")}</th>
@@ -368,7 +367,7 @@ export function StageRidge({
             </tr>
           ))}
         </tbody>
-      </table>
+      </SrTable>
       <div className="mt-4 flex gap-3" aria-hidden="true">
         <div
           className="relative w-[112px] flex-none sm:w-[150px]"
