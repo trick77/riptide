@@ -1053,21 +1053,31 @@ describe("open PRs", () => {
     expect(
       screen.getByText("Offene PRs: wo staut es sich?"),
     ).toBeInTheDocument();
-    expect(screen.getByText("von 3 offenen PRs")).toBeInTheDocument();
+    expect(screen.getByText("Repos im Stau")).toBeInTheDocument();
+    expect(screen.getByText("mit 3 lang offenen PRs")).toBeInTheDocument();
+    expect(screen.getByText("insgesamt 3 PRs lang offen")).toBeInTheDocument();
     expect(screen.getByText("typischerweise 9.0 Tage alt")).toBeInTheDocument();
-    expect(screen.getByText("30.0 Tage")).toBeInTheDocument();
-    // In the backend's order, zero counts left out.
+    // The repo's median age, never its oldest PR's.
+    expect(screen.getByText("12.0 Tage")).toBeInTheDocument();
+    // In the backend's order, zero counts left out; the jam marked.
     const rows = screen.getAllByText(/^(kasse\/kasse-api|portal\/portal-web)$/);
     expect(rows.map((r) => r.textContent)).toEqual([
       "kasse/kasse-api",
       "portal/portal-web",
     ]);
+    expect(screen.getAllByText("Stau")).toHaveLength(1);
     expect(screen.getAllByText("Bereit zum Merge 1")).toHaveLength(2);
     expect(screen.queryByText(/Entwurf/)).toBeNull();
     fireEvent.click(
       screen.getAllByRole("button", { name: "PRs ansehen →" })[0],
     );
     expect(onFacts).toHaveBeenCalledWith("prs", "kasse/kasse-api");
+    // The inactive ones apart, their link a search for their word.
+    expect(
+      screen.getByText(/^1 PR inaktiv: seit 30 Tagen kein Event/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Ansehen →" }));
+    expect(onFacts).toHaveBeenCalledWith("prs", "Inaktiv");
   });
 
   it("says when nothing was open", () => {
@@ -1083,6 +1093,9 @@ describe("open PRs", () => {
             ...m.open_prs,
             open: 0,
             long: 0,
+            jammed: 0,
+            jammed_long: 0,
+            inactive: 0,
             age: { n: 0, p50: null, p90: null },
             repos: [],
           },
@@ -1093,6 +1106,7 @@ describe("open PRs", () => {
       screen.getByText("Am Ende des Zeitraums war kein PR offen."),
     ).toBeInTheDocument();
     expect(screen.queryByText("Die lang offenen warten auf:")).toBeNull();
+    expect(screen.queryByText(/inaktiv:/)).toBeNull();
   });
 
   it("words the finding and links the first repo's open PRs", async () => {
@@ -1112,11 +1126,11 @@ describe("open PRs", () => {
     });
     render(<App />);
     expect(
-      await screen.findByText("2 PRs sind seit 7 Tagen oder länger offen."),
+      await screen.findByText("In 1 Repo stauen sich die PRs."),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Am meisten in kasse/kasse-api: 2, der älteste ist 30.0 Tage offen. Noch ohne erstes Review: 1 der lang offenen.",
+        "Am meisten in kasse/kasse-api: 3 PRs seit 7 Tagen oder länger offen, im Median 12.0 Tage. Noch ohne erstes Review: 2 der 3 PRs im Stau.",
       ),
     ).toBeInTheDocument();
     fireEvent.click(
@@ -1140,6 +1154,31 @@ describe("open PRs", () => {
     expect(screen.getByText("Neueste zuerst")).toBeInTheDocument();
   });
 
+  it("shows an inactive PR's time without an event", async () => {
+    const rows = facts().prs.rows;
+    mockFetch((url) =>
+      url.pathname === "/api/facts"
+        ? facts({
+            prs: {
+              count: 1,
+              rows: [
+                {
+                  ...rows[2],
+                  waiting: "inactive",
+                  age_s: 90 * 86400,
+                  idle_s: 60 * 86400,
+                },
+              ],
+            },
+          })
+        : metrics(),
+    );
+    render(<App />);
+    expect(
+      await screen.findByText("Inaktiv · 60.0 Tage ohne Event"),
+    ).toBeInTheDocument();
+  });
+
   it("says the open PRs come first when they lead the table", async () => {
     const rows = facts().prs.rows;
     mockFetch((url) =>
@@ -1150,7 +1189,7 @@ describe("open PRs", () => {
     render(<App />);
     expect(
       await screen.findByText(
-        "Offene zuerst, die ältesten oben; dann die neuesten",
+        "Offene zuerst, die ältesten oben, inaktive danach; dann die neuesten",
       ),
     ).toBeInTheDocument();
   });

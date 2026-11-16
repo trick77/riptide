@@ -7,7 +7,7 @@ import (
 
 // Findings come only from the rules the page already applies (the stage
 // that takes longest, repos flakier or slower than in the previous
-// period, PRs open OpenLongDays or more), never from new thresholds of
+// period, repos jammed with long-open PRs), never from new thresholds of
 // their own, plus one fixed question to talk about.
 const (
 	// FindingsMax caps the findings before the question to talk about.
@@ -43,13 +43,12 @@ type Finding struct {
 }
 
 // findings are the attention ones first (a stage past StageAttention on
-// enough PRs, then
-// flaky repos by wasted CI time, then slow ones by factor, a repo once,
-// then more long-open PRs than at the previous period's end), the hints
-// after them (the stage, long-open PRs as many as before or fewer), at
-// most FindingsMax, then the first-touch rate to talk about. The UI reads
-// an open-PR finding's numbers off the open PRs.
-func findings(c Chain, b Build, r Review, o OpenPRs, openLong Change) []Finding {
+// enough PRs, then flaky repos by wasted CI time, then slow ones by factor,
+// a repo once, then more jammed repos than at the previous period's end),
+// the hints after them (the stage, jammed repos as many as before or
+// fewer), at most FindingsMax, then the first-touch rate to talk about. The
+// UI reads an open-PR finding's numbers off the open PRs.
+func findings(c Chain, b Build, r Review, o OpenPRs, openJammed Change) []Finding {
 	out := []Finding{}
 	var hot *Stage
 	for i := range c.Stages {
@@ -94,14 +93,16 @@ func findings(c Chain, b Build, r Review, o OpenPRs, openLong Change) []Finding 
 	}
 	add(FindingFlaky, flaky)
 	add(FindingSlow, slow)
-	openMore := o.Long > 0 && openLong.Verdict == ChangeWorse
+	// Jammed repos only: a long-open PR or two is a PR left lying, or one
+	// whose close event never came.
+	openMore := o.Jammed > 0 && openJammed.Verdict == ChangeWorse
 	if openMore {
 		out = append(out, Finding{Kind: FindingOpenPRs, Tone: ToneAttention})
 	}
 	if hot != nil && !attention {
 		out = append(out, stage(ToneHint))
 	}
-	if o.Long > 0 && !openMore {
+	if o.Jammed > 0 && !openMore {
 		out = append(out, Finding{Kind: FindingOpenPRs, Tone: ToneHint})
 	}
 	out = out[:min(len(out), FindingsMax)]

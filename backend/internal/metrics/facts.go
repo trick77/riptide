@@ -58,6 +58,7 @@ var waitTerm = map[string]uiTerm{
 	WaitReview:      {"In Review", "In review"},
 	WaitChanges:     {"Änderungen verlangt", "Changes requested"},
 	WaitMerge:       {"Bereit zum Merge", "Ready to merge"},
+	WaitInactive:    {"Inaktiv", "Inactive"},
 }
 
 // promotionTerm is a GitOps PR's type.
@@ -151,9 +152,11 @@ type PRFact struct {
 	ProdAt   *time.Time `json:"prod_at"`
 	ToProdS  *float64   `json:"to_prod_s"`
 	// AgeS and Waiting are a PR open at the period's end: its age then and
-	// what it waits on; null for every other PR.
+	// what it waits on, inactive when idle OpenInactiveDays; IdleS the time
+	// since its last event. Null for every other PR.
 	AgeS    *float64 `json:"age_s"`
 	Waiting *string  `json:"waiting"`
+	IdleS   *float64 `json:"idle_s"`
 }
 
 // DeployFact is one row of the deploy table.
@@ -314,12 +317,13 @@ type factPR struct {
 	pr      dataset.PR
 	age     *float64
 	waiting *string
+	idle    *float64
 }
 
-// factPRs are the PRs open at the period's end first, oldest first: the
-// ones waiting, and the open PRs' link lands on them. Then the window's
-// other PRs, newest first. An open PR the window has its row from the
-// window, with the review times read there.
+// factPRs are the PRs open at the period's end first, oldest first, the
+// inactive ones after them: the ones waiting, and the open PRs' link lands
+// on them. Then the window's other PRs, newest first. An open PR the window
+// has its row from the window, with the review times read there.
 func factPRs(ds *dataset.Dataset) []factPR {
 	at := ds.Meta.To
 	type key struct {
@@ -330,11 +334,21 @@ func factPRs(ds *dataset.Dataset) []factPR {
 	for _, pr := range ds.PRs {
 		window[key{pr.Repo, pr.PRID}] = pr
 	}
-	open := slices.Clone(ds.OpenPRs)
-	slices.SortStableFunc(open, func(a, b dataset.OpenPR) int { return a.OpenedAt.Compare(b.OpenedAt) })
+	type openRow struct {
+		pr       dataset.OpenPR
+		inactive bool
+	}
+	open := make([]openRow, len(ds.OpenPRs))
+	for i, o := range ds.OpenPRs {
+		open[i] = openRow{o, openInactive(o, at)}
+	}
+	slices.SortStableFunc(open, func(a, b openRow) int {
+		return cmp.Or(cmp.Compare(first(!a.inactive), first(!b.inactive)), a.pr.OpenedAt.Compare(b.pr.OpenedAt))
+	})
 	out := make([]factPR, 0, len(open)+len(ds.PRs))
 	seen := map[key]bool{}
-	for _, o := range open {
+	for _, row := range open {
+		o := row.pr
 		k := key{o.Repo, o.PRID}
 		seen[k] = true
 		pr, ok := window[k]
@@ -350,7 +364,11 @@ func factPRs(ds *dataset.Dataset) []factPR {
 		// filtered as the open-PR numbers count it.
 		pr.State = "open"
 		pr.Bot, pr.Title, pr.JiraKeys = o.Bot, o.Title, o.JiraKeys
-		out = append(out, factPR{pr: pr, age: ptr(openAge(o, at)), waiting: ptr(waitsOn(o))})
+		on := waitsOn(o)
+		if row.inactive {
+			on = WaitInactive
+		}
+		out = append(out, factPR{pr: pr, age: ptr(openAge(o, at)), waiting: &on, idle: ptr(openIdle(o, at))})
 	}
 	rest := newestFirst(ds.PRs, func(pr dataset.PR) *time.Time { return cmp.Or(pr.MergedAt, pr.OpenedAt) })
 	for _, pr := range rest {
@@ -402,7 +420,7 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 				State:   pr.State,
 				ReviewS: wait(pr.ReadyAt, pr.ApprovedAt), CycleS: wait(pr.OpenedAt, pr.MergedAt),
 				MergedAt: pr.MergedAt, ProdAt: prodAt, ToProdS: wait(pr.MergedAt, prodAt),
-				AgeS: x.age, Waiting: x.waiting,
+				AgeS: x.age, Waiting: x.waiting, IdleS: x.idle,
 			}
 		}),
 		// Every image a deploy ran, not only the new ones: a search for an

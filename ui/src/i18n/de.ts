@@ -161,16 +161,15 @@ export const de = {
     firstTouchRule:
       "Steht immer da: kein Grenzwert, keine Richtung · {{n}} von {{total}} Approvals",
     toReview: "Zum Review →",
-    openTitle_one: "{{count}} PR ist seit {{days}} Tagen oder länger offen.",
-    openTitle_other:
-      "{{count}} PRs sind seit {{days}} Tagen oder länger offen.",
+    openTitle_one: "In {{count}} Repo stauen sich die PRs.",
+    openTitle_other: "In {{count}} Repos stauen sich die PRs.",
     openBody:
-      "Am meisten in {{repo}}: {{n}}, der älteste ist {{oldest}} offen. Noch ohne erstes Review: {{first}} der lang offenen.",
+      "Am meisten in {{repo}}: {{n}} PRs seit {{days}} Tagen oder länger offen, im Median {{p50}}. Noch ohne erstes Review: {{first}} der {{jammed}} PRs im Stau.",
     openLever: "alte PRs im Daily ansprechen: reviewen, mergen oder schliessen",
     openRuleAttention:
-      "Regel: «Achtung», wenn mehr PRs ab {{days}} Tagen offen sind als am Ende der Vorperiode ({{prev}}), sonst ein Hinweis",
+      "Regel: Stau ab {{min}} PRs im selben Repo, die {{days}} Tage oder länger offen sind; «Achtung», wenn mehr Repos im Stau sind als am Ende der Vorperiode ({{prev}}), sonst ein Hinweis",
     openRuleHint:
-      "Regel: jeder PR ab {{days}} Tagen offen; «Achtung», wenn es mehr sind als am Ende der Vorperiode",
+      "Regel: Stau ab {{min}} PRs im selben Repo, die {{days}} Tage oder länger offen sind; «Achtung», wenn mehr Repos im Stau sind als am Ende der Vorperiode",
     openPRsOf: "Offene PRs von {{repo}} ansehen →",
     runsOf: "Läufe von {{repo}} ansehen →",
     flakyTitle: "{{repo}}: {{rate}} der {{kind}} scheitern.",
@@ -378,15 +377,19 @@ export const de = {
   },
   open: {
     title: "Offene PRs: wo staut es sich?",
-    sub: "Stand {{at}}, egal wann geöffnet. Ab {{days}} Tagen offen gilt ein PR als lang offen. Ohne GitOps-Repos{{bots}}.",
+    sub: "Stand {{at}}, egal wann geöffnet. Ab {{days}} Tagen offen gilt ein PR als lang offen, ab {{min}} lang offenen im selben Repo staut es sich. Ohne GitOps-Repos{{bots}}.",
     subBots: ", Bots mitgezählt",
-    long: {
-      label: "Lang offen",
-      question: "Wie viele PRs sind seit {{days}} Tagen oder länger offen?",
-      unit_one: "von {{count}} offenen PR",
-      unit_other: "von {{count}} offenen PRs",
+    jammed: {
+      label: "Repos im Stau",
+      question:
+        "In wie vielen Repos sind {{min}} oder mehr PRs seit {{days}} Tagen oder länger offen?",
+      unit_one: "mit {{count}} lang offenen PR",
+      unit_other: "mit {{count}} lang offenen PRs",
+      note_one: "insgesamt {{count}} PR lang offen",
+      note_other: "insgesamt {{count}} PRs lang offen",
       direction: "weniger ist besser",
-      directionWhy: "ein lang offener PR ist liegengebliebene Arbeit",
+      directionWhy:
+        "mehrere liegengebliebene PRs im selben Repo sind ein Stau; ein einzelner ist ein Einzelfall",
     },
     all: {
       label: "Offene PRs",
@@ -396,11 +399,18 @@ export const de = {
       directionWhy: "mehr offene PRs kann auch mehr Arbeit im Gang heissen",
     },
     longWaitOn: "Die lang offenen warten auf:",
+    inactive_one:
+      "{{count}} PR inaktiv: seit {{days}} Tagen kein Event, in keiner Zahl oben. Ein verlorenes Merge-Event sieht gleich aus.",
+    inactive_other:
+      "{{count}} PRs inaktiv: seit {{days}} Tagen kein Event, in keiner Zahl oben. Ein verlorenes Merge-Event sieht gleich aus.",
+    viewInactive: "Ansehen →",
+    jam: "Stau",
     colRepo: "Repo",
     colOpen: "Offen",
     colLong: "≥ {{days}} T.",
-    colOldest: "Ältester",
+    colMedian: "Median-Alter",
     colWaiting: "Wartet auf",
+    colInactive: "Inaktiv",
     viewPRs: "PRs ansehen →",
     none: "Am Ende des Zeitraums war kein PR offen.",
     why: {
@@ -410,11 +420,11 @@ export const de = {
         "mehrere lang offene PRs im selben Repo auf ein erstes Review warten: dort fehlt ein Reviewer, oder die PRs sind zu gross.",
       lever:
         "Reviewer beim Öffnen nennen, alte PRs im Daily ansprechen, PRs schliessen, die niemand mehr braucht.",
-      def: "PRs, die am Ende des Zeitraums offen waren: geöffnet davor, weder gemerged, abgelehnt noch gelöscht. Alter ab dem Erstelldatum des PRs, lang offen ab {{days}} Tagen.",
+      def: "PRs, die am Ende des Zeitraums offen waren: geöffnet davor, weder gemerged, abgelehnt noch gelöscht. Alter ab dem Erstelldatum des PRs, lang offen ab {{days}} Tagen, Stau ab {{min}} lang offenen im selben Repo. Pro Repo das Median-Alter, nie der älteste: einer allein bestimmt ihn.",
       basis_one: "{{count}} offener PR, Stand {{at}}.",
       basis_other: "{{count}} offene PRs, Stand {{at}}.",
       coverage:
-        "Ein PR, dessen Merge oder Schliessen Bitbucket nie gemeldet hat, bleibt offen; ein PR ohne jedes Event seit Datenbeginn fehlt.",
+        "Ein PR, dessen Merge oder Schliessen Bitbucket nie gemeldet hat, bleibt offen, bis er nach {{inactive}} Tagen ohne Event als inaktiv zählt; allein macht er nie einen Stau. Ein PR ohne jedes Event seit Datenbeginn fehlt.",
     },
   },
   deploys: {
@@ -577,8 +587,10 @@ export const de = {
     tabRuns: "Läufe",
     filtered: "gefiltert nach «{{q}}»",
     newest: "Neueste zuerst",
-    openFirst: "Offene zuerst, die ältesten oben; dann die neuesten",
+    openFirst:
+      "Offene zuerst, die ältesten oben, inaktive danach; dann die neuesten",
     openFor: "{{age}} offen",
+    idleFor: "{{idle}} ohne Event",
     firstOf: " · die ersten {{limit}} von {{count}}",
     noHits: "Keine Treffer für «{{q}}».",
     empty: "Keine Einträge im Zeitraum.",

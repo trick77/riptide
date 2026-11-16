@@ -202,7 +202,7 @@ func TestFindings(t *testing.T) {
 	// The waiting stage first, the worst flaky repo next, capped at three,
 	// then the question to talk about.
 	same := Change{Verdict: ChangeSame}
-	got := kinds(findings(chain(0.86), b, reviewed, OpenPRs{Long: 2}, same))
+	got := kinds(findings(chain(0.86), b, reviewed, OpenPRs{Long: 3, Jammed: 1}, same))
 	want := "stage:attention flaky:attention:kasse/web flaky:attention:kasse/e2e first_touch:talk "
 	if got != want {
 		t.Errorf("findings = %q, want %q", got, want)
@@ -223,8 +223,9 @@ func TestFindings(t *testing.T) {
 	}
 }
 
-// Long-open PRs: attention when more than at the previous period's end,
-// after the repos; else a hint after the stage's.
+// Jammed repos: attention when more than at the previous period's end,
+// after the repos; else a hint after the stage's. Long-open PRs in no
+// jammed repo: nothing.
 func TestFindingsOpenPRs(t *testing.T) {
 	hint := Chain{Stages: []Stage{{Key: StageReview, Share: ptr(0.4), Hot: true}}}
 	kinds := func(fs []Finding) string {
@@ -237,17 +238,21 @@ func TestFindingsOpenPRs(t *testing.T) {
 	flaky := Build{Hotspots: Hotspots{Kinds: []KindHotspots{{Kind: KindMain, Repos: []RepoHotspot{
 		{Repo: "kasse/web", Flaky: true, WastedSeconds: 900},
 	}}}}}
-	if got := kinds(findings(hint, flaky, Review{}, OpenPRs{Long: 3}, Change{Verdict: ChangeWorse})); got != "flaky:attention open_prs:attention stage:hint " {
+	if got := kinds(findings(hint, flaky, Review{}, OpenPRs{Long: 3, Jammed: 1}, Change{Verdict: ChangeWorse})); got != "flaky:attention open_prs:attention stage:hint " {
 		t.Errorf("more than before = %q", got)
 	}
 	for _, v := range []string{ChangeSame, ChangeBetter, ChangeNone} {
-		if got := kinds(findings(hint, Build{}, Review{}, OpenPRs{Long: 1}, Change{Verdict: v})); got != "stage:hint open_prs:hint " {
+		if got := kinds(findings(hint, Build{}, Review{}, OpenPRs{Long: 3, Jammed: 1}, Change{Verdict: v})); got != "stage:hint open_prs:hint " {
 			t.Errorf("%s = %q", v, got)
 		}
 	}
-	// None long open: nothing, whatever the comparison says.
+	// None long open, or no repo jammed: nothing, whatever the comparison
+	// says.
 	if got := kinds(findings(Chain{}, Build{}, Review{}, OpenPRs{Open: 4}, Change{Verdict: ChangeWorse})); got != "" {
 		t.Errorf("none long open = %q", got)
+	}
+	if got := kinds(findings(Chain{}, Build{}, Review{}, OpenPRs{Open: 9, Long: 5}, Change{Verdict: ChangeWorse})); got != "" {
+		t.Errorf("none jammed = %q", got)
 	}
 }
 

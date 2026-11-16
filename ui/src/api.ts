@@ -216,26 +216,36 @@ export type Costs = {
 export type PRWaiting =
   "draft" | "first_review" | "review" | "changes" | "merge";
 
+// Inactive: no event for inactive_days, in the PR table only.
+export type PRFactWaiting = PRWaiting | "inactive";
+
 export type WaitingCounts = Record<PRWaiting, number>;
 
 export type OpenRepo = {
   repo: string;
   open: number;
   long: number;
-  oldest_s: number;
+  jammed: boolean;
   age: Spread;
   waiting: WaitingCounts;
+  inactive: number;
 };
 
 // The PRs open at the period's end, whenever opened.
 export type OpenPRs = {
   at: string;
   long_days: number;
+  jam_min: number;
+  inactive_days: number;
   open: number;
   long: number;
+  jammed: number;
+  jammed_long: number;
+  inactive: number;
   age: Spread;
   waiting: WaitingCounts;
   long_waiting: WaitingCounts;
+  jammed_waiting: WaitingCounts;
   repos: OpenRepo[];
 };
 
@@ -278,7 +288,7 @@ export type Comparison = {
   wasted_share: Change;
   build: KindChange[];
   open_prs: Change;
-  open_long: Change;
+  open_jammed: Change;
 };
 
 export type Metrics = {
@@ -313,7 +323,8 @@ export type PRFact = {
   to_prod_s: number | null;
   // A PR open at the period's end: its age then, what it waits on.
   age_s: number | null;
-  waiting: PRWaiting | null;
+  waiting: PRFactWaiting | null;
+  idle_s: number | null;
 };
 
 export type DeployFact = {
