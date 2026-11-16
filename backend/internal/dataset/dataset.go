@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/trick77/riptide/internal/parse"
 )
 
 var (
@@ -619,9 +621,11 @@ const (
 )
 
 // BranchKind classifies a branch: main (master, main), release (release/*),
-// feature (feature/*, feat/*, bugfix/*, fix/*, hotfix/*), pr (Jenkins'
-// PR-<n>), other. A feature build is what a developer waits on: a branch
-// scheme missing here hides those runs in other.
+// feature (every prefix the work mix knows: feature/, feat/, bugfix/, fix/,
+// hotfix/, chore/, refactor/, docs/), pr (Jenkins' PR-<n>), other. A feature
+// build is what a developer waits on: a branch scheme missing here hides
+// those runs in other. The prefixes are the work mix's (parse.changeTypes),
+// one list for both; only here a prefix needs its '/'.
 func BranchKind(branch string) string {
 	b := strings.ToLower(branch)
 	switch {
@@ -629,9 +633,7 @@ func BranchKind(branch string) string {
 		return BranchMain
 	case strings.HasPrefix(b, "release/"):
 		return BranchRelease
-	case strings.HasPrefix(b, "feature/"), strings.HasPrefix(b, "feat/"),
-		strings.HasPrefix(b, "bugfix/"), strings.HasPrefix(b, "fix/"),
-		strings.HasPrefix(b, "hotfix/"):
+	case parse.HasChangePrefix(b):
 		return BranchFeature
 	case prBranch.MatchString(b):
 		return BranchPR

@@ -667,8 +667,9 @@ components:
       enum: [release, main, feature, other, unknown]
       description: |
         `release`: build_type release or hotfix; `main`: the default branch
-        (master or main), no release; `feature`: feature/…, feat/…,
-        bugfix/…, fix/…, hotfix/…, PR-<n>; `other`: any other branch;
+        (master or main), no release; `feature`: every prefix the work mix
+        knows (feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/,
+        docs/) and PR-<n>; `other`: any other branch;
         `unknown`: a default-branch run before the team's first build_type,
         release or not.
 

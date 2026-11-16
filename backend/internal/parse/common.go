@@ -13,6 +13,9 @@ import (
 	"unicode/utf8"
 )
 
+// changeTypes are the developers' branch prefixes. They also decide which CI
+// runs are feature builds (HasChangePrefix), on read, so a prefix added here
+// reclassifies past build periods as well.
 var changeTypes = map[string]string{
 	"feature":  "feature",
 	"feat":     "feature",
@@ -35,6 +38,16 @@ func ChangeType(branch string) string {
 		return ct
 	}
 	return "other"
+}
+
+// HasChangePrefix tells whether branch starts with one of changeTypes' prefixes and its
+// '/', a leading '/' aside: feature/x, /fix/y. Stricter than ChangeType,
+// which also takes a bare "feature": a CI run's branch named after a prefix
+// is no scheme.
+func HasChangePrefix(branch string) bool {
+	prefix, _, ok := strings.Cut(strings.TrimLeft(branch, "/"), "/")
+	_, known := changeTypes[strings.ToLower(prefix)]
+	return ok && known
 }
 
 var jiraKeyRE = regexp.MustCompile(`[A-Z][A-Z0-9]+-[0-9]+`)

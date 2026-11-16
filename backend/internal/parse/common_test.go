@@ -26,6 +26,26 @@ func TestChangeType(t *testing.T) {
 	}
 }
 
+func TestHasChangePrefix(t *testing.T) {
+	for _, c := range []struct {
+		branch string
+		want   bool
+	}{
+		{"feature/x", true},
+		{"Chore/deps", true},
+		{"/fix/y", true}, // a leading '/' aside
+		{"docs/", true},
+		{"feature", false}, // a bare prefix is no scheme
+		{"wip/x", false},
+		{"kas-1/feature/x", false},
+		{"", false},
+	} {
+		if got := HasChangePrefix(c.branch); got != c.want {
+			t.Errorf("HasChangePrefix(%q) = %v, want %v", c.branch, got, c.want)
+		}
+	}
+}
+
 func TestJiraKeys(t *testing.T) {
 	for _, c := range []struct {
 		name  string
