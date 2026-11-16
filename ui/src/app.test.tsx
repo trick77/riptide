@@ -12,6 +12,7 @@ import type { Facts, FlowOutcome, Metrics, RunKind } from "./api";
 import { Build } from "./Build";
 import { Costs } from "./Costs";
 import { Flow } from "./Flow";
+import { stepLook } from "./heatmap";
 import { initialLanguage } from "./i18n";
 import { parseState, stateQuery } from "./state";
 import { Strip } from "./strip";
@@ -874,6 +875,107 @@ describe("App", () => {
     const links = screen.getAllByRole("button", { name: "Läufe ansehen →" });
     fireEvent.click(links[links.length - 1]);
     expect(window.location.search).toBe("?q=kasse%2Fmono&tab=runs");
+  });
+
+  it("paints the failure heatmap as the backend classed it", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      const m = metrics(5);
+      const cell = (
+        runs: number,
+        failed: number,
+        step: number | null,
+        no_data = false,
+      ) => ({ runs, failed, rate: runs ? failed / runs : null, step, no_data });
+      m.build.hotspots.kinds[2].heatmap = [
+        {
+          repo: "kasse/kasse-api",
+          other: false,
+          weeks: [
+            // before the run data
+            cell(0, 0, null, true),
+            cell(0, 0, null),
+            cell(2, 1, null),
+            cell(3, 0, 0),
+            cell(5, 2, 4),
+          ],
+        },
+        {
+          repo: "",
+          other: true,
+          weeks: [
+            cell(0, 0, null, true),
+            cell(0, 0, null),
+            cell(0, 0, null),
+            cell(0, 0, null),
+            cell(4, 4, 4),
+          ],
+        },
+      ];
+      m.build.hotspots.kinds[0].heatmap = m.build.hotspots.kinds[2].heatmap;
+      return m;
+    });
+    render(<App />);
+    await screen.findByText("Fehlerquote pro Repo und Woche");
+    // The numbers as a table for assistive tech, the grid hidden from it.
+    const table = screen.getByRole("table", {
+      name: "Fehlerquote pro Repo und Woche, Feature- und PR-Builds",
+    });
+    expect(
+      within(table).getByRole("row", { name: /^übrige Repos/ }),
+    ).toHaveTextContent("4 von 4 Läufen fehlgeschlagen (100 %)");
+    const map = screen.getByTestId("heat-map");
+    expect(map).toHaveAttribute("aria-hidden", "true");
+    expect(within(map).getAllByTestId("heat-row")).toHaveLength(2);
+    expect(within(map).getByText("übrige Repos")).toBeInTheDocument();
+    const cells = within(map).getAllByTestId("heat-cell").slice(0, 5);
+    // The backend's class, never one the browser derived.
+    expect(cells[4].firstElementChild).toHaveClass("bg-bad-4");
+    expect(cells[3].firstElementChild).toHaveClass("bg-cell-empty");
+    expect(cells[1].firstElementChild).toHaveClass("border-dashed");
+    expect(cells[0].firstElementChild).toHaveClass("texture-gap");
+    fireEvent.mouseEnter(cells[4]);
+    // The tooltip sits in the grid, hidden from assistive tech.
+    const tipNow = () => screen.getByRole("tooltip", { hidden: true });
+    const tip = tipNow();
+    expect(tip.firstElementChild?.textContent).toBe(
+      "kasse/kasse-api · KW 46 · Feature- und PR-Builds",
+    );
+    expect(tip).toHaveTextContent("2 von 5 Läufen fehlgeschlagen (40 %)");
+    fireEvent.mouseLeave(cells[4]);
+    fireEvent.mouseEnter(cells[2]);
+    expect(tipNow()).toHaveTextContent(
+      "1 von 2 Läufen fehlgeschlagenunter 3 Läufen: kein Urteil",
+    );
+    fireEvent.mouseLeave(cells[2]);
+    fireEvent.mouseEnter(cells[1]);
+    expect(tipNow()).toHaveTextContent("keine Läufe");
+    fireEvent.mouseLeave(cells[1]);
+    fireEvent.mouseEnter(cells[0]);
+    expect(tipNow()).toHaveTextContent("keine verlässlichen Daten");
+    // The legend from the backend's cut points, drawn as the cells are.
+    expect(screen.getByText("10–20 %")).toBeInTheDocument();
+    expect(screen.getByText("ab 40 %")).toBeInTheDocument();
+    const swatches = screen.getAllByTestId("heat-swatch");
+    expect(swatches).toHaveLength(8);
+    expect(swatches[0].className).toBe(
+      `inline-block size-2.5 ${cells[3].firstElementChild?.className.replace("h-[18px] ", "")}`,
+    );
+    // A hovered cell does not carry over to another kind.
+    fireEvent.mouseEnter(cells[4]);
+    expect(tipNow()).toBeInTheDocument();
+    const kinds = screen.getByRole("group", { name: "Lauf-Art" });
+    fireEvent.click(within(kinds).getByRole("button", { name: "Releases" }));
+    expect(
+      screen.getByRole("table", { name: /Releases$/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("tooltip", { hidden: true })).toBeNull();
+    // A class past the colours takes the top one and warns once, never
+    // takes the page down.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(stepLook(5).className).toContain("bg-bad-4");
+    expect(stepLook(6).className).toContain("bg-bad-4");
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 
   it("asks for the facts of the product the metrics resolved", async () => {

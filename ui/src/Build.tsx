@@ -28,6 +28,7 @@ import {
   partPct,
   pct,
 } from "./format";
+import { FailureHeatmap } from "./heatmap";
 import { Quiver } from "./quiver";
 import { Sankey, type SankeyLink, type SankeyNode } from "./sankey";
 import type { Tab } from "./state";
@@ -712,6 +713,10 @@ export function Build({
                 min: h.min_runs,
               })}
             </p>
+            {k && (
+              // Keyed by kind: a hovered cell never carries over to another.
+              <FailureHeatmap key={k.kind} k={k} h={h} weeks={m.period.weeks} />
+            )}
             {k && (
               <SlowestTable
                 rows={k.slowest}

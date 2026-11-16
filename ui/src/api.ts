@@ -165,6 +165,29 @@ export type KindHotspots = {
   // The kind's repos the chart cannot draw: past the cut, without a run
   // with a verdict, or without a median.
   unplotted: number;
+  // A row per repo of `repos`, in its order, a cell per week.
+  heatmap: HeatRow[];
+};
+
+// One repo's runs of a kind in one week. step: null under heat_min_runs
+// runs, 0 without a failure, 1..4 by heat_steps.
+export type HeatCell = {
+  runs: number;
+  failed: number;
+  rate: number | null;
+  step: number | null;
+  // No run in a week before the run data starts: unknown, not none.
+  no_data: boolean;
+};
+
+// other: the kind's repos past the cut of `repos`, together; repo empty.
+export type HeatRow = { repo: string; other: boolean; weeks: HeatCell[] };
+
+// A legend class: a failure rate from `from` to `to`, null where open.
+export type HeatClass = {
+  step: number;
+  from: number | null;
+  to: number | null;
 };
 
 // One repo against its own runs of the kind in the previous period.
@@ -223,6 +246,9 @@ export type Hotspots = {
   outlier_min_s: number;
   outlier_repo_min_runs: number;
   slowest_min_runs: number;
+  heat_min_runs: number;
+  heat_steps: number[];
+  heat_classes: HeatClass[];
   kinds: KindHotspots[];
   outliers: Outlier[];
   outlier_count: number;

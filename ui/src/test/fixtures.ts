@@ -119,6 +119,8 @@ function kindHotspots(
     slowest: [],
     outlier_threshold_s: null,
     unplotted: 0,
+    // Set per test: its weeks follow the period.
+    heatmap: [],
   };
 }
 
@@ -309,6 +311,15 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
         outlier_min_s: 3600,
         outlier_repo_min_runs: 3,
         slowest_min_runs: 3,
+        heat_min_runs: 3,
+        heat_steps: [0.1, 0.2, 0.4],
+        heat_classes: [
+          { step: 0, from: null, to: null },
+          { step: 1, from: null, to: 0.1 },
+          { step: 2, from: 0.1, to: 0.2 },
+          { step: 3, from: 0.2, to: 0.4 },
+          { step: 4, from: 0.4, to: null },
+        ],
         kinds: [
           kindHotspots("release", 0),
           kindHotspots("main", 1),

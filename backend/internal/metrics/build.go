@@ -248,6 +248,9 @@ type baseline struct {
 	// incomplete: the previous period is not covered by the run data, or
 	// its runs fall into other kinds (see buildsIncomplete).
 	incomplete bool
+	// previous: computing the previous period itself, which nobody draws,
+	// so no heatmap.
+	previous bool
 }
 
 // build is the CI section. base names the repos and holds the previous
@@ -276,6 +279,7 @@ func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
 		FlakyMinPoints: FlakyMinPoints, FlakyMinFailures: FlakyMinFailures,
 		OutlierFactor: OutlierFactor, OutlierMinS: OutlierMinS, OutlierRepoMinRuns: OutlierRepoMinRuns,
 		SlowestMinRuns: SlowestMinRuns, Kinds: []KindHotspots{}, Outliers: []Outlier{}, OutlierGroups: []OutlierGroup{},
+		HeatMinRuns: HeatMinRuns, HeatSteps: slices.Clone(HeatSteps), HeatClasses: heatClasses(),
 	}
 	for _, kind := range runKinds {
 		rs := by[kind]
@@ -327,6 +331,10 @@ func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
 		repos := kr.byRepo()
 		out.repos[kind] = repos
 		k, outliers, compared := kindHotspots(kind, kr, repos, base)
+		k.Heatmap = []HeatRow{}
+		if !base.previous {
+			k.Heatmap = heatmap(p, kr, k.Repos, out.GapWeeks)
+		}
 		out.compared[kind] = compared
 		out.Hotspots.Kinds = append(out.Hotspots.Kinds, k)
 		out.Hotspots.Outliers = append(out.Hotspots.Outliers, outliers...)
@@ -612,6 +620,9 @@ type KindHotspots struct {
 	// Repos: past its cut, without a run with a verdict, or every timed run
 	// an outlier.
 	Unplotted int `json:"unplotted"`
+	// Heatmap is a row per repo of Repos, in its order: the failure rate per
+	// week.
+	Heatmap []HeatRow `json:"heatmap"`
 }
 
 // Outlier is a run far longer than its kind usually takes.
@@ -652,6 +663,11 @@ type Hotspots struct {
 	// OutlierGroups are the outliers of all kinds that started close
 	// together, two runs or more, the largest first.
 	OutlierGroups []OutlierGroup `json:"outlier_groups"`
+	// HeatMinRuns and HeatSteps class the heatmap's cells, HeatClasses are
+	// those classes for the legend.
+	HeatMinRuns int         `json:"heat_min_runs"`
+	HeatSteps   []float64   `json:"heat_steps"`
+	HeatClasses []HeatClass `json:"heat_classes"`
 }
 
 // RepoHotspot is one repo of a kind against its own runs of the kind in
