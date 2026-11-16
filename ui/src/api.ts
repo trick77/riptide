@@ -262,7 +262,18 @@ export type Finding = {
 export type Change = {
   prev: number | null;
   verdict: "better" | "worse" | "same" | "none";
-  reason: "low_sample" | "incomplete" | "no_value" | "undirected" | null;
+  reason:
+    | "low_sample"
+    | "incomplete"
+    | "no_value"
+    | "undirected"
+    | "not_reporting"
+    | null;
+  // A better direction exists, whatever the verdict.
+  directed: boolean;
+  // -1..1, positive better: log2(now / previous), negated where lower is
+  // better, clamped at halving / doubling; null without a verdict.
+  score: number | null;
 };
 
 // A kind of run against the previous period: its success rate, and how

@@ -734,21 +734,41 @@ components:
         A number against the previous period. Durations and rates count as
         the same within 10 % of the previous value, shares within 3 points.
       additionalProperties: false
-      required: [prev, verdict, reason]
+      required: [prev, verdict, reason, directed, score]
       properties:
+        directed:
+          type: boolean
+          description: |
+            The number has a better direction, whatever the verdict: an
+            undirected one with too few data says `low_sample`, not
+            `undirected`.
         prev:
           $ref: "#/components/schemas/NullableNumber"
           description: The previous period's value; null when the periods do not compare.
+        score:
+          type: [number, "null"]
+          minimum: -1
+          maximum: 1
+          description: |
+            The change's size, positive better: log2(current / previous),
+            negated where lower is better, clamped to -1..1 (halving,
+            doubling). From 0 to anything is ±1, 0 to 0 is 0. Shares score
+            linearly, 25 points = ±1: a ratio near 0 % or 100 % explodes on
+            a change within the 3 points that count as the same. A count
+            (jammed repos) adds 2 to both sides first, so one more is no
+            doubling. 0 when the verdict is same (within the tolerance the
+            change is noise), null when it is none.
         verdict: { type: string, enum: [better, worse, same, none] }
         reason:
           type: [string, "null"]
-          enum: [low_sample, incomplete, no_value, undirected, null]
+          enum: [low_sample, incomplete, no_value, undirected, not_reporting, null]
           description: |
             Why the verdict is none. `low_sample`: too few in one of the
             periods. `incomplete`: the previous period starts before its
             source's data, or a period has more first deploys than releases.
             `no_value`: a value missing. `undirected`: no better direction;
-            `prev` is set.
+            `prev` is set. `not_reporting`: the source (Argo CD, for the
+            deploy numbers) does not report for the team yet.
 
     Comparison:
       type: object

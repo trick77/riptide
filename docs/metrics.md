@@ -390,6 +390,19 @@ deploy `kind` are set from the data, never from name lists; `bot` adds
 riptide's automation detection as it stands at read time, the same for a
 PR's opener, its reviewers and a commit's author.
 
+Each compared number carries a verdict and a `score`, its change's size
+for the overview's strip: log2(now / previous), negated where lower is
+better, clamped to ±1 (halving, doubling); from 0 to anything is ±1. A share
+scores its points linearly, 25 points = ±1: a ratio near 0 % or 100 %
+explodes (0 % to 3 % failures is infinite) on a change the 3-point tolerance
+calls the same. A count (jammed repos) adds 2 to both sides first: one
+jammed repo more is no doubling (0 to 1 scores 0.58, 10 to 20 still
+0.87). A same verdict scores 0 (within the tolerance the change is
+noise), no verdict no score; Argo CD silent for the team is
+`not_reporting`, not too few. `directed` says whether the number
+has a better direction at all, whatever the verdict (an undirected one with
+too few data says `low_sample`); the strip draws only the directed ones.
+
 Open PRs list the jammed repos first (3 PRs or more open 7 days or more),
 then by long-open PRs, then by the median age; the top 8 and every repo
 with a long-open PR. The jammed repos are compared with the previous

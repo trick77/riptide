@@ -713,20 +713,20 @@ func (kr kindRuns) byRepo() map[string]*repoRuns {
 // period, prev (nil without any), and sets its flags.
 func (h *RepoHotspot) against(rr, prev *repoRuns, incomplete bool) {
 	if prev == nil && !incomplete {
-		h.DurationChange, h.FailureChange = none(ReasonNoValue), none(ReasonNoValue)
+		h.DurationChange, h.FailureChange = repoDurationMetric.none(ReasonNoValue), repoFailureMetric.none(ReasonNoValue)
 		return
 	}
 	if prev == nil {
 		prev = &repoRuns{}
 	}
-	h.DurationChange = judge(side{Median(rr.durations), rr.timed >= HotspotMinRuns},
-		side{Median(prev.durations), prev.timed >= HotspotMinRuns}, down, relative, incomplete)
+	h.DurationChange = repoDurationMetric.judge(side{Median(rr.durations), rr.timed >= HotspotMinRuns},
+		side{Median(prev.durations), prev.timed >= HotspotMinRuns}, incomplete)
 	if p := h.DurationChange.Prev; p != nil && *p > 0 {
 		h.Factor = ptr(*h.Duration.P50 / *p)
 		h.Slow = *h.Factor+eps >= SlowFactor
 	}
-	h.FailureChange = judge(side{h.FailureRate, rr.counted >= HotspotMinRuns},
-		side{ratio(prev.failures, prev.counted), prev.counted >= HotspotMinRuns}, down, points, incomplete)
+	h.FailureChange = repoFailureMetric.judge(side{h.FailureRate, rr.counted >= HotspotMinRuns},
+		side{ratio(prev.failures, prev.counted), prev.counted >= HotspotMinRuns}, incomplete)
 	if p := h.FailureChange.Prev; p != nil {
 		h.Flaky = h.Failures >= FlakyMinFailures && *h.FailureRate+eps >= flakyThreshold(*p)
 	}
