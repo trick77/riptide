@@ -621,11 +621,13 @@ const (
 )
 
 // BranchKind classifies a branch: main (master, main), release (release/*),
-// feature (every prefix the work mix knows: feature/, feat/, bugfix/, fix/,
-// hotfix/, chore/, refactor/, docs/), pr (Jenkins' PR-<n>), other. A feature
-// build is what a developer waits on: a branch scheme missing here hides
-// those runs in other. The prefixes are the work mix's (parse.changeTypes),
-// one list for both; only here a prefix needs its '/'.
+// feature (every prefix the work mix knows but docs: feature/, feat/,
+// bugfix/, fix/, hotfix/, chore/, refactor/), pr (Jenkins' PR-<n>), other. A
+// feature build is what a developer waits on: a branch scheme missing here
+// hides those runs in other. The prefixes are the work mix's
+// (parse.FeatureBranch), one list for both; only here a prefix needs its
+// '/'. docs/ and doc/ are other (parse.DocsBranch says why). A PR-<n> build
+// of a docs branch stays pr: its name does not tell the source branch.
 func BranchKind(branch string) string {
 	b := strings.ToLower(branch)
 	switch {
@@ -633,7 +635,7 @@ func BranchKind(branch string) string {
 		return BranchMain
 	case strings.HasPrefix(b, "release/"):
 		return BranchRelease
-	case parse.HasChangePrefix(b):
+	case parse.FeatureBranch(b):
 		return BranchFeature
 	case prBranch.MatchString(b):
 		return BranchPR

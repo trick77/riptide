@@ -14,8 +14,9 @@ import (
 )
 
 // changeTypes are the developers' branch prefixes. They also decide which CI
-// runs are feature builds (HasChangePrefix), on read, so a prefix added here
-// reclassifies past build periods as well.
+// runs are feature builds (FeatureBranch), on read, so a prefix added here
+// reclassifies past build periods as well; the PR events' change_type is
+// stored at ingest and keeps its old value.
 var changeTypes = map[string]string{
 	"feature":  "feature",
 	"feat":     "feature",
@@ -26,6 +27,12 @@ var changeTypes = map[string]string{
 	"refactor": "refactor",
 	"docs":     "docs",
 }
+
+// docsPrefixes are no feature builds: their pipelines often skip the build
+// (user, 2026-11-16), and their short green runs would flatter the feature
+// builds' duration and success. doc/ is no change type: adding one would
+// split the stored PR events at the deploy.
+var docsPrefixes = map[string]bool{"docs": true, "doc": true}
 
 // ChangeType maps a branch name to its change type by the prefix before the
 // first `/`: "" for no branch, "other" for an unknown prefix.
@@ -40,14 +47,22 @@ func ChangeType(branch string) string {
 	return "other"
 }
 
-// HasChangePrefix tells whether branch starts with one of changeTypes' prefixes and its
-// '/', a leading '/' aside: feature/x, /fix/y. Stricter than ChangeType,
-// which also takes a bare "feature": a CI run's branch named after a prefix
-// is no scheme.
-func HasChangePrefix(branch string) bool {
+// FeatureBranch tells whether branch starts with one of changeTypes'
+// prefixes and its '/', a leading '/' aside (feature/x, /fix/y), docs ones
+// aside. Stricter than ChangeType, which also takes a bare "feature": a CI
+// run's branch named after a prefix is no scheme.
+func FeatureBranch(branch string) bool {
 	prefix, _, ok := strings.Cut(strings.TrimLeft(branch, "/"), "/")
-	_, known := changeTypes[strings.ToLower(prefix)]
-	return ok && known
+	p := strings.ToLower(prefix)
+	_, known := changeTypes[p]
+	return ok && known && !docsPrefixes[p]
+}
+
+// DocsBranch tells whether branch starts with docs/ or doc/, a leading '/'
+// aside; a dash scheme (DOC-123-x, a Jira key) is none.
+func DocsBranch(branch string) bool {
+	prefix, _, ok := strings.Cut(strings.TrimLeft(branch, "/"), "/")
+	return ok && docsPrefixes[strings.ToLower(prefix)]
 }
 
 var jiraKeyRE = regexp.MustCompile(`[A-Z][A-Z0-9]+-[0-9]+`)

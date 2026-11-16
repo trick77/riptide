@@ -16,6 +16,8 @@ func TestChangeType(t *testing.T) {
 		{"chore/deps", "chore"},
 		{"refactor/x", "refactor"},
 		{"docs/readme", "docs"},
+		// no change type: it would split the stored PR events at the deploy
+		{"doc/readme", "other"},
 		{"wip/x", "other"},
 		{"HOTFIX", "hotfix"},
 		{"", ""},
@@ -26,22 +28,29 @@ func TestChangeType(t *testing.T) {
 	}
 }
 
-func TestHasChangePrefix(t *testing.T) {
+func TestFeatureBranch(t *testing.T) {
 	for _, c := range []struct {
-		branch string
-		want   bool
+		branch       string
+		feature, doc bool
 	}{
-		{"feature/x", true},
-		{"Chore/deps", true},
-		{"/fix/y", true}, // a leading '/' aside
-		{"docs/", true},
-		{"feature", false}, // a bare prefix is no scheme
-		{"wip/x", false},
-		{"kas-1/feature/x", false},
-		{"", false},
+		{"feature/x", true, false},
+		{"Chore/deps", true, false},
+		{"/fix/y", true, false}, // a leading '/' aside
+		{"docs/", false, true},  // docs pipelines often skip the build
+		{"Doc/readme", false, true},
+		{"/docs/x", false, true},
+		{"doc-123-login", false, false}, // a DOC Jira key, no docs scheme
+		{"docs", false, false},
+		{"feature", false, false}, // a bare prefix is no scheme
+		{"wip/x", false, false},
+		{"kas-1/feature/x", false, false},
+		{"", false, false},
 	} {
-		if got := HasChangePrefix(c.branch); got != c.want {
-			t.Errorf("HasChangePrefix(%q) = %v, want %v", c.branch, got, c.want)
+		if got := FeatureBranch(c.branch); got != c.feature {
+			t.Errorf("FeatureBranch(%q) = %v, want %v", c.branch, got, c.feature)
+		}
+		if got := DocsBranch(c.branch); got != c.doc {
+			t.Errorf("DocsBranch(%q) = %v, want %v", c.branch, got, c.doc)
 		}
 	}
 }

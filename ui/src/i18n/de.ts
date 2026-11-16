@@ -661,18 +661,18 @@ export const de = {
       release: "build_type release oder hotfix",
       main: "master oder main, kein Release",
       feature:
-        "feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/, docs/ und PR-Builds",
+        "feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/ und PR-Builds",
       other:
-        "kein bekanntes Präfix: release/… ohne Release, Nightlies, eigene Namensschemas",
+        "docs/ und doc/ (oft ohne Build), release/… ohne Release, Nightlies, eigene Namensschemas",
       unknown: "vor der ersten build_type-Meldung",
     },
     prefixes: "Häufigste Präfixe",
     noBranch: "ohne Branch im Pipeline-Namen",
     featureMissingTitle: "Feature- und Bugfix-Builds: kein Lauf erkannt",
     featureMissing_one:
-      "Erkannt werden Branches mit feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/, docs/ und PR-Builds. {{count}} Lauf auf einem Branch ohne bekanntes Präfix steht unter «Übrige Branches» (release/, Nightlies und Bots nicht mitgezählt), vermutlich ein Feature-Build des Teams.",
+      "Erkannt werden Branches mit feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/ und PR-Builds. {{count}} Lauf auf einem Branch ohne bekanntes Präfix steht unter «Übrige Branches» (release/, docs/, doc/, Nightlies und Bots nicht mitgezählt), vermutlich ein Feature-Build des Teams.",
     featureMissing_other:
-      "Erkannt werden Branches mit feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/, docs/ und PR-Builds. {{count}} Läufe auf Branches ohne bekanntes Präfix stehen unter «Übrige Branches» (release/, Nightlies und Bots nicht mitgezählt), vermutlich die Feature-Builds des Teams.",
+      "Erkannt werden Branches mit feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/ und PR-Builds. {{count}} Läufe auf Branches ohne bekanntes Präfix stehen unter «Übrige Branches» (release/, docs/, doc/, Nightlies und Bots nicht mitgezählt), vermutlich die Feature-Builds des Teams.",
     sparkAria: "Erfolgsquote pro Woche, {{kind}}: {{parts}}",
     successful: "erfolgreich",
     typicalDuration: "typische Dauer, alle Repos",

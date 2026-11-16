@@ -725,15 +725,19 @@ func TestBranchPrefixes(t *testing.T) {
 }
 
 func TestFeatureHint(t *testing.T) {
-	// Only release branches, nightlies, bots, Tekton and aborted runs: no
-	// sign of unrecognised feature builds.
+	// Only release branches, nightlies, bots, docs, Tekton and aborted runs:
+	// no sign of unrecognised feature builds.
 	none := hinted(
 		otherRuns("SUCCESS", "release/1.1", "release-1.2", "nightly", "nightly-full", "renovate/x",
-			"dependabot/y", "snyk-fix-1", "", "develop"),
+			"dependabot/y", "snyk-fix-1", "", "develop", "docs/readme", "doc/api"),
 		otherRuns("ABORTED", "kas-1-x"),
 	)
 	if none.FeatureHint != nil {
 		t.Errorf("hint = %+v", none.FeatureHint)
+	}
+	// A DOC Jira key is a feature scheme, not docs: it still hints.
+	if b := hinted(otherRuns("SUCCESS", "DOC-123-login", "doc-7-x")); b.FeatureHint == nil || b.FeatureHint.Runs != 2 {
+		t.Errorf("hint with DOC keys = %+v", b.FeatureHint)
 	}
 	// recognised feature builds: nothing to hint at
 	feat := otherRuns("SUCCESS", "feat/x")

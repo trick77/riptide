@@ -666,18 +666,18 @@ export const en = {
       release: "build_type release or hotfix",
       main: "master or main, no release",
       feature:
-        "feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/, docs/ and PR builds",
+        "feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/ and PR builds",
       other:
-        "no known prefix: release/… without a release, nightlies, other naming schemes",
+        "docs/ and doc/ (often without a build), release/… without a release, nightlies, other naming schemes",
       unknown: "before the first build_type report",
     },
     prefixes: "Most frequent prefixes",
     noBranch: "no branch in the pipeline name",
     featureMissingTitle: "Feature and bugfix builds: no run recognised",
     featureMissing_one:
-      "Recognised are branches starting feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/, docs/ and PR builds. {{count}} run on a branch without a known prefix is under “Other branches” (release/, nightlies and bots not counted), likely a feature build of the team.",
+      "Recognised are branches starting feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/ and PR builds. {{count}} run on a branch without a known prefix is under “Other branches” (release/, docs/, doc/, nightlies and bots not counted), likely a feature build of the team.",
     featureMissing_other:
-      "Recognised are branches starting feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/, docs/ and PR builds. {{count}} runs on branches without a known prefix are under “Other branches” (release/, nightlies and bots not counted), likely the team's feature builds.",
+      "Recognised are branches starting feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/ and PR builds. {{count}} runs on branches without a known prefix are under “Other branches” (release/, docs/, doc/, nightlies and bots not counted), likely the team's feature builds.",
     sparkAria: "Success rate per week, {{kind}}: {{parts}}",
     successful: "successful",
     typicalDuration: "typical duration, all repos",
