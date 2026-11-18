@@ -103,15 +103,13 @@ func (d Deps) authPing(w http.ResponseWriter, r *http.Request) {
 // secrets ("" for any source) and returns the caller's team. On failure it
 // has already written the 401.
 func (d Deps) bearer(w http.ResponseWriter, r *http.Request, source string) (string, bool) {
-	scheme, value, _ := strings.Cut(r.Header.Get("Authorization"), " ")
-	token := strings.TrimSpace(value)
-	if !strings.EqualFold(scheme, "bearer") || token == "" {
+	token, ok := bearerToken(r)
+	if !ok {
 		httpapi.WriteDetail(w, http.StatusUnauthorized, "Missing or malformed Authorization header.")
 		return "", false
 	}
 	keys := d.Runtime.Keys()
 	var team string
-	var ok bool
 	if source == "" {
 		team, ok = keys.LookupAnySource(token)
 	} else {
@@ -122,6 +120,14 @@ func (d Deps) bearer(w http.ResponseWriter, r *http.Request, source string) (str
 		return "", false
 	}
 	return team, true
+}
+
+// bearerToken is the token of `Authorization: Bearer <token>`, ok false when
+// the header is missing or malformed.
+func bearerToken(r *http.Request) (string, bool) {
+	scheme, value, _ := strings.Cut(r.Header.Get("Authorization"), " ")
+	token := strings.TrimSpace(value)
+	return token, strings.EqualFold(scheme, "bearer") && token != ""
 }
 
 // dummySecret stands in for an unknown team's key, so rejecting an unknown
