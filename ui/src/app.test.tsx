@@ -697,6 +697,96 @@ describe("App", () => {
     expect(p.queryByText("Für die nächste Retro")).toBeNull();
   });
 
+  // The two shapes the backend sends: releases per week, whole counts
+  // (null before Argo CD reported), and a kind's success rate. No line
+  // without a week of this period.
+  it("draws a card's weeks", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis") {
+        const a = assessment();
+        const base = analysisStatus();
+        const gain = (
+          metric: string,
+          label: string,
+          unit: "per_week" | "share",
+          value: number,
+          prev: number,
+          series: { prev: (number | null)[]; cur: (number | null)[] },
+        ) => ({
+          ...a.signals.find((s) => s.id === "change:merged_per_week")!,
+          id: `change:${metric}`,
+          metric,
+          facts: [
+            {
+              id: `change:${metric}.value`,
+              label,
+              unit,
+              value,
+              prev,
+              verdict: "better" as const,
+              magnitude: "minor" as const,
+            },
+          ],
+          series,
+        });
+        const deploys = gain(
+          "deploy_frequency",
+          "deploy_per_week",
+          "per_week",
+          4.5,
+          3.9,
+          { prev: [null, 3], cur: [4, 5] },
+        );
+        const builds = gain(
+          "build_success:feature",
+          "build_success",
+          "share",
+          0.95,
+          0.9,
+          { prev: [0.8, 0.9], cur: [0.94, 0.96] },
+        );
+        const stale = gain(
+          "build_success:main",
+          "build_success",
+          "share",
+          0.95,
+          0.9,
+          { prev: [0.8, 0.9], cur: [null, null] },
+        );
+        const card = (signal: string) => ({
+          signal,
+          column: "good" as const,
+          lever: "name_what_helped",
+        });
+        return analysisStatus({
+          assessment: { ...a, signals: [...a.signals, deploys, builds, stale] },
+          layout: {
+            ...base.layout,
+            cards: [
+              card(deploys.id),
+              card(builds.id),
+              card(stale.id),
+              ...base.layout.cards,
+            ],
+          },
+        });
+      }
+      return metrics();
+    });
+    render(<App />);
+    const p = within(await screen.findByTestId("assessment"));
+    expect(
+      p.getByRole("img", { name: "Pro Woche, Vorperiode: –, 3; jetzt: 4, 5" }),
+    ).toBeInTheDocument();
+    expect(
+      p.getByRole("img", {
+        name: "Pro Woche, Vorperiode: 80 %, 90 %; jetzt: 94 %, 96 %",
+      }),
+    ).toBeInTheDocument();
+    expect(p.getAllByRole("img", { name: /^Pro Woche/ })).toHaveLength(2);
+  });
+
   it("says nothing is stuck beside what runs", async () => {
     mockFetch((url) => {
       if (url.pathname === "/api/facts") return facts();

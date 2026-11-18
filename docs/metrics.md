@@ -563,7 +563,10 @@ on the right ("stuck"), with a tally of each. Gains rank last, so they get
 slots of their own (the best 2 gains, 1 resolution) on top of the 4 cards,
 worded or not. Without a gain or a resolution the left says
 "unremarkable": a quiet period is no success (user: "wenn nichts läuft, ist
-läuft gut übertrieben").
+läuft gut übertrieben"). A change of deploy frequency or of a kind's build
+success carries its weeks in both periods (`series`), the numbers the
+deploy and build sections count per week anyway; review time, lead time and
+merged PRs have no weekly series, so their cards draw none.
 
 A source silent for 7 days at the end is a gap: its signals are left out.
 The repos are ranked by their signals' weight; a jam or a steady slow build

@@ -32,6 +32,110 @@ export function Tip({
   );
 }
 
+const SW = 240;
+const SH = 48;
+
+// The floor of a success-rate scale: the nearest 10 % below the lowest
+// week, at most 90 %, so a small dip shows and 100 % stays the top.
+// Scaling only: the rates are the backend's.
+export function shareLow(values: (number | null)[]): number {
+  const known = values.filter((v): v is number => v != null);
+  if (!known.length) return 0.9;
+  return Math.min(0.9, Math.floor(Math.min(...known) * 10) / 10);
+}
+
+// A number week by week as one thin line, a gap where a week has none, a
+// dot on the last value. split marks where the current period starts: the
+// weeks before it, the previous period, sit on a recessive band. The scale
+// and the size are the caller's (low..high, className), so cards that
+// share a scale compare.
+export function Spark({
+  values,
+  low,
+  high,
+  stroke,
+  label,
+  split,
+  className,
+}: {
+  values: (number | null)[];
+  low: number;
+  high: number;
+  stroke: string;
+  label: string;
+  split?: number;
+  className: string;
+}) {
+  const n = values.length;
+  const x = (i: number) => (n < 2 ? SW / 2 : 4 + (i / (n - 1)) * (SW - 8));
+  const span = high - low || 1;
+  const y = (v: number) => SH - 4 - ((v - low) / span) * (SH - 8);
+  const segs: string[] = [];
+  let cur = "";
+  values.forEach((v, i) => {
+    if (v == null) {
+      if (cur) segs.push(cur);
+      cur = "";
+    } else cur += `${cur ? "L" : "M"}${x(i).toFixed(1)} ${y(v).toFixed(1)} `;
+  });
+  if (cur) segs.push(cur);
+  let last = -1;
+  values.forEach((v, i) => {
+    if (v != null) last = i;
+  });
+  // The band ends halfway between the previous period's last week and the
+  // current one's first.
+  const band =
+    split != null && split > 0 && split < n ? (x(split - 1) + x(split)) / 2 : 0;
+  return (
+    <svg
+      viewBox={`0 0 ${SW} ${SH}`}
+      className={className}
+      role="img"
+      aria-label={label}
+    >
+      {band > 0 && (
+        <rect
+          x="0"
+          y="0"
+          width={band}
+          height={SH}
+          fill="var(--color-active)"
+          opacity="0.5"
+        />
+      )}
+      <line x1="0" x2={SW} y1="4" y2="4" stroke="var(--color-grid-minor)" />
+      <line
+        x1="0"
+        x2={SW}
+        y1={SH - 4}
+        y2={SH - 4}
+        stroke="var(--color-grid-minor)"
+      />
+      {segs.map((d, i) => (
+        <path
+          key={i}
+          d={d}
+          fill="none"
+          stroke={stroke}
+          strokeWidth="2"
+          strokeLinejoin="round"
+        />
+      ))}
+      {last >= 0 && (
+        <circle
+          cx={x(last)}
+          cy={y(values[last]!)}
+          r="3.5"
+          fill={stroke}
+          stroke="var(--color-panel)"
+          strokeWidth="2"
+        />
+      )}
+    </svg>
+  );
+}
+
 // Every n-th week label, so 26 weeks do not overprint each other.
 export function labelEvery(n: number): number {
   return n <= 6 ? 1 : n <= 13 ? 2 : 4;

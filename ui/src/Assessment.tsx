@@ -22,6 +22,7 @@ import {
   type Signal,
   type WaitingCounts,
 } from "./api";
+import { shareLow, Spark } from "./charts";
 import { stageNames } from "./Flow";
 import { clock, dayMonth, dur, money, num, pct, stage } from "./format";
 import type { Tab } from "./state";
@@ -424,6 +425,51 @@ type CardView = {
   lever: string;
 };
 
+const SPARK_STROKE: Record<Column, string> = {
+  good: "var(--color-online)",
+  bad: "var(--color-danger-ink)",
+  done: "var(--color-s1)",
+};
+
+// A card's number week by week, the previous period on a band: a share
+// scaled as the build section scales its rates (shareLow, from the card's
+// own weeks), a count from 0. Scaling only; the weeks are the backend's.
+// No line without a week of this period: its end dot would stand in the
+// previous one's band.
+function WeekSpark({
+  f,
+  series,
+  column,
+}: {
+  f: Fact;
+  series: NonNullable<Signal["series"]>;
+  column: Column;
+}) {
+  const { t } = useTranslation();
+  const values = [...series.prev, ...series.cur];
+  const known = values.filter((v): v is number => v != null);
+  if (known.length < 2 || series.cur.every((v) => v == null)) return null;
+  const share = f.unit === "share";
+  const low = share ? shareLow(values) : 0;
+  const high = share ? 1 : Math.max(...known);
+  // A week's releases are a whole count; per week is the period's mean.
+  const unit = f.unit === "per_week" ? "count" : f.unit;
+  return (
+    <Spark
+      values={values}
+      low={low}
+      high={high}
+      split={series.prev.length}
+      stroke={SPARK_STROKE[column]}
+      className="block h-8 w-40 shrink-0"
+      label={t("overview.assess.sparkAria", {
+        prev: series.prev.map((v) => fmtFact(t, unit, v)).join(", "),
+        cur: series.cur.map((v) => fmtFact(t, unit, v)).join(", "),
+      })}
+    />
+  );
+}
+
 function SignalCard({ c }: { c: CardView }) {
   const { t } = useTranslation();
   const f = c.s.facts[0];
@@ -453,14 +499,21 @@ function SignalCard({ c }: { c: CardView }) {
         {c.title}
       </p>
       {f && (
-        <div className="mb-2 flex flex-wrap items-baseline gap-2">
-          <span className="font-serif text-[32px] leading-none text-ink tabular-nums">
-            {fmtFact(t, f.unit, f.value)}
-          </span>
-          <span className="text-[13px] text-muted">
-            {t(`overview.assess.label.${f.label}`, { defaultValue: f.label })}
-          </span>
-          <Prev f={f} />
+        <div className="mb-2 flex flex-wrap items-end justify-between gap-x-3 gap-y-1">
+          <div className="flex flex-wrap items-baseline gap-2">
+            <span className="font-serif text-[32px] leading-none text-ink tabular-nums">
+              {fmtFact(t, f.unit, f.value)}
+            </span>
+            <span className="text-[13px] text-muted">
+              {t(`overview.assess.label.${f.label}`, {
+                defaultValue: f.label,
+              })}
+            </span>
+            <Prev f={f} />
+          </div>
+          {c.s.series && (
+            <WeekSpark f={f} series={c.s.series} column={c.column} />
+          )}
         </div>
       )}
       {c.s.waiting && <WaitingBar w={c.s.waiting} />}

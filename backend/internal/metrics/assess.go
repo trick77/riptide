@@ -148,9 +148,20 @@ type Signal struct {
 	Facts   []Fact   `json:"facts"`
 	Waiting *Waiting `json:"waiting"`
 	Drivers []Driver `json:"drivers"`
+	// Series is the hero number week by week, where the page computes it
+	// anyway (deploy frequency, build success); absent for the rest, so the
+	// model's digest, which marshals signals as they are, never carries it.
+	Series *Series `json:"series,omitempty"`
 	// score ranks good changes among themselves, the larger move first: the
 	// Change's |Score|. Not stored: the stored order already holds it.
 	score float64
+}
+
+// Series is a number per week, the previous period's and this one's, null
+// for a week without a value (no runs).
+type Series struct {
+	Prev []*float64 `json:"prev"`
+	Cur  []*float64 `json:"cur"`
 }
 
 // FocusRepo is a repo with movement: its signals and up to three numbers.
@@ -631,6 +642,7 @@ func (a *assessor) changeSignals() {
 		if kind, ok := strings.CutPrefix(t.metric, "build_success:"); ok {
 			s.RunKind = ptr(kind)
 		}
+		s.Series = a.series(t.metric)
 		if bad {
 			s.Tone = ToneAttention
 			if t.metric == "review_time" {
@@ -648,6 +660,39 @@ func (a *assessor) changeSignals() {
 				fact("throughput_instability.success", "deploy_success", UnitShare, m.Delivery.Frequency.SuccessRate, ds)},
 		})
 	}
+}
+
+// series is a team number's weeks in both periods, for the numbers the
+// page already counts per week: releases to production, a kind's success
+// rate. Nil for the rest; no weekly numbers are computed for a card alone.
+func (a *assessor) series(metric string) *Series {
+	// A week before Argo CD reported is no week of zero releases: null. The
+	// week it started in counts, as the per-week rate counts it.
+	start := a.m.Meta.DataStart.ArgoCD
+	releases := func(f DeployFrequency, p Period) []*float64 {
+		out := make([]*float64, len(f.Weeks))
+		for i, w := range f.Weeks {
+			if start != nil && i < len(p.Weeks) && p.Weeks[i].End.After(*start) {
+				out[i] = f64(w.Release)
+			}
+		}
+		return out
+	}
+	success := func(m Metrics, kind string) []*float64 {
+		for _, b := range m.Build.Kinds {
+			if b.Kind == kind && b.Weekly != nil {
+				return slices.Clone(b.Weekly)
+			}
+		}
+		return []*float64{}
+	}
+	if metric == "deploy_frequency" {
+		return &Series{Prev: releases(a.pm.Delivery.Frequency, a.p.Previous), Cur: releases(a.m.Delivery.Frequency, a.p.Period)}
+	}
+	if kind, ok := strings.CutPrefix(metric, "build_success:"); ok {
+		return &Series{Prev: success(a.pm, kind), Cur: success(a.m, kind)}
+	}
+	return nil
 }
 
 // reviewDrivers split a worsened review time by repo: each repo's PRs times
@@ -821,6 +866,7 @@ func (a *assessor) resolvedSignals() {
 				if t.metric == rest && t.value != nil && t.c.Verdict != ChangeWorse {
 					s.Source = t.source
 					s.Facts = []Fact{fact(s.ID+".value", t.label, t.unit, t.value, t.c)}
+					s.Series = a.series(rest)
 				}
 			}
 		}

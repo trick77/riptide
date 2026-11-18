@@ -621,6 +621,10 @@ export type Signal = {
   facts: Fact[];
   waiting: WaitingCounts | null;
   drivers: Driver[] | null;
+  // The hero number week by week, where the backend counts it anyway
+  // (deploy frequency, build success); absent otherwise and in an analysis
+  // stored before the field.
+  series?: { prev: (number | null)[]; cur: (number | null)[] };
 };
 
 // A team-wide signal as the page shows it: its column and lever are the

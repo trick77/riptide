@@ -231,6 +231,44 @@ func TestChangeSignalsGood(t *testing.T) {
 	}
 }
 
+// A card's weeks come only where the page counts them anyway: releases
+// per week and a kind's success rate, both periods; none for the rest.
+func TestSeries(t *testing.T) {
+	a := &assessor{}
+	w0 := time.Date(2026, 11, 2, 0, 0, 0, 0, zurich)
+	week := func(days int) Week { return Week{Start: w0.AddDate(0, 0, days), End: w0.AddDate(0, 0, days+7)} }
+	a.p.Previous.Weeks = []Week{week(0)}
+	a.p.Period.Weeks = []Week{week(7), week(14)}
+	// Argo CD reported from the period's first Wednesday on: the previous
+	// week is no week of zero releases, the one it started in counts.
+	a.m.Meta.DataStart.ArgoCD = ptr(w0.AddDate(0, 0, 9))
+	a.m.Delivery.Frequency.Weeks = []DeployWeek{{Release: 2}, {Release: 3, Sync: 4}}
+	a.pm.Delivery.Frequency.Weeks = []DeployWeek{{Release: 0}}
+	a.m.Build.Kinds = []BuildStats{{Kind: "feature", Weekly: []*float64{ptr(0.9), nil}}}
+	vals := func(xs []*float64) []any {
+		out := []any{}
+		for _, x := range xs {
+			if x == nil {
+				out = append(out, nil)
+			} else {
+				out = append(out, *x)
+			}
+		}
+		return out
+	}
+	d := a.series("deploy_frequency")
+	if d == nil || fmt.Sprint(vals(d.Prev)) != "[<nil>]" || fmt.Sprint(vals(d.Cur)) != "[2 3]" {
+		t.Errorf("deploys = %+v", d)
+	}
+	b := a.series("build_success:feature")
+	if b == nil || len(b.Prev) != 0 || b.Prev == nil || fmt.Sprint(vals(b.Cur)) != "[0.9 <nil>]" {
+		t.Errorf("builds = %+v", b)
+	}
+	if a.series("review_time") != nil {
+		t.Errorf("a series for a number no week counts")
+	}
+}
+
 // A worsening the latest assessment raised that is a gain now is resolved,
 // told once: no good change beside the resolution.
 func TestResolvedGainToldOnce(t *testing.T) {

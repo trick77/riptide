@@ -166,6 +166,7 @@ export const en = {
         calm: "Unremarkable",
       },
       tallyLabel: "Tally",
+      sparkAria: "Per week, previous period: {{prev}}; now: {{cur}}",
       tally: {
         good: "running well",
         done: "resolved",

@@ -2149,6 +2149,20 @@ components:
               share: { type: number, minimum: 0, maximum: 1 }
               value: { $ref: "#/components/schemas/NullableNumber" }
               prev: { $ref: "#/components/schemas/NullableNumber" }
+        series:
+          description: |
+            The hero number week by week, the previous period's and this
+            one's, where the page computes it anyway: a change of deploy
+            frequency (releases per week) or of a kind's build success (its
+            success rate, null for a week without runs; a deploy week before
+            Argo CD reported is null too). Absent for the rest, and in an
+            analysis stored before the field.
+          type: object
+          additionalProperties: false
+          required: [prev, cur]
+          properties:
+            prev: { type: array, items: { $ref: "#/components/schemas/NullableNumber" } }
+            cur: { type: array, items: { $ref: "#/components/schemas/NullableNumber" } }
 
     Fact:
       type: object

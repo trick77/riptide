@@ -29,6 +29,7 @@ import {
   partPct,
   pct,
 } from "./format";
+import { shareLow, Spark } from "./charts";
 import { FailureHeatmap } from "./heatmap";
 import { Quiver } from "./quiver";
 import { Sankey, type SankeyLink, type SankeyNode } from "./sankey";
@@ -61,67 +62,21 @@ const HEAD =
   "border-b border-border pb-2 text-[11px] font-medium tracking-[.12em] text-muted uppercase";
 const CELL = "border-b border-border-soft py-2 text-[13.5px] tabular-nums";
 
-const SW = 240;
-const SH = 48;
-
 // A kind's weekly success rate on the scale all cards share.
-function Spark({ b, low }: { b: BuildStats; low: number }) {
+function KindSpark({ b, low }: { b: BuildStats; low: number }) {
   const { t } = useTranslation();
-  const n = b.weekly.length;
-  const x = (i: number) => (n < 2 ? SW / 2 : 4 + (i / (n - 1)) * (SW - 8));
-  const y = (v: number) => SH - 4 - ((v - low) / (1 - low)) * (SH - 8);
-  const segs: string[] = [];
-  let cur = "";
-  b.weekly.forEach((v, i) => {
-    if (v == null) {
-      if (cur) segs.push(cur);
-      cur = "";
-    } else cur += `${cur ? "L" : "M"}${x(i).toFixed(1)} ${y(v).toFixed(1)} `;
-  });
-  if (cur) segs.push(cur);
-  let last = -1;
-  b.weekly.forEach((v, i) => {
-    if (v != null) last = i;
-  });
   return (
-    <svg
-      viewBox={`0 0 ${SW} ${SH}`}
+    <Spark
+      values={b.weekly}
+      low={low}
+      high={1}
+      stroke={KIND_STROKE[b.kind]}
       className="mt-2 block h-12 w-full"
-      role="img"
-      aria-label={t("build.sparkAria", {
+      label={t("build.sparkAria", {
         kind: t(`build.kind.${b.kind}`),
         parts: b.weekly.map((v) => (v == null ? "–" : pct(v))).join(", "),
       })}
-    >
-      <line x1="0" x2={SW} y1="4" y2="4" stroke="var(--color-grid-minor)" />
-      <line
-        x1="0"
-        x2={SW}
-        y1={SH - 4}
-        y2={SH - 4}
-        stroke="var(--color-grid-minor)"
-      />
-      {segs.map((d, i) => (
-        <path
-          key={i}
-          d={d}
-          fill="none"
-          stroke={KIND_STROKE[b.kind]}
-          strokeWidth="2"
-          strokeLinejoin="round"
-        />
-      ))}
-      {last >= 0 && (
-        <circle
-          cx={x(last)}
-          cy={y(b.weekly[last]!)}
-          r="3.5"
-          fill={KIND_STROKE[b.kind]}
-          stroke="var(--color-panel)"
-          strokeWidth="2"
-        />
-      )}
-    </svg>
+    />
   );
 }
 
@@ -215,7 +170,7 @@ function KindCard({
       )}
       {/* A normal card's width on the wide one: the line keeps its shape. */}
       <div className={lead ? "max-w-[320px]" : ""}>
-        <Spark b={b} low={low} />
+        <KindSpark b={b} low={low} />
         <div className="flex justify-between text-[10.5px] text-faint">
           <span>{t("build.scale", { kw: weeks[0]?.kw, low: pct(low) })}</span>
           <span>{t("common.cw", { kw: weeks[weeks.length - 1]?.kw })}</span>
@@ -823,11 +778,7 @@ export function Build({
   const k = h.kinds.find((x) => x.kind === shown);
   // One scale for every card, so a dip reads the same in each: from the
   // lowest week, rounded down to 10 %, to 100 %.
-  const lowest = Math.min(
-    1,
-    ...stats.flatMap((s) => s.weekly.filter((v): v is number => v != null)),
-  );
-  const low = Math.min(0.9, Math.floor(lowest * 10) / 10);
+  const low = shareLow(stats.flatMap((s) => s.weekly));
 
   return (
     <section id="build" aria-labelledby="h-build" className="mt-10">

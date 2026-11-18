@@ -61,6 +61,9 @@ type digestSignal struct {
 	metrics.Signal
 	Means  string   `json:"means"`
 	Levers []string `json:"levers"`
+	// Series shadows the signal's weeks, always nil (omitted): the weeks
+	// are the page's picture, the model words the facts.
+	Series *struct{} `json:"series,omitempty"`
 }
 
 // Digest is what the model reads: the assessment, every repo under an

@@ -186,6 +186,10 @@ func TestDigestHidesRepos(t *testing.T) {
 	if !strings.Contains(llm.digest, `"pr_jam:repo_a"`) {
 		t.Errorf("the jam is not in the digest under its alias")
 	}
+	// The weeks are the page's: not a key of the model's input.
+	if strings.Contains(llm.digest, `"series"`) {
+		t.Errorf("the digest carries the weeks: %s", llm.digest)
+	}
 	var out Output
 	if err := json.Unmarshal(st.rows[0].Output, &out); err != nil {
 		t.Fatal(err)
