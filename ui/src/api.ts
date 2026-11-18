@@ -150,6 +150,14 @@ export type BuildStats = {
   building: Spread;
   ci_seconds: number;
   wasted_seconds: number;
+  // Failed runs a rerun passed on the same commit; their rate over the
+  // runs with a commit, their share of the failed ones, their part of
+  // wasted_seconds. Unjudged runs have no commit to tell.
+  flaky_runs: number;
+  flaky_rate: number | null;
+  flaky_of_failed: number | null;
+  flaky_seconds: number;
+  unjudged: number;
   outlier_runs: number;
   outlier_seconds: number;
   weekly: (number | null)[];
@@ -161,7 +169,8 @@ export type BuildStats = {
 // branch.
 export type BranchPrefix = { prefix: string; runs: number };
 
-export type FlowOutcome = "succeeded" | "failed" | "no_verdict" | "outlier";
+export type FlowOutcome =
+  "succeeded" | "flaky" | "failed" | "no_verdict" | "outlier";
 
 export type FlowKind = { kind: RunKind; seconds: number; share: number };
 
@@ -244,6 +253,8 @@ export type RepoHotspot = {
   failure_change: Change;
   wasted_seconds: number;
   failing_more: boolean;
+  flaky_runs: number;
+  flaky_seconds: number;
   // Every run's time of the kind, those without a verdict included,
   // outliers aside; the rows add up to at most the kind's.
   ci_seconds: number;
@@ -381,6 +392,8 @@ export type Change = {
 export type KindChange = {
   kind: RunKind;
   success: Change;
+  // The flaky rate against the previous period's, lower better.
+  flaky: Change;
   slower: number;
   failing_more: number;
   compared: number;
@@ -471,6 +484,8 @@ export type RunFact = {
   outcome: "succeeded" | "failed" | null;
   // A stage promotion's check: listed faded, counted in no build number.
   gitops: boolean;
+  // Failed, and a rerun passed on the same commit.
+  flaky: boolean;
 };
 
 export type Table<T> = { count: number; rows: T[] };

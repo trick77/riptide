@@ -33,6 +33,7 @@
       "succeeded": "Succeeded",
       "failed": "Failed"
     },
+    "flaky": "Flaky",
     "runKind": {
       "release": "Releases",
       "main": "Default branch builds",
@@ -75,6 +76,7 @@
       "succeeded": "Erfolgreich",
       "failed": "Fehlgeschlagen"
     },
+    "flaky": "Flaky",
     "runKind": {
       "release": "Releases",
       "main": "Default-Branch-Builds",

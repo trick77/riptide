@@ -89,7 +89,7 @@ export function SubHead({ title, text }: { title: string; text?: string }) {
   );
 }
 
-const VERDICT_TONE: Record<Exclude<Change["verdict"], "none">, Tone> = {
+export const VERDICT_TONE: Record<Exclude<Change["verdict"], "none">, Tone> = {
   better: "ok",
   worse: "warn",
   same: "none",

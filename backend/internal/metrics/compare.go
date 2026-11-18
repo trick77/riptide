@@ -107,6 +107,9 @@ type Change struct {
 type KindChange struct {
 	Kind    string `json:"kind"`
 	Success Change `json:"success"`
+	// Flaky is BuildStats.FlakyRate against the previous period's, both
+	// over lowSample runs with a verdict and a commit or more.
+	Flaky Change `json:"flaky"`
 	// Slower and FailingMore are the repos flagged slow and failing more.
 	Slower      int `json:"slower"`
 	FailingMore int `json:"failing_more"`
@@ -182,6 +185,7 @@ const (
 	buildSuccessMetric
 	repoDurationMetric
 	repoFailureMetric
+	buildFlakyMetric
 )
 
 func (id metricID) def() metric {
@@ -200,6 +204,7 @@ func (id metricID) def() metric {
 		buildSuccessMetric:  {up, points},
 		repoDurationMetric:  {down, relative},
 		repoFailureMetric:   {down, points},
+		buildFlakyMetric:    {down, points},
 	}[id]
 }
 
@@ -387,6 +392,8 @@ func compare(cur, prev Metrics, period Period) Comparison {
 			Kind: b.Kind,
 			Success: buildSuccessMetric.judge(side{b.SuccessRate, b.Runs >= lowSample},
 				side{p.SuccessRate, p.Runs >= lowSample}, builds),
+			Flaky: buildFlakyMetric.judge(side{b.FlakyRate, b.judged >= lowSample},
+				side{p.FlakyRate, p.judged >= lowSample}, builds),
 			Compared: cur.Build.compared[b.Kind],
 		}
 		// The hotspots keep every flagged repo past their cut to the top.

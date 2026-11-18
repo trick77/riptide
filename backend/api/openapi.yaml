@@ -844,10 +844,13 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [kind, success, slower, failing_more, compared]
+            required: [kind, success, flaky, slower, failing_more, compared]
             properties:
               kind: { $ref: "#/components/schemas/RunKind" }
               success: { $ref: "#/components/schemas/Change" }
+              flaky:
+                $ref: "#/components/schemas/Change"
+                description: BuildStats' `flaky_rate` against the previous period's, lower better.
               slower: { type: integer, description: Repos of the kind flagged slow (see Hotspots). }
               failing_more: { type: integer, description: Repos of the kind flagged failing more. }
               compared:
@@ -1224,10 +1227,11 @@ components:
 
     FlowOutcome:
       type: string
-      enum: [succeeded, failed, no_verdict, outlier]
+      enum: [succeeded, flaky, failed, no_verdict, outlier]
       description: |
         Where a run's CI time went, each second in exactly one: `succeeded`,
-        `failed` (FAILURE, UNSTABLE, Failed: BuildStats' `wasted_seconds`),
+        `flaky` (BuildStats' `flaky_seconds`), `failed` (FAILURE, UNSTABLE,
+        Failed: the rest of BuildStats' `wasted_seconds`),
         `no_verdict` (ABORTED, NOT_BUILT, Tekton's None, a Jenkins timeout),
         each outliers aside; `outlier`, any verdict.
 
@@ -1236,7 +1240,7 @@ components:
       additionalProperties: false
       description: |
         Build's `kinds`' CI time from kind to outcome, outliers included,
-        no second twice: per kind, succeeded + failed + no_verdict =
+        no second twice: per kind, succeeded + flaky + failed + no_verdict =
         `ci_seconds` and outlier = `outlier_seconds`. Hours add up across
         kinds; a share of a kind is of its own time only. A negative
         duration (clock skew) is no duration, here and everywhere else.
@@ -1271,7 +1275,9 @@ components:
             properties:
               repo: { type: string }
               seconds: { $ref: "#/components/schemas/Seconds" }
-              failed: { $ref: "#/components/schemas/Seconds" }
+              failed:
+                $ref: "#/components/schemas/Seconds"
+                description: Its red runs' time, the flaky and failed outcomes.
         other_repos: { type: integer, description: The repos with time past the 3 named. }
         other_seconds: { $ref: "#/components/schemas/Seconds" }
         other_failed: { $ref: "#/components/schemas/Seconds" }
@@ -1318,7 +1324,8 @@ components:
         counts in `outlier_runs` and `outlier_seconds` instead. The time
         split by outcome is Build's `ci_flow`.
       required: [kind, runs, succeeded, failed, no_verdict, success_rate, duration, waiting, building, ci_seconds,
-                 wasted_seconds, outlier_runs, outlier_seconds, weekly, prefixes]
+                 wasted_seconds, flaky_runs, flaky_rate, flaky_of_failed, flaky_seconds, unjudged,
+                 outlier_runs, outlier_seconds, weekly, prefixes]
       properties:
         kind: { $ref: "#/components/schemas/RunKind" }
         runs: { type: integer, description: Runs with a verdict. }
@@ -1345,6 +1352,24 @@ components:
         wasted_seconds:
           $ref: "#/components/schemas/Seconds"
           description: Time of the failed runs, outliers left out.
+        flaky_runs:
+          type: integer
+          description: |
+            Failed runs a later run of the same pipeline passed on the same
+            commit, under another run ID; runs without a verdict between
+            them do not count. Outliers included, as in `failed`. A lower
+            bound: retries inside a run, a commit built once and a rerun
+            after the period go unseen.
+        flaky_rate:
+          $ref: "#/components/schemas/NullableNumber"
+          description: "`flaky_runs` over the runs with a verdict and a commit."
+        flaky_of_failed:
+          $ref: "#/components/schemas/NullableNumber"
+          description: "`flaky_runs` over `failed`."
+        flaky_seconds:
+          $ref: "#/components/schemas/Seconds"
+          description: The flaky runs' part of `wasted_seconds`.
+        unjudged: { type: integer, description: "Runs with a verdict but no commit: never flaky, out of `flaky_rate`." }
         outlier_runs: { type: integer, description: "Runs past the kind's outlier threshold, with or without a verdict." }
         outlier_seconds:
           $ref: "#/components/schemas/Seconds"
@@ -1574,7 +1599,8 @@ components:
       description: One repo of a kind against its own runs of the kind in the previous period.
       additionalProperties: false
       required: [repo, runs, duration, waiting, building, duration_change, factor, slow, failures, failure_rate,
-                 failure_change, wasted_seconds, failing_more, ci_seconds, compared, prev_complete,
+                 failure_change, wasted_seconds, failing_more, flaky_runs, flaky_seconds, ci_seconds, compared,
+                 prev_complete,
                  plotted]
       properties:
         repo: { type: string }
@@ -1609,6 +1635,10 @@ components:
           description: The failure rate against the repo's previous one, both over `min_runs` runs or more.
         wasted_seconds: { $ref: "#/components/schemas/Seconds" }
         failing_more: { type: boolean, description: "The failure rate against the previous one, see `failing_more_factor`." }
+        flaky_runs: { type: integer, description: "Its failed runs a rerun passed on the same commit, as BuildStats'. Never a flag." }
+        flaky_seconds:
+          $ref: "#/components/schemas/Seconds"
+          description: Their part of `wasted_seconds`.
         ci_seconds:
           $ref: "#/components/schemas/Seconds"
           description: |
@@ -1767,7 +1797,8 @@ components:
       type: object
       description: A finished CI run in the period, newest first.
       additionalProperties: false
-      required: [pipeline_name, run_id, kind, commit_sha, duration_s, image_refs, status, verdict, outcome, gitops]
+      required: [pipeline_name, run_id, kind, commit_sha, duration_s, image_refs, status, verdict, outcome, gitops,
+                 flaky]
       properties:
         pipeline_name: { type: string }
         run_id: { type: string }
@@ -1786,6 +1817,12 @@ components:
             null for any other word (UNSTABLE, ABORTED, …), which the UI
             shows as the CI sent it.
         gitops: { type: boolean, description: "A run in a GitOps repo, a stage promotion's check: listed, counted in no build number." }
+        flaky:
+          type: boolean
+          description: |
+            Failed, and a later run of the pipeline passed on the same
+            commit: one of BuildStats' `flaky_runs`. The search finds it by
+            the word Flaky.
 
     RunVerdict:
       type: string

@@ -779,6 +779,8 @@ describe("App", () => {
             factor: 1,
             slow: false,
             failing_more: true,
+            flaky_runs: 3,
+            flaky_seconds: 2700,
             ci_seconds: 12_000,
             compared: true,
             prev_complete: true,
@@ -798,6 +800,8 @@ describe("App", () => {
             factor: 3,
             slow: true,
             failing_more: false,
+            flaky_runs: 0,
+            flaky_seconds: 0,
             ci_seconds: 21_600,
             compared: true,
             prev_complete: true,
@@ -817,6 +821,8 @@ describe("App", () => {
             factor: null,
             slow: false,
             failing_more: false,
+            flaky_runs: 0,
+            flaky_seconds: 0,
             ci_seconds: 3600,
             compared: false,
             prev_complete: false,
@@ -900,6 +906,11 @@ describe("App", () => {
       "Von 2 Repos sind 1 langsamer, 1 fehleranfälliger geworden als in der Vorperiode",
     );
     expect(screen.getByText("2.0 h")).toBeInTheDocument();
+    // The red time's flaky part, counted by the backend.
+    expect(screen.getByText("3 flaky")).toHaveAttribute(
+      "title",
+      "0.8 h davon in Läufen, die ein späterer Lauf auf demselben Commit grün machte",
+    );
     // Above the table: red arrows only where the backend flagged, labelled
     // with what changed; no comparison, no arrow.
     const quiver = screen.getByTestId("quiver");
@@ -1526,6 +1537,64 @@ describe("App", () => {
     });
     render(<App />);
     expect(await screen.findByText(/\+ 3 ohne Ergebnis/)).toBeInTheDocument();
+  });
+
+  it("shows a kind's flaky runs as the backend counted them, and the runs", async () => {
+    const calls = mockFetch((url) => {
+      if (url.pathname === "/api/facts") {
+        const f = facts();
+        f.runs.rows[1] = { ...f.runs.rows[1], flaky: true };
+        return f;
+      }
+      const m = metrics();
+      m.build.kinds[0] = {
+        ...m.build.kinds[0],
+        runs: 20,
+        failed: 4,
+        flaky_runs: 2,
+        flaky_rate: 0.1,
+        flaky_of_failed: 0.5,
+        flaky_seconds: 1800,
+        unjudged: 1,
+      };
+      m.comparison.build[2] = {
+        ...m.comparison.build[2],
+        flaky: change("worse", 0.02),
+      };
+      // Releases: nothing red now, flaky before; the improvement shows.
+      m.comparison.build[0] = {
+        ...m.comparison.build[0],
+        flaky: change("better", 0.1),
+      };
+      return m;
+    });
+    render(<App />);
+    expect(
+      await screen.findByText(
+        "2 rote Läufe flaky: danach grün auf demselben Commit (50 % der roten, 0.5 h) · 1 Lauf ohne Commit nicht beurteilt",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Flaky-Quote 10 % der Läufe mit Commit, Vorperiode 2 %"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Flaky-Quote 0 % der Läufe mit Commit, Vorperiode 10 %"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Kein roter Lauf, also auch kein flaky"),
+    ).toBeInTheDocument();
+    // A kind with red runs but none flaky says so.
+    expect(
+      screen.getAllByText(
+        "Kein roter Lauf wurde auf demselben Commit danach grün",
+      ).length,
+    ).toBeGreaterThan(0);
+    fireEvent.click(
+      screen.getByRole("button", { name: /Flaky-Läufe ansehen/ }),
+    );
+    await waitFor(() => expect(factsCalls(calls).at(-1)).toMatch(/&q=flaky$/));
+    const runs = (await screen.findByText("#11")).closest("tr")!;
+    expect(within(runs).getByText("Flaky")).toBeInTheDocument();
   });
 
   it("treats a blank search as none", async () => {
@@ -2388,7 +2457,7 @@ describe("CI hours", () => {
     // The same hours by repo, outliers in: the top three and the rest.
     const byRepo = screen.getByRole("img", { name: /^CI-Zeit nach Repo/ });
     expect(byRepo.getAttribute("aria-label")).toBe(
-      "CI-Zeit nach Repo: kasse/kasse-web: 200.0 h, davon 100.0 h fehlgeschlagen; kasse/kasse-api: 120.0 h, davon 30.0 h fehlgeschlagen; kasse/policy: 80.0 h; 4 weitere: 60.0 h, davon 20.0 h fehlgeschlagen",
+      "CI-Zeit nach Repo: kasse/kasse-web: 200.0 h, davon 100.0 h rot; kasse/kasse-api: 120.0 h, davon 30.0 h rot; kasse/policy: 80.0 h; 4 weitere: 60.0 h, davon 20.0 h rot",
     );
     // The failed part as a number, not by hatching alone.
     expect(

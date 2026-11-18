@@ -250,7 +250,13 @@ type RunFact struct {
 	// GitOps: a run in a GitOps repo, a stage promotion's check; listed,
 	// counted nowhere.
 	GitOps bool `json:"gitops"`
+	// Flaky: failed, and a later run of the pipeline passed on the same
+	// commit, as the build section counts it (flakyRuns).
+	Flaky bool `json:"flaky"`
 }
+
+// flakyTerm is a flaky run's mark on screen, searched in both languages.
+var flakyTerm = uiTerm{"Flaky", "Flaky"}
 
 // Run outcomes: a status that plainly says succeeded or failed, which the
 // UI words in the viewer's language. Every other status (UNSTABLE, ABORTED,
@@ -458,6 +464,9 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 	deploys := newestFirst(ds.Deploys, func(d dataset.Deploy) *time.Time { return &d.At })
 	runs := newestFirst(ds.Runs, runAt)
 	gitops := gitopsRun(ds)
+	// As the build section counts them: its runs, its pairing.
+	flaky := flakyRuns(teamRuns(ds, f, gitops))
+	isFlaky := func(r dataset.Run) bool { return verdict(r) == VerdictFailure && flaky[refOf(r)] }
 
 	return Facts{
 		ProductionStage: prod,
@@ -520,12 +529,15 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 				return true
 			}
 			status, kind := runStatusTerms(r), runKindTerms(RunKind(r, ds.Meta.BuildTypeFrom))
+			if isFlaky(r) {
+				status += " " + flakyTerm.both()
+			}
 			return m.match(append([]*string{&r.PipelineName, r.Repo, r.CommitSHA, r.Status, &status, &kind, r.BuildType}, strs(r.ImageRefs)...)...)
 		}, func(r dataset.Run) RunFact {
 			return RunFact{
 				PipelineName: r.PipelineName, RunID: r.RunID, Kind: RunKind(r, ds.Meta.BuildTypeFrom),
 				CommitSHA: r.CommitSHA, DurationS: r.DurationS, ImageRefs: r.ImageRefs, Status: r.Status,
-				Verdict: verdict(r), Outcome: runOutcome(r), GitOps: gitops(r),
+				Verdict: verdict(r), Outcome: runOutcome(r), GitOps: gitops(r), Flaky: isFlaky(r),
 			}
 		}),
 	}

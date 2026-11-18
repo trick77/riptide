@@ -33,7 +33,16 @@ import { FailureHeatmap } from "./heatmap";
 import { Quiver } from "./quiver";
 import { Sankey, type SankeyLink, type SankeyNode } from "./sankey";
 import type { Tab } from "./state";
-import { Card, CardHead, Compare, Mono, Note, Pill, SectionHead } from "./ui";
+import {
+  Card,
+  CardHead,
+  Compare,
+  Mono,
+  Note,
+  Pill,
+  SectionHead,
+  VERDICT_TONE,
+} from "./ui";
 
 // Line colours in the series ramp's fixed order, by kind, so a kind keeps
 // its colour whichever kinds the filter leaves.
@@ -113,7 +122,17 @@ function Spark({ b, low }: { b: BuildStats; low: number }) {
   );
 }
 
-function KindCard({ b, low, m }: { b: BuildStats; low: number; m: Metrics }) {
+function KindCard({
+  b,
+  low,
+  m,
+  onFacts,
+}: {
+  b: BuildStats;
+  low: number;
+  m: Metrics;
+  onFacts: (tab: Tab, q: string) => void;
+}) {
   const { t } = useTranslation();
   const c = m.comparison.build.find((x) => x.kind === b.kind);
   const weeks = m.period.weeks;
@@ -206,11 +225,74 @@ function KindCard({ b, low, m }: { b: BuildStats; low: number; m: Metrics }) {
             h: num(b.outlier_seconds / 3600, 1),
           })}
       </div>
+      <Flaky b={b} c={c} onFacts={onFacts} />
       {c && (
         <>
           <Compare change={c.success} now={pct(b.success_rate)} format={pct} />
           <RepoChanges c={c} />
         </>
+      )}
+    </div>
+  );
+}
+
+// The kind's red runs a rerun passed on the same commit: how many, their
+// share of the red ones and their time, the rate against the previous
+// period as the backend judged it, and the way to the runs.
+function Flaky({
+  b,
+  c,
+  onFacts,
+}: {
+  b: BuildStats;
+  c: KindChange | undefined;
+  onFacts: (tab: Tab, q: string) => void;
+}) {
+  const { t } = useTranslation();
+  // Nothing red now and nothing flaky before: nothing to say. Flaky
+  // before and nothing red now is the improvement the backend judged.
+  if (b.failed === 0 && !c?.flaky.prev) return null;
+  const v = c?.flaky.verdict;
+  return (
+    <div
+      className="flex flex-col gap-0.5 text-xs text-muted"
+      title={t("build.flakyTitle")}
+    >
+      <span>
+        {b.flaky_runs > 0
+          ? t("build.flaky", {
+              count: b.flaky_runs,
+              share: pct(b.flaky_of_failed),
+              h: num(b.flaky_seconds / 3600, 1),
+            })
+          : b.failed > 0
+            ? t("build.flakyNone")
+            : t("build.flakyNoRed")}
+        {b.unjudged > 0 && t("build.unjudged", { count: b.unjudged })}
+      </span>
+      {(b.flaky_runs > 0 || c?.flaky.prev != null) && (
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          {c?.flaky.prev != null && v && v !== "none" && v !== "same" && (
+            <Pill tone={VERDICT_TONE[v]}>{t(`compare.${v}`)}</Pill>
+          )}
+          <span>
+            {c?.flaky.prev != null
+              ? t("build.flakyRatePrev", {
+                  rate: pct(b.flaky_rate),
+                  prev: pct(c.flaky.prev),
+                })
+              : t("build.flakyRate", { rate: pct(b.flaky_rate) })}
+          </span>
+          {b.flaky_runs > 0 && (
+            <button
+              type="button"
+              onClick={() => onFacts("runs", "flaky")}
+              className="no-print border-0 bg-transparent p-0 text-xs text-accent-strong hover:underline"
+            >
+              {t("build.viewFlaky")}
+            </button>
+          )}
+        </span>
       )}
     </div>
   );
@@ -519,6 +601,9 @@ const OUTCOME_LOOK: Record<
   Pick<SankeyNode, "color" | "linkOpacity" | "hatch" | "danger" | "solid">
 > = {
   succeeded: { color: "var(--color-ink-3)", linkOpacity: 0.45 },
+  // Red time a rerun turned green: red on purpose, the failed time's part
+  // hatched apart (the kinds keep no red; this is an outcome, red time).
+  flaky: { color: "var(--color-danger)", linkOpacity: 0.45, hatch: true },
   failed: {
     color: "var(--color-danger)",
     linkOpacity: 0.85,
@@ -547,8 +632,8 @@ const SEP = `${EN}·${EN}`;
 const REPO_COLOR = ["bg-seq-4", "bg-seq-3", "bg-seq-2"];
 
 // FlowRepos is the flow's total once more, split by repo: the same hours,
-// outliers included, the failed part hatched as the flow's failed outcome
-// counts it, so without the outliers.
+// outliers included, the red part hatched as the flow's flaky and failed
+// outcomes count it, so without the outliers.
 function FlowRepos({ f }: { f: CIFlow }) {
   const { t } = useTranslation();
   if (!f.repos.length) return null;
@@ -743,7 +828,7 @@ export function Build({
           <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-3">
             <FeatureMissing hint={b.feature_hint} stats={stats} />
             {stats.map((s) => (
-              <KindCard key={s.kind} b={s} low={low} m={m} />
+              <KindCard key={s.kind} b={s} low={low} m={m} onFacts={onFacts} />
             ))}
           </div>
           <p className="mt-2 mb-0 text-xs text-muted">{t("build.legend")}</p>
@@ -856,6 +941,16 @@ export function Build({
                           {t("common.hours", {
                             n: num(r.wasted_seconds / 3600, 1),
                           })}
+                          {r.flaky_runs > 0 && (
+                            <div
+                              className="text-[11.5px] text-muted"
+                              title={t("build.repoFlakyTitle", {
+                                h: num(r.flaky_seconds / 3600, 1),
+                              })}
+                            >
+                              {t("build.repoFlaky", { n: r.flaky_runs })}
+                            </div>
+                          )}
                         </div>
                         <div className={`${CELL} text-right`}>
                           <RunsLink repo={r.repo} onFacts={onFacts} />

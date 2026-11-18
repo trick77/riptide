@@ -696,6 +696,23 @@ export const en = {
     runs_other: "{{count}} runs",
     noVerdict: " + {{n}} without a result",
     outliers: " · {{n}} outliers ({{h}} h) not in duration and CI time",
+    flaky_one:
+      "{{count}} red run flaky: green afterwards on the same commit ({{share}} of the red, {{h}} h)",
+    flaky_other:
+      "{{count}} red runs flaky: green afterwards on the same commit ({{share}} of the red, {{h}} h)",
+    flakyNone: "No red run went green afterwards on the same commit",
+    flakyNoRed: "No red run, so none flaky",
+    unjudged_one: " · {{count}} run without a commit not judged",
+    unjudged_other: " · {{count}} runs without a commit not judged",
+    flakyRate: "Flaky rate {{rate}} of runs with a commit",
+    flakyRatePrev:
+      "Flaky rate {{rate}} of runs with a commit, previous period {{prev}}",
+    viewFlaky: "View flaky runs →",
+    flakyTitle:
+      "Flaky: a run fails, a later run of the same pipeline on the same commit is green. A lower bound: retries inside a run, commits built once and reruns after the period's end are missing. Whether tests or infrastructure failed is not in the data.",
+    repoFlaky: "{{n}} flaky",
+    repoFlakyTitle:
+      "{{h}} h of it in runs a later run on the same commit turned green",
     failingMore: "Fails more often",
     failingMoreText: "previous period {{prev}} → now {{rate}} red",
     slow: "Got slower",
@@ -763,6 +780,7 @@ export const en = {
       sub: "Each kind's CI time by outcome, outliers included{{sep}}band width = hours",
       outcome: {
         succeeded: "Succeeded",
+        flaky: "Flaky (green afterwards)",
         failed: "Failed",
         no_verdict: "Without a result",
         outlier: "Outliers",
@@ -773,13 +791,13 @@ export const en = {
       aria: "CI time from kind of run to outcome: {{parts}}",
       withOutliers: "{{h}} incl. outliers",
       repos: "By repo, across run kinds",
-      reposMeta: "hatched: failed, outliers aside",
-      repoFailed: "{{repo}}: {{h}}, {{failed}} of it failed",
+      reposMeta: "hatched: red (flaky and failed), outliers aside",
+      repoFailed: "{{repo}}: {{h}}, {{failed}} of it red",
       repoFailedShort: " · {{h}} red",
       reposOther_one: "{{count}} more",
       reposOther_other: "{{count}} more",
       reposAria: "CI time by repo: {{parts}}",
-      rule: "Failed: FAILURE, UNSTABLE, Failed. Without a result: ABORTED, NOT_BUILT, Tekton's None, Jenkins timeouts included. Outliers: {{outliers}} (a repo with enough runs of its own also over its own median). An outlier counts only as an outlier, whatever its result, so the hours here include the outliers the cards above leave out. Each kind's bands show its own split; a node's height only the amount, no comparison between kinds.",
+      rule: "Failed: FAILURE, UNSTABLE, Failed. Flaky: red as well, but a later run of the same pipeline was green on the same commit. Without a result: ABORTED, NOT_BUILT, Tekton's None, Jenkins timeouts included. Outliers: {{outliers}} (a repo with enough runs of its own also over its own median). An outlier counts only as an outlier, whatever its result, so the hours here include the outliers the cards above leave out. Each kind's bands show its own split; a node's height only the amount, no comparison between kinds.",
     },
   },
   quiver: {

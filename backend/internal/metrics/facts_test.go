@@ -231,6 +231,7 @@ type uiTerms struct {
 	ChangeType  map[string]string `json:"changeType"`
 	Promotion   string            `json:"promotion"`
 	RunOutcome  map[string]string `json:"runOutcome"`
+	Flaky       string            `json:"flaky"`
 	RunKind     map[string]string `json:"runKind"`
 }
 
@@ -254,7 +255,7 @@ func TestSearchTermsMatchTheUI(t *testing.T) {
 	}
 	for code, g := range groups {
 		got := slices.Sorted(maps.Keys(g))
-		if want := []string{"changeType", "deployClass", "prState", "prWaiting", "promotion", "runKind", "runOutcome"}; !slices.Equal(got, want) {
+		if want := []string{"changeType", "deployClass", "flaky", "prState", "prWaiting", "promotion", "runKind", "runOutcome"}; !slices.Equal(got, want) {
 			t.Errorf("terms.json %s groups %v, compared %v", code, got, want)
 		}
 	}
@@ -287,6 +288,9 @@ func TestSearchTermsMatchTheUI(t *testing.T) {
 		}
 		if want := map[bool]string{true: promotionTerm.De, false: promotionTerm.En}[de]; u.Promotion != want {
 			t.Errorf("%s promotion: ui %q, backend %q", code, u.Promotion, want)
+		}
+		if want := map[bool]string{true: flakyTerm.De, false: flakyTerm.En}[de]; u.Flaky != want {
+			t.Errorf("%s flaky: ui %q, backend %q", code, u.Flaky, want)
 		}
 	}
 }

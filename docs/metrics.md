@@ -490,9 +490,9 @@ hour (and, with 3 runs of its repo or more, six times the repo's median) is
 an outlier:
 several repos stuck at the same time point at shared infrastructure, not at
 a repo. Where the CI hours went splits each kind's time, outliers
-included, into succeeded, failed (FAILURE, UNSTABLE, Failed), without a
+included, into succeeded, flaky, failed (FAILURE, UNSTABLE, Failed), without a
 verdict and outlier, no second twice: an outlier counts as one whatever its
-verdict, so the first three sum to the kind's CI time and all four to its
+verdict, so the first four sum to the kind's CI time and all five to its
 time in `ci_flow`; a negative duration (clock skew) is no duration. Hours
 add up across kinds; each share is of the kind's own time or of all of it,
 never one kind's rate against another's. The same total splits by repo
@@ -500,6 +500,27 @@ across kinds, the 3 largest named and the rest folded, without a verdict:
 more CI time can be more work. The thresholds are starting
 values, not measured. The shapes are in
 [`backend/api/openapi.yaml`](../backend/api/openapi.yaml).
+
+A failed run is flaky when a later run of the same pipeline (same
+`source` and `pipeline_name`) passed on the same `commit_sha` under another
+`run_id`: red, then green without a code change. Paired within a kind,
+an unknown run with main (a default-branch run before the build type was
+reported), never with a release: a release skips the tests a main build
+failed. Counted in the red run's kind; later means a later start,
+or a later end when a start is missing, never one's start against the
+other's end. Runs
+without a verdict between them neither pass nor break it; a COMPLETED
+sent twice for one run is no rerun. Each kind counts its flaky runs, their
+rate over the runs with a verdict and a commit (compared with the previous
+period, lower better), their share of the red runs and their CI time, a
+part of the wasted time; each repo row its own, shown, never a flag. The
+facts mark each such run, searchable as Flaky. A lower bound: a retry
+inside a run (Jenkins `retry`, Tekton task retries), a commit built once,
+a rerun after the period's end and a CI that builds a merge commit of its
+own per run (a Jenkins PR job merging the target branch) all go unseen;
+runs without a commit are counted apart (`unjudged`). Whether the tests,
+the infrastructure or the network failed is not in the data. Not
+measured on a real import yet.
 
 ### The overview's assessment and its LLM wording
 

@@ -255,6 +255,18 @@ type BuildStats struct {
 	CISeconds float64 `json:"ci_seconds"`
 	// WastedSeconds is the time of the failed runs, outliers aside.
 	WastedSeconds float64 `json:"wasted_seconds"`
+	// FlakyRuns are the failed runs a later run of the same pipeline passed
+	// on the same commit (see flakyRuns), outliers included as in Failed.
+	FlakyRuns int `json:"flaky_runs"`
+	// FlakyRate is FlakyRuns over the runs with a verdict and a commit;
+	// FlakyOfFailed over Failed, how much of the red was no code's fault.
+	FlakyRate     *float64 `json:"flaky_rate"`
+	FlakyOfFailed *float64 `json:"flaky_of_failed"`
+	// FlakySeconds is the flaky runs' part of WastedSeconds.
+	FlakySeconds float64 `json:"flaky_seconds"`
+	// Unjudged are the runs with a verdict but no commit: no telling
+	// whether they were flaky, so out of FlakyRate.
+	Unjudged int `json:"unjudged"`
 	// OutlierRuns are the runs of the kind past its outlier threshold, with
 	// or without a verdict; they still count in Runs and the success rate.
 	OutlierRuns int `json:"outlier_runs"`
@@ -271,6 +283,8 @@ type BuildStats struct {
 	// WastedSeconds + noVerdict = CISeconds, plus OutlierSeconds = total.
 	// Sent once, as Build.CIFlow.
 	total, succeeded, noVerdict float64
+	// judged are the runs with a verdict and a commit, FlakyRate's base.
+	judged int
 }
 
 // tally counts runs by verdict; runs are those with one.
@@ -341,10 +355,10 @@ func gitopsRun(ds *dataset.Dataset) func(dataset.Run) bool {
 }
 
 // teamRuns are the runs the build section counts: with a status, in the
-// product, GitOps repos' runs left out (stage promotions, mechanical).
-func teamRuns(ds *dataset.Dataset, f filter) map[string][]dataset.Run {
+// product, GitOps repos' runs left out (stage promotions, mechanical;
+// gitops is gitopsRun(ds)).
+func teamRuns(ds *dataset.Dataset, f filter, gitops func(dataset.Run) bool) map[string][]dataset.Run {
 	by := map[string][]dataset.Run{}
-	gitops := gitopsRun(ds)
 	for _, r := range ds.Runs {
 		if r.Status == nil || gitops(r) || !f.in(r.Project) {
 			continue
@@ -378,7 +392,8 @@ type baseline struct {
 // build is the CI section. base names the repos and holds the previous
 // period's runs; nil names them by ds alone and compares nothing.
 func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
-	by := teamRuns(ds, f)
+	by := teamRuns(ds, f, gitopsRun(ds))
+	flaky := flakyRuns(by)
 	out := Build{
 		DataFrom: ds.Meta.BuildDataFrom, Kinds: []BuildStats{},
 		repos: map[string]map[string]*repoRuns{}, compared: map[string]int{},
@@ -408,12 +423,20 @@ func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
 		if len(rs) == 0 {
 			continue
 		}
-		kr := newKindRuns(rs, base.repos)
+		kr := newKindRuns(rs, base.repos, flaky)
 		b := BuildStats{Kind: kind, Prefixes: []BranchPrefix{}}
 		var t tally
 		var durations, waits, works []float64
 		for i, r := range rs {
 			v := t.count(kr.verdicts[i])
+			if judged(r, v) {
+				b.judged++
+				if kr.flaky[i] {
+					b.FlakyRuns++
+				}
+			} else if v != VerdictNone {
+				b.Unjudged++
+			}
 			if kr.stuck[i] {
 				b.OutlierRuns++
 				b.OutlierSeconds += seconds(r)
@@ -426,6 +449,9 @@ func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
 				continue
 			case VerdictFailure:
 				b.WastedSeconds += seconds(r)
+				if kr.flaky[i] {
+					b.FlakySeconds += seconds(r)
+				}
 			default:
 				b.succeeded += seconds(r)
 			}
@@ -440,6 +466,7 @@ func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
 		b.total = b.CISeconds + b.OutlierSeconds
 		b.Runs, b.Succeeded, b.Failed, b.NoVerdict = t.runs, t.succeeded, t.failed, t.none
 		b.SuccessRate = ratio(b.Succeeded, b.Runs)
+		b.FlakyRate, b.FlakyOfFailed = ratio(b.FlakyRuns, b.judged), ratio(b.FlakyRuns, b.Failed)
 		b.Duration = spread(durations)
 		b.Waiting, b.Building = spread(waits), spread(works)
 		for _, w := range bucket(p, rs, runAt) {
@@ -485,7 +512,11 @@ func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
 // time here.
 const (
 	FlowSucceeded = "succeeded"
-	// FlowFailed is BuildStats.WastedSeconds: FAILURE, UNSTABLE, Failed.
+	// FlowFlaky is BuildStats.FlakySeconds: failed runs a rerun passed on
+	// the same commit.
+	FlowFlaky = "flaky"
+	// FlowFailed is the rest of BuildStats.WastedSeconds: FAILURE,
+	// UNSTABLE, Failed.
 	FlowFailed = "failed"
 	// FlowNoVerdict: ABORTED, NOT_BUILT, Tekton's None, a Jenkins
 	// timeout().
@@ -504,7 +535,7 @@ type CIFlow struct {
 	// Kinds are those with time, in Build.Kinds' order: the left nodes,
 	// each its CISeconds plus OutlierSeconds.
 	Kinds []FlowKind `json:"kinds"`
-	// Outcomes are those with time, in the order succeeded, failed,
+	// Outcomes are those with time, in the order succeeded, flaky, failed,
 	// no_verdict, outlier: the right nodes.
 	Outcomes []FlowOutcomeShare `json:"outcomes"`
 	// Links are the kinds' outcomes with time, by kind as Kinds, then by
@@ -523,7 +554,7 @@ type CIFlow struct {
 const FlowTopRepos = 3
 
 // FlowRepo is one repo's time across kinds, outliers included; Failed is
-// its part in the failed outcome.
+// its part in the flaky and failed outcomes, its red runs' time.
 type FlowRepo struct {
 	Repo    string  `json:"repo"`
 	Seconds float64 `json:"seconds"`
@@ -558,15 +589,15 @@ type FlowLink struct {
 }
 
 // outcomeSeconds is b's total split by outcome, in CIFlow's order.
-func outcomeSeconds(b BuildStats) [4]float64 {
-	return [4]float64{b.succeeded, b.WastedSeconds, b.noVerdict, b.OutlierSeconds}
+func outcomeSeconds(b BuildStats) [5]float64 {
+	return [5]float64{b.succeeded, b.FlakySeconds, b.WastedSeconds - b.FlakySeconds, b.noVerdict, b.OutlierSeconds}
 }
 
-var flowOutcomes = [4]string{FlowSucceeded, FlowFailed, FlowNoVerdict, FlowOutlier}
+var flowOutcomes = [5]string{FlowSucceeded, FlowFlaky, FlowFailed, FlowNoVerdict, FlowOutlier}
 
 func ciFlow(kinds []BuildStats, repos map[string]map[string]*repoRuns) CIFlow {
 	f := CIFlow{Kinds: []FlowKind{}, Outcomes: []FlowOutcomeShare{}, Links: []FlowLink{}, Repos: []FlowRepo{}}
-	var sums [4]float64
+	var sums [5]float64
 	for _, b := range kinds {
 		f.TotalSeconds += b.total
 		for i, s := range outcomeSeconds(b) {
@@ -626,27 +657,110 @@ func ciFlow(kinds []BuildStats, repos map[string]map[string]*repoRuns) CIFlow {
 	return f
 }
 
-// kindRuns are one kind's runs, each with its repo, its verdict and whether
-// it is an outlier, decided once for the kind table and the hotspots alike.
+// kindRuns are one kind's runs, each with its repo, its verdict, whether
+// it is an outlier and whether it is flaky, decided once for the kind
+// table, the flow and the hotspots alike.
 type kindRuns struct {
 	runs     []dataset.Run
 	repos    []string
 	verdicts []string
 	stuck    []bool
+	flaky    []bool
 	cut      outlierCut
 }
 
-func newKindRuns(rs []dataset.Run, repoKey repoNamer) kindRuns {
+// newKindRuns decides one kind's runs; flaky are the team's flaky runs
+// (flakyRuns), across kinds.
+func newKindRuns(rs []dataset.Run, repoKey repoNamer, flaky map[runRef]bool) kindRuns {
 	n := len(rs)
-	kr := kindRuns{runs: rs, repos: make([]string, n), verdicts: make([]string, n), stuck: make([]bool, n)}
+	kr := kindRuns{
+		runs: rs, repos: make([]string, n), verdicts: make([]string, n), stuck: make([]bool, n), flaky: make([]bool, n),
+	}
 	for i, r := range rs {
 		kr.repos[i], kr.verdicts[i] = repoKey(r), verdict(r)
+		kr.flaky[i] = kr.verdicts[i] == VerdictFailure && flaky[refOf(r)]
 	}
 	kr.cut = newOutlierCut(kr)
 	for i, r := range rs {
 		kr.stuck[i] = kr.cut.stuck(r, kr.repos[i])
 	}
 	return kr
+}
+
+// judged: a run with a verdict and a commit, the runs flakiness can be
+// told for.
+func judged(r dataset.Run, v string) bool {
+	return v != VerdictNone && r.CommitSHA != nil && *r.CommitSHA != ""
+}
+
+// runRef names one run, the same in the facts as in the build section.
+type runRef struct{ source, pipeline, id string }
+
+func refOf(r dataset.Run) runRef { return runRef{r.Source, r.PipelineName, r.RunID} }
+
+// after reports whether run a began after run b: by their starts, else by
+// their ends, never one's start against the other's end; false when
+// neither pair is there.
+func after(a, b dataset.Run) bool {
+	switch {
+	case a.StartedAt != nil && b.StartedAt != nil:
+		return a.StartedAt.After(*b.StartedAt)
+	case a.FinishedAt != nil && b.FinishedAt != nil:
+		return a.FinishedAt.After(*b.FinishedAt)
+	}
+	return false
+}
+
+// pairKind is the kind a run pairs within: an unknown run is a
+// default-branch run from before the pipelines reported a build type, so
+// it pairs with main. Never across other kinds: a release skips the tests
+// a red main build failed (user), its green says nothing about that red.
+func pairKind(kind string) string {
+	if kind == KindUnknown {
+		return KindMain
+	}
+	return kind
+}
+
+// flakyRuns are the failed runs, of the build section's runs by kind,
+// that a later run of the same pipeline and kind (pairKind) passed on the
+// same commit: red, then green without a code change. Another run ID only
+// (a COMPLETED sent twice is no rerun); runs without a verdict neither
+// pass nor break the chain. A lower bound: a retry inside a run, a commit
+// built once, a rerun after the period or a CI that builds a merge commit
+// of its own per run all go unseen. Whether tests or infrastructure failed
+// is not in the data.
+func flakyRuns(by map[string][]dataset.Run) map[runRef]bool {
+	type key struct{ kind, source, pipeline, sha string }
+	// pass is a green run, as much of it as after reads.
+	type pass struct {
+		id                string
+		started, finished *time.Time
+	}
+	green := map[key][]pass{}
+	for kind, rs := range by {
+		for _, r := range rs {
+			if v := verdict(r); v == VerdictSuccess && judged(r, v) {
+				k := key{pairKind(kind), r.Source, r.PipelineName, *r.CommitSHA}
+				green[k] = append(green[k], pass{r.RunID, r.StartedAt, r.FinishedAt})
+			}
+		}
+	}
+	set := map[runRef]bool{}
+	for kind, rs := range by {
+		for _, r := range rs {
+			if v := verdict(r); v != VerdictFailure || !judged(r, v) {
+				continue
+			}
+			for _, g := range green[key{pairKind(kind), r.Source, r.PipelineName, *r.CommitSHA}] {
+				if g.id != r.RunID && after(dataset.Run{StartedAt: g.started, FinishedAt: g.finished}, r) {
+					set[refOf(r)] = true
+					break
+				}
+			}
+		}
+	}
+	return set
 }
 
 // timed: a run with a verdict and a duration, the runs medians are over.
@@ -878,6 +992,10 @@ type RepoHotspot struct {
 	// FailingMore: a failure rate of at least failingMoreThreshold of the
 	// previous period's and FailingMoreMinPoints above it.
 	FailingMore bool `json:"failing_more"`
+	// FlakyRuns are the failed runs a rerun passed on the same commit,
+	// FlakySeconds their part of WastedSeconds. Shown, never a flag.
+	FlakyRuns    int     `json:"flaky_runs"`
+	FlakySeconds float64 `json:"flaky_seconds"`
 	// CISeconds is every run's time, those without a verdict included,
 	// outliers aside, counted as BuildStats.CISeconds. The rows add up to
 	// at most the kind's: a repo without a run with a verdict has no row,
@@ -1003,8 +1121,8 @@ type repoRuns struct {
 	// start.
 	waits, works []float64
 	// timed are the runs with a verdict and a duration, outliers included.
-	timed, counted, failures int
-	wasted                   float64
+	timed, counted, failures, flaky int
+	wasted, flakySecs               float64
 	// ci is every run's time, those without a verdict included; stuck the
 	// outliers' time, in no other number of the repo.
 	ci, stuck float64
@@ -1043,8 +1161,14 @@ func (kr kindRuns) byRepo() map[string]*repoRuns {
 		rr.counted++
 		if v == VerdictFailure {
 			rr.failures++
+			if kr.flaky[i] {
+				rr.flaky++
+			}
 			if !kr.stuck[i] {
 				rr.wasted += seconds(r)
+				if kr.flaky[i] {
+					rr.flakySecs += seconds(r)
+				}
 			}
 		}
 	}
@@ -1122,6 +1246,7 @@ func kindHotspots(kind string, kr kindRuns, repos map[string]*repoRuns, base *ba
 			Repo: repo, Runs: rr.counted, Duration: spread(rr.durations),
 			Waiting: spread(rr.waits), Building: spread(rr.works), Failures: rr.failures,
 			FailureRate: ratio(rr.failures, rr.counted), WastedSeconds: rr.wasted, CISeconds: rr.ci,
+			FlakyRuns: rr.flaky, FlakySeconds: rr.flakySecs,
 		}
 		h.against(rr, prev[repo], base.incomplete)
 		h.Compared = h.DurationChange.Prev != nil || h.FailureChange.Prev != nil
