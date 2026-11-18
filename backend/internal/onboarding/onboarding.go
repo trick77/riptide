@@ -294,6 +294,10 @@ type Onboarder struct {
 	Secret string
 	DryRun bool
 	Log    *slog.Logger
+
+	// projectHooks caches projectHook per project for the request: repo
+	// targets of one project ask once. Run is sequential, no lock.
+	projectHooks map[string]*Webhook
 }
 
 func (o *Onboarder) log() *slog.Logger {
@@ -304,25 +308,32 @@ func (o *Onboarder) log() *slog.Logger {
 }
 
 // ours reports a hook of this team's: named riptide and delivering to this
-// team's path, on whatever host. A host move (riptide-collector to riptide,
-// 2026-11-14) left every hook on the old host, failing for days: matching on
-// the host would call those foreign and never move them. A hook named
-// riptide for another team is foreign: a shared project.
+// team's path, on whatever host and under whatever prefix. A host move
+// (riptide-collector to riptide, 2026-11-14) left every hook on the old
+// host, failing for days: matching on the host would call those foreign and
+// never move them. A hook named riptide for another team is foreign: a
+// shared project.
 func (o *Onboarder) ours(h Webhook) bool {
 	if h.Name != WebhookName {
 		return false
 	}
 	u, err := url.Parse(h.URL)
-	return err == nil && strings.TrimRight(u.Path, "/") == "/webhooks/bitbucket/"+o.Team
+	return err == nil && strings.HasSuffix(strings.TrimRight(u.Path, "/"), "/webhooks/bitbucket/"+o.Team)
 }
 
-func named(hooks []Webhook) *Webhook {
+// find picks the team's riptide hook among hooks, else another team's (or
+// nil): Bitbucket does not keep names unique, and two teams on one shared
+// repo both name theirs riptide.
+func (o *Onboarder) find(hooks []Webhook) (own, foreign *Webhook) {
 	for i := range hooks {
-		if hooks[i].Name == WebhookName {
-			return &hooks[i]
+		switch {
+		case o.ours(hooks[i]):
+			return &hooks[i], nil
+		case hooks[i].Name == WebhookName && foreign == nil:
+			foreign = &hooks[i]
 		}
 	}
-	return nil
+	return nil, foreign
 }
 
 func (o *Onboarder) body() map[string]any {
@@ -369,20 +380,28 @@ func (o *Onboarder) diff(h Webhook) []string {
 }
 
 // projectHook is the team's hook on t's project, nil when there is none or
-// the caller may not read the project's hooks (no project admin: then there
-// is nothing to check).
+// the project's hooks cannot be read: no project admin (401, 403), or a
+// project without project hooks (a personal ~USER one may answer 400 or
+// 404). Then there is nothing to check.
 func (o *Onboarder) projectHook(ctx context.Context, t Target) (*Webhook, error) {
-	hooks, err := o.Client.ListWebhooks(ctx, Target{Project: t.Project})
-	if err != nil {
-		if s := status(err); s == http.StatusUnauthorized || s == http.StatusForbidden {
-			return nil, nil
-		}
-		return nil, err
-	}
-	if h := named(hooks); h != nil && o.ours(*h) {
+	if h, ok := o.projectHooks[t.Project]; ok {
 		return h, nil
 	}
-	return nil, nil
+	hooks, err := o.Client.ListWebhooks(ctx, Target{Project: t.Project})
+	if err != nil {
+		switch status(err) {
+		case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+			hooks = nil
+		default:
+			return nil, err
+		}
+	}
+	own, _ := o.find(hooks)
+	if o.projectHooks == nil {
+		o.projectHooks = map[string]*Webhook{}
+	}
+	o.projectHooks[t.Project] = own
+	return own, nil
 }
 
 type repoHook struct {
@@ -393,13 +412,17 @@ type repoHook struct {
 // repoHooks lists, under a project, the repos' hooks named riptide: the
 // team's (stray next to a project hook) and other teams' (foreign). In
 // Bitbucket's repo order: the listings run concurrently, the result does not
-// depend on which answered first.
+// depend on which answered first. A repo gone since the repo list (404) has
+// none; any other failure stops the listings still to run.
 func (o *Onboarder) repoHooks(ctx context.Context, project string) (stray []repoHook, foreign []string, err error) {
 	slugs, err := o.Client.ListRepos(ctx, project)
 	if err != nil {
 		return nil, nil, err
 	}
-	found := make([]*Webhook, len(slugs))
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	own := make([]*Webhook, len(slugs))
+	other := make([]*Webhook, len(slugs))
 	errs := make([]error, len(slugs))
 	sem := make(chan struct{}, repoHookConcurrency)
 	var wg sync.WaitGroup
@@ -407,26 +430,37 @@ func (o *Onboarder) repoHooks(ctx context.Context, project string) (stray []repo
 		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			if ctx.Err() != nil {
+				return
+			}
 			hooks, err := o.Client.ListWebhooks(ctx, Target{Project: project, Repo: slug})
-			found[i], errs[i] = named(hooks), err
+			if err != nil && status(err) != http.StatusNotFound {
+				errs[i] = err
+				cancel()
+				return
+			}
+			own[i], other[i] = o.find(hooks)
 		})
 	}
 	wg.Wait()
+	// The first real failure in repo order; the listings it cancelled
+	// failed for that reason only.
+	var first error
 	for _, err := range errs {
-		if err != nil {
-			return nil, nil, err
+		if err != nil && (first == nil || errors.Is(first, context.Canceled)) {
+			first = err
 		}
 	}
+	if first != nil {
+		return nil, nil, first
+	}
 	for i, slug := range slugs {
-		h := found[i]
-		if h == nil {
-			continue
-		}
 		t := Target{Project: project, Repo: slug}
-		if o.ours(*h) {
-			stray = append(stray, repoHook{t, *h})
-		} else {
-			foreign = append(foreign, t.Key()+" -> "+h.URL)
+		switch {
+		case own[i] != nil:
+			stray = append(stray, repoHook{t, *own[i]})
+		case other[i] != nil:
+			foreign = append(foreign, t.Key()+" -> "+other[i].URL)
 		}
 	}
 	return stray, foreign, nil
@@ -438,13 +472,13 @@ func (o *Onboarder) Status(ctx context.Context, t Target) Row {
 	if err != nil {
 		return row(t, "failed", detail("list webhooks", err))
 	}
-	h := named(hooks)
+	h, other := o.find(hooks)
 	var r Row
 	switch {
-	case h == nil:
+	case h == nil && other == nil:
 		r = row(t, "missing", "no riptide webhook")
-	case !o.ours(*h):
-		r = row(t, "foreign", "the riptide webhook delivers to another team: "+h.URL)
+	case h == nil:
+		r = row(t, "foreign", "only another team's riptide webhook: "+other.URL+"; onboard adds the team's own")
 	default:
 		if d := o.diff(*h); len(d) > 0 {
 			r = row(t, "stale", fmt.Sprintf("webhook id=%d differs; onboard rewrites it", h.ID))
@@ -503,9 +537,11 @@ func (o *Onboarder) Onboard(ctx context.Context, t Target) Row {
 	if err != nil {
 		return row(t, "failed", detail("list webhooks", err))
 	}
-	h := named(hooks)
-	if h != nil && !o.ours(*h) {
-		return row(t, "failed", "a webhook named riptide delivers to another team ("+h.URL+"); left alone")
+	// Another team's riptide hook stays; ours goes next to it (a shared
+	// repo or project delivers to both teams).
+	h, other := o.find(hooks)
+	if o.projectHooks != nil && t.IsProject() && !o.DryRun {
+		delete(o.projectHooks, t.Project)
 	}
 	prefix := ""
 	if o.DryRun {
@@ -542,6 +578,9 @@ func (o *Onboarder) Onboard(ctx context.Context, t Target) Row {
 			r = row(t, "ok", fmt.Sprintf("%swebhook up to date (id=%d), secret rewritten", prefix, h.ID))
 		}
 	}
+	if other != nil {
+		r.Foreign = append(r.Foreign, t.Key()+" -> "+other.URL)
+	}
 	if !t.IsProject() {
 		return r
 	}
@@ -560,11 +599,14 @@ func (o *Onboarder) Onboard(ctx context.Context, t Target) Row {
 				r.Status = "failed"
 				return r
 			}
+			o.log().InfoContext(ctx, "onboard_repo_webhook_pruned", "team", o.Team, "target", s.repo.Key())
 		}
-		o.log().InfoContext(ctx, "onboard_repo_webhook_pruned", "team", o.Team, "target", s.repo.Key(), "dry_run", o.DryRun)
 		r.RepoHooks = append(r.RepoHooks, s.repo.Repo)
 	}
-	if len(stray) > 0 {
+	switch {
+	case len(stray) > 0 && o.DryRun:
+		r.Detail += fmt.Sprintf(", would prune %d repo webhook(s)", len(stray))
+	case len(stray) > 0:
 		r.Detail += fmt.Sprintf(", %d repo webhook(s) pruned", len(stray))
 	}
 	return r
@@ -577,14 +619,17 @@ func (o *Onboarder) Remove(ctx context.Context, t Target) Row {
 	if err != nil {
 		return row(t, "failed", detail("list webhooks", err))
 	}
-	h := named(hooks)
+	h, other := o.find(hooks)
 	switch {
-	case h == nil:
+	case h == nil && other == nil:
 		return row(t, "skipped", "no riptide webhook")
-	case !o.ours(*h):
-		return row(t, "skipped", "the riptide webhook delivers to another team ("+h.URL+"); left alone")
+	case h == nil:
+		return row(t, "skipped", "only another team's riptide webhook ("+other.URL+"); left alone")
 	case o.DryRun:
 		return row(t, "ok", fmt.Sprintf("dry run: would remove webhook id=%d", h.ID))
+	}
+	if t.IsProject() {
+		delete(o.projectHooks, t.Project)
 	}
 	if err := o.Client.do(ctx, http.MethodDelete, hookPath(t, h.ID), nil, nil, nil); err != nil {
 		return row(t, "failed", detail("delete webhook", err))
