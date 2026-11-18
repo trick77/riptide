@@ -9,7 +9,6 @@ import { dur, durParts, fullDate, num, pct, stage } from "./format";
 import type { Tab } from "./state";
 import { Strip } from "./strip";
 import {
-  Compare,
   Direction,
   SectionHead,
   SubHead,
@@ -142,13 +141,10 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
               ? t("overview.freq.firstSeen", { count: freq.first_seen })
               : undefined)
           }
-          compare={
-            <Compare
-              change={c.deploy_frequency}
-              now={freq.syncs ? num(freq.per_week, 1) : "–"}
-              format={(v) => num(v, 1)}
-            />
-          }
+          compare={{
+            change: c.deploy_frequency,
+            format: (v) => num(v, 1),
+          }}
           open={why === "freq"}
           onWhy={() => onWhy("freq")}
         />
@@ -176,13 +172,10 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
             />
           }
           warn={lt.low_sample ? t("overview.lead.lowSample") : undefined}
-          compare={
-            <Compare
-              change={c.lead_time}
-              now={dur(lt.human.p50)}
-              format={dur}
-            />
-          }
+          compare={{
+            change: c.lead_time,
+            format: dur,
+          }}
           open={why === "lead"}
           onWhy={() => onWhy("lead")}
         />
@@ -203,13 +196,10 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
               why={t("common.ownHistory")}
             />
           }
-          compare={
-            <Compare
-              change={c.deploy_success}
-              now={pct(freq.success_rate)}
-              format={pct}
-            />
-          }
+          compare={{
+            change: c.deploy_success,
+            format: pct,
+          }}
           open={why === "dsucc"}
           onWhy={() => onWhy("dsucc")}
         />

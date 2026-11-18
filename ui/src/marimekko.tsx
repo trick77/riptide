@@ -275,7 +275,7 @@ export function OpenMekko({
           <span className="inline-flex items-center gap-1.5">
             <span
               aria-hidden="true"
-              className="size-[7px] rounded-full bg-ochre"
+              className="size-[7px] rounded-full bg-danger"
             />
             {t("open.mekko.longMark", { days: num(o.long_days) })}
           </span>
@@ -388,10 +388,10 @@ export function OpenMekko({
                     )}
                     <div className="flex h-5 items-center justify-center">
                       {r.long > 0 && (
-                        <span className="inline-flex items-center gap-1 text-[11px] whitespace-nowrap text-ochre tabular-nums">
+                        <span className="inline-flex items-center gap-1 text-[11px] whitespace-nowrap text-danger-ink tabular-nums">
                           <span
                             aria-hidden="true"
-                            className="size-[7px] rounded-full bg-ochre"
+                            className="size-[7px] rounded-full bg-danger"
                           />
                           {num(r.long)}
                         </span>

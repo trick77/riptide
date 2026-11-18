@@ -3,11 +3,55 @@
 // merged.
 
 import { useTranslation } from "react-i18next";
-import type { Metrics } from "./api";
+import type { Change, Metrics } from "./api";
 import { DayCalendar } from "./calendar";
 import { WeekStack } from "./charts";
-import { num, pct, stage } from "./format";
-import { Card, CardHead, Compare, Legend, SectionHead, Swatch } from "./ui";
+import { fullDate, num, pct, stage } from "./format";
+import {
+  Card,
+  CardHead,
+  Compare,
+  Delta,
+  Eyebrow,
+  Legend,
+  SectionHead,
+  Swatch,
+  WarnLine,
+} from "./ui";
+
+// A number of the section against the previous period, in its head: the
+// section says itself whether it runs better or worse. The bars stay blue,
+// they are a count. The first deploys are in the note under the chart;
+// Argo CD reporting only since a day is said under the head, as on the
+// overview's tile.
+function HeadNumber({
+  label,
+  value,
+  unit,
+  change,
+  format,
+}: {
+  label: string;
+  value: string;
+  unit?: string;
+  change: Change;
+  format: (v: number) => string;
+}) {
+  return (
+    <div className="text-right">
+      <Eyebrow>{label}</Eyebrow>
+      <div className="text-[20px] font-medium text-ink tabular-nums">
+        {value}
+        {unit && (
+          <span className="ml-1.5 text-[12px] font-normal text-muted">
+            {unit}
+          </span>
+        )}
+      </div>
+      <Delta change={change} format={format} />
+    </div>
+  );
+}
 
 export function Deploys({ m }: { m: Metrics }) {
   const { t } = useTranslation();
@@ -31,11 +75,36 @@ export function Deploys({ m }: { m: Metrics }) {
           title={t("deploys.cardTitle", { prod })}
           sub={t("deploys.cardSub")}
           right={
-            <Legend>
-              <Swatch className="bg-s1" label={t("deploys.release")} />
-            </Legend>
+            <div className="flex flex-wrap items-start gap-x-6 gap-y-2">
+              {freq.argo_reporting && (
+                <>
+                  <HeadNumber
+                    label={t("overview.freq.label")}
+                    value={freq.syncs ? num(freq.per_week, 1) : "–"}
+                    unit={freq.syncs ? t("overview.freq.unit") : undefined}
+                    change={m.comparison.deploy_frequency}
+                    format={(v) => num(v, 1)}
+                  />
+                  <HeadNumber
+                    label={t("overview.dsucc.label")}
+                    value={pct(freq.success_rate)}
+                    change={m.comparison.deploy_success}
+                    format={pct}
+                  />
+                </>
+              )}
+              <Legend>
+                <Swatch className="bg-s1" label={t("deploys.release")} />
+              </Legend>
+            </div>
           }
         />
+        {freq.argo_reporting && freq.since && (
+          <WarnLine>
+            {t("overview.sinceNote", { date: fullDate(new Date(freq.since)) }) +
+              (freq.low_sample ? t("overview.sinceLow") : "")}
+          </WarnLine>
+        )}
         <WeekStack
           labels={weeks.map((w) => t("common.cw", { kw: w.kw }))}
           series={[

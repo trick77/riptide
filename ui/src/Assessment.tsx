@@ -25,6 +25,7 @@ import {
 import { stageNames } from "./Flow";
 import { clock, dayMonth, dur, money, num, pct, stage } from "./format";
 import type { Tab } from "./state";
+import { Delta } from "./ui";
 
 const POLL_MS = 3000;
 // Small meta text: plain spaces around the middot are fine there.
@@ -53,13 +54,6 @@ const WAIT_COLOR: Record<PRWaiting, string> = {
   changes: "bg-seq-2",
   merge: "bg-seq-1",
   draft: "bg-other",
-};
-
-const VERDICT_TEXT: Record<Fact["verdict"], string> = {
-  better: "text-online",
-  worse: "text-danger-ink",
-  same: "text-muted",
-  none: "text-muted",
 };
 
 const COLUMN_STYLE: Record<Column, { border: string; tag: string }> = {
@@ -196,12 +190,7 @@ function ruleText(t: TFunction, s: Signal): string {
 
 function Prev({ f }: { f: Fact }) {
   const { t } = useTranslation();
-  if (f.prev == null) return null;
-  return (
-    <span className={`font-mono text-[11.5px] ${VERDICT_TEXT[f.verdict]}`}>
-      {t("overview.assess.prev", { v: fmtFact(t, f.unit, f.prev) })}
-    </span>
-  );
+  return <Delta change={f} format={(v) => fmtFact(t, f.unit, v)} />;
 }
 
 function Seen({ n }: { n: number }) {

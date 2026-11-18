@@ -1,8 +1,9 @@
 // The team against its own previous period, one row per number with a
 // better direction: the dashed centre line is the previous period, a bar
 // to the left got worse, to the right better, its length the backend's
-// score (-1..1, halving / doubling). Worse bars alone are red, so the eye
-// lands on them; numbers without a direction are no rows at all.
+// score (-1..1, halving / doubling). Worse bars are red, better ones green,
+// as on every page; the same is a grey tick. Numbers without a direction
+// are no rows at all.
 
 import type { TFunction } from "i18next";
 import { useId, useState } from "react";
@@ -138,7 +139,7 @@ export function Strip({ m }: { m: Metrics }) {
             <span className="absolute top-0 right-[calc(50%+8px)] whitespace-nowrap text-danger-ink">
               ◀ {t("compare.worse")}
             </span>
-            <span className="absolute top-0 left-[calc(50%+8px)] whitespace-nowrap text-muted">
+            <span className="absolute top-0 left-[calc(50%+8px)] whitespace-nowrap text-online">
               {t("compare.better")} ▶
             </span>
           </div>
@@ -257,7 +258,9 @@ function Bar({
               ? left
                 ? "bg-linear-to-r from-danger to-danger/45"
                 : "bg-linear-to-l from-danger to-danger/45"
-              : "bg-ink-3"
+              : left
+                ? "bg-linear-to-r from-online to-online/45"
+                : "bg-linear-to-l from-online to-online/45"
           }`}
           style={left ? { right: "50%", width } : { left: "50%", width }}
         />
@@ -265,7 +268,7 @@ function Bar({
       <span
         aria-hidden="true"
         className={`absolute top-1/2 -translate-y-1/2 text-[11px] whitespace-nowrap tabular-nums ${
-          worse ? "text-danger-ink" : "text-muted"
+          worse ? "text-danger-ink" : same ? "text-muted" : "text-online"
         }`}
         style={left ? { right: at } : { left: at }}
       >
