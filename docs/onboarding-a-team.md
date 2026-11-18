@@ -85,7 +85,7 @@ Each source uses the team's source-specific secret:
 
 - **Bitbucket** → `POST /webhooks/bitbucket/{team}`, HMAC via
   `X-Hub-Signature` (BBS handles signing, secret is the team's
-  `bitbucket` key). The canonical path is `riptide onboard-bitbucket`:
+  `bitbucket` key). The canonical path is `POST /onboard/{team}`:
   [setup-bitbucket-webhook.md](setup-bitbucket-webhook.md).
 - **ArgoCD** → `POST /webhooks/argocd`, `Authorization: Bearer <argocd>`.
   See [setup-argocd-notification.md](setup-argocd-notification.md).

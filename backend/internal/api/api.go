@@ -1,5 +1,5 @@
 // Package api is riptide's HTTP surface: on the collector listener the four
-// webhook sinks, /auth/ping and the API docs (the probes are kit's, package
+// webhook sinks, /auth/ping, /onboard and the API docs (the probes are kit's, package
 // httpapi); on the UI listener the read API under /api.
 // Handlers do HTTP, auth, dispatch to the pure extractors in package parse,
 // config-derived fields, and persistence.
@@ -49,7 +49,9 @@ type Deps struct {
 	// Analysis serves the overview's assessment and its LLM wording.
 	Analysis Analyst
 	Runtime  *config.Runtime
-	Log      *slog.Logger
+	// Onboarding serves POST /onboard/{team}.
+	Onboarding Onboarding
+	Log        *slog.Logger
 	// Now is the clock for occurred_at fallbacks; time.Now when nil.
 	Now func() time.Time
 }
@@ -68,6 +70,7 @@ func Register(srv *httpapi.Server, d Deps) {
 	srv.HandleFunc("POST /webhooks/pipeline", d.pipeline)
 	srv.HandleFunc("POST /webhooks/argocd", d.argocd)
 	srv.HandleFunc("POST /webhooks/noergler", d.noergler)
+	srv.HandleFunc("POST /onboard/{team}", d.onboard)
 	srv.HandleFunc("GET /openapi.yaml", d.openapiSpec)
 	srv.HandleFunc("GET /docs", d.docs)
 }

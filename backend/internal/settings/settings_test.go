@@ -52,6 +52,30 @@ func TestAnalysisSettings(t *testing.T) {
 	}
 }
 
+func TestOnboardingURLs(t *testing.T) {
+	s, err := Load(lookup(map[string]string{
+		"BACKEND_PUBLIC_URL": "https://riptide.example.com/", "BACKEND_BITBUCKET_URL": "https://git.example.com",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.PublicURL != "https://riptide.example.com" || s.BitbucketURL != "https://git.example.com" {
+		t.Errorf("urls = %q %q", s.PublicURL, s.BitbucketURL)
+	}
+	if s, _ := Load(lookup(nil)); s.PublicURL != "" || s.BitbucketURL != "" {
+		t.Errorf("defaults = %q %q", s.PublicURL, s.BitbucketURL)
+	}
+	for _, env := range []map[string]string{
+		{"BACKEND_PUBLIC_URL": "riptide.example.com"},
+		{"BACKEND_PUBLIC_URL": "https://riptide.example.com?x=1"},
+		{"BACKEND_BITBUCKET_URL": "http://git.example.com"},
+	} {
+		if _, err := Load(lookup(env)); err == nil {
+			t.Errorf("%v loaded", env)
+		}
+	}
+}
+
 func TestOverrides(t *testing.T) {
 	s, err := Load(lookup(map[string]string{
 		"BACKEND_DB_URL":                "postgresql+asyncpg://u:p@db:5432/r",

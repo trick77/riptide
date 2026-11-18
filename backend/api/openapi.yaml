@@ -4,7 +4,7 @@ info:
   title: riptide API
   # The CONTRACT's version, not the binary's. The two move independently:
   # a release that changes no route leaves this alone.
-  version: 2.2.0
+  version: 2.3.0
   description: |
     DevOps delivery-metrics ingestion. Senders post raw events from Bitbucket
     Data Center, CI pipelines (Jenkins, Tekton, ...), Argo CD and noergler;
@@ -21,6 +21,7 @@ info:
       `/webhooks/pipeline`. `/auth/ping` accepts any of the team's keys.
     - `/webhooks/bitbucket/{team}` is HMAC-signed by Bitbucket with the team's
       `bitbucket` key (`X-Hub-Signature: sha256=<hex>`).
+    - `/onboard/{team}` takes the team's `bitbucket` key as a bearer token.
 
     ## Idempotency
 
@@ -44,6 +45,8 @@ servers:
 tags:
   - name: webhooks
     description: Event sinks.
+  - name: onboarding
+    description: The team's Bitbucket webhooks, self-service.
   - name: health
     description: Sender self-checks and this document. The liveness and readiness probes (/healthz, /readyz) answer loopback callers only and are not part of this contract.
   - name: read
@@ -189,6 +192,72 @@ paths:
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/Unprocessable" }
         "500": { $ref: "#/components/responses/ServerError" }
+
+  /onboard/{team}:
+    post:
+      tags: [onboarding]
+      operationId: onboard
+      summary: Put the team's Bitbucket webhook on projects and repos, report or remove it
+      description: |
+        A project without `repos` gets one project webhook, which covers every
+        repo in it, new ones included; onboarding it deletes the team's repo
+        webhooks below it, which would deliver every event a second time. A
+        project with `repos` gets one repo webhook each (a personal `~USER`
+        project, or one only partly the team's); a repo under the team's
+        project webhook is skipped.
+
+        The webhook is named `riptide` and delivers to
+        `<BACKEND_PUBLIC_URL>/webhooks/bitbucket/{team}`, signed with the
+        team's `bitbucket` key. A `riptide` webhook delivering to this team's
+        path on any host is the team's and is rewritten (a host move is one
+        `onboard`); one delivering to another team's path is left alone.
+
+        Authenticated with the team's `bitbucket` key as a bearer. The
+        Bitbucket calls run on the caller's own token in `X-Bitbucket-Token`
+        (admin on the targets), for this request only, never stored. A
+        Bitbucket failure is a row with status `failed`; the other targets
+        still run. Off (`503`) without `BACKEND_PUBLIC_URL` and
+        `BACKEND_BITBUCKET_URL`.
+      security: [{ teamKey: [] }]
+      parameters:
+        - name: team
+          in: path
+          required: true
+          description: The team the bearer key belongs to.
+          schema: { type: string, minLength: 1 }
+        - name: X-Bitbucket-Token
+          in: header
+          required: true
+          description: The caller's Bitbucket HTTP access token, admin on the projects or repos.
+          schema: { type: string, minLength: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OnboardRequest" }
+      responses:
+        "200":
+          description: Every target, in the order given.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OnboardResult" }
+        "400":
+          description: "`X-Bitbucket-Token` missing, or the body unreadable."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422":
+          description: The body is invalid; the detail says why.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: Onboarding is off on this instance.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /auth/ping:
     get:
@@ -509,6 +578,79 @@ components:
                 items: { type: string }
                 description: '`["body"]` or `["body", "<field>"]`.'
               msg: { type: string }
+
+    OnboardRequest:
+      type: object
+      required: [projects]
+      additionalProperties: false
+      properties:
+        action:
+          type: string
+          enum: [status, onboard, remove]
+          default: status
+          description: "`status` writes nothing."
+        projects:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [key]
+            additionalProperties: false
+            properties:
+              key: { type: string, minLength: 1, examples: [PLAT, "~JDOE"] }
+              repos:
+                type: array
+                minItems: 1
+                items: { type: string, minLength: 1 }
+                description: Repo slugs; absent is the whole project.
+        dry_run:
+          type: boolean
+          default: false
+          description: Report what onboard or remove would write; write nothing.
+
+    OnboardResult:
+      type: object
+      required: [team, action, dry_run, webhook_url, healthy, rows, text]
+      additionalProperties: false
+      properties:
+        team: { type: string }
+        action: { type: string, enum: [status, onboard, remove] }
+        dry_run: { type: boolean }
+        webhook_url: { type: string, description: Where the team's webhooks deliver. }
+        healthy:
+          type: boolean
+          description: With status every row ok; with onboard and remove no row failed.
+        rows:
+          type: array
+          items:
+            type: object
+            required: [target, level, status, detail, diff, repo_hooks, foreign]
+            additionalProperties: false
+            properties:
+              target: { type: string, examples: [PLAT, PLAT/repo] }
+              level: { type: string, enum: [project, repo] }
+              status:
+                type: string
+                enum: [ok, stale, missing, foreign, double, skipped, failed]
+                description: |
+                  status: ok, stale (onboard rewrites it), missing, foreign
+                  (delivers to another team), double (a project and a repo
+                  webhook both deliver) or failed. onboard and remove: ok,
+                  skipped or failed.
+              detail: { type: string }
+              diff:
+                type: array
+                items: { type: string }
+                description: What onboard changes or changed; `create` for a new webhook.
+              repo_hooks:
+                type: array
+                items: { type: string }
+                description: Under a project, the repos with a webhook of the team's own besides the project's; onboard deletes them.
+              foreign:
+                type: array
+                items: { type: string }
+                description: "`riptide` webhooks under the target delivering to another team, left alone."
+        text: { type: string, description: The rows as a plain table. }
 
     WebhookResult:
       type: object

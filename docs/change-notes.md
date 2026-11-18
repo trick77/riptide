@@ -7,6 +7,27 @@ repository.
 Real account handles, hostnames and tokens belong in the mounted
 `riptide.json` / team-keys Secret, never in this file: the repository is public.
 
+## 2026-11-18 — Bitbucket webhooks self-service, `onboard-bitbucket` gone
+
+**`POST /onboard/{team}` replaces `riptide onboard-bitbucket`.** A team
+reports, creates, updates or removes its webhooks itself, with its
+`bitbucket` key as a bearer and its own Bitbucket token in
+`X-Bitbucket-Token`, per project (one hook for every repo, new ones
+included) or per repo; see
+[setup-bitbucket-webhook.md](setup-bitbucket-webhook.md). Onboarding a
+project deletes the team's repo hooks below it.
+
+**Set `BACKEND_PUBLIC_URL`** (riptide's base URL as Bitbucket reaches it) and
+**`BACKEND_BITBUCKET_URL`**; without both `/onboard` answers 503. The route
+in front of riptide must pass `/onboard` without a login, like
+`/webhooks`, and riptide must reach Bitbucket outbound. Onboarding a project
+of dozens of repos lists every repo's hooks: give that route a router
+timeout of a few minutes.
+
+**After a host move run `onboard` once per team**: hooks named `riptide`
+delivering to the team's path are rewritten whatever host they point at.
+Bitbucket redelivers nothing, so what went to the old host is lost.
+
 ## 2026-11-16 — Jira keys link to their tickets
 
 **`riptide.json` takes `jira.base_url`**, the Jira instance's root URL. Every
