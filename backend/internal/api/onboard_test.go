@@ -127,6 +127,8 @@ func TestOnboardRefuses(t *testing.T) {
 		{"empty repos", "platform", platformBitbucket, "t", `{"projects":[{"key":"PLAT","repos":[]}]}`, http.StatusUnprocessableEntity},
 		{"twice", "platform", platformBitbucket, "t", `{"projects":[{"key":"PLAT"},{"key":" PLAT "}]}`, http.StatusUnprocessableEntity},
 		{"two objects", "platform", platformBitbucket, "t", ok + ok, http.StatusUnprocessableEntity},
+		{"repo of a whole project", "platform", platformBitbucket, "t",
+			`{"projects":[{"key":"PLAT","repos":["x"]},{"key":"PLAT"}]}`, http.StatusUnprocessableEntity},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			expectStatus(t, h.post(c.team, c.key, c.token, c.body), c.want)

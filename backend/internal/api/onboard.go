@@ -54,8 +54,6 @@ type onboardResponse struct {
 // 300 s in front (infra) so riptide answers before the router cuts.
 const onboardTimeout = 270 * time.Second
 
-var onboardActions = []string{string(onboarding.ActionStatus), string(onboarding.ActionOnboard), string(onboarding.ActionRemove)}
-
 // onboard puts the team's Bitbucket webhook on the projects and repos in the
 // body, reports it or removes it. Authenticated by the team's bitbucket key
 // as a bearer; the Bitbucket calls run on the caller's own token
@@ -69,8 +67,7 @@ func (d Deps) onboard(w http.ResponseWriter, r *http.Request) {
 	}
 	// The bearer just proved equal to the team's bitbucket key, the hooks'
 	// HMAC secret: no second lookup a key reload could answer with "".
-	_, secret, _ := strings.Cut(r.Header.Get("Authorization"), " ")
-	secret = strings.TrimSpace(secret)
+	secret, _ := bearerToken(r)
 	// Same answer as a wrong key: a valid key does not reveal other teams.
 	if team != r.PathValue("team") {
 		httpapi.WriteDetail(w, http.StatusUnauthorized, "Invalid credentials.")
@@ -134,8 +131,12 @@ func parseOnboard(body []byte) (onboardRequest, []onboarding.Target, error) {
 	if req.Action == "" {
 		req.Action = string(onboarding.ActionStatus)
 	}
-	if !slices.Contains(onboardActions, req.Action) {
-		return req, nil, fmt.Errorf("action must be one of %s", strings.Join(onboardActions, ", "))
+	if !slices.Contains(onboarding.Actions, onboarding.Action(req.Action)) {
+		names := make([]string, len(onboarding.Actions))
+		for i, a := range onboarding.Actions {
+			names[i] = string(a)
+		}
+		return req, nil, fmt.Errorf("action must be one of %s", strings.Join(names, ", "))
 	}
 	if len(req.Projects) == 0 {
 		return req, nil, errors.New("projects must list at least one project")
@@ -172,6 +173,13 @@ func parseOnboard(body []byte) (onboardRequest, []onboarding.Target, error) {
 			if err := add(onboarding.Target{Project: key, Repo: slug}); err != nil {
 				return req, nil, err
 			}
+		}
+	}
+	// A repo of a project also listed whole: the project's webhook covers
+	// it, and onboarding both would create a repo hook only to prune it.
+	for _, t := range targets {
+		if !t.IsProject() && seen[onboarding.Target{Project: t.Project}] {
+			return req, nil, fmt.Errorf("%s: %s is listed whole too, its project webhook covers the repo", t.Key(), t.Project)
 		}
 	}
 	return req, targets, nil

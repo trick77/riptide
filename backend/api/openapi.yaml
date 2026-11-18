@@ -204,7 +204,10 @@ paths:
         webhooks below it, which would deliver every event a second time. A
         project with `repos` gets one repo webhook each (a personal `~USER`
         project, or one only partly the team's); a repo under the team's
-        project webhook is skipped.
+        project webhook is skipped, and one whose project's webhooks the
+        caller cannot read fails (a project webhook there would double it).
+        A repo listed under a project also listed whole is a `422`. A second
+        webhook of the team's on one target is deleted.
 
         The webhook is named `riptide` and delivers to
         `<BACKEND_PUBLIC_URL>/webhooks/bitbucket/{team}`, signed with the

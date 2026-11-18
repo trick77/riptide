@@ -46,7 +46,9 @@ Content-Type: application/json
   its own id, nothing dedupes them).
 - **A project with `repos`** gets one repo webhook each: a personal `~USER`
   project, or a project shared with another team. A project webhook sends
-  every repo's events to your team, the other team's included.
+  every repo's events to your team, the other team's included. Needs a token
+  that can read the project's webhooks too: without, riptide cannot rule out
+  a project webhook that would double the repo's, and refuses.
 - `action`: `status` (default, writes nothing), `onboard`, `remove`.
   `"dry_run": true` reports what onboard or remove would write.
 - Idempotent: rerun after edits. Every run rewrites the secret, since

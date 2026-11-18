@@ -325,6 +325,65 @@ func TestRepoTargets(t *testing.T) {
 	}
 }
 
+// Two hooks of the team's on one target: status says double, onboard keeps
+// the first, remove takes both.
+func TestDuplicateHooks(t *testing.T) {
+	f, o := setup(t)
+	f.hook("PLAT", "riptide", oldURL)
+	f.hook("PLAT", "riptide", wantURL)
+	if r := o.Status(t.Context(), proj); r.Status != "double" {
+		t.Fatalf("status: %+v", r)
+	}
+	r := o.Onboard(t.Context(), proj)
+	if r.Status != "ok" || len(f.hooks["PLAT"]) != 1 || f.hooks["PLAT"][0]["url"] != wantURL ||
+		!slices.Contains(r.Diff, "duplicate id=101 deleted") {
+		t.Fatalf("onboard: %+v %v", r, f.hooks["PLAT"])
+	}
+	f.hook("PLAT", "riptide", oldURL)
+	if r := o.Remove(t.Context(), proj); r.Status != "ok" || len(f.hooks["PLAT"]) != 0 {
+		t.Fatalf("remove: %+v %v", r, f.hooks["PLAT"])
+	}
+}
+
+// Without project admin a repo hook could sit next to a project hook
+// unseen: onboard refuses, status cannot tell and says nothing more.
+func TestRepoWithoutProjectAdminIsRefused(t *testing.T) {
+	f, o := setup(t)
+	f.deny["GET PLAT"] = http.StatusForbidden
+	r := o.Onboard(t.Context(), Target{Project: "PLAT", Repo: "x"})
+	if r.Status != "failed" || !strings.Contains(r.Detail, "no project admin") || len(f.writes) != 0 {
+		t.Fatalf("onboard: %+v %v", r, f.writes)
+	}
+}
+
+// Another team's hook on a shared repo under our project hook: covered.
+func TestForeignRepoHookUnderOurProjectHook(t *testing.T) {
+	f, o := setup(t)
+	f.hook("PLAT", "riptide", wantURL)
+	f.hook("PLAT/x", "riptide", otherURL)
+	if r := o.Status(t.Context(), Target{Project: "PLAT", Repo: "x"}); r.Status != "ok" || !strings.Contains(r.Detail, "covered") {
+		t.Fatalf("status: %+v", r)
+	}
+}
+
+// A dry run plans like the real run: a repo after its project is skipped.
+func TestDryRunPlansTheProjectHook(t *testing.T) {
+	_, o := setup(t)
+	o.DryRun = true
+	rows, _ := Run(t.Context(), o, ActionOnboard, []Target{proj, {Project: "PLAT", Repo: "x"}})
+	if rows[0].Status != "ok" || rows[1].Status != "skipped" {
+		t.Fatalf("rows = %+v", rows)
+	}
+}
+
+func TestUnknownActionFails(t *testing.T) {
+	f, o := setup(t)
+	rows, healthy := Run(t.Context(), o, Action("grant"), []Target{proj})
+	if healthy || rows[0].Status != "failed" || len(f.writes) != 0 {
+		t.Fatalf("rows = %+v", rows)
+	}
+}
+
 // Repo targets of one project read its webhooks once per run.
 func TestProjectHookReadOncePerProject(t *testing.T) {
 	f, o := setup(t)
