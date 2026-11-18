@@ -318,7 +318,7 @@ function FactsTables({
           <Mono className="whitespace-nowrap">{r.pipeline_name}</Mono>,
           <span className="text-muted">#{r.run_id}</span>,
           <span className="text-muted">{t(`build.kind.${r.kind}`)}</span>,
-          <Mono className="text-muted">{shortSha(r.commit_sha)}</Mono>,
+          <Mono className="text-muted">{shortSha(r.shown_sha)}</Mono>,
           dur(r.duration_s),
           <Mono>
             {r.image_refs.length

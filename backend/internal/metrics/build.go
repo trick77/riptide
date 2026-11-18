@@ -264,7 +264,8 @@ type BuildStats struct {
 	FlakyOfFailed *float64 `json:"flaky_of_failed"`
 	// FlakySeconds is the flaky runs' part of WastedSeconds.
 	FlakySeconds float64 `json:"flaky_seconds"`
-	// Unjudged are the runs with a verdict but no commit: no telling
+	// Unjudged are the runs with a verdict but no commit (failed before
+	// their checkout, or a sender that sends none): no telling
 	// whether they were flaky, so out of FlakyRate.
 	Unjudged int `json:"unjudged"`
 	// OutlierRuns are the runs of the kind past its outlier threshold, with
@@ -690,7 +691,38 @@ func newKindRuns(rs []dataset.Run, repoKey repoNamer, flaky map[runRef]bool) kin
 // judged: a run with a verdict and a commit, the runs flakiness can be
 // told for.
 func judged(r dataset.Run, v string) bool {
-	return v != VerdictNone && r.CommitSHA != nil && *r.CommitSHA != ""
+	return v != VerdictNone && code(r) != ""
+}
+
+// code is the code a run built, the key a rerun shares: where the CI built
+// a merge of a PR (that merge commit is new on every build) the PR's head
+// on the target's tip it was merged onto, the same head on a moved target
+// being other code; else the commit; "" without one. A head without its
+// base keeps the merge commit: no pair rather than a wrong one.
+func code(r dataset.Run) string {
+	if head, base := orEmpty(r.HeadSHA), orEmpty(r.BaseSHA); head != "" && base != "" {
+		return head + "@" + base
+	}
+	return orEmpty(r.CommitSHA)
+}
+
+// shownSHA is the commit a run's row shows, by code's rule: the PR's own
+// head where code pairs on it (the code a developer knows), else the
+// commit. A head without its base shows the merge commit, as it pairs on
+// it: two rows with one SHA are always the same code.
+func shownSHA(r dataset.Run) *string {
+	if orEmpty(r.HeadSHA) != "" && orEmpty(r.BaseSHA) != "" {
+		return r.HeadSHA
+	}
+	return r.CommitSHA
+}
+
+// orEmpty is s, "" for nil.
+func orEmpty(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // runRef names one run, the same in the facts as in the build section.
@@ -724,12 +756,13 @@ func pairKind(kind string) string {
 
 // flakyRuns are the failed runs, of the build section's runs by kind,
 // that a later run of the same pipeline and kind (pairKind) passed on the
-// same commit: red, then green without a code change. Another run ID only
-// (a COMPLETED sent twice is no rerun); runs without a verdict neither
-// pass nor break the chain. A lower bound: a retry inside a run, a commit
-// built once, a rerun after the period or a CI that builds a merge commit
-// of its own per run all go unseen. Whether tests or infrastructure failed
-// is not in the data.
+// same code (code: the PR's head where the CI built a merge of it): red,
+// then green without a code change. Another run ID only (a COMPLETED sent
+// twice is no rerun); runs without a verdict neither pass nor break the
+// chain. A lower bound: a retry inside a run, a commit built once, a
+// rerun after the period, a run without a commit (failed before its
+// checkout) and a CI merge commit without its head_sha all go unseen.
+// Whether tests or infrastructure failed is not in the data.
 func flakyRuns(by map[string][]dataset.Run) map[runRef]bool {
 	type key struct{ kind, source, pipeline, sha string }
 	// pass is a green run, as much of it as after reads.
@@ -741,7 +774,7 @@ func flakyRuns(by map[string][]dataset.Run) map[runRef]bool {
 	for kind, rs := range by {
 		for _, r := range rs {
 			if v := verdict(r); v == VerdictSuccess && judged(r, v) {
-				k := key{pairKind(kind), r.Source, r.PipelineName, *r.CommitSHA}
+				k := key{pairKind(kind), r.Source, r.PipelineName, code(r)}
 				green[k] = append(green[k], pass{r.RunID, r.StartedAt, r.FinishedAt})
 			}
 		}
@@ -752,7 +785,7 @@ func flakyRuns(by map[string][]dataset.Run) map[runRef]bool {
 			if v := verdict(r); v != VerdictFailure || !judged(r, v) {
 				continue
 			}
-			for _, g := range green[key{pairKind(kind), r.Source, r.PipelineName, *r.CommitSHA}] {
+			for _, g := range green[key{pairKind(kind), r.Source, r.PipelineName, code(r)}] {
 				if g.id != r.RunID && after(dataset.Run{StartedAt: g.started, FinishedAt: g.finished}, r) {
 					set[refOf(r)] = true
 					break

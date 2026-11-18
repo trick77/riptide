@@ -141,6 +141,8 @@ Indexes:
 | `image_refs` | character varying[] | no | `'{}'::character varying[]` |  |
 | `build_type` | character varying | yes |  |  |
 | `agent_started_at` | timestamp with time zone | yes |  |  |
+| `head_sha` | character varying | yes |  |  |
+| `base_sha` | character varying | yes |  |  |
 
 Indexes:
 
@@ -310,6 +312,8 @@ erDiagram
         character_varying[] image_refs
         character_varying build_type
         timestamp_with_time_zone agent_started_at
+        character_varying head_sha
+        character_varying base_sha
     }
     team_analyses {
         bigint id PK

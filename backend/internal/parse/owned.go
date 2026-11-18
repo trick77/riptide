@@ -17,7 +17,16 @@ type PipelineDraft struct {
 	RunID        string
 	Phase        string
 	Status       *string
-	CommitSHA    string // lowercased
+	// CommitSHA is the commit built, lowercased; nil for a run that failed
+	// before its checkout (no agent, a git timeout): still a run, as red.
+	CommitSHA *string
+	// HeadSHA is a PR build's own head, lowercased, when the CI built a merge
+	// of it with the target branch: that merge commit (CommitSHA) is new on
+	// every build. BaseSHA is the target's tip it was merged onto: together
+	// they are the code a rerun shares (the same head on a moved target is
+	// other code). nil otherwise.
+	HeadSHA *string
+	BaseSHA *string
 	// ImageRefs is every image the run published, trimmed and deduplicated
 	// in arrival order; empty when it published none. A run is one event
 	// however many images it pushes.
@@ -51,7 +60,9 @@ func Pipeline(raw []byte) (*PipelineDraft, error) {
 		RunID:          o.requiredString("run_id", 1),
 		Phase:          o.requiredString("phase", 1),
 		Status:         o.optionalString("status", 0),
-		CommitSHA:      strings.ToLower(o.requiredString("commit_sha", 7)),
+		CommitSHA:      o.optionalSHA("commit_sha"),
+		HeadSHA:        o.optionalSHA("head_sha"),
+		BaseSHA:        o.optionalSHA("base_sha"),
 		ImageRefs:      imageRefs(o),
 		ActorHandle:    o.optionalTrimmed("actor_handle"),
 		BuildType:      lowered(o.optionalTrimmed("build_type")),
@@ -76,6 +87,18 @@ func Pipeline(raw []byte) (*PipelineDraft, error) {
 		d.OccurredAt = *d.FinishedAt
 	}
 	return d, nil
+}
+
+// optionalSHA is a commit SHA, trimmed (a shell's trailing newline would
+// never match Bitbucket's) and lowercased; blank is absent, and one shorter
+// than 7 characters once trimmed is an error.
+func (o *object) optionalSHA(field string) *string {
+	s := o.optionalTrimmed(field)
+	if s != nil && len([]rune(*s)) < 7 {
+		o.fail(field, "string_too_short", "String should have at least 7 characters")
+		return nil
+	}
+	return lowered(s)
 }
 
 // lowered lowercases an optional value.

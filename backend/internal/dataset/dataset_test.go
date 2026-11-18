@@ -321,6 +321,38 @@ func TestRunAgentTimeFromStarted(t *testing.T) {
 	t.Fatal("run kasse-api/PR-7 missing")
 }
 
+// A PR build of a merge the CI made itself reports a commit Bitbucket never
+// saw: its head_sha finds the repository. A run without a commit is read,
+// with its pipeline's repository.
+func TestRunRepoFromHeadSHA(t *testing.T) {
+	st, pool := migrated(t)
+	seed(t, pool)
+	at := days(1).Add(time.Hour)
+	for _, r := range []struct {
+		id, run            string
+		commit, head, base any
+	}{{"merge", "1", sha("m"), sha("1"), sha("n")}, {"no-commit", "2", nil, nil, nil}} {
+		if _, err := pool.Exec(t.Context(), `INSERT INTO pipeline_events (delivery_id, source, pipeline_name, run_id, phase,
+			status, commit_sha, head_sha, base_sha, started_at, occurred_at, team, payload)
+			VALUES ($1, 'jenkins', 'other-name/PR-9', $2, 'COMPLETED', 'FAILURE', $3, $4, $5, $6, $6, $7, '{}')`,
+			r.id, r.run, r.commit, r.head, r.base, at, team); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := load(t, st, t0, days(28))
+	got := map[string]string{}
+	for _, r := range d.Runs {
+		if r.PipelineName == "other-name/PR-9" {
+			got[r.RunID] = str(r.Repo) + "|" + str(r.HeadSHA) + "|" + str(r.BaseSHA) + "|" + str(r.CommitSHA)
+		}
+	}
+	// The run without a commit takes its pipeline's repository: excluded
+	// projects and products see it like the pipeline's other runs.
+	if want := map[string]string{"1": kasseAPI + "|" + sha("1") + "|" + sha("n") + "|" + sha("m"), "2": kasseAPI + "|<nil>|<nil>|<nil>"}; !maps.Equal(got, want) {
+		t.Errorf("runs = %v, want %v", got, want)
+	}
+}
+
 // The window is [from, to): rows on the end bound fall out, a deploy's kind
 // still comes from history before the window.
 func TestDatasetWindow(t *testing.T) {
@@ -552,6 +584,8 @@ func TestDatasetExcludedProject(t *testing.T) {
 	// portal-web commit, for a lead time.
 	s := &seeder{t: t, pool: pool, n: 1000}
 	s.run(run{pipeline: "portal-web/master", runID: "1", status: "SUCCESS", commit: sha("7"), started: days(6)})
+	// Failed before its checkout: no commit, still the portal's.
+	s.run(run{pipeline: "portal-web/master", runID: "2", status: "FAILURE", started: days(6).Add(time.Hour)})
 	s.rollup(team, portalWeb+"#2", "declined", days(6).Add(time.Hour))
 	base, head, ops := strings.Repeat("e1", 20), strings.Repeat("e2", 20), strings.Repeat("e3", 20)
 	s.push(portalWeb, "master", days(5), commit{sha: base, authored: days(5)})
@@ -609,6 +643,12 @@ func TestDatasetExcludedProject(t *testing.T) {
 	}
 	if len(d.Products) != 1 || d.Products[0].Key != "kasse" {
 		t.Errorf("products = %+v", d.Products)
+	}
+	// The run without a commit goes with its pipeline's project.
+	for _, r := range d.Runs {
+		if r.PipelineName == "portal-web/master" {
+			t.Errorf("excluded project's run kept: %+v", r)
+		}
 	}
 	if !eqTime(d.Meta.DataStart.Bitbucket, full.Meta.DataStart.Bitbucket) {
 		t.Errorf("data start moved: %v", d.Meta.DataStart.Bitbucket)

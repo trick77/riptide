@@ -19,7 +19,14 @@
 //   phase          required, "STARTED" / "COMPLETED" (this helper emits
 //                  these two; "FINALIZED" is reserved for future use)
 //   status         optional, "SUCCESS" / "FAILURE" / "UNSTABLE" / ...
-//   commit_sha     required, >=7 chars
+//   commit_sha     the commit built, >=7 chars; left out when the build has
+//                  none (it failed before the checkout): the run still counts,
+//                  as red, instead of vanishing
+//   head_sha       optional, PR builds of a merge Jenkins made with the target
+//                  branch: the PR's own head (that merge commit is new on
+//                  every build)
+//   base_sha       optional, with head_sha: the target's tip the merge was
+//                  made onto; head and base are the code a rerun shares
 //   started_at     required, ISO 8601 UTC
 //   finished_at    optional, ISO 8601 UTC
 //   image_refs     optional, every image the run published, full references
@@ -71,20 +78,15 @@ void notifyStarted(final Map args) {
         return
     }
     // Direct Map access (Argument.getOptionalValue rejects null defaults).
-    // `?:` also keeps resolveCommitSha() lazy — `sh 'git rev-parse HEAD'`
-    // only runs when commitSha wasn't supplied.
-    def commitSha = args.commitSha ?: resolveCommitSha()
+    // No workspace fallback here: before the checkout a reused workspace
+    // still holds the previous build's HEAD. STARTED without a commit is fine.
+    def commitSha = args.commitSha ?: resolveCommitSha(false)
     def credentialsId = Argument.getOptionalValue(args, "credentialsId", "RIPTIDE_TOKEN")
     def pipelineName = Argument.getOptionalValue(args, "pipelineName", env.JOB_NAME)
     def runId = Argument.getOptionalValue(args, "runId", env.BUILD_NUMBER)
     def startedAt = Argument.getOptionalValue(args, "startedAt", currentBuildStartedAtIso())
     int timeoutSeconds = Argument.getOptionalValue(args, "timeoutSeconds", 15) as int
     int httpTimeoutSeconds = Argument.getOptionalValue(args, "httpTimeoutSeconds", 10) as int
-
-    if (!commitSha) {
-        warnRiptide("missing commit", "no commitSha and resolveCommitSha() returned null; skipping STARTED")
-        return
-    }
 
     // Status is intentionally omitted on STARTED — the schema treats it as
     // optional and emitting "IN_PROGRESS" would invent a value the rest of
@@ -94,9 +96,9 @@ void notifyStarted(final Map args) {
             pipeline_name: pipelineName,
             run_id       : runId,
             phase        : 'STARTED',
-            commit_sha   : commitSha,
             started_at   : startedAt,
     ]
+    addCommit(body, commitSha, args)
     addActor(body, args)
 
     postEventBestEffort(collectorUrl, credentialsId, body, timeoutSeconds, httpTimeoutSeconds)
@@ -135,21 +137,18 @@ void notifyCompleted(final Map args) {
     int timeoutSeconds = Argument.getOptionalValue(args, "timeoutSeconds", 15) as int
     int httpTimeoutSeconds = Argument.getOptionalValue(args, "httpTimeoutSeconds", 10) as int
 
-    if (!commitSha) {
-        warnRiptide("missing commit", "no commitSha and resolveCommitSha() returned null; skipping COMPLETED")
-        return
-    }
-
+    // A build without a commit (it failed before the checkout) is reported all
+    // the same: skipped, the infrastructure failures would never reach riptide.
     def body = [
             source       : 'jenkins',
             pipeline_name: pipelineName,
             run_id       : runId,
             phase        : 'COMPLETED',
             status       : status,
-            commit_sha   : commitSha,
             started_at   : startedAt,
             finished_at  : finishedAt,
     ]
+    addCommit(body, commitSha, args)
     // Whatever the status: callers add an image once it is pushed, and an
     // UNSTABLE run, or one failing in a later step, still published it.
     // flatten() takes a single String passed as imageRefs as one image
@@ -305,22 +304,119 @@ private void addActor(Map body, final Map args) {
 }
 
 /**
+ * The commit fields: commit_sha when the build has one, and on a PR build
+ * the PR's head as head_sha. Without a commit the event goes out all the
+ * same: a build that failed before its checkout is still a red run.
+ * `headSha:` overrides, like `commitSha:`.
+ */
+private void addCommit(Map body, final String commitSha, final Map args) {
+    def merge = commitSha ? resolveMerge(commitSha) : null
+    def headSha = args.headSha ?: merge?.head
+    def baseSha = args.baseSha ?: merge?.base
+    if (commitSha) {
+        body.commit_sha = commitSha
+    } else {
+        echo "riptide-notify: no commit (failed before the checkout?); sending ${body.phase} without commit_sha"
+    }
+    if (headSha && headSha != commitSha) {
+        body.head_sha = headSha
+        if (baseSha) {
+            body.base_sha = baseSha
+        }
+    }
+}
+
+/**
  * Resolve the commit SHA from the workspace if not supplied explicitly.
  * Prefers `env.GIT_COMMIT` (populated by the Git plugin); falls back to
  * `git rev-parse HEAD` for non-plugin checkouts (e.g. submodule-only,
  * scripted checkouts).
  *
- * @return 40-char SHA, or null if nothing is available
+ * The first GIT_COMMIT seen is kept in env.RIPTIDE_COMMIT_SHA, so COMPLETED
+ * reports the commit the checkout set even from a `post` block without the
+ * workspace, or after another repository's checkout moved GIT_COMMIT. The
+ * rev-parse fallback is never kept: before the checkout a reused workspace
+ * still holds the previous build's HEAD, and COMPLETED must look again once
+ * the checkout ran.
+ *
+ * @param fromWorkspace false skips the rev-parse fallback (STARTED, which may
+ *        run before the checkout)
+ * @return the SHA, or null if nothing is available (no checkout yet, no
+ *         workspace, no agent)
  */
-String resolveCommitSha() {
-    if (env.GIT_COMMIT) {
+String resolveCommitSha(boolean fromWorkspace = true) {
+    if (env.RIPTIDE_COMMIT_SHA) {
+        return env.RIPTIDE_COMMIT_SHA
+    }
+    if (env.GIT_COMMIT ==~ /[0-9a-f]{7,40}/) {
+        env.RIPTIDE_COMMIT_SHA = env.GIT_COMMIT
         return env.GIT_COMMIT
     }
+    if (!fromWorkspace) {
+        return null
+    }
     try {
-        return sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+        def sha = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+        return sha ==~ /[0-9a-f]{7,40}/ ? sha : null
+    } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
+        throw e // the user aborted the build: never swallow that
     } catch (Throwable t) {
         return null
     }
+}
+
+/**
+ * The PR's own head and the target's tip on a multibranch PR build that
+ * checked out a merge of the PR with its target branch (Bitbucket Branch
+ * Source, "merging the pull request with the current target branch
+ * revision"). GIT_COMMIT is then a merge commit Jenkins made itself, with a
+ * new SHA on every build: a rerun of unchanged code looks like new code. Its
+ * second parent is the PR's head, its first the target's tip: together the
+ * code built (the same head on a moved target is other code).
+ *
+ * Only when the first parent is on the target branch (its tip at the
+ * checkout; an older commit of it once a later fetch moved the tip), so a
+ * PR built as its own head (head strategy) whose last commit happens to be
+ * a merge is never mistaken. Null outside PR builds and whenever git cannot
+ * tell. Kept in env.RIPTIDE_MERGE for the commit it was read off, so
+ * COMPLETED reports it without the workspace, and a commit resolved later
+ * (after the checkout) is read again.
+ *
+ * @return [head: sha, base: sha], or null
+ */
+private Map resolveMerge(final String commitSha) {
+    def kept = (env.RIPTIDE_MERGE ?: '').tokenize()
+    if (kept.size() == 3 && kept[0] == commitSha) {
+        return [head: kept[1], base: kept[2]]
+    }
+    def target = (env.CHANGE_TARGET ?: '').toString()
+    if (!env.CHANGE_ID || !target || !(commitSha ==~ /[0-9a-f]{7,40}/) || !(target ==~ /[A-Za-z0-9._\/-]+/)) {
+        return null
+    }
+    try {
+        // Two lines: first parent, second parent; a commit without a second
+        // parent makes git fail, which is the head strategy.
+        def lines = sh(
+                script: "git rev-parse '${commitSha}^1' '${commitSha}^2'",
+                returnStdout: true,
+        ).trim().readLines().collect { it.trim() }
+        if (lines.size() != 2 || !(lines[0] ==~ /[0-9a-f]{40}/) || !(lines[1] ==~ /[0-9a-f]{40}/)) {
+            return null
+        }
+        def onTarget = sh(
+                script: "git merge-base --is-ancestor '${lines[0]}' 'refs/remotes/origin/${target}'",
+                returnStatus: true,
+        ) == 0
+        if (onTarget) {
+            env.RIPTIDE_MERGE = "${commitSha} ${lines[1]} ${lines[0]}"
+            return [head: lines[1], base: lines[0]]
+        }
+    } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
+        throw e // the user aborted the build: never swallow that
+    } catch (Throwable t) {
+        // No second parent, no target ref fetched, no workspace: no head_sha.
+    }
+    return null
 }
 
 /**

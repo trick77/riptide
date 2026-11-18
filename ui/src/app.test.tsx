@@ -1543,7 +1543,12 @@ describe("App", () => {
     const calls = mockFetch((url) => {
       if (url.pathname === "/api/facts") {
         const f = facts();
-        f.runs.rows[1] = { ...f.runs.rows[1], flaky: true };
+        // The commit the backend picked to show, not commit_sha.
+        f.runs.rows[1] = {
+          ...f.runs.rows[1],
+          flaky: true,
+          shown_sha: "e".repeat(40),
+        };
         return f;
       }
       const m = metrics();
@@ -1595,6 +1600,7 @@ describe("App", () => {
     await waitFor(() => expect(factsCalls(calls).at(-1)).toMatch(/&q=flaky$/));
     const runs = (await screen.findByText("#11")).closest("tr")!;
     expect(within(runs).getByText("Flaky")).toBeInTheDocument();
+    expect(within(runs).getByText("eeeeeeee")).toBeInTheDocument();
   });
 
   it("treats a blank search as none", async () => {

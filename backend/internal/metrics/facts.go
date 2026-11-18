@@ -236,12 +236,15 @@ type DeployFact struct {
 
 // RunFact is one row of the run table.
 type RunFact struct {
-	PipelineName string   `json:"pipeline_name"`
-	RunID        string   `json:"run_id"`
-	Kind         string   `json:"kind"`
-	CommitSHA    *string  `json:"commit_sha"`
-	DurationS    *int64   `json:"duration_s"`
-	ImageRefs    []string `json:"image_refs"`
+	PipelineName string  `json:"pipeline_name"`
+	RunID        string  `json:"run_id"`
+	Kind         string  `json:"kind"`
+	CommitSHA    *string `json:"commit_sha"`
+	// ShownSHA is the commit the row shows (shownSHA): a PR build's own head
+	// where CommitSHA is a merge the CI made of it, else CommitSHA.
+	ShownSHA  *string  `json:"shown_sha"`
+	DurationS *int64   `json:"duration_s"`
+	ImageRefs []string `json:"image_refs"`
 	// Status is as the CI sent it, Verdict what it says (see verdict),
 	// Outcome the status when it plainly says so (see runOutcome).
 	Status  *string `json:"status"`
@@ -532,11 +535,11 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 			if isFlaky(r) {
 				status += " " + flakyTerm.both()
 			}
-			return m.match(append([]*string{&r.PipelineName, r.Repo, r.CommitSHA, r.Status, &status, &kind, r.BuildType}, strs(r.ImageRefs)...)...)
+			return m.match(append([]*string{&r.PipelineName, r.Repo, r.CommitSHA, r.HeadSHA, r.BaseSHA, r.Status, &status, &kind, r.BuildType}, strs(r.ImageRefs)...)...)
 		}, func(r dataset.Run) RunFact {
 			return RunFact{
 				PipelineName: r.PipelineName, RunID: r.RunID, Kind: RunKind(r, ds.Meta.BuildTypeFrom),
-				CommitSHA: r.CommitSHA, DurationS: r.DurationS, ImageRefs: r.ImageRefs, Status: r.Status,
+				CommitSHA: r.CommitSHA, ShownSHA: shownSHA(r), DurationS: r.DurationS, ImageRefs: r.ImageRefs, Status: r.Status,
 				Verdict: verdict(r), Outcome: runOutcome(r), GitOps: gitops(r), Flaky: isFlaky(r),
 			}
 		}),

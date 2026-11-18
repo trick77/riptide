@@ -21,6 +21,41 @@ import (
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
+// migratedBefore applies every migration ordered before name to pool's
+// schema and returns a function applying one by name: a data migration's
+// test seeds the rows it found, then runs it.
+func migratedBefore(t *testing.T, pool *pgxpool.Pool, name string) func(string) {
+	t.Helper()
+	apply := func(n string) {
+		t.Helper()
+		body, err := migrationFS.ReadFile("migrations/" + n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(context.Background(), string(body)); err != nil {
+			t.Fatalf("%s: %v", n, err)
+		}
+	}
+	files, err := migrationFS.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if f.Name() < name {
+			apply(f.Name())
+		}
+	}
+	return apply
+}
+
+// deref is s, "" for nil.
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 // testStore opens a migrated store on a fresh schema, plus a raw pool on the
 // same schema for assertions.
 func testStore(t *testing.T) (*Store, *pgxpool.Pool) {
@@ -295,7 +330,8 @@ func TestInsertsDedupeOnDeliveryID(t *testing.T) {
 	}
 	pl := &parse.PipelineDraft{
 		DeliveryID: "jenkins#p#1#COMPLETED", Source: "jenkins", PipelineName: "p", RunID: "1", Phase: "COMPLETED",
-		CommitSHA: "abc1234", ImageRefs: []string{"reg/acme/p:1.0"}, StartedAt: now, FinishedAt: ptr(now.Add(210 * time.Second)),
+		CommitSHA: ptr("abc1234"), HeadSHA: ptr("def4567"), ImageRefs: []string{"reg/acme/p:1.0"}, StartedAt: now,
+		FinishedAt: ptr(now.Add(210 * time.Second)),
 		OccurredAt: now, Payload: []byte(`{}`),
 	}
 	ar := &parse.ArgoCDDraft{
@@ -331,8 +367,16 @@ func TestInsertsDedupeOnDeliveryID(t *testing.T) {
 		t.Errorf("automation = %v %v", automated, source)
 	}
 	var dur int
-	if err := pool.QueryRow(ctx, `SELECT duration_seconds FROM pipeline_events`).Scan(&dur); err != nil || dur != 210 {
-		t.Errorf("pipeline duration = %d, %v", dur, err)
+	var head string
+	if err := pool.QueryRow(ctx, `SELECT duration_seconds, head_sha FROM pipeline_events`).Scan(&dur, &head); err != nil ||
+		dur != 210 || head != "def4567" {
+		t.Errorf("pipeline duration = %d, head %q, %v", dur, head, err)
+	}
+	// A run without a commit is stored all the same.
+	nc := *pl
+	nc.DeliveryID, nc.RunID, nc.CommitSHA, nc.HeadSHA = "jenkins#p#2#COMPLETED", "2", nil, nil
+	if ok, err := s.InsertPipeline(ctx, &nc, "checkout"); err != nil || !ok {
+		t.Errorf("no-commit insert = %v, %v", ok, err)
 	}
 	if err := pool.QueryRow(ctx, `SELECT duration_seconds FROM argocd_events`).Scan(&dur); err != nil || dur != 45 {
 		t.Errorf("argocd duration = %d, %v", dur, err)
@@ -578,7 +622,7 @@ func TestInsertPipelineAgentStartedAt(t *testing.T) {
 	ctx := context.Background()
 	at := time.Date(2026, 4, 28, 10, 5, 30, 0, time.UTC)
 	d := &parse.PipelineDraft{DeliveryID: "x", Source: "jenkins", PipelineName: "p", RunID: "1", Phase: "STARTED",
-		CommitSHA: "abc1234", StartedAt: at.Add(-time.Minute), AgentStartedAt: &at, OccurredAt: at, Payload: []byte(`{}`)}
+		CommitSHA: ptr("abc1234"), StartedAt: at.Add(-time.Minute), AgentStartedAt: &at, OccurredAt: at, Payload: []byte(`{}`)}
 	if _, err := s.InsertPipeline(ctx, d, "t"); err != nil {
 		t.Fatal(err)
 	}
@@ -615,7 +659,7 @@ func TestInsertPipelineBuildType(t *testing.T) {
 	ctx := context.Background()
 	release := "release"
 	d := &parse.PipelineDraft{DeliveryID: "x", Source: "jenkins", PipelineName: "p", RunID: "1", Phase: "COMPLETED",
-		CommitSHA: "abc1234", BuildType: &release, StartedAt: time.Now(), OccurredAt: time.Now(), Payload: []byte(`{}`)}
+		CommitSHA: ptr("abc1234"), BuildType: &release, StartedAt: time.Now(), OccurredAt: time.Now(), Payload: []byte(`{}`)}
 	if _, err := s.InsertPipeline(ctx, d, "t"); err != nil {
 		t.Fatal(err)
 	}
@@ -629,7 +673,7 @@ func TestModifiedAtTrigger(t *testing.T) {
 	s, pool := testStore(t)
 	ctx := context.Background()
 	d := &parse.PipelineDraft{DeliveryID: "x", Source: "jenkins", PipelineName: "p", RunID: "1", Phase: "S",
-		CommitSHA: "abc1234", StartedAt: time.Now(), OccurredAt: time.Now(), Payload: []byte(`{}`)} // nil ImageRefs: stored as '{}'
+		CommitSHA: ptr("abc1234"), StartedAt: time.Now(), OccurredAt: time.Now(), Payload: []byte(`{}`)} // nil ImageRefs: stored as '{}'
 	if _, err := s.InsertPipeline(ctx, d, "t"); err != nil {
 		t.Fatal(err)
 	}
@@ -647,9 +691,9 @@ func TestRecentActivity(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 	_, _ = s.InsertPipeline(ctx, &parse.PipelineDraft{DeliveryID: "1", Source: "jenkins", PipelineName: "build",
-		RunID: "1", Phase: "S", CommitSHA: "abc1234", ImageRefs: []string{}, StartedAt: now, OccurredAt: now, Payload: []byte(`{}`)}, "checkout")
+		RunID: "1", Phase: "S", CommitSHA: ptr("abc1234"), ImageRefs: []string{}, StartedAt: now, OccurredAt: now, Payload: []byte(`{}`)}, "checkout")
 	_, _ = s.InsertPipeline(ctx, &parse.PipelineDraft{DeliveryID: "2", Source: "jenkins", PipelineName: "build",
-		RunID: "2", Phase: "S", CommitSHA: "abc1234", ImageRefs: []string{}, StartedAt: now, OccurredAt: now, Payload: []byte(`{}`)}, "checkout")
+		RunID: "2", Phase: "S", CommitSHA: ptr("abc1234"), ImageRefs: []string{}, StartedAt: now, OccurredAt: now, Payload: []byte(`{}`)}, "checkout")
 	_, _ = s.InsertArgoCD(ctx, &parse.ArgoCDDraft{DeliveryID: "a", AppName: "app-prod", Revision: "abc1234",
 		OccurredAt: now, Payload: []byte(`{}`)}, "platform")
 

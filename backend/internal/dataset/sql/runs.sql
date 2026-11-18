@@ -5,7 +5,9 @@
 --
 -- The run's repository is the one Bitbucket saw its commit in: pipeline and
 -- Bitbucket rows join on the App-repo commit SHA (docs/metrics.md). One repository
--- per run, however many events carry the SHA (a push and the PR's events).
+-- per run, however many events carry the SHA (a push and the PR's events). A
+-- PR build of a merge the CI made itself reports a commit Bitbucket never saw:
+-- its head_sha, the PR's own head, is looked up as well.
 --
 -- `gitops` flags a run in a GitOps repo, as in prs.sql: a stage promotion's
 -- check is mechanical, not the team's build; Go leaves it out of the build
@@ -18,6 +20,8 @@ SELECT p.source,
        p.build_type,
        p.run_id,
        p.commit_sha,
+       p.head_sha,
+       p.base_sha,
        p.status,
        p.started_at,
        COALESCE(p.agent_started_at, s.agent_started_at) AS agent_started_at,
@@ -31,8 +35,9 @@ FROM pipeline_events p
 LEFT JOIN LATERAL (
   SELECT b.repo_full_name
   FROM bitbucket_events b
-  WHERE b.commit_sha = p.commit_sha AND b.repo_full_name IS NOT NULL
-  ORDER BY b.occurred_at
+  WHERE b.commit_sha IN (p.commit_sha, p.head_sha) AND b.repo_full_name IS NOT NULL
+  -- The head first: the code built, wherever else its merge was sighted.
+  ORDER BY b.commit_sha IS NOT DISTINCT FROM p.head_sha DESC, b.occurred_at
   LIMIT 1
 ) r ON true
 -- The agent time is known when the run gets its agent, so a sender may post
