@@ -233,7 +233,7 @@ export const en = {
         data_gap:
           "The source stopped reporting before the period's end; nothing about it says anything about the work.",
         pr_jam:
-          "Three or more PRs open a week or longer. Why they wait is not in the data: a freeze, a dependency, holidays or nobody feeling responsible.",
+          "Four or more PRs open a week or longer, drafts not counted. Why they wait is not in the data: a freeze, a dependency, holidays or nobody feeling responsible.",
         slow_stage: "The stage with the longest median to production.",
         slower_build:
           "The median green run takes one and a half times as long as last period or longer: slower than the repo itself, not than others. What inside the build got slower is not in the data.",
@@ -544,7 +544,7 @@ export const en = {
   },
   open: {
     title: "Open PRs: where do they pile up?",
-    sub: "As of {{at}}, whenever opened. A PR open {{days}} days or more counts as long open; {{min}} long-open ones in the same repo are a jam. GitOps repos and bots left out.",
+    sub: "As of {{at}}, whenever opened. A PR open {{days}} days or more counts as long open; {{min}} long-open ones in the same repo are a jam; a draft never, it may wait. GitOps repos and bots left out.",
     jammed: {
       label: "Jammed repos",
       question:
@@ -595,7 +595,7 @@ export const en = {
         "several long-open PRs in the same repo wait for a first review: a reviewer is missing there, or the PRs are too big.",
       lever:
         "name reviewers when opening, bring old PRs up in the daily, close PRs nobody needs anymore.",
-      def: "PRs open at the end of the period: opened before it, neither merged, declined nor deleted. Age from the PR's creation date, long open from {{days}} days, a jam from {{min}} long-open ones in the same repo. Per repo the median age, never the oldest: one alone decides that.",
+      def: "PRs open at the end of the period: opened before it, neither merged, declined nor deleted. Age from the PR's creation date, long open from {{days}} days, a jam from {{min}} long-open ones in the same repo. A draft is never long open and never forgotten: it waits on its author. Per repo the median age, never the oldest: one alone decides that.",
       basis_one: "{{count}} open PR, as of {{at}}.",
       basis_other: "{{count}} open PRs, as of {{at}}.",
       coverage:

@@ -144,6 +144,19 @@ func TestDraftToReadyIsSyntheticReadyForReview(t *testing.T) {
 	}
 }
 
+// A ready PR turned back into a draft is stored: its latest event must say
+// draft, or it counts as long open until its next event.
+func TestReadyToDraftIsSyntheticBackToDraft(t *testing.T) {
+	body := fixture(t, "bitbucket_pr_modified_draft_to_ready.json")
+	body["previousDraft"] = false
+	m(body["pullRequest"])["draft"] = true
+	body["actor"] = map[string]any{"name": "carol", "displayName": "Carol Maintainer", "slug": "carol"}
+	d := mustDraft(t, body, "pr:modified")
+	if d.EventType != BackToDraft || *d.PRID != 42 || str(d.Author) != "carol" {
+		t.Errorf("draft = %+v", d)
+	}
+}
+
 func TestDraftToReadyUsesActorAsAuthor(t *testing.T) {
 	body := fixture(t, "bitbucket_pr_modified_draft_to_ready.json")
 	body["actor"] = map[string]any{"name": "carol", "displayName": "Carol Maintainer", "slug": "carol"}
@@ -155,13 +168,12 @@ func TestDraftToReadyUsesActorAsAuthor(t *testing.T) {
 func TestPRModifiedWithoutFlipIsSkipped(t *testing.T) {
 	t.Run("title only", func(t *testing.T) {
 		s := mustSkip(t, fixture(t, "bitbucket_pr_modified_title_only.json"), "pr:modified")
-		if s.Reason != "pr:modified without draft→ready flip" || s.EventType != "pr:modified" || str(s.RepoFullName) != "acme/payments-api" {
+		if s.Reason != "pr:modified without a draft flip" || s.EventType != "pr:modified" || str(s.RepoFullName) != "acme/payments-api" {
 			t.Errorf("skip = %+v", s)
 		}
 	})
-	t.Run("ready to draft", func(t *testing.T) {
+	t.Run("draft stays draft", func(t *testing.T) {
 		body := fixture(t, "bitbucket_pr_modified_draft_to_ready.json")
-		body["previousDraft"] = false
 		m(body["pullRequest"])["draft"] = true
 		mustSkip(t, body, "pr:modified")
 	})

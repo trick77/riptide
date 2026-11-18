@@ -226,7 +226,7 @@ export const de = {
         data_gap:
           "Die Quelle meldet seit vor dem Periodenende nichts; ihre Zahlen sagen nichts über die Arbeit.",
         pr_jam:
-          "Drei oder mehr PRs seit einer Woche oder länger offen. Warum sie liegen, steht nicht in den Daten: ein Freeze, eine Abhängigkeit, Ferien oder niemand fühlt sich zuständig.",
+          "Vier oder mehr PRs seit einer Woche oder länger offen, Entwürfe nicht gezählt. Warum sie liegen, steht nicht in den Daten: ein Freeze, eine Abhängigkeit, Ferien oder niemand fühlt sich zuständig.",
         slow_stage: "Die Etappe mit dem längsten Median bis Produktion.",
         slower_build:
           "Der grüne Median-Lauf dauert anderthalbmal so lang wie in der Vorperiode oder länger: langsamer als das Repo selbst, nicht als andere. Was im Build langsamer wurde, steht nicht in den Daten.",
@@ -538,7 +538,7 @@ export const de = {
   },
   open: {
     title: "Offene PRs: wo staut es sich?",
-    sub: "Stand {{at}}, egal wann geöffnet. Ab {{days}} Tagen offen gilt ein PR als lang offen, ab {{min}} lang offenen im selben Repo staut es sich. Ohne GitOps-Repos und Bots.",
+    sub: "Stand {{at}}, egal wann geöffnet. Ab {{days}} Tagen offen gilt ein PR als lang offen, ab {{min}} lang offenen im selben Repo staut es sich; ein Entwurf nie, er darf liegen. Ohne GitOps-Repos und Bots.",
     jammed: {
       label: "Repos im Stau",
       question:
@@ -589,7 +589,7 @@ export const de = {
         "mehrere lang offene PRs im selben Repo auf ein erstes Review warten: dort fehlt ein Reviewer, oder die PRs sind zu gross.",
       lever:
         "Reviewer beim Öffnen nennen, alte PRs im Daily ansprechen, PRs schliessen, die niemand mehr braucht.",
-      def: "PRs, die am Ende des Zeitraums offen waren: geöffnet davor, weder gemerged, abgelehnt noch gelöscht. Alter ab dem Erstelldatum des PRs, lang offen ab {{days}} Tagen, Stau ab {{min}} lang offenen im selben Repo. Pro Repo das Median-Alter, nie der älteste: einer allein bestimmt ihn.",
+      def: "PRs, die am Ende des Zeitraums offen waren: geöffnet davor, weder gemerged, abgelehnt noch gelöscht. Alter ab dem Erstelldatum des PRs, lang offen ab {{days}} Tagen, Stau ab {{min}} lang offenen im selben Repo. Ein Entwurf ist nie lang offen und nie vergessen: er wartet auf seinen Autor. Pro Repo das Median-Alter, nie der älteste: einer allein bestimmt ihn.",
       basis_one: "{{count}} offener PR, Stand {{at}}.",
       basis_other: "{{count}} offene PRs, Stand {{at}}.",
       coverage:

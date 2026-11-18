@@ -28,6 +28,12 @@ var reviewerActivityEvents = map[string]bool{
 // drafts. The raw eventKey survives on payload.eventKey.
 const ReadyForReview = "pr:ready_for_review"
 
+// BackToDraft is the synthetic event type for a `pr:modified` delivery
+// that turns a ready PR back into a draft: without it, the PR's latest
+// stored event still says ready, and it counts as long open and jammed
+// until its next event.
+const BackToDraft = "pr:back_to_draft"
+
 // maxDeliveryHeader bounds a header-supplied delivery id.
 const maxDeliveryHeader = 200
 
@@ -125,15 +131,19 @@ func Bitbucket(raw []byte, h BitbucketHeaders, now time.Time) (*BitbucketDraft, 
 	if eventType == "pr:modified" {
 		wasDraft, ok1 := body["previousDraft"].(bool)
 		isDraft, ok2 := pr["draft"].(bool)
-		if !ok1 || !ok2 || !wasDraft || isDraft {
-			return skip("pr:modified without draft→ready flip", repo)
+		switch {
+		case !ok1 || !ok2 || wasDraft == isDraft:
+			return skip("pr:modified without a draft flip", repo)
+		case wasDraft:
+			eventType = ReadyForReview
+		default:
+			eventType = BackToDraft
 		}
-		eventType = ReadyForReview
 	}
 
 	var branch, commit, author, displayName string
 	serviceAccount, isRevert := false, false
-	actorAuthored := reviewerActivityEvents[eventType] || eventType == ReadyForReview
+	actorAuthored := reviewerActivityEvents[eventType] || eventType == ReadyForReview || eventType == BackToDraft
 
 	if len(pr) > 0 {
 		fromRef := asMap(pr["fromRef"])

@@ -944,7 +944,7 @@ components:
       properties:
         at: { $ref: "#/components/schemas/Instant" }
         long_days: { type: integer, description: "Open this many days or more is long open (7)." }
-        jam_min: { type: integer, description: "A repo with this many long-open PRs or more is jammed (3)." }
+        jam_min: { type: integer, description: "A repo with this many long-open PRs or more is jammed (4)." }
         inactive_days: { type: integer, description: "No event this many days or more is inactive (30)." }
         open: { type: integer }
         long: { type: integer }

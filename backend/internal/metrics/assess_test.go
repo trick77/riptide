@@ -65,7 +65,7 @@ func assessFixture(t *testing.T, h History) Assessment {
 	}
 	jam := func(end time.Time) []dataset.OpenPR {
 		var out []dataset.OpenPR
-		for i, d := range []float64{9, 10, 12} {
+		for i, d := range []float64{9, 10, 12, 14} {
 			out = append(out, openPR(func(o *dataset.OpenPR) {
 				o.PRID, o.OpenedAt, o.ReadyAt, o.LastEventAt = int64(30+i), before(end, d), ptr(before(end, d)), before(end, 1)
 			}))
@@ -138,8 +138,8 @@ func TestAssessSignals(t *testing.T) {
 		}
 	}
 	jam := signal(a, "pr_jam:kasse/kasse-api")
-	if jam == nil || jam.Tone != ToneAttention || jam.Waiting == nil || jam.Waiting.FirstReview != 3 {
-		t.Fatalf("jam = %+v, want attention (jammed before too), 3 waiting on a first review; have %v", jam, ids)
+	if jam == nil || jam.Tone != ToneAttention || jam.Waiting == nil || jam.Waiting.FirstReview != 4 {
+		t.Fatalf("jam = %+v, want attention (jammed before too), 4 waiting on a first review; have %v", jam, ids)
 	}
 	slow := signal(a, "steady_slow:main:kasse/kasse-web")
 	if signal(a, "steady_slow:main:kasse/kasse-api") != nil {

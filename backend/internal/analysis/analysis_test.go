@@ -33,7 +33,7 @@ var zurich = func() *time.Location {
 // now is a Thursday of KW 46: the last closed week is KW 45.
 var now = time.Date(2026, 11, 12, 12, 0, 0, 0, zurich)
 
-// jammed is a dataset whose repo kasse/kasse-api has three PRs open a week
+// jammed is a dataset whose repo kasse/kasse-api has four PRs open a week
 // or longer at the period's end, all waiting on a first review.
 func jammed(_ context.Context, team string, p metrics.Period) (*dataset.Dataset, error) {
 	ds := &dataset.Dataset{
@@ -42,7 +42,7 @@ func jammed(_ context.Context, team string, p metrics.Period) (*dataset.Dataset,
 		Reviews:  []dataset.Review{},
 		Products: []dataset.Product{{Key: "kasse", Repos: []string{"kasse/kasse-api"}, Apps: []string{}}},
 	}
-	for i, days := range []int{9, 10, 12} {
+	for i, days := range []int{9, 10, 12, 14} {
 		at := p.To.AddDate(0, 0, -days)
 		ds.OpenPRs = append(ds.OpenPRs, dataset.OpenPR{
 			Repo: "kasse/kasse-api", Project: "kasse", PRID: int64(i + 1), OpenedAt: at, ReadyAt: &at,

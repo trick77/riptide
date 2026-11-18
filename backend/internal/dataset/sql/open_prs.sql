@@ -95,7 +95,7 @@ details AS (
          -- (pushes, edits), never the reviewers'.
          coalesce(bool_or(e.is_automated) FILTER (WHERE e.event_type = 'pr:opened'),
                   bool_or(e.is_automated) FILTER (WHERE e.event_type IN
-                      ('pr:modified', 'pr:ready_for_review', 'pr:from_ref_updated', 'pr:merged')),
+                      ('pr:modified', 'pr:ready_for_review', 'pr:back_to_draft', 'pr:from_ref_updated', 'pr:merged')),
                   false) AS automated,
          -- change_type means something on PR events only, and every PR
          -- event stores the source branch.

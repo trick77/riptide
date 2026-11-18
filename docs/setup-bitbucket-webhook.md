@@ -59,10 +59,11 @@ The command is idempotent (rerun after edits), supports `--dry-run` and
 
 The **Modified** trigger is required for DX Core 4 pickup-time accuracy on
 PRs opened as drafts: BBS emits `pr:modified` on title / description /
-target / draft changes, and the parser keeps only the draft→ready flips
-(re-typed as a synthetic `pr:ready_for_review` row) — that's the
-clock-start signal for the pickup metric documented in
-[metrics.md](metrics.md#pickup-time-query). The
+target / draft changes, and the parser keeps only the draft flips: draft→ready
+(re-typed as a synthetic `pr:ready_for_review` row) is the clock-start signal
+for the pickup metric documented in
+[metrics.md](metrics.md#pickup-time-query); ready→draft (`pr:back_to_draft`)
+takes the PR out of the long-open count. The
 **Reviewer updated** trigger covers silent reviewer-status changes
 (adding / removing reviewers without a comment) that also feed the
 pickup metric.

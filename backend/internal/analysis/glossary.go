@@ -40,7 +40,7 @@ var kinds = map[string]kindGloss{
 		[]string{LeverCheckSource},
 	},
 	metrics.SignalPRJam: {
-		"Three or more PRs open a week or longer in one repo. 'waiting' counts what those long-open PRs wait on (first_review, review, changes, merge, draft), not every open PR. Why they wait is not in the data: a merge freeze, a release date, a dependency, holidays or nobody feeling responsible are all possible.",
+		"Four or more PRs open a week or longer in one repo, drafts never counted. 'waiting' counts what those long-open PRs wait on (first_review, review, changes, merge, draft), not every open PR. Why they wait is not in the data: a merge freeze, a release date, a dependency, holidays or nobody feeling responsible are all possible.",
 		[]string{LeverWalkPRs, LeverAskWhyWaiting},
 	},
 	metrics.SignalStage: {
@@ -111,7 +111,7 @@ var labels = map[string]string{
 	"lead_time_p50":   "median time from commit to production; shorter is better",
 	"review_p50":      "median time from PR ready to approval; shorter is better",
 	"within_day":      "share of PRs merged within a day of opening; higher is better",
-	"jammed_repos":    "repos with three or more PRs open a week or longer; fewer is better",
+	"jammed_repos":    "repos with four or more PRs open a week or longer; fewer is better",
 	"build_success":   "share of a run kind's runs that succeeded; higher is better",
 	"merged_per_week": "human PRs merged per week, the team's throughput; more is better",
 	"wip_weeks":       "open PRs over PRs merged per week: weeks of work standing open; fewer is better",

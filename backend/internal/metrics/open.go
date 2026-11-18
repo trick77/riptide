@@ -16,11 +16,12 @@ const (
 	// not measured (2026-11-15: open "for days or even a week++" is the
 	// congestion to see).
 	OpenLongDays = 7
-	// OpenJamMin: a repo with this many long-open PRs is jammed. One or two
+	// OpenJamMin: a repo with this many long-open PRs is jammed. Up to three
 	// are single PRs left lying, not a queue, and a PR whose close event
 	// Bitbucket never delivered (it happens, 2026-11-16) is one more long
-	// open PR: alone it never makes a jam. Chosen, not measured.
-	OpenJamMin = 3
+	// open PR: alone it never makes a jam. Chosen, not measured; 3 until
+	// 2026-11-18 (user: raised to 4).
+	OpenJamMin = 4
 	// OpenInactiveDays: an open PR with no event this many days is
 	// inactive, counted apart, not open. riptide cannot tell a lost close
 	// event from a PR nobody touches; without this, the lost ones pile up
@@ -158,9 +159,16 @@ func openIdle(pr dataset.OpenPR, at time.Time) float64 {
 	return max(at.Sub(pr.LastEventAt).Seconds(), 0)
 }
 
-// openInactive: no event for OpenInactiveDays.
+// openInactive: no event for OpenInactiveDays. Never a draft: a draft may
+// lie as long as its author wants (user, 2026-11-18).
 func openInactive(pr dataset.OpenPR, at time.Time) bool {
-	return openIdle(pr, at) >= OpenInactiveDays*24*60*60
+	return !pr.Draft && openIdle(pr, at) >= OpenInactiveDays*24*60*60
+}
+
+// openLong: open OpenLongDays or more, waiting on the team. Never a draft:
+// it waits on its author, so it is no congestion and makes no jam.
+func openLong(pr dataset.OpenPR, at time.Time) bool {
+	return !pr.Draft && openAge(pr, at) >= OpenLongDays*24*60*60
 }
 
 // openPRs is the dataset's PRs open at its end, for the page's filter.
@@ -176,7 +184,6 @@ func openPRs(ds *dataset.Dataset, f filter) []dataset.OpenPR {
 
 func openSection(ds *dataset.Dataset, f filter) OpenPRs {
 	at := ds.Meta.To
-	long := float64(OpenLongDays * 24 * 60 * 60)
 	out := OpenPRs{At: at, LongDays: OpenLongDays, JamMin: OpenJamMin, InactiveDays: OpenInactiveDays,
 		Repos: []OpenRepo{}}
 	var ages []float64
@@ -201,7 +208,7 @@ func openSection(ds *dataset.Dataset, f filter) OpenPRs {
 		r.row.Open++
 		out.Waiting.add(on)
 		r.row.Waiting.add(on)
-		if age >= long {
+		if openLong(pr, at) {
 			out.Long++
 			r.row.Long++
 			out.LongWaiting.add(on)
