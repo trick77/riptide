@@ -488,7 +488,6 @@ export const en = {
     lead: "The time to the user, split into stages.",
     fwLeadTime: "Change lead time, broken down",
     reviewTitle: "Review: fast, but how thorough?",
-    reviewSub: "PRs by people only.",
     review: {
       label: "Review time",
       question: "How long does a PR wait for its first approval?",

@@ -482,7 +482,6 @@ export const de = {
     lead: "Die Zeit bis zum Nutzer, aufgeteilt in Etappen.",
     fwLeadTime: "Change lead time, aufgeschlüsselt",
     reviewTitle: "Review: schnell, aber wie gründlich?",
-    reviewSub: "Nur PRs von Menschen.",
     review: {
       label: "Review-Zeit",
       question: "Wie lange wartet ein PR auf das erste Approval?",

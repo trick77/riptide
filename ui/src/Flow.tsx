@@ -308,7 +308,7 @@ export function Flow({ m, why, onWhy, onFacts }: Props) {
       />
 
       <Card className="mt-3">
-        <CardHead title={t("flow.reviewTitle")} sub={t("flow.reviewSub")} />
+        <CardHead title={t("flow.reviewTitle")} />
         <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-3">
           <Tile
             label={t("flow.review.label")}
