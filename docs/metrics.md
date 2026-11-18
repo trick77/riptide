@@ -452,11 +452,13 @@ the team's: a kind mixes toolchains, and against the team a UI build with
 Playwright smoke tests is always slow while a Gradle repo that doubled
 hides. A repo whose median takes at least 1.5 times its previous one is
 slow; one whose failure rate is at least twice its previous one and 5
-points above it, with 2 failed runs or more, is flaky (at most halfway from
-the previous rate to 100 %, or a repo failing most runs could never get
-flaky); both from 10 runs in each period on. A repo new to the kind, or
+points above it, with 2 failed runs or more, is failing more (at most
+halfway from the previous rate to 100 %, or a repo failing most runs could
+never be flagged); both from 10 runs in each period on. A trend, not
+flakiness: a repo steadily red a third of the time is never flagged. A
+repo new to the kind, or
 without enough runs, or before the run data covers the previous period, is
-not compared; the kind counts the repos that got slower or flakier instead
+not compared; the kind counts the repos that got slower or fail more instead
 of comparing its mixed median. A repo steady at 25 minutes is never slow
 against itself, so each kind also lists its 5 slowest repos by median,
 outliers aside, from 3 runs with a verdict and a duration on, flagged or
@@ -473,7 +475,7 @@ Each kind's heatmap gives those repo rows, plus one row for the repos past
 the cut, a cell per week, bucketed as the kind's weekly rate: runs and
 failures counted as in the row, outliers included, and a class the backend
 picks: none under 3 runs (no verdict, hatched), 0 without a failure, then
-under 10 %, 10–20 %, 20–40 % and 40 % or more. A flaky repo shows as a red
+under 10 %, 10–20 %, 20–40 % and 40 % or more. A repo failing more shows as a red
 row, a shared outage as a red column. Starting values, not measured.
 A run of a commit Bitbucket never saw counts with the repository its
 pipeline is named after. A run succeeded on SUCCESS (Jenkins), Succeeded
@@ -512,7 +514,7 @@ against the same number before. `metrics.Assess` raises the signals:
   own previous period (1.5 times its median, as the hotspots flag it);
 - a steady slow build: among a kind's 3 slowest repos in both periods and
   slower than the kind's median. No factor, since a kind mixes toolchains;
-- flaky repos, as the hotspots flag them;
+- repos failing more, as the hotspots flag them;
 - a notable change: a directed team number past 25 % (5 points for a
   share), the review time's worsening split by repo. That covers deploys,
   lead time, review, within-day, jammed repos, build success per kind,

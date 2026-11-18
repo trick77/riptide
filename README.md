@@ -32,7 +32,7 @@ gateway. Config is a JSON file changed by pull request, not an admin UI.
   time, deploy success), Flow (where a change waits, from first commit to
   prod, open PRs, review thoroughness), Build (CI success and duration per
   kind of run, where the CI time goes per repo, longest and stuck builds,
-  repos that got slower or flakier than before), Deploys (how evenly it
+  repos that got slower or fail more often than before), Deploys (how evenly it
   ships), Work mix, Costs (noergler review spend), Data (the PRs, deploys and
   runs behind every number, searchable) and Frameworks (which number belongs
   to DORA, DX Core 4, SPACE, DevEx or Flow)

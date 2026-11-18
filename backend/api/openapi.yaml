@@ -844,12 +844,12 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [kind, success, slower, flakier, compared]
+            required: [kind, success, slower, failing_more, compared]
             properties:
               kind: { $ref: "#/components/schemas/RunKind" }
               success: { $ref: "#/components/schemas/Change" }
               slower: { type: integer, description: Repos of the kind flagged slow (see Hotspots). }
-              flakier: { type: integer, description: Repos of the kind flagged flaky. }
+              failing_more: { type: integer, description: Repos of the kind flagged failing more. }
               compared:
                 type: integer
                 description: Repos of the kind with enough runs in both periods to compare, every one, not only the listed.
@@ -1384,23 +1384,25 @@ components:
         counts as neither failure nor run. An outlier counts as a run and in
         failure rates, but in no duration or wasted time.
       additionalProperties: false
-      required: [min_runs, slow_factor, flaky_factor, flaky_min_points, flaky_min_failures, outlier_factor,
+      required: [min_runs, slow_factor, failing_more_factor, failing_more_min_points, failing_more_min_failures,
+                 outlier_factor,
                  outlier_min_s, outlier_repo_min_runs, slowest_min_runs, kinds, outliers, outlier_count,
                  outlier_groups, heat_min_runs, heat_steps, heat_classes]
       properties:
         min_runs: { type: integer, description: "Runs a repo needs in a kind, in both periods, to be flagged." }
         slow_factor: { type: number, description: A repo median this many times its previous one is slow. }
-        flaky_factor:
+        failing_more_factor:
           type: number
           description: |
             A failure rate this many times the repo's previous one and at
-            least `flaky_min_points` above it is flaky, at most halfway from
-            the previous one to 100 %, with `flaky_min_failures` failed runs
-            or more.
-        flaky_min_points:
+            least `failing_more_min_points` above it is failing more, at most
+            halfway from the previous one to 100 %, with
+            `failing_more_min_failures` failed runs or more. A trend, not
+            flakiness.
+        failing_more_min_points:
           type: number
-          description: Points of 0..1 a flaky repo's failure rate is at least above its previous one.
-        flaky_min_failures: { type: integer, description: Failed runs a flaky repo has at least. }
+          description: Points of 0..1 a flagged repo's failure rate is at least above its previous one.
+        failing_more_min_failures: { type: integer, description: Failed runs a flagged repo has at least. }
         outlier_factor:
           type: number
           description: |
@@ -1454,7 +1456,7 @@ components:
               repos:
                 type: array
                 description: |
-                  A row per repo with a counted run: the flaky ones by wasted
+                  A row per repo with a counted run: those failing more by wasted
                   CI time, then the slow ones by factor, then the rest by
                   wasted time and median; the top 8 and every flagged one.
                 items: { $ref: "#/components/schemas/RepoHotspot" }
@@ -1572,7 +1574,7 @@ components:
       description: One repo of a kind against its own runs of the kind in the previous period.
       additionalProperties: false
       required: [repo, runs, duration, waiting, building, duration_change, factor, slow, failures, failure_rate,
-                 failure_change, wasted_seconds, flaky, ci_seconds, compared, prev_complete,
+                 failure_change, wasted_seconds, failing_more, ci_seconds, compared, prev_complete,
                  plotted]
       properties:
         repo: { type: string }
@@ -1606,7 +1608,7 @@ components:
           $ref: "#/components/schemas/Change"
           description: The failure rate against the repo's previous one, both over `min_runs` runs or more.
         wasted_seconds: { $ref: "#/components/schemas/Seconds" }
-        flaky: { type: boolean }
+        failing_more: { type: boolean, description: "The failure rate against the previous one, see `failing_more_factor`." }
         ci_seconds:
           $ref: "#/components/schemas/Seconds"
           description: |
@@ -2036,7 +2038,7 @@ components:
         id: { type: string }
         kind:
           type: string
-          enum: [data_gap, pr_jam, slow_stage, slower_build, steady_slow, flaky, change, bottleneck_moved,
+          enum: [data_gap, pr_jam, slow_stage, slower_build, steady_slow, failing_more, change, bottleneck_moved,
                  throughput_instability, agent_wait, shared_stall, inactive_prs, resync_share, resolved, question]
         tone: { type: string, enum: [gate, attention, hint, good, talk] }
         source: { type: string, enum: [bitbucket, pipeline, argocd, noergler] }

@@ -171,11 +171,11 @@ func TestAssessHistory(t *testing.T) {
 	a := assessFixture(t, History{
 		Seen: map[string]int{"pr_jam:kasse/kasse-api": 2},
 		Latest: map[string]string{
-			"pr_jam:kasse/kasse-api":         ToneAttention,
-			"flaky:main:kasse/kasse-cli":     ToneAttention,
-			"change:within_day":              ToneGood, // a gone improvement is no news
-			"change:open_jammed":             ToneAttention,
-			"steady_slow:main:kasse/kasse-x": ToneHint, // no runs now: nothing to show
+			"pr_jam:kasse/kasse-api":            ToneAttention,
+			"failing_more:main:kasse/kasse-cli": ToneAttention,
+			"change:within_day":                 ToneGood, // a gone improvement is no news
+			"change:open_jammed":                ToneAttention,
+			"steady_slow:main:kasse/kasse-x":    ToneHint, // no runs now: nothing to show
 			// slower last time, steady slow now: still slow, not resolved
 			"slower_build:main:kasse/kasse-web": ToneAttention,
 		},
@@ -183,8 +183,8 @@ func TestAssessHistory(t *testing.T) {
 	if s := signal(a, "pr_jam:kasse/kasse-api"); s == nil || s.Seen != 2 {
 		t.Errorf("jam seen = %+v", s)
 	}
-	if signal(a, "resolved:flaky:main:kasse/kasse-cli") == nil {
-		t.Errorf("flaky kasse-cli not resolved")
+	if signal(a, "resolved:failing_more:main:kasse/kasse-cli") == nil {
+		t.Errorf("failing more kasse-cli not resolved")
 	}
 	if signal(a, "resolved:change:within_day") != nil {
 		t.Errorf("a gone improvement resolved")

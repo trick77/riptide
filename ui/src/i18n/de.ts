@@ -179,7 +179,7 @@ export const de = {
         slow_stage: "längste Etappe",
         slower_build: "langsamer geworden",
         steady_slow: "Dauerläufer",
-        flaky: "flaky",
+        failing_more: "scheitert öfter",
         change: "wichtige Veränderung",
         bottleneck_moved: "Engpass gewandert",
         throughput_instability: "Throughput gegen Stabilität",
@@ -196,7 +196,7 @@ export const de = {
         slow_stage: "Die meiste Zeit liegt in der Etappe «{{stage}}»",
         slower_build: "{{repo}}: {{kind}} langsamer als in der Vorperiode",
         steady_slow: "{{repo}}: {{kind}} wieder unter den langsamsten",
-        flaky: "{{repo}}: {{kind}} scheitern öfter",
+        failing_more: "{{repo}}: {{kind}} scheitern öfter",
         changeGood: "{{label}}: deutlich besser",
         changeBad: "{{label}}: deutlich schlechter",
         bottleneck_moved: "Der Engpass ist zu «{{stage}}» gewandert",
@@ -218,7 +218,7 @@ export const de = {
           "Der Median-Lauf dauert anderthalbmal so lang wie in der Vorperiode oder länger: langsamer als das Repo selbst, nicht als andere. Was im Build langsamer wurde, steht nicht in den Daten.",
         steady_slow:
           "In dieser und der vorherigen Periode unter den langsamsten ihrer Art und langsamer als deren Median: langsam als Gewohnheit, nicht als Veränderung.",
-        flaky:
+        failing_more:
           "Scheitert viel öfter als in der Vorperiode. Ob Tests, Infrastruktur oder echte Fehler, steht nicht in den Daten.",
         changeGood:
           "Über der Schwelle für eine wichtige Veränderung gegenüber der Vorperiode.",
@@ -678,7 +678,7 @@ export const de = {
     successful: "erfolgreich",
     typicalDuration: "typische Dauer, alle Repos",
     repos:
-      "Von {{compared}} Repos sind {{slower}} langsamer, {{flakier}} fehleranfälliger geworden als in der Vorperiode",
+      "Von {{compared}} Repos sind {{slower}} langsamer, {{failing}} fehleranfälliger geworden als in der Vorperiode",
     reposNone: "Repos: kein Vergleich mit der Vorperiode",
     redRuns: "in roten Läufen, von {{h}} h CI-Zeit",
     waitingTitle:
@@ -690,8 +690,8 @@ export const de = {
     runs_other: "{{count}} Läufe",
     noVerdict: " + {{n}} ohne Ergebnis",
     outliers: " · {{n}} Ausreisser ({{h}} h) nicht in Dauer und CI-Zeit",
-    flaky: "Fehleranfälliger geworden",
-    flakyText: "Vorperiode {{prev}} → jetzt {{rate}} rot",
+    failingMore: "Fehleranfälliger geworden",
+    failingMoreText: "Vorperiode {{prev}} → jetzt {{rate}} rot",
     slow: "Langsamer geworden",
     slowText: "Vorperiode {{prev}} → jetzt {{p50}} ({{factor}}×)",
     fine: "Unauffällig",
@@ -740,7 +740,7 @@ export const de = {
     colRuns: "Läufe",
     noAgentRepo: "Keiner der Läufe meldet, wann er einen Agent bekam",
     hotspotsRule:
-      "Fehleranfälliger geworden: Quote mindestens {{flaky}}× die der Vorperiode und {{points}} Prozentpunkte darüber, höchstens halbwegs zwischen ihr und 100 %, mit mindestens {{failures}} roten Läufen. Langsamer geworden: Median mindestens {{slow}}× der der Vorperiode. Beides ab {{min}} Läufen in beiden Perioden.",
+      "Fehleranfälliger geworden: Quote mindestens {{failing}}× die der Vorperiode und {{points}} Prozentpunkte darüber, höchstens halbwegs zwischen ihr und 100 %, mit mindestens {{failures}} roten Läufen. Langsamer geworden: Median mindestens {{slow}}× der der Vorperiode. Beides ab {{min}} Läufen in beiden Perioden.",
     stuckTitle: "Hängende Läufe",
     stuckSub: "Läufe über {{factor}}× dem Median ihrer Art und über {{min}}",
     stuck_one: "1 Lauf hing",
@@ -780,7 +780,7 @@ export const de = {
     xAxis: "Median-Dauer (log) →",
     yAxis: "↑ Fehlerquote",
     slower: "▲ ×{{factor}} Dauer",
-    flakier: "▲ Fehlerquote {{prev}} → {{rate}}",
+    failingMore: "▲ Fehlerquote {{prev}} → {{rate}}",
     median: "Median",
     rate: "Fehlerquote",
     runs: "Läufe",

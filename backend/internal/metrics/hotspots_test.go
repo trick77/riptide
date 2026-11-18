@@ -37,17 +37,17 @@ func against(ds, prev *dataset.Dataset) Build {
 	return build(ds, p4(), filter{}, baselineOf(ds, prev, false))
 }
 
-// flagged counts a kind's slow and flaky repos.
-func flagged(k KindHotspots) (slower, flakier int) {
+// flagged counts a kind's repos flagged slow and failing more.
+func flagged(k KindHotspots) (slower, failing int) {
 	for _, h := range k.Repos {
 		if h.Slow {
 			slower++
 		}
-		if h.Flaky {
-			flakier++
+		if h.FailingMore {
+			failing++
 		}
 	}
-	return slower, flakier
+	return slower, failing
 }
 
 func kindOf(h Hotspots, kind string) KindHotspots {
@@ -113,7 +113,7 @@ func TestHotspotsChart(t *testing.T) {
 
 func TestHotspots(t *testing.T) {
 	ds := data(func(ds *dataset.Dataset) {
-		// slower and flakier: 10 runs of 1000 s, half of them failed
+		// slower and failing more: 10 runs of 1000 s, half of them failed
 		ds.Runs = append(ds.Runs, runs("kasse/slow", 10, 1000, 5, "FAILURE")...)
 		// the bulk: 20 quick green runs, 2 aborted ones that count for nothing
 		ds.Runs = append(ds.Runs, runs("kasse/quick", 22, 100, 2, "ABORTED")...)
@@ -127,8 +127,8 @@ func TestHotspots(t *testing.T) {
 	})
 	b := against(ds, prev)
 	h := b.Hotspots
-	if h.MinRuns != HotspotMinRuns || h.SlowFactor != SlowFactor || h.FlakyFactor != FlakyFactor ||
-		h.FlakyMinPoints != FlakyMinPoints || h.FlakyMinFailures != FlakyMinFailures ||
+	if h.MinRuns != HotspotMinRuns || h.SlowFactor != SlowFactor || h.FailingMoreFactor != FailingMoreFactor ||
+		h.FailingMoreMinPoints != FailingMoreMinPoints || h.FailingMoreMinFailures != FailingMoreMinFailures ||
 		h.OutlierFactor != OutlierFactor || h.OutlierMinS != OutlierMinS {
 		t.Errorf("thresholds = %+v", h)
 	}
@@ -145,8 +145,8 @@ func TestHotspots(t *testing.T) {
 	}
 	// From 0 % to half its runs; the stuck repo's failures count but not
 	// their time, and two runs flag nothing.
-	if !slow.Flaky || slow.WastedSeconds != 5000 || slow.Runs != 10 || slow.Failures != 5 || quick.Flaky {
-		t.Errorf("flaky = %+v / %+v", slow, quick)
+	if !slow.FailingMore || slow.WastedSeconds != 5000 || slow.Runs != 10 || slow.Failures != 5 || quick.FailingMore {
+		t.Errorf("failing more = %+v / %+v", slow, quick)
 	}
 	expectNear(t, "previous failure rate", slow.FailureChange.Prev, 0)
 	// The previous position in the units of the current one: seconds, 0..1.
@@ -160,12 +160,12 @@ func TestHotspots(t *testing.T) {
 		!slow.Plotted || stuck.Plotted {
 		t.Errorf("compared = %+v / %+v, unplotted %d", slow, stuck, k.Unplotted)
 	}
-	if stuck.Flaky || stuck.Slow || stuck.WastedSeconds != 0 || stuck.Failures != 2 ||
+	if stuck.FailingMore || stuck.Slow || stuck.WastedSeconds != 0 || stuck.Failures != 2 ||
 		stuck.FailureChange.Reason == nil || *stuck.FailureChange.Reason != ReasonLowSample {
 		t.Errorf("stuck = %+v", stuck)
 	}
-	// The flagged rows first, the flaky one by wasted time.
-	if slower, flakier := flagged(k); k.Repos[0].Repo != "kasse/slow" || slower != 1 || flakier != 1 ||
+	// The flagged rows first, the one failing more by wasted time.
+	if slower, failing := flagged(k); k.Repos[0].Repo != "kasse/slow" || slower != 1 || failing != 1 ||
 		b.compared[KindMain] != 2 {
 		t.Errorf("repos = %+v, compared %d", k.Repos, b.compared[KindMain])
 	}
@@ -191,12 +191,12 @@ func TestHotspotsAgainstOwnPeriod(t *testing.T) {
 	b := against(period(120), period(60))
 	k := kindOf(b.Hotspots, KindMain)
 	web, api := repoOf(k, "kasse/web"), repoOf(k, "kasse/api")
-	if web.Slow || web.Flaky || !api.Slow || api.Flaky {
+	if web.Slow || web.FailingMore || !api.Slow || api.FailingMore {
 		t.Errorf("web = %+v, api = %+v", web, api)
 	}
 	expectNear(t, "api factor", api.Factor, 2)
-	if slower, flakier := flagged(k); slower != 1 || flakier != 0 || b.compared[KindMain] != 2 {
-		t.Errorf("counts %d %d %d", slower, flakier, b.compared[KindMain])
+	if slower, failing := flagged(k); slower != 1 || failing != 0 || b.compared[KindMain] != 2 {
+		t.Errorf("counts %d %d %d", slower, failing, b.compared[KindMain])
 	}
 	// A new repo has nothing to compare with; an incomplete previous period
 	// compares nothing.
@@ -212,20 +212,20 @@ func TestHotspotsAgainstOwnPeriod(t *testing.T) {
 	}
 }
 
-// One red run after a clean period is no flaky repo, however few the runs:
-// the floors of FlakyMinPoints and FlakyMinFailures.
-func TestFlakyNeedsPoints(t *testing.T) {
-	flaky := func(count, red int) bool {
+// One red run after a clean period flags no repo, however few the runs:
+// the floors of FailingMoreMinPoints and FailingMoreMinFailures.
+func TestFailingMoreNeedsPoints(t *testing.T) {
+	failing := func(count, red int) bool {
 		prev := data(func(ds *dataset.Dataset) { ds.Runs = runs("kasse/a", count, 100, 0, "") })
 		cur := data(func(ds *dataset.Dataset) { ds.Runs = runs("kasse/a", count, 100, red, "FAILURE") })
-		return repoOf(kindOf(against(cur, prev).Hotspots, KindMain), "kasse/a").Flaky
+		return repoOf(kindOf(against(cur, prev).Hotspots, KindMain), "kasse/a").FailingMore
 	}
 	for _, c := range []struct {
 		count, red int
 		want       bool
 	}{{40, 1, false}, {40, 2, true}, {10, 1, false}, {19, 1, false}, {10, 2, true}} {
-		if got := flaky(c.count, c.red); got != c.want {
-			t.Errorf("%d red of %d: flaky %v", c.red, c.count, got)
+		if got := failing(c.count, c.red); got != c.want {
+			t.Errorf("%d red of %d: failing more %v", c.red, c.count, got)
 		}
 	}
 }
@@ -365,7 +365,7 @@ func TestHotspotsNeedEnoughRuns(t *testing.T) {
 		t.Errorf("kind = %+v", b.Kinds[0])
 	}
 	a, bb := repoOf(k, "kasse/a"), repoOf(k, "kasse/b")
-	if a.Slow || bb.Flaky || a.Factor != nil || a.DurationChange.Reason == nil || *a.DurationChange.Reason != ReasonLowSample {
+	if a.Slow || bb.FailingMore || a.Factor != nil || a.DurationChange.Reason == nil || *a.DurationChange.Reason != ReasonLowSample {
 		t.Errorf("flagged on few runs: %+v / %+v", a, bb)
 	}
 	// A previous median of 0 gives no factor.
@@ -673,9 +673,9 @@ func TestBuildSplitsAgentWait(t *testing.T) {
 	}
 }
 
-// A repo failing most of its runs can still get flaky: when it starts
+// A repo failing most of its runs can still be flagged: when it starts
 // failing them all.
-func TestFlakyAboveHalf(t *testing.T) {
+func TestFailingMoreAboveHalf(t *testing.T) {
 	ds := data(func(ds *dataset.Dataset) {
 		ds.Runs = append(runs("kasse/a", 20, 100, 12, "FAILURE"), runs("kasse/b", 20, 100, 20, "FAILURE")...)
 	})
@@ -684,14 +684,14 @@ func TestFlakyAboveHalf(t *testing.T) {
 	})
 	k := kindOf(against(ds, prev).Hotspots, KindMain)
 	expectNear(t, "team rate", k.FailureRate, 0.8)
-	if a, b := repoOf(k, "kasse/a"), repoOf(k, "kasse/b"); a.Flaky || !b.Flaky || k.Repos[0].Repo != "kasse/b" {
+	if a, b := repoOf(k, "kasse/a"), repoOf(k, "kasse/b"); a.FailingMore || !b.FailingMore || k.Repos[0].Repo != "kasse/b" {
 		t.Errorf("repos = %+v", k.Repos)
 	}
 	// The cap comes last: from 96 % red, all red still flags.
 	for _, c := range []struct{ prev, want float64 }{
-		{0.1, 0.2}, {0, FlakyMinPoints}, {0.6, 0.8}, {0.03, 0.08}, {0.96, 0.98},
+		{0.1, 0.2}, {0, FailingMoreMinPoints}, {0.6, 0.8}, {0.03, 0.08}, {0.96, 0.98},
 	} {
-		if got := flakyThreshold(c.prev); !near(got, c.want) {
+		if got := failingMoreThreshold(c.prev); !near(got, c.want) {
 			t.Errorf("threshold at %v = %v, want %v", c.prev, got, c.want)
 		}
 	}

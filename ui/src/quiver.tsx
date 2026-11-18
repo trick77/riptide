@@ -1,6 +1,6 @@
 // A kind's repos as arrows from the previous period to now: median duration
 // (log) against failure rate, the circle's area the repo's share of the
-// kind's CI time. Red only where the backend flagged slow or flaky, an
+// kind's CI time. Red only where the backend flagged slow or failing more, an
 // arrow only where it sent both previous values; the browser draws no
 // thresholds and classifies nothing, it places, scales and labels.
 
@@ -142,7 +142,7 @@ export function Quiver({
       ? { x: x(h.duration_change.prev!), y: y(h.failure_change.prev!) }
       : null,
     r: radius(h.ci_seconds),
-    bad: h.slow || h.flaky,
+    bad: h.slow || h.failing_more,
   }));
   // Painted in three layers, each in the backend's order: the flagged on
   // top, so no grey circle hides a red arrow, nor takes its hover.
@@ -179,9 +179,9 @@ export function Quiver({
     const parts = [p.h.repo];
     if (p.h.slow && p.h.factor != null)
       parts.push(t("quiver.slower", { factor: num(p.h.factor, 1) }));
-    if (p.h.flaky)
+    if (p.h.failing_more)
       parts.push(
-        t("quiver.flakier", {
+        t("quiver.failingMore", {
           prev: pct(p.h.failure_change.prev),
           rate: pct(p.h.failure_rate),
         }),

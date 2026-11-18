@@ -280,7 +280,7 @@ function RepoChanges({ c }: { c: KindChange }) {
       {t("build.repos", {
         compared: c.compared,
         slower: c.slower,
-        flakier: c.flakier,
+        failing: c.failing_more,
       })}
     </div>
   );
@@ -290,11 +290,11 @@ function RepoChanges({ c }: { c: KindChange }) {
 // Gradle, npm with Playwright and the rest.
 function reason(t: TFunction, h: RepoHotspot) {
   const out: [string, "fail" | "warn", string][] = [];
-  if (h.flaky)
+  if (h.failing_more)
     out.push([
-      t("build.flaky"),
+      t("build.failingMore"),
       "fail",
-      t("build.flakyText", {
+      t("build.failingMoreText", {
         prev: pct(h.failure_change.prev),
         rate: pct(h.failure_rate),
       }),
@@ -872,9 +872,9 @@ export function Build({
             )}
             <p className="mt-2.5 mb-0 text-xs text-muted">
               {t("build.hotspotsRule", {
-                flaky: num(h.flaky_factor, 1),
-                points: num(h.flaky_min_points * 100, 0),
-                failures: h.flaky_min_failures,
+                failing: num(h.failing_more_factor, 1),
+                points: num(h.failing_more_min_points * 100, 0),
+                failures: h.failing_more_min_failures,
                 slow: num(h.slow_factor, 1),
                 min: h.min_runs,
               })}

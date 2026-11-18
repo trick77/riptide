@@ -81,7 +81,7 @@ func ruleLever(s metrics.Signal) string {
 // otherwise.
 func tab(s metrics.Signal) string {
 	switch s.Kind {
-	case metrics.SignalSteadySlow, metrics.SignalSlower, metrics.SignalFlaky:
+	case metrics.SignalSteadySlow, metrics.SignalSlower, metrics.SignalFailingMore:
 		return "runs"
 	}
 	return "prs"

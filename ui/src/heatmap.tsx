@@ -1,4 +1,4 @@
-// A kind's failure rate per repo and week: a flaky repo shows as a red
+// A kind's failure rate per repo and week: a repo failing more shows as a red
 // row, a shared outage as a red column. Rows, cells, classes and the
 // legend's bounds come from the backend; this only paints them.
 
