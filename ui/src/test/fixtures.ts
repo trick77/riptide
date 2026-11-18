@@ -410,7 +410,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
     open_prs: {
       at: w[w.length - 1].end,
       long_days: 7,
-      jam_min: 3,
+      jam_min: 4,
       inactive_days: 30,
       open: 4,
       long: 3,

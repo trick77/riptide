@@ -54,6 +54,7 @@ func TestOpenPRs(t *testing.T) {
 			at("kasse/kasse-api", 30),
 			at("kasse/kasse-api", 7, func(o *dataset.OpenPR) { o.Touched, o.Approved = true, true }), // exactly a week: long
 			at("kasse/kasse-api", 12),
+			at("kasse/kasse-api", 9),
 			at("kasse/kasse-api", 1),
 			// no event for 31 days: inactive, out of every count but its own
 			at("kasse/kasse-api", 300, idle(31)),
@@ -71,29 +72,29 @@ func TestOpenPRs(t *testing.T) {
 	})
 
 	o := openSection(ds, filter{})
-	if !o.At.Equal(now) || o.LongDays != 7 || o.JamMin != 3 || o.InactiveDays != 30 {
+	if !o.At.Equal(now) || o.LongDays != 7 || o.JamMin != 4 || o.InactiveDays != 30 {
 		t.Errorf("at %v, long days %d, jam min %d, inactive days %d", o.At, o.LongDays, o.JamMin, o.InactiveDays)
 	}
-	if o.Open != 9 || o.Long != 5 || o.Inactive != 3 {
-		t.Errorf("open %d long %d inactive %d, want 9, 5 and 3 (bot out)", o.Open, o.Long, o.Inactive)
+	if o.Open != 10 || o.Long != 6 || o.Inactive != 3 {
+		t.Errorf("open %d long %d inactive %d, want 10, 6 and 3 (bot out)", o.Open, o.Long, o.Inactive)
 	}
-	// kasse-api alone has three long-open PRs; kasse-web's inactive one
-	// would have made its third.
-	if o.Jammed != 1 || o.JammedLong != 3 {
+	// kasse-api alone has four long-open PRs; kasse-web's inactive one
+	// would have made its second.
+	if o.Jammed != 1 || o.JammedLong != 4 {
 		t.Errorf("jammed %d, their long %d", o.Jammed, o.JammedLong)
 	}
-	if w := o.Waiting; w.FirstReview != 7 || w.Merge != 1 || w.Draft != 1 || w.Review != 0 || w.Changes != 0 {
+	if w := o.Waiting; w.FirstReview != 8 || w.Merge != 1 || w.Draft != 1 || w.Review != 0 || w.Changes != 0 {
 		t.Errorf("waiting = %+v", w)
 	}
-	if w := o.LongWaiting; w.FirstReview != 4 || w.Merge != 1 || w.Draft != 0 {
+	if w := o.LongWaiting; w.FirstReview != 5 || w.Merge != 1 || w.Draft != 0 {
 		t.Errorf("long waiting = %+v", w)
 	}
 	// The jammed repo's long-open ones only: kasse-web's and portal's
 	// waiting for a first review left out.
-	if w := o.JammedWaiting; w.FirstReview != 2 || w.Merge != 1 || w.Draft != 0 {
+	if w := o.JammedWaiting; w.FirstReview != 3 || w.Merge != 1 || w.Draft != 0 {
 		t.Errorf("jammed waiting = %+v", w)
 	}
-	if o.Age.N != 9 {
+	if o.Age.N != 10 {
 		t.Errorf("age n = %d", o.Age.N)
 	}
 	// Jammed first, then by long-open PRs, then by the median age: portal's
@@ -106,12 +107,12 @@ func TestOpenPRs(t *testing.T) {
 		t.Errorf("repos = %s", got)
 	}
 	api := o.Repos[0]
-	if api.Open != 4 || api.Long != 3 || !api.Jammed || api.Inactive != 1 || api.Age.N != 4 ||
-		api.Waiting.Merge != 1 || api.Waiting.FirstReview != 3 {
+	if api.Open != 5 || api.Long != 4 || !api.Jammed || api.Inactive != 1 || api.Age.N != 5 ||
+		api.Waiting.Merge != 1 || api.Waiting.FirstReview != 4 {
 		t.Errorf("kasse-api = %+v", api)
 	}
 	// What its long-open ones wait on: the 1-day PR's first review left out.
-	if w := api.LongWaiting; w.FirstReview != 2 || w.Merge != 1 || w.Draft != 0 || w.Review != 0 || w.Changes != 0 {
+	if w := api.LongWaiting; w.FirstReview != 3 || w.Merge != 1 || w.Draft != 0 || w.Review != 0 || w.Changes != 0 {
 		t.Errorf("kasse-api long waiting = %+v", w)
 	}
 	// kasse-web's draft is 6.9 days old, not long open; its 20-day one is.
@@ -133,6 +134,26 @@ func TestOpenPRs(t *testing.T) {
 	// Nothing open: empty, not null.
 	if got := openSection(data(), filter{}); got.Open != 0 || got.Repos == nil || len(got.Repos) != 0 || got.Age.P50 != nil {
 		t.Errorf("empty = %+v", got)
+	}
+}
+
+// A draft may lie as long as its author wants (user, 2026-11-18): never
+// long open, never a jam, never inactive; still open, waiting on a draft.
+func TestDraftsWaitFreely(t *testing.T) {
+	draft := func(id int64) dataset.OpenPR {
+		return openPR(func(o *dataset.OpenPR) {
+			o.PRID, o.OpenedAt, o.LastEventAt, o.Draft, o.ReadyAt = id, ago(60), ago(45), true, nil
+		})
+	}
+	ds := data(func(ds *dataset.Dataset) { ds.OpenPRs = []dataset.OpenPR{draft(1), draft(2), draft(3)} })
+	o := openSection(ds, filter{})
+	if o.Open != 3 || o.Long != 0 || o.Inactive != 0 || o.Jammed != 0 || o.Waiting.Draft != 3 {
+		t.Errorf("open = %+v", o)
+	}
+	for _, f := range factPRs(ds) {
+		if f.waiting == nil || *f.waiting != WaitDraft {
+			t.Errorf("fact waits on %v, want draft", f.waiting)
+		}
 	}
 }
 
@@ -166,28 +187,28 @@ func TestComputeOpenPRsAgainstThePrevious(t *testing.T) {
 			o.Repo, o.PRID, o.OpenedAt, o.LastEventAt = repo, id, ago(days), ago(days)
 		})
 	}
-	// Opened 40 to 42 days ago, each with its last event then: three
+	// Opened 40 to 43 days ago, each with its last event then: four
 	// long-open PRs at the previous period's end, inactive now.
 	jam := func(repo string) []dataset.OpenPR {
-		return []dataset.OpenPR{long(repo, 40), long(repo, 41), long(repo, 42)}
+		return []dataset.OpenPR{long(repo, 40), long(repo, 41), long(repo, 42), long(repo, 43)}
 	}
 	cur := data(func(ds *dataset.Dataset) {
 		ds.OpenPRs = append(jam("kasse/kasse-old"),
-			long("kasse/kasse-api", 9), long("kasse/kasse-api", 10), long("kasse/kasse-api", 11),
-			long("kasse/kasse-web", 8), long("kasse/kasse-web", 9), long("kasse/kasse-web", 10))
+			long("kasse/kasse-api", 9), long("kasse/kasse-api", 10), long("kasse/kasse-api", 11), long("kasse/kasse-api", 12),
+			long("kasse/kasse-web", 8), long("kasse/kasse-web", 9), long("kasse/kasse-web", 10), long("kasse/kasse-web", 11))
 	})
 	prev := data(func(ds *dataset.Dataset) {
 		ds.Meta.To = prevEnd
 		ds.OpenPRs = jam("kasse/kasse-old")
 	})
 	m := Compute(cur, prev, Params{Period: p4(), Previous: PreviousPeriod(4, now, zurich)})
-	if o := m.OpenPRs; o.Jammed != 2 || o.Long != 6 || o.Inactive != 3 {
+	if o := m.OpenPRs; o.Jammed != 2 || o.Long != 8 || o.Inactive != 4 {
 		t.Fatalf("jammed %d long %d inactive %d", o.Jammed, o.Long, o.Inactive)
 	}
 	if c := m.Comparison.OpenJammed; c.Verdict != ChangeWorse || c.Prev == nil || *c.Prev != 1 {
 		t.Errorf("open jammed = %+v", c)
 	}
-	if c := m.Comparison.OpenPRs; c.Verdict != ChangeNone || show(c.Prev) != 3.0 {
+	if c := m.Comparison.OpenPRs; c.Verdict != ChangeNone || show(c.Prev) != 4.0 {
 		t.Errorf("open = %+v", c)
 	}
 	// More jammed repos than at the previous end: each jam needs attention.
