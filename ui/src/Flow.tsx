@@ -328,13 +328,10 @@ export function Flow({ m, why, onWhy, onFacts }: Props) {
                 why={t("common.ownHistory")}
               />
             }
-            compare={
-              <Compare
-                change={c.review_time}
-                now={dur(r.review.p50)}
-                format={dur}
-              />
-            }
+            compare={{
+              change: c.review_time,
+              format: dur,
+            }}
             open={why === "review"}
             onWhy={() => onWhy("review")}
           />
@@ -352,13 +349,10 @@ export function Flow({ m, why, onWhy, onFacts }: Props) {
                 why={t("flow.touch.directionWhy")}
               />
             }
-            compare={
-              <Compare
-                change={c.first_touch}
-                now={pct(r.first_touch_rate)}
-                format={pct}
-              />
-            }
+            compare={{
+              change: c.first_touch,
+              format: pct,
+            }}
             open={why === "touch"}
             onWhy={() => onWhy("touch")}
           />
@@ -379,13 +373,10 @@ export function Flow({ m, why, onWhy, onFacts }: Props) {
                 why={t("flow.cycle.directionWhy")}
               />
             }
-            compare={
-              <Compare
-                change={c.within_day}
-                now={pct(r.within_day.rate)}
-                format={pct}
-              />
-            }
+            compare={{
+              change: c.within_day,
+              format: pct,
+            }}
             open={why === "cycle"}
             onWhy={() => onWhy("cycle")}
           />

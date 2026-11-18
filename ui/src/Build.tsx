@@ -41,16 +41,19 @@ import {
   Note,
   Pill,
   SectionHead,
+  type Tone,
   VERDICT_TONE,
 } from "./ui";
 
 // Line colours in the series ramp's fixed order, by kind, so a kind keeps
-// its colour whichever kinds the filter leaves.
+// its colour whichever kinds the filter leaves, on the cards, in the flow
+// and the scatter alike. The remainder kinds grey: a pink one would read
+// as a second red next to the failed runs.
 const KIND_STROKE: Record<RunKind, string> = {
   release: "var(--color-s1)",
   main: "var(--color-s2)",
   feature: "var(--color-s3)",
-  other: "var(--color-s4)",
+  other: "var(--color-other)",
   unknown: "var(--color-axis)",
 };
 
@@ -176,7 +179,9 @@ function KindCard({
           {t("build.typicalDuration")}
         </div>
         <div className="text-xs text-muted">
-          <div className={`${big} font-medium text-ink tabular-nums`}>
+          <div
+            className={`${big} font-medium tabular-nums ${b.wasted_seconds > 0 ? "text-danger-ink" : "text-ink"}`}
+          >
             {t("common.hours", { n: num(b.wasted_seconds / 3600, 1) })}
           </div>
           {t("build.redRuns", { h: num(b.ci_seconds / 3600, 1) })}
@@ -369,9 +374,9 @@ function RepoChanges({ c }: { c: KindChange }) {
 }
 
 // Each repo against its own previous period, never the team: a kind mixes
-// Gradle, npm with Playwright and the rest.
+// Gradle, npm with Playwright and the rest. What the backend flagged, red.
 function reason(t: TFunction, h: RepoHotspot) {
-  const out: [string, "fail" | "warn", string][] = [];
+  const out: [string, Tone, string][] = [];
   if (h.failing_more)
     out.push([
       t("build.failingMore"),
@@ -384,11 +389,38 @@ function reason(t: TFunction, h: RepoHotspot) {
   if (h.slow)
     out.push([
       t("build.slow"),
-      "warn",
+      "fail",
       t("build.slowText", {
         prev: dur(h.duration_change.prev),
         p50: dur(h.duration.p50),
         factor: num(h.factor ?? 0, 1),
+      }),
+    ]);
+  return out;
+}
+
+// What the backend judged better than the repo's previous period, green:
+// a listed repo that improved says so instead of "unremarkable". Better is
+// the verdict past the tolerance; red waits for the flags above, as a
+// small worsening is noise there (the assessment counts the same way).
+function gains(t: TFunction, h: RepoHotspot) {
+  const out: [string, Tone, string][] = [];
+  if (h.failure_change.verdict === "better")
+    out.push([
+      t("build.reliable"),
+      "ok",
+      t("build.failingMoreText", {
+        prev: pct(h.failure_change.prev),
+        rate: pct(h.failure_rate),
+      }),
+    ]);
+  if (h.duration_change.verdict === "better")
+    out.push([
+      t("build.faster"),
+      "ok",
+      t("build.fasterText", {
+        prev: dur(h.duration_change.prev),
+        p50: dur(h.duration.p50),
       }),
     ]);
   return out;
@@ -614,14 +646,6 @@ const OUTCOME_LOOK: Record<
   outlier: { color: "var(--color-ochre)", linkOpacity: 0.45 },
 };
 
-// The kinds in this chart: the remainder kinds grey, so no pink stream
-// reads as a second red next to the failed one.
-const FLOW_KIND: Record<RunKind, string> = {
-  ...KIND_STROKE,
-  other: "var(--color-other)",
-  unknown: "var(--color-axis)",
-};
-
 // A middot between parts of a heading, an en space either side.
 const EN = String.fromCharCode(0x2002);
 const SEP = `${EN}·${EN}`;
@@ -693,8 +717,11 @@ function FlowRepos({ f }: { f: CIFlow }) {
           <span key={r.repo}>
             <i className={`mr-1 inline-block size-2 rounded-sm ${r.color}`} />
             {r.repo} {ciHours(r.seconds)}
-            {r.failed > 0 &&
-              t("build.flow.repoFailedShort", { h: ciHours(r.failed) })}
+            {r.failed > 0 && (
+              <span className="text-danger-ink">
+                {t("build.flow.repoFailedShort", { h: ciHours(r.failed) })}
+              </span>
+            )}
           </span>
         ))}
       </div>
@@ -719,7 +746,7 @@ function FlowCard({ f, h }: { f: CIFlow; h: Hotspots }) {
     value: stuck.has(k.kind)
       ? t("build.flow.withOutliers", { h: ciHours(k.seconds) })
       : ciHours(k.seconds),
-    color: FLOW_KIND[k.kind],
+    color: KIND_STROKE[k.kind],
     linkOpacity: 0.5,
   }));
   const right: SankeyNode[] = f.outcomes.map((o) => ({
@@ -892,6 +919,7 @@ export function Build({
                   ))}
                   {k.repos.map((r) => {
                     const why = reason(t, r);
+                    const better = gains(t, r);
                     const none = noCompare(t, r, h.min_runs);
                     return (
                       <div key={r.repo} className="contents">
@@ -901,20 +929,25 @@ export function Build({
                           </Mono>
                         </div>
                         <div className={`${CELL} flex flex-col gap-1`}>
-                          {why.length ? (
-                            why.map(([label, tone, text]) => (
-                              <span
-                                key={label}
-                                className="text-[12.5px] text-muted"
-                              >
-                                <Pill tone={tone}>{label}</Pill> {text}
-                              </span>
-                            ))
-                          ) : (
+                          {[...why, ...better].map(([label, tone, text]) => (
+                            <span
+                              key={label}
+                              className="text-[12.5px] text-muted"
+                            >
+                              <Pill tone={tone}>{label}</Pill> {text}
+                            </span>
+                          ))}
+                          {why.length === 0 && (
                             <span className="text-[12.5px] text-muted">
-                              <Pill tone="none">
-                                {none ? t("build.noCompare") : t("build.fine")}
-                              </Pill>{" "}
+                              {better.length === 0 && (
+                                <>
+                                  <Pill tone="none">
+                                    {none
+                                      ? t("build.noCompare")
+                                      : t("build.fine")}
+                                  </Pill>{" "}
+                                </>
+                              )}
                               {none ? `${none}; ` : ""}
                               {t("build.fineText", {
                                 p50: dur(r.duration.p50),
@@ -937,7 +970,9 @@ export function Build({
                             </span>
                           )}
                         </div>
-                        <div className={`${CELL} text-right text-ink-dim`}>
+                        <div
+                          className={`${CELL} text-right ${r.wasted_seconds > 0 ? "text-danger-ink" : "text-ink-dim"}`}
+                        >
                           {t("common.hours", {
                             n: num(r.wasted_seconds / 3600, 1),
                           })}

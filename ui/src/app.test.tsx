@@ -1495,9 +1495,11 @@ describe("App", () => {
       };
     });
     render(<App />);
+    // On the overview's tile and under the deploy section's head, where its
+    // change stands too.
     expect(
-      await screen.findByText(/Argo CD meldet erst seit 07\.11\.2026/),
-    ).toBeInTheDocument();
+      await screen.findAllByText(/Argo CD meldet erst seit 07\.11\.2026/),
+    ).toHaveLength(2);
     expect(screen.queryByText(/wenig belastbar\.$/)).toBeNull();
   });
 
@@ -1519,8 +1521,10 @@ describe("App", () => {
     });
     render(<App />);
     expect(
-      await screen.findByText(/Weniger als eine Woche Daten: wenig belastbar/),
-    ).toBeInTheDocument();
+      await screen.findAllByText(
+        /Weniger als eine Woche Daten: wenig belastbar/,
+      ),
+    ).toHaveLength(2);
   });
 
   it("shows the runs without a verdict a kind leaves out", async () => {
@@ -1702,10 +1706,10 @@ describe("open PRs", () => {
     expect(api[1].className).toContain("rounded-t");
     expect(api[1].className).toContain("border-b-2");
     expect(
-      within(cols[0]).getByText("3", { selector: ".text-ochre" }),
+      within(cols[0]).getByText("3", { selector: ".text-danger-ink" }),
     ).toBeInTheDocument();
     expect(
-      within(cols[1]).queryByText("1", { selector: ".text-ochre" }),
+      within(cols[1]).queryByText("1", { selector: ".text-danger-ink" }),
     ).toBeNull();
     // The whole column is the target, its tooltip every segment, top
     // first; formatted counts, en spaces round the middot.
@@ -2284,8 +2288,45 @@ describe("flow", () => {
   });
 });
 
+describe("colour", () => {
+  // One meaning per colour: the change under a number in its verdict's
+  // colour, the number itself ink; the deploy section says it too.
+  it("colours the change, never the number", async () => {
+    mockFetch();
+    render(<App />);
+    await screen.findByRole("heading", { name: "Einschätzung" });
+    const better = await screen.findAllByText("vorher 0.1");
+    // The overview's tile and the deploy section's head.
+    expect(better).toHaveLength(2);
+    better.forEach((el) => expect(el).toHaveClass("text-online"));
+    expect(
+      within(document.getElementById("deploys")!).getByText("vorher 0.1"),
+    ).toBeInTheDocument();
+    const worse = screen.getByText("vorher 1.0 Tage");
+    expect(worse).toHaveClass("text-danger-ink");
+    // The verdict's pill: worse is red, no longer ochre.
+    expect(screen.getAllByText("Schlechter")[0]).toHaveClass("text-danger-ink");
+  });
+
+  // A repo the backend judged more reliable says so in green, its numbers
+  // kept, instead of "unremarkable".
+  it("marks a repo that got better", async () => {
+    const m = metrics();
+    m.build.hotspots.kinds.forEach((k) => {
+      k.repos[0].failure_change = change("better", 0.3);
+    });
+    mockFetch((url) => (url.pathname === "/api/facts" ? facts() : m));
+    render(<App />);
+    const pill = await screen.findByText("Verlässlicher geworden");
+    expect(pill).toHaveClass("bg-online/15");
+    const row = pill.parentElement!.parentElement!;
+    expect(within(row).queryByText("Unauffällig")).toBeNull();
+    expect(row.textContent).toMatch(/Vorperiode 30 % → jetzt/);
+  });
+});
+
 describe("strip", () => {
-  it("draws the backend's scores, worse to the left and red, no undirected row", () => {
+  it("draws the backend's scores, worse left and red, better green, no undirected row", () => {
     const m = metrics();
     render(
       <Strip
@@ -2319,7 +2360,10 @@ describe("strip", () => {
 
     const review = rows[4];
     const better = within(review).getByText("2.4 h");
-    expect(better).toHaveClass("text-muted");
+    expect(better).toHaveClass("text-online");
+    expect(within(review).getByTestId("strip-bar").className).toContain(
+      "from-online",
+    );
     expect(better.style.left).toContain("50%");
 
     expect(within(rows[2]).getByText("Vorperiode unvollständig")).toBeVisible();
@@ -2466,9 +2510,13 @@ describe("CI hours", () => {
       "CI-Zeit nach Repo: kasse/kasse-web: 200.0 h, davon 100.0 h rot; kasse/kasse-api: 120.0 h, davon 30.0 h rot; kasse/policy: 80.0 h; 4 weitere: 60.0 h, davon 20.0 h rot",
     );
     // The failed part as a number, not by hatching alone.
-    expect(
-      screen.getByText(/kasse\/kasse-web 200\.0 h · 100\.0 h rot/),
-    ).toBeInTheDocument();
+    // Red CI time written red; the hatch in the bar stays dark, so the
+    // repo's hue still tells it.
+    const red = screen.getByText("· 100.0 h rot");
+    expect(red).toHaveClass("text-danger-ink");
+    expect(red.parentElement?.textContent).toBe(
+      "kasse/kasse-web 200.0 h · 100.0 h rot",
+    );
     expect(
       screen.getByText("Nach Repo, über alle Lauf-Arten"),
     ).toBeInTheDocument();

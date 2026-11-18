@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import type { Metrics } from "./api";
 import { BarList } from "./charts";
 import { money, pct } from "./format";
-import { Card, CardHead, Compare, Direction, SectionHead, Tile } from "./ui";
+import { Card, CardHead, Direction, SectionHead, Tile } from "./ui";
 
 export function Costs({ m }: { m: Metrics }) {
   const { t } = useTranslation();
@@ -44,13 +44,10 @@ export function Costs({ m }: { m: Metrics }) {
               why={t("costs.wastedWhy")}
             />
           }
-          compare={
-            <Compare
-              change={cmp.wasted_share}
-              now={pct(c.wasted_share)}
-              format={pct}
-            />
-          }
+          compare={{
+            change: cmp.wasted_share,
+            format: pct,
+          }}
         />
         <Tile
           label={t("costs.perKloc")}
@@ -62,13 +59,10 @@ export function Costs({ m }: { m: Metrics }) {
               why={t("costs.perKlocWhy")}
             />
           }
-          compare={
-            <Compare
-              change={cmp.cost_per_kloc}
-              now={c.per_kloc == null ? "–" : money(c.per_kloc)}
-              format={money}
-            />
-          }
+          compare={{
+            change: cmp.cost_per_kloc,
+            format: money,
+          }}
         />
       </div>
       <Card className="mt-3">

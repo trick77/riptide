@@ -66,7 +66,11 @@ function Td({ cell, t }: { cell: Cell; t: TFunction }) {
   return (
     <td
       className={`border-b border-border-soft py-2 pr-3 align-top ${
-        kind === "ok" ? "text-ink-dim" : "text-ochre"
+        kind === "ok"
+          ? "text-ink-dim"
+          : kind === "not"
+            ? "text-muted"
+            : "text-ochre"
       }`}
     >
       {t(`frameworks.cell.${key}`)}

@@ -26,11 +26,13 @@ const PR_STATE_TONE: Record<PRFact["state"], Tone> = {
   deleted: "none",
 };
 
-// A failed sync shows its phase.
+// A failed sync shows its phase. A first deploy is no problem, only
+// counted without a verdict (release or re-sync unknown): neutral, its dot
+// hatched.
 const DEPLOY_TONE: Record<DeployFact["class"], Tone> = {
   failed: "fail",
   release: "ok",
-  first_seen: "warn",
+  first_seen: "none",
   sync: "none",
 };
 
@@ -295,7 +297,10 @@ function FactsTables({
               ? d.new_images.map(shortImage).join(", ")
               : "–"}
           </Mono>,
-          <Pill tone={DEPLOY_TONE[d.class]}>
+          <Pill
+            tone={DEPLOY_TONE[d.class]}
+            dot={d.class === "first_seen" ? "texture-unknown" : undefined}
+          >
             {d.class === "failed" ? d.phase : t(`facts.deployClass.${d.class}`)}
           </Pill>,
         ])}
@@ -332,8 +337,9 @@ function FactsTables({
                   ? t(`facts.runOutcome.${r.outcome}`)
                   : ciWord(r.status)}
               </Pill>
-              {/* red, then green on the same commit */}
-              {r.flaky && <Pill tone="warn">{t("facts.flaky")}</Pill>}
+              {/* red, then green on the same commit: red time, as in
+                  the CI flow */}
+              {r.flaky && <Pill tone="fail">{t("facts.flaky")}</Pill>}
             </span>
           ) : (
             "–"

@@ -89,23 +89,58 @@ export function SubHead({ title, text }: { title: string; text?: string }) {
   );
 }
 
+// One meaning per colour on every page: green better, red worse (also
+// failed, red CI time, a jam), ochre only "read with care" (few cases, a
+// data gap, missing).
 export const VERDICT_TONE: Record<Exclude<Change["verdict"], "none">, Tone> = {
   better: "ok",
-  worse: "warn",
+  worse: "fail",
   same: "none",
 };
 
+const VERDICT_INK: Record<Change["verdict"], string> = {
+  better: "text-online",
+  worse: "text-danger-ink",
+  same: "text-muted",
+  none: "text-muted",
+};
+
+export type CompareProps = {
+  change: Change;
+  now: string;
+  format: (v: number) => string;
+};
+
+// The previous value right under a number, in the backend's verdict's
+// colour: the colour sits on the change, the number stays ink. A Change or
+// an assessment's Fact, both carry prev and verdict.
+export function Delta({
+  change,
+  format,
+}: {
+  change: Pick<Change, "prev" | "verdict">;
+  format: (v: number) => string;
+}) {
+  const { t } = useTranslation();
+  if (change.prev == null) return null;
+  return (
+    <span
+      className={`font-mono text-[12px] tabular-nums ${VERDICT_INK[change.verdict]}`}
+    >
+      {t("compare.before", { v: format(change.prev) })}
+    </span>
+  );
+}
+
 // A number against the previous period: before → now and the backend's
-// verdict, or why there is none.
+// verdict, or why there is none. short: the before stands under the
+// number already (Delta), the foot keeps the verdict alone.
 export function Compare({
   change,
   now,
   format,
-}: {
-  change: Change;
-  now: string;
-  format: (v: number) => string;
-}) {
+  short = false,
+}: CompareProps & { short?: boolean }) {
   const { t } = useTranslation();
   if (change.prev == null)
     return (
@@ -121,11 +156,14 @@ export function Compare({
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 border-t border-border-soft pt-2 text-[12.5px] text-ink-dim">
       {v !== "none" && <Pill tone={VERDICT_TONE[v]}>{t(`compare.${v}`)}</Pill>}
-      <span>
-        {t("compare.previous")}{" "}
-        <span className="text-ink tabular-nums">{format(change.prev)}</span> →{" "}
-        {t("compare.now")} <span className="text-ink tabular-nums">{now}</span>
-      </span>
+      {!short && (
+        <span>
+          {t("compare.previous")}{" "}
+          <span className="text-ink tabular-nums">{format(change.prev)}</span> →{" "}
+          {t("compare.now")}{" "}
+          <span className="text-ink tabular-nums">{now}</span>
+        </span>
+      )}
       {change.reason === "undirected" && (
         <span className="text-muted">{t("compare.undirected")}</span>
       )}
@@ -267,8 +305,9 @@ export type TileProps = {
   question?: string;
   // Which way is better, and why; or that there is no better way.
   direction?: ReactNode;
-  // The number against the previous period (Compare).
-  compare?: ReactNode;
+  // The number against the previous period: its change under the number,
+  // the verdict and before → now at the foot.
+  compare?: Omit<CompareProps, "now">;
   // When set, the tile has a "Was heisst das?" toggle.
   open?: boolean;
   onWhy?: () => void;
@@ -315,10 +354,15 @@ export function Tile({
         </span>
         {unit && <span className="text-[13px] text-muted">{unit}</span>}
       </div>
+      {compare?.change.prev != null && (
+        <div>
+          <Delta change={compare.change} format={compare.format} />
+        </div>
+      )}
       {note && <div className="text-xs text-muted">{note}</div>}
       {direction && <div className="text-xs text-muted">{direction}</div>}
       {warn && <WarnLine>{warn}</WarnLine>}
-      {compare}
+      {compare && <Compare {...compare} now="" short />}
     </div>
   );
 }
@@ -428,14 +472,24 @@ const DOT: Record<Tone, string> = {
   none: "bg-muted",
 };
 
-export function Pill({ tone, children }: { tone: Tone; children: ReactNode }) {
+// dot overrides the tone's dot: a texture for what is counted without a
+// verdict (texture-unknown).
+export function Pill({
+  tone,
+  dot,
+  children,
+}: {
+  tone: Tone;
+  dot?: string;
+  children: ReactNode;
+}) {
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-px text-xs font-medium whitespace-nowrap ${PILL[tone]}`}
     >
       <span
         aria-hidden="true"
-        className={`size-1.5 rounded-full ${DOT[tone]}`}
+        className={`size-1.5 rounded-full ${dot ?? DOT[tone]}`}
       />
       {children}
     </span>

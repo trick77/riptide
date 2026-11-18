@@ -15,7 +15,7 @@ import {
   RepoNo,
 } from "./marimekko";
 import type { Tab } from "./state";
-import { Card, CardHead, Compare, Direction, Mono, Pill, Tile } from "./ui";
+import { Card, CardHead, Direction, Mono, Pill, Tile } from "./ui";
 
 const HEAD =
   "border-b border-border pb-2 text-[11px] font-medium tracking-[.12em] text-muted uppercase";
@@ -31,14 +31,16 @@ export const WAITS: PRWaiting[] = [
   "draft",
 ];
 
-function Waits({ w }: { w: WaitingCounts }) {
+// stuck: the PRs counted are long open or jammed, so waiting for a first
+// review is what is stuck (red); a fresh PR waiting for one is not.
+function Waits({ w, stuck }: { w: WaitingCounts; stuck: boolean }) {
   const { t } = useTranslation();
   const parts = WAITS.filter((k) => w[k] > 0);
   if (!parts.length) return <span className="text-muted">–</span>;
   return (
     <span className="flex flex-wrap gap-1.5">
       {parts.map((k) => (
-        <Pill key={k} tone={k === "first_review" ? "warn" : "none"}>
+        <Pill key={k} tone={stuck && k === "first_review" ? "fail" : "none"}>
           {t(`facts.prWaiting.${k}`)} {num(w[k])}
         </Pill>
       ))}
@@ -92,13 +94,10 @@ export function OpenPRs({
               why={t("open.jammed.directionWhy")}
             />
           }
-          compare={
-            <Compare
-              change={c.open_jammed}
-              now={num(o.jammed)}
-              format={(v) => num(v)}
-            />
-          }
+          compare={{
+            change: c.open_jammed,
+            format: (v) => num(v),
+          }}
           open={open}
           onWhy={onWhy}
         />
@@ -120,19 +119,16 @@ export function OpenPRs({
               why={t("open.all.directionWhy")}
             />
           }
-          compare={
-            <Compare
-              change={c.open_prs}
-              now={num(o.open)}
-              format={(v) => num(v)}
-            />
-          }
+          compare={{
+            change: c.open_prs,
+            format: (v) => num(v),
+          }}
         />
       </div>
       {o.long > 0 && (
         <div className="mt-3.5 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[13px] text-ink-dim">
           {t("open.longWaitOn", { days: o.long_days })}{" "}
-          <Waits w={o.long_waiting} />
+          <Waits w={o.long_waiting} stuck />
         </div>
       )}
       {o.inactive > 0 && (
@@ -180,11 +176,11 @@ export function OpenPRs({
                       <Breakable text={r.repo} />
                     </Mono>
                   </span>
-                  {r.jammed && <Pill tone="warn">{t("open.jam")}</Pill>}
+                  {r.jammed && <Pill tone="fail">{t("open.jam")}</Pill>}
                 </div>
                 <div className={`${CELL} text-right`}>{num(r.open)}</div>
                 <div
-                  className={`${CELL} text-right ${r.jammed ? "text-ochre" : r.long > 0 ? "text-ink-dim" : "text-muted"}`}
+                  className={`${CELL} text-right ${r.long > 0 ? "text-danger-ink" : "text-muted"}`}
                 >
                   {num(r.long)}
                 </div>
@@ -192,7 +188,7 @@ export function OpenPRs({
                   {dur(r.age.p50)}
                 </div>
                 <div className={CELL}>
-                  <Waits w={r.waiting} />
+                  <Waits w={r.waiting} stuck={r.jammed} />
                 </div>
                 <div
                   className={`${CELL} text-right ${r.inactive > 0 ? "text-ink-dim" : "text-muted"}`}
