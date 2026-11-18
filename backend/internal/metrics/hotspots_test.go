@@ -113,8 +113,9 @@ func TestHotspotsChart(t *testing.T) {
 
 func TestHotspots(t *testing.T) {
 	ds := data(func(ds *dataset.Dataset) {
-		// slower and failing more: 10 runs of 1000 s, half of them failed
-		ds.Runs = append(ds.Runs, runs("kasse/slow", 10, 1000, 5, "FAILURE")...)
+		// slower and failing more: 15 runs of 1000 s, a third of them
+		// failed; the 10 green ones are what its median is over
+		ds.Runs = append(ds.Runs, runs("kasse/slow", 15, 1000, 5, "FAILURE")...)
 		// the bulk: 20 quick green runs, 2 aborted ones that count for nothing
 		ds.Runs = append(ds.Runs, runs("kasse/quick", 22, 100, 2, "ABORTED")...)
 		// two runs stuck for long, both broken: too few to flag
@@ -134,8 +135,8 @@ func TestHotspots(t *testing.T) {
 	}
 	k := kindOf(h, KindMain)
 	expectNear(t, "team p50", k.Duration.P50, 100)
-	// 7 broken of 32 counted runs: ABORTED is no run.
-	expectNear(t, "team failure rate", k.FailureRate, 7.0/32)
+	// 7 broken of 37 counted runs: ABORTED is no run.
+	expectNear(t, "team failure rate", k.FailureRate, 7.0/37)
 
 	// Each repo against its own previous period: the slow one took 400 s.
 	slow, quick, stuck := repoOf(k, "kasse/slow"), repoOf(k, "kasse/quick"), repoOf(k, "kasse/stuck")
@@ -143,16 +144,16 @@ func TestHotspots(t *testing.T) {
 	if !slow.Slow || slow.DurationChange.Verdict != ChangeWorse || quick.Slow || quick.DurationChange.Verdict != ChangeSame {
 		t.Errorf("slow flags = %+v / %+v", slow, quick)
 	}
-	// From 0 % to half its runs; the stuck repo's failures count but not
-	// their time, and two runs flag nothing.
-	if !slow.FailingMore || slow.WastedSeconds != 5000 || slow.Runs != 10 || slow.Failures != 5 || quick.FailingMore {
+	// From 0 % to a third of its runs; the stuck repo's failures count but
+	// not their time, and two runs flag nothing.
+	if !slow.FailingMore || slow.WastedSeconds != 5000 || slow.Runs != 15 || slow.Failures != 5 || quick.FailingMore {
 		t.Errorf("failing more = %+v / %+v", slow, quick)
 	}
 	expectNear(t, "previous failure rate", slow.FailureChange.Prev, 0)
 	// The previous position in the units of the current one: seconds, 0..1.
 	expectNear(t, "previous median", slow.DurationChange.Prev, 400)
 	// CI time as the kind counts it: aborted runs in, outliers out.
-	if slow.CISeconds != 10000 || quick.CISeconds != 2200 || stuck.CISeconds != 0 {
+	if slow.CISeconds != 15000 || quick.CISeconds != 2200 || stuck.CISeconds != 0 {
 		t.Errorf("ci seconds = %v / %v / %v", slow.CISeconds, quick.CISeconds, stuck.CISeconds)
 	}
 	// The stuck repo's every run an outlier: no median to draw it at.
@@ -537,8 +538,8 @@ func TestCIFlowSplitsWithoutOverlap(t *testing.T) {
 		}
 	}
 	// The skewed run is no duration anywhere: still a failed run, but in no
-	// median, spread or outlier cut.
-	if main.Failed != 5 || main.Duration.N != 30 || kindOf(b.Hotspots, KindMain).Duration.N != 30 {
+	// median, spread or outlier cut. Durations are the green runs' only.
+	if main.Failed != 5 || main.Duration.N != 27 || kindOf(b.Hotspots, KindMain).Duration.N != 27 {
 		t.Errorf("skewed run as a duration: %+v", main)
 	}
 	if b.Kinds[2].Duration.N != 0 || b.Kinds[2].Runs != 1 {
@@ -620,8 +621,8 @@ func TestCIFlowSplitsWithoutOverlap(t *testing.T) {
 
 // The wait for an agent and the build split only the runs that report when
 // they got one: a run without it, or with one outside the run, has neither,
-// never a wait of 0. Duration stays over all of them; outliers carry their
-// wait.
+// never a wait of 0. Duration stays over all the green ones, a red run in
+// none of the three; outliers carry their wait.
 func TestBuildSplitsAgentWait(t *testing.T) {
 	start := ago(1)
 	at := func(s float64) *time.Time { return ptr(start.Add(time.Duration(s * float64(time.Second)))) }
@@ -636,7 +637,8 @@ func TestBuildSplitsAgentWait(t *testing.T) {
 	ds := data(func(ds *dataset.Dataset) {
 		ds.Runs = []dataset.Run{
 			timed("1", 600, 60, "SUCCESS"),
-			timed("2", 600, 120, "FAILURE"),
+			timed("2", 600, 120, "SUCCESS"),
+			timed("2r", 200, 150, "FAILURE"),    // red: no duration, no split
 			timed("3", 600, -2, "SUCCESS"),      // no agent time reported
 			timed("4", 600, -1, "SUCCESS"),      // agent before the start: skew
 			timed("5", 600, 700, "SUCCESS"),     // agent after the end: skew

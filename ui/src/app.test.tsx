@@ -1280,7 +1280,7 @@ describe("App", () => {
     render(<App />);
     await screen.findByText("Längste Builds");
     expect(
-      screen.getByText(/ab 3 Läufen mit Ergebnis und Dauer/),
+      screen.getByText(/Median der grünen Läufe, ohne Ausreisser, ab 3 davon/),
     ).toBeInTheDocument();
     // The wait beside the build, in the hotspots row too.
     expect(screen.getByText(/· 1 min Warten, 9 min Bauen/)).toBeInTheDocument();

@@ -229,7 +229,7 @@ export const de = {
           "Drei oder mehr PRs seit einer Woche oder länger offen. Warum sie liegen, steht nicht in den Daten: ein Freeze, eine Abhängigkeit, Ferien oder niemand fühlt sich zuständig.",
         slow_stage: "Die Etappe mit dem längsten Median bis Produktion.",
         slower_build:
-          "Der Median-Lauf dauert anderthalbmal so lang wie in der Vorperiode oder länger: langsamer als das Repo selbst, nicht als andere. Was im Build langsamer wurde, steht nicht in den Daten.",
+          "Der grüne Median-Lauf dauert anderthalbmal so lang wie in der Vorperiode oder länger: langsamer als das Repo selbst, nicht als andere. Was im Build langsamer wurde, steht nicht in den Daten.",
         steady_slow:
           "In dieser und der vorherigen Periode unter den langsamsten ihrer Art und langsamer als deren Median: langsam als Gewohnheit, nicht als Veränderung.",
         failing_more:
@@ -301,7 +301,7 @@ export const de = {
         failure_rate: "Läufe rot",
         wasted: "CI-Zeit in roten Läufen",
         runs: "Läufe",
-        build_p50: "Median-Lauf",
+        build_p50: "Median grüner Läufe",
         kind_p50: "typischer Lauf dieser Art",
         build_wait_p50: "Warten auf einen Agent",
         build_work_p50: "Bauen",
@@ -690,7 +690,7 @@ export const de = {
       "Erkannt werden Branches mit feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/ und PR-Builds. {{count}} Läufe auf Branches ohne bekanntes Präfix stehen unter «Übrige Branches» (release/, docs/, doc/, Nightlies und Bots nicht mitgezählt), vermutlich die Feature-Builds des Teams.",
     sparkAria: "Erfolgsquote pro Woche, {{kind}}: {{parts}}",
     successful: "erfolgreich",
-    typicalDuration: "typische Dauer, alle Repos",
+    typicalDuration: "typischer grüner Build, alle Repos",
     repos:
       "Von {{compared}} Repos sind {{slower}} langsamer, {{failing}} fehleranfälliger geworden als in der Vorperiode",
     reposNone: "Repos: kein Vergleich mit der Vorperiode",
@@ -767,7 +767,7 @@ export const de = {
     noneOfKind: "Keine Läufe dieser Art mit Ergebnis.",
     slowestTitle: "Längste Builds",
     slowestSub:
-      "Nach Median, ohne Ausreisser, ab {{min}} Läufen mit Ergebnis und Dauer.",
+      "Nach Median der grünen Läufe, ohne Ausreisser, ab {{min}} davon.",
     colMedian: "Median",
     colSlowest: "Langsamste 10 %",
     colWaitBuild: "Warten / Bauen",
@@ -784,7 +784,7 @@ export const de = {
     showAll: "Läufe anzeigen",
     noOutliers: "Keine Ausreisser im Zeitraum.",
     stuckRule:
-      "Ein Repo mit mindestens {{min}} eigenen Läufen mit Ergebnis und Dauer muss zudem {{factor}}× seinen eigenen Median überschreiten. Abgebrochene Läufe erscheinen trotzdem.",
+      "Ein Repo mit mindestens {{min}} eigenen grünen Läufen muss zudem {{factor}}× seinen eigenen Median überschreiten. Abgebrochene Läufe erscheinen trotzdem.",
     flow: {
       title: "Wohin die CI-Stunden fliessen",
       sub: "CI-Zeit jeder Lauf-Art nach Ausgang, Ausreisser eingerechnet{{sep}}Bandbreite = Stunden",

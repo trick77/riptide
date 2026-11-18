@@ -740,7 +740,8 @@ func TestBuilds(t *testing.T) {
 		t.Errorf("hint with feature runs = %+v", b.FeatureHint)
 	}
 	main := b.Kinds[1]
-	expectNear(t, "main p50", main.Duration.P50, 750)
+	// The green run's 600 s alone: the red one's 900 s is no build time.
+	expectNear(t, "main p50", main.Duration.P50, 600)
 	if main.CISeconds != 1500 || main.WastedSeconds != 900 || main.Failed != 1 {
 		t.Errorf("main = %+v", main)
 	}
@@ -853,11 +854,38 @@ func TestRepoDurations(t *testing.T) {
 		byKind[k.Kind] = k
 	}
 	main := byKind[KindMain].Repos
-	if len(main) != 1 || main[0].Repo != "kasse/kasse-api" || main[0].Runs != 2 || *main[0].Duration.P50 != 750 {
+	// Both runs count as runs, the green one's 600 s alone as duration.
+	if len(main) != 1 || main[0].Repo != "kasse/kasse-api" || main[0].Runs != 2 || *main[0].Duration.P50 != 600 {
 		t.Errorf("main = %+v", main)
 	}
 	if other := byKind[KindOther].Repos; other[0].Repo != "nightly" {
 		t.Errorf("other = %+v", other)
+	}
+}
+
+// A UI repo whose green builds take 25 minutes and whose red ones stop
+// after 2: its build takes 25 minutes, not the 13 a mixed median says.
+func TestDurationsGreenOnly(t *testing.T) {
+	ds := data(func(ds *dataset.Dataset) {
+		for i, d := range []int64{1500, 1500, 1500, 120, 120, 120} {
+			status := "SUCCESS"
+			if d == 120 {
+				status = "FAILURE"
+			}
+			ds.Runs = append(ds.Runs, run(func(r *dataset.Run) {
+				r.RunID, r.Repo, r.DurationS, r.Status = string(rune('a'+i)), s("kasse/kasse-ui"), n(d), s(status)
+			}))
+		}
+	})
+	b := build(ds, p4(), filter{}, nil)
+	expectNear(t, "kind p50", b.Kinds[0].Duration.P50, 1500)
+	k := b.Hotspots.Kinds[0]
+	expectNear(t, "team p50", k.Duration.P50, 1500)
+	if r := repoOf(k, "kasse/kasse-ui"); r.Runs != 6 || r.Duration.N != 3 || *r.Duration.P50 != 1500 {
+		t.Errorf("repo = %+v", r)
+	}
+	if len(k.Slowest) != 1 || *k.Slowest[0].Duration.P50 != 1500 {
+		t.Errorf("slowest = %+v", k.Slowest)
 	}
 }
 
