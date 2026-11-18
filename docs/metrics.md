@@ -502,8 +502,12 @@ values, not measured. The shapes are in
 [`backend/api/openapi.yaml`](../backend/api/openapi.yaml).
 
 A failed run is flaky when a later run of the same pipeline (same
-`source` and `pipeline_name`) passed on the same `commit_sha` under another
-`run_id`: red, then green without a code change. Paired within a kind,
+`source` and `pipeline_name`) passed on the same code under another
+`run_id`: red, then green without a code change. The same code is the
+`head_sha` and `base_sha` a PR build sends when the CI built a merge of the
+PR with its target branch (that merge commit is new on every build; the
+same head on a moved target is other code), else the `commit_sha`; a head
+without its base is never paired. Paired within a kind,
 an unknown run with main (a default-branch run before the build type was
 reported), never with a release: a release skips the tests a main build
 failed. Counted in the red run's kind; later means a later start,
@@ -516,9 +520,12 @@ period, lower better), their share of the red runs and their CI time, a
 part of the wasted time; each repo row its own, shown, never a flag. The
 facts mark each such run, searchable as Flaky. A lower bound: a retry
 inside a run (Jenkins `retry`, Tekton task retries), a commit built once,
-a rerun after the period's end and a CI that builds a merge commit of its
-own per run (a Jenkins PR job merging the target branch) all go unseen;
-runs without a commit are counted apart (`unjudged`). Whether the tests,
+a rerun after the period's end and a CI merge commit sent without its
+`head_sha` and `base_sha` all go unseen. A run that failed before its checkout has no
+commit: a red run, never flaky, counted apart (`unjudged`), and a sender
+must still report it, or the infrastructure failures vanish. A sender that
+starts reporting them adds red runs from that day on: the period across it
+fails more against the previous one with nothing changed in the builds. Whether the tests,
 the infrastructure or the network failed is not in the data. Not
 measured on a real import yet.
 

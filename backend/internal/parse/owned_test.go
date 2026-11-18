@@ -133,9 +133,37 @@ func TestPipelineFields(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if d.CommitSHA != "abc1234567890abc" || !d.StartedAt.Equal(time.Date(2026, 4, 28, 10, 5, 0, 0, time.UTC)) {
+		if str(d.CommitSHA) != "abc1234567890abc" || !d.StartedAt.Equal(time.Date(2026, 4, 28, 10, 5, 0, 0, time.UTC)) {
 			t.Errorf("draft = %+v", d)
 		}
+	})
+	t.Run("no commit is a run all the same, head sha lowercased", func(t *testing.T) {
+		for _, v := range []any{nil, ""} {
+			b := base()
+			b["commit_sha"] = v
+			d, err := Pipeline(encode(t, b))
+			if err != nil || d.CommitSHA != nil || d.HeadSHA != nil {
+				t.Errorf("%q: draft = %+v, %v", v, d, err)
+			}
+		}
+		b := base()
+		delete(b, "commit_sha")
+		if d, err := Pipeline(encode(t, b)); err != nil || d.CommitSHA != nil {
+			t.Errorf("absent: draft = %+v, %v", d, err)
+		}
+		b = base()
+		b["head_sha"], b["base_sha"] = "DEF4567890ABC", "  "
+		if d, err := Pipeline(encode(t, b)); err != nil || str(d.HeadSHA) != "def4567890abc" || d.BaseSHA != nil {
+			t.Errorf("head sha = %q, base %v, %v", str(d.HeadSHA), d.BaseSHA, err)
+		}
+		b["base_sha"] = "AAA1111\n"
+		if d, err := Pipeline(encode(t, b)); err != nil || str(d.BaseSHA) != "aaa1111" {
+			t.Errorf("base sha = %q, %v", str(d.BaseSHA), err)
+		}
+		// Seven characters only with the whitespace: too short.
+		b["base_sha"] = "  abc12  "
+		_, err := Pipeline(encode(t, b))
+		expectInvalid(t, err, "body.base_sha", "string_too_short")
 	})
 	t.Run("epoch seconds and milliseconds", func(t *testing.T) {
 		b := base()
@@ -205,6 +233,9 @@ func TestPipelineFields(t *testing.T) {
 		{"null source", "body.source", "missing", func(b map[string]any) { b["source"] = nil }},
 		{"empty run_id", "body.run_id", "string_too_short", func(b map[string]any) { b["run_id"] = "" }},
 		{"short commit sha", "body.commit_sha", "string_too_short", func(b map[string]any) { b["commit_sha"] = "abc" }},
+		{"short head sha", "body.head_sha", "string_too_short", func(b map[string]any) { b["head_sha"] = "abc" }},
+		{"short base sha", "body.base_sha", "string_too_short", func(b map[string]any) { b["base_sha"] = "abc" }},
+		{"numeric commit sha", "body.commit_sha", "string_type", func(b map[string]any) { b["commit_sha"] = 1234567 }},
 		{"numeric phase", "body.phase", "string_type", func(b map[string]any) { b["phase"] = 3 }},
 		{"bad kind", "body.actor_account_kind", "literal_error", func(b map[string]any) { b["actor_account_kind"] = "robot" }},
 		{"image refs not a list", "body.image_refs", "list_type", func(b map[string]any) { b["image_refs"] = "reg/acme/ui:1.0" }},
@@ -223,8 +254,9 @@ func TestPipelineFields(t *testing.T) {
 		})
 	}
 	t.Run("all errors reported at once", func(t *testing.T) {
+		// commit_sha is optional: a run without a checkout still counts.
 		_, err := Pipeline([]byte(`{}`))
-		if got := validationTypes(t, err); len(got) != 6 {
+		if got := validationTypes(t, err); len(got) != 5 {
 			t.Errorf("errors = %v", got)
 		}
 	})

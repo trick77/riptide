@@ -475,6 +475,9 @@ export type RunFact = {
   run_id: string;
   kind: RunKind;
   commit_sha: string | null;
+  // The commit to show, the backend's pick: a PR build's own head where
+  // commit_sha is a merge the CI made of it, else commit_sha.
+  shown_sha: string | null;
   duration_s: number | null;
   image_refs: string[];
   status: string | null;

@@ -12,28 +12,10 @@ import (
 // failing_more after 0009: its kind, IDs, fact IDs, {{facts}}, resolved
 // IDs and the report's card entries. Prose and repos named flaky stay.
 func TestMigrationRenamesFlakySignals(t *testing.T) {
-	dsn := testdb.DSN(t)
 	ctx := context.Background()
-	pool := testdb.Pool(t, dsn)
-	files, err := migrationFS.ReadDir("migrations")
-	if err != nil {
-		t.Fatal(err)
-	}
-	apply := func(name string) {
-		body, err := migrationFS.ReadFile("migrations/" + name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := pool.Exec(ctx, string(body)); err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-	}
+	pool := testdb.Pool(t, testdb.DSN(t))
 	const rename = "0009_team_analyses_failing_more.sql"
-	for _, f := range files {
-		if f.Name() < rename {
-			apply(f.Name())
-		}
-	}
+	apply := migratedBefore(t, pool, rename)
 	assessment := `{"signals": [{"id": "flaky:main:kasse/flaky", "kind": "flaky", "repo": "kasse/flaky",
 		"facts": [{"id": "flaky:main:kasse/flaky.runs"}]},
 		{"id": "resolved:flaky:feature:kasse/a", "kind": "resolved", "metric": "flaky:feature:kasse/a"}]}`

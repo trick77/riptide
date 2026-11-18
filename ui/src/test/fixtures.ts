@@ -595,6 +595,7 @@ export function runFact(o: Partial<RunFact> = {}): RunFact {
     run_id: "1",
     kind: "main",
     commit_sha: "c".repeat(40),
+    shown_sha: "c".repeat(40),
     duration_s: 600,
     image_refs: [],
     status: "SUCCESS",

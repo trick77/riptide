@@ -16,7 +16,9 @@ mandatory** — without them the metrics break.
   "run_id": "<env.BUILD_NUMBER>",
   "phase": "COMPLETED",
   "status": "<SUCCESS|FAILURE|UNSTABLE|...>",
-  "commit_sha": "<env.GIT_COMMIT>",
+  "commit_sha": "<env.GIT_COMMIT, omitted when the build has none>",
+  "head_sha": "<a PR build's own head, optional; see below>",
+  "base_sha": "<the target's tip it was merged onto, with head_sha>",
   "image_ref": "<registry/path/app:tag, optional>",
   "image_refs": ["<registry/path/app:tag, optional>", "<...>"],
   "actor_handle": "<git account Jenkins acts through, optional>",
@@ -31,6 +33,22 @@ mandatory** — without them the metrics break.
 The `team` column is populated from the bearer token, not the payload.
 Cross-source joins (to Bitbucket / Noergler) use `commit_sha`; per-pipeline
 aggregations use `pipeline_name`.
+
+A build that fails before its checkout (no agent pod, a git timeout, no
+workspace) has no commit. Send it all the same, without `commit_sha`: it
+is a red run, and skipped it would hide exactly the infrastructure
+failures. It is never flaky, with nothing to pair it on.
+
+`head_sha` is for PR jobs that build a merge of the PR with its target
+branch (Bitbucket Branch Source, "merging the pull request with the
+current target branch revision"). `GIT_COMMIT` is then a merge commit
+Jenkins made itself: new on every build, so a rerun of unchanged code
+looks like new code, and unknown to Bitbucket. Its second parent is the
+PR's head, its first the target branch's tip: send them as `head_sha` and
+`base_sha` when that first parent is on the target branch. riptide then pairs
+a red run with a later green one on the same head and base (flaky runs;
+the same head on a moved target is other code) and finds the run's
+repository by the head. The shared library below does it.
 
 `actor_handle` is the git-host account Jenkins itself commits and pushes as.
 Declaring it (with `actor_account_kind: "service"`) keeps those events out of
@@ -102,7 +120,9 @@ post {
 
 The helper handles HMAC plumbing, `currentBuild.result` snapshot/restore,
 the wall-clock timeout, FlowInterruptedException-vs-Throwable split,
-ABORTED-vs-FAILURE status mapping, and lazy `commit_sha` resolution.
+ABORTED-vs-FAILURE status mapping, lazy `commit_sha` resolution (kept from
+STARTED for COMPLETED, sent without when there is none) and a PR merge
+build's `head_sha`.
 Prefer this over the inline snippet below — the inline form is for
 teams without a shared library.
 

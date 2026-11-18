@@ -122,6 +122,48 @@ func TestFlakyAcrossKindsAndOrder(t *testing.T) {
 	}
 }
 
+// A PR build of a merge the CI made itself has a new commit every build:
+// its head on the same base pairs the rerun. The same head on a moved
+// target is other code; a head without its base is never paired.
+func TestFlakyOnHeadSHA(t *testing.T) {
+	merge := func(head, base string) func(*dataset.Run) {
+		return func(r *dataset.Run) {
+			r.HeadSHA = s(head)
+			if base != "" {
+				r.BaseSHA = s(base)
+			}
+		}
+	}
+	ds := data(func(ds *dataset.Dataset) {
+		ds.Runs = []dataset.Run{
+			flakyRun("1", "merge1", "FAILURE", 3, merge("h", "t1")),
+			flakyRun("2", "merge2", "SUCCESS", 2.9, merge("h", "t1")),
+			// master fixed in between: green on another base, not flaky
+			flakyRun("3", "merge3", "FAILURE", 2.8, merge("i", "t1")),
+			flakyRun("4", "merge4", "SUCCESS", 2.7, merge("i", "t2")),
+			// no base sent: no pair
+			flakyRun("5", "merge5", "FAILURE", 2.6, merge("j", "")),
+			flakyRun("6", "merge6", "SUCCESS", 2.5, merge("j", "")),
+		}
+	})
+	k := build(ds, p4(), filter{}, nil).Kinds[0]
+	if k.Failed != 3 || k.FlakyRuns != 1 || k.Unjudged != 0 {
+		t.Errorf("kind = %+v", k)
+	}
+	// The row shows the head, the code a developer knows, where it pairs on
+	// it; without a base the merge commit it pairs on. A search finds the
+	// base too.
+	for _, r := range ComputeFacts(ds, all(), "").Runs.Rows {
+		want := map[string]string{"1": "h", "5": "merge5"}[r.RunID]
+		if want != "" && (r.ShownSHA == nil || *r.ShownSHA != want) {
+			t.Errorf("run %s: shown sha = %v, want %s", r.RunID, r.ShownSHA, want)
+		}
+	}
+	if rows := ComputeFacts(ds, all(), "t2").Runs.Rows; len(rows) != 1 || rows[0].RunID != "4" {
+		t.Errorf("base search = %+v", rows)
+	}
+}
+
 // The flaky rate compares over the runs with a commit, not every run with
 // a verdict: 4 of 20 is too few.
 func TestFlakyComparedOnJudgedRuns(t *testing.T) {

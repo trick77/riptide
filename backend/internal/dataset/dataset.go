@@ -241,15 +241,20 @@ type LeadTime struct {
 
 // Run is one finished CI run.
 type Run struct {
-	Source       string     `json:"source" db:"source"`
-	PipelineName string     `json:"pipeline_name" db:"pipeline_name"`
-	Branch       string     `json:"branch" db:"-"`
-	BranchKind   string     `json:"branch_kind" db:"-"`
-	BuildType    *string    `json:"build_type" db:"build_type"`
-	RunID        string     `json:"run_id" db:"run_id"`
-	CommitSHA    *string    `json:"commit_sha" db:"commit_sha"`
-	Status       *string    `json:"status" db:"status"`
-	StartedAt    *time.Time `json:"started_at" db:"started_at"`
+	Source       string  `json:"source" db:"source"`
+	PipelineName string  `json:"pipeline_name" db:"pipeline_name"`
+	Branch       string  `json:"branch" db:"-"`
+	BranchKind   string  `json:"branch_kind" db:"-"`
+	BuildType    *string `json:"build_type" db:"build_type"`
+	RunID        string  `json:"run_id" db:"run_id"`
+	CommitSHA    *string `json:"commit_sha" db:"commit_sha"`
+	// HeadSHA is a PR build's own head when CommitSHA is a merge the CI made
+	// of it with the target branch, BaseSHA the target's tip it was merged
+	// onto; nil otherwise.
+	HeadSHA   *string    `json:"head_sha" db:"head_sha"`
+	BaseSHA   *string    `json:"base_sha" db:"base_sha"`
+	Status    *string    `json:"status" db:"status"`
+	StartedAt *time.Time `json:"started_at" db:"started_at"`
 	// AgentStartedAt is when the run got its build agent, as the CI
 	// reported it; nil when it did not.
 	AgentStartedAt *time.Time `json:"agent_started_at" db:"agent_started_at"`
@@ -343,6 +348,7 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 		}
 	}
 
+	runRepos(d)
 	exclude(d, p.Excluded)
 
 	automated := func(login, displayName string) bool {
@@ -378,6 +384,34 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 	d.Products = products(d)
 	d.utc()
 	return d, nil
+}
+
+// runRepos gives a run without a repository the one other runs of the same
+// pipeline found in Bitbucket: a run that failed before its checkout has no
+// commit to look it up by, and the project exclusion, the product filter and
+// the GitOps flag would otherwise never see it (an excluded project's agent
+// failures would count as the team's). A pipeline name two repositories
+// share stays without.
+func runRepos(d *Dataset) {
+	type found struct{ repo, project *string }
+	by, ambiguous := map[string]found{}, map[string]bool{}
+	key := func(r Run) string { return r.Source + "#" + r.PipelineName }
+	for _, r := range d.Runs {
+		if r.Repo == nil {
+			continue
+		}
+		if prev, ok := by[key(r)]; ok && *prev.repo != *r.Repo {
+			ambiguous[key(r)] = true
+		}
+		by[key(r)] = found{r.Repo, r.Project}
+	}
+	for i := range d.Runs {
+		r := &d.Runs[i]
+		if f, ok := by[key(*r)]; ok && r.Repo == nil && !ambiguous[key(*r)] {
+			r.Repo, r.Project = f.repo, f.project
+			r.GitOps = slices.Contains(d.GitOpsRepos, *f.repo)
+		}
+	}
 }
 
 // exclude drops the rows of excluded projects before anything is derived

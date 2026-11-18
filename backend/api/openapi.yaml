@@ -537,14 +537,40 @@ components:
     PipelineEvent:
       type: object
       description: Unknown fields are allowed and kept in the stored payload.
-      required: [source, pipeline_name, run_id, phase, commit_sha, started_at]
+      required: [source, pipeline_name, run_id, phase, started_at]
       properties:
         source: { type: string, minLength: 1, description: "CI system: jenkins, tekton, ..." }
         pipeline_name: { type: string, minLength: 1, description: Jenkins job / Tekton pipeline name. }
         run_id: { type: string, minLength: 1, description: Jenkins build number / Tekton PipelineRun name. }
         phase: { type: string, minLength: 1, description: STARTED / COMPLETED / FINALIZED. }
         status: { type: [string, "null"], description: SUCCESS / FAILURE / ... }
-        commit_sha: { type: string, minLength: 7, description: The App-repo commit being built. }
+        commit_sha:
+          type: [string, "null"]
+          # Blank, or 7 characters or more once trimmed (stored trimmed,
+          # lowercased); the same for head_sha and base_sha.
+          pattern: '^\s*$|^\s*\S.{5,}\S\s*$'
+          description: |
+            The App-repo commit being built, 7 characters or more. Absent,
+            null or blank (whitespace only) for a run that failed before its
+            checkout (no agent, a git timeout): still a run, counted as red,
+            never flaky (nothing to pair it on).
+        head_sha:
+          type: [string, "null"]
+          pattern: '^\s*$|^\s*\S.{5,}\S\s*$'
+          description: |
+            A PR build's own head, 7 characters or more, when `commit_sha` is
+            a merge the CI made of the PR with its target branch (Jenkins'
+            Bitbucket Branch Source, "merge with the target"): that merge
+            commit is new on every build and unknown to Bitbucket. Finds the
+            run's repository. Absent, null or blank: none.
+        base_sha:
+          type: [string, "null"]
+          pattern: '^\s*$|^\s*\S.{5,}\S\s*$'
+          description: |
+            With `head_sha`: the target branch's tip the merge was made onto,
+            7 characters or more. Head and base are the code built: a rerun
+            on both is the same code (flaky runs), the same head on a moved
+            target is not. A head without a base is never paired.
         image_ref:
           type: [string, "null"]
           description: |
@@ -1797,13 +1823,16 @@ components:
       type: object
       description: A finished CI run in the period, newest first.
       additionalProperties: false
-      required: [pipeline_name, run_id, kind, commit_sha, duration_s, image_refs, status, verdict, outcome, gitops,
-                 flaky]
+      required: [pipeline_name, run_id, kind, commit_sha, shown_sha, duration_s, image_refs, status, verdict, outcome,
+                 gitops, flaky]
       properties:
         pipeline_name: { type: string }
         run_id: { type: string }
         kind: { $ref: "#/components/schemas/RunKind" }
-        commit_sha: { type: [string, "null"] }
+        commit_sha: { type: [string, "null"], description: Null for a run that failed before its checkout. }
+        shown_sha:
+          type: [string, "null"]
+          description: The commit to show, the code built - a PR build's own head where `commit_sha` is a merge the CI made of it, else `commit_sha`.
         duration_s: { type: [integer, "null"] }
         image_refs: { type: array, items: { type: string } }
         status: { type: [string, "null"], description: As the CI sent it. }
