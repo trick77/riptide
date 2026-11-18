@@ -1,43 +1,64 @@
 # Setup: Bitbucket webhook
 
-Wire a Bitbucket Data Center repository to send PR + push events to
-riptide. Authentication is **HMAC-SHA256** via BBS's native
+Wire a Bitbucket Data Center project or repository to send PR + push events
+to riptide. Authentication is **HMAC-SHA256** via BBS's native
 `configuration.secret`; the team's secret is the `bitbucket` entry in
 `team-keys.json`.
 
-The canonical path is `riptide onboard-bitbucket` — manual UI
-configuration is the fallback only. The command provisions the webhook
-with HMAC, the correct event set, and the correct per-team URL
-(`/webhooks/bitbucket/{team}`).
+The canonical path is `POST /onboard/{team}`, self-service: riptide
+provisions the webhook with HMAC, the event set and the per-team URL
+(`/webhooks/bitbucket/{team}`) itself. Manual UI configuration is the
+fallback only.
 
 ## Prerequisites
 
-- Repo admin access to the Bitbucket repository (or use the command with a
-  REPO_ADMIN token).
-- The riptide base URL for your environment (ask the platform
-  team).
+- **Your own Bitbucket HTTP access token** with admin on the projects (or
+  repos) to wire. Used for the one request, never stored.
 - **Your team's Bitbucket HMAC secret** — the value stored under
   `<team>.bitbucket` in `team-keys.json`. The platform team hands it out
   during onboarding (see [`onboarding-a-team.md`](onboarding-a-team.md)).
-  This secret authenticates Bitbucket webhooks **only** — the team's
-  ArgoCD / Jenkins bearers are separate values.
+  This secret authenticates Bitbucket webhooks and `/onboard` **only** — the
+  team's ArgoCD / Jenkins bearers are separate values.
+- The instance runs with `BACKEND_PUBLIC_URL` (its base URL as Bitbucket
+  reaches it) and `BACKEND_BITBUCKET_URL`; without them `/onboard` answers
+  503.
 
-## Path A: `riptide onboard-bitbucket` (recommended)
+## Path A: `POST /onboard/{team}` (recommended)
 
-Get the binary with `make build` (writes `bin/riptide`), `go run
-./backend/cmd/riptide` from a checkout, or run the collector image, whose
-entrypoint is the same binary:
-`docker run --rm -v "$PWD:/work" -w /work -e BITBUCKET_TOKEN -e BACKEND_TEAM_KEY ghcr.io/trick77/riptide onboard-bitbucket team-config.json`.
+```http
+POST https://riptide.example.com/onboard/<team>
+Authorization: Bearer <team's bitbucket key>
+X-Bitbucket-Token: <your Bitbucket token>
+Content-Type: application/json
 
-```bash
-export BITBUCKET_TOKEN=...     # repo-admin REST token
-export BACKEND_TEAM_KEY=...    # team's `bitbucket` HMAC secret
-riptide onboard-bitbucket path/to/team-config.json
+{
+  "action": "onboard",
+  "projects": [
+    {"key": "PLAT"},
+    {"key": "~JDOE", "repos": ["tool"]}
+  ]
+}
 ```
 
-The command is idempotent (rerun after edits), supports `--dry-run` and
-`--remove`, and surfaces every diff before applying. See
-`scripts/bitbucket-onboarding.example.json` for the input shape.
+- **A project without `repos`** gets one project webhook: every repo in it
+  delivers, new ones included. Onboarding it deletes the team's repo webhooks
+  below it, which would deliver every event a second time (each delivery has
+  its own id, nothing dedupes them).
+- **A project with `repos`** gets one repo webhook each: a personal `~USER`
+  project, or a project shared with another team. A project webhook sends
+  every repo's events to your team, the other team's included.
+- `action`: `status` (default, writes nothing), `onboard`, `remove`.
+  `"dry_run": true` reports what onboard or remove would write.
+- Idempotent: rerun after edits. Every run rewrites the secret, since
+  Bitbucket never returns it.
+- A webhook named `riptide` that delivers to your team's path is yours on any
+  host: after a host move, one `onboard` points them all at
+  `BACKEND_PUBLIC_URL`. One delivering to another team's path is left alone
+  and listed.
+
+The answer lists every target with its status, plus `text`, the same as a
+table. `healthy` is false when a status row is not `ok` or an onboard row
+failed. The full contract: `/docs` on the instance.
 
 ## Path B: manual UI fallback
 
@@ -54,7 +75,7 @@ The command is idempotent (rerun after edits), supports `--dry-run` and
    - Repository: **Push**
    - Pull request: **Opened**, **Source branch updated**, **Modified**,
      **Approved**, **Unapproved**, **Needs work**, **Reviewer updated**,
-     **Merged**, **Deleted**, **Comment added**
+     **Merged**, **Declined**, **Deleted**, **Comment added**
 8. **Save**.
 
 The **Modified** trigger is required for DX Core 4 pickup-time accuracy on
@@ -87,6 +108,6 @@ the top-level `credentials` block via REST — BBS DC silently drops
 
 | Symptom | Likely cause |
 |---|---|
-| Bitbucket shows `401` with `Invalid signature.` | Wrong/missing HMAC secret in BBS, or wrong team segment in the URL. Re-run the onboarder, which always rewrites the secret (BBS redacts it on read-back). |
+| Bitbucket shows `401` with `Invalid signature.` | Wrong/missing HMAC secret in BBS, or wrong team segment in the URL. Run `onboard` again: it always rewrites the secret (BBS redacts it on read-back). A `status` run lists every hook still pointing elsewhere. |
 | Bitbucket shows `422` | Malformed payload — open an issue with the delivery UUID |
 | No log line at all | Webhook URL wrong, or network policy blocks Bitbucket → cluster |

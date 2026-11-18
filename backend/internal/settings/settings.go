@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -48,6 +49,12 @@ type Settings struct {
 	// AnalysisLoc is the calendar the assessments' closed weeks and the
 	// schedule run in.
 	AnalysisLoc *time.Location
+	// PublicURL is the base URL senders reach riptide on; POST /onboard
+	// points the Bitbucket webhooks at it. Empty switches onboarding off.
+	PublicURL string
+	// BitbucketURL is the Bitbucket Data Center base URL POST /onboard
+	// calls. Empty switches onboarding off.
+	BitbucketURL string
 	// Lookup is the environment with ./.env, for llmwire's variables.
 	Lookup Lookup
 }
@@ -129,8 +136,31 @@ func Load(lookup Lookup) (Settings, error) {
 	if s.AnalysisLoc, err = time.LoadLocation(tz); err != nil {
 		return Settings{}, fmt.Errorf("BACKEND_ANALYSIS_TZ must be an IANA time zone, got %q", tz)
 	}
+	if s.PublicURL, err = baseURL("BACKEND_PUBLIC_URL", get("BACKEND_PUBLIC_URL", ""), false); err != nil {
+		return Settings{}, err
+	}
+	if s.BitbucketURL, err = baseURL("BACKEND_BITBUCKET_URL", get("BACKEND_BITBUCKET_URL", ""), true); err != nil {
+		return Settings{}, err
+	}
 	s.Lookup = lookup
 	return s, nil
+}
+
+// baseURL checks an optional base URL (scheme and host, a path allowed) and
+// drops its trailing slash; empty stays empty.
+func baseURL(name, v string, httpsOnly bool) (string, error) {
+	if v == "" {
+		return "", nil
+	}
+	u, err := url.Parse(v)
+	if err != nil || u.Host == "" || (u.Scheme != "https" && (httpsOnly || u.Scheme != "http")) ||
+		u.RawQuery != "" || u.Fragment != "" {
+		if httpsOnly {
+			return "", fmt.Errorf("%s must be an https URL, got %q", name, v)
+		}
+		return "", fmt.Errorf("%s must be an http(s) URL, got %q", name, v)
+	}
+	return strings.TrimRight(v, "/"), nil
 }
 
 // checkListenAddr refuses a bind with no loopback listener: the exec probes

@@ -93,7 +93,10 @@ event tables, is in [docs/metrics.md](docs/metrics.md).
 
 Every CI posts to the one pipeline endpoint, told apart by its `source` field.
 Senders check their key at startup with `GET /auth/ping`, which answers the
-team.
+team. A team puts its Bitbucket webhooks up itself with `POST /onboard/{team}`
+(its `bitbucket` key as a bearer, its own Bitbucket token in
+`X-Bitbucket-Token`): one webhook per project, or per repo, see
+[setup-bitbucket-webhook.md](docs/setup-bitbucket-webhook.md).
 
 ## LLM assessment
 
@@ -175,6 +178,8 @@ Environment (a `.env` in the working directory fills in what is unset):
 | `BACKEND_ANALYSIS_MODEL` | empty (off) | llmwire profile id that words the overview's assessment; locally `mimo-v2.6-pro`, deployed `gpt-6.1-sol` through LiteLLM (infra repo) |
 | `BACKEND_ANALYSIS_REASONING` | empty (balanced) | the model's effort level |
 | `BACKEND_ANALYSIS_TZ` | `Europe/Zurich` | calendar of the assessed closed weeks and the Monday schedule |
+| `BACKEND_PUBLIC_URL` | empty (onboarding off) | riptide's base URL as senders reach it; `POST /onboard` points the Bitbucket webhooks there |
+| `BACKEND_BITBUCKET_URL` | empty (onboarding off) | Bitbucket Data Center base URL `POST /onboard` calls |
 
 The model's key: [LLM assessment](#llm-assessment). An old `RIPTIDE_*`
 variable still set refuses the start.
@@ -210,7 +215,7 @@ Adding a team: [docs/onboarding-a-team.md](docs/onboarding-a-team.md).
 A key works only on its own source's endpoint: an `argocd` key sent to
 `/webhooks/pipeline` gets a 401, even from the same team. Bitbucket is
 HMAC-only: Bitbucket DC's REST API silently drops `credentials.password`, so
-`riptide onboard-bitbucket` provisions the HMAC secret and the team comes from
+`POST /onboard/{team}` provisions the HMAC secret and the team comes from
 the URL path.
 
 A key read from a Kubernetes Secret with `oc get secret … -o jsonpath` is
@@ -223,7 +228,6 @@ still base64: pipe it through `base64 -d`. Pasted wrapped, it answers
 | --- | --- |
 | `riptide serve` (default) | collector on `:8000` and UI listener on `127.0.0.1:8080` |
 | `riptide migrate` | applies pending migrations and exits; run it before `serve`, which refuses a schema that is behind |
-| `riptide onboard-bitbucket` | creates, updates or removes the riptide webhook on Bitbucket repos (`--dry-run`, `--remove`; `--discover` lists the repos the token can administer), see [onboarding a team](docs/onboarding-a-team.md) |
 | `riptide check-onboarding` | lists which repos, pipelines and apps reported (`-team`, `-since 1h`); exit 1 when Bitbucket, the CI or Argo CD sent nothing |
 | `riptide analyse` | words one view with the LLM, see [LLM assessment](#llm-assessment) |
 | `riptide version` | prints the version |

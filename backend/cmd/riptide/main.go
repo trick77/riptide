@@ -3,7 +3,6 @@
 //	riptide serve              run the collector and the UI listener (default)
 //	riptide migrate            apply pending database migrations and exit
 //	riptide version            print the version and exit
-//	riptide onboard-bitbucket  create, update or remove the riptide webhook on Bitbucket repos
 //	riptide check-onboarding   list which repos, pipelines and apps reported in the last hour
 //	riptide analyse            word one team's assessment with the LLM (-dry-run: print its input)
 //	riptide -healthcheck       probe /healthz, exit 0 on a 2xx (liveness: the container healthcheck)
@@ -35,12 +34,11 @@ import (
 	"github.com/trick77/riptide/internal/api"
 	"github.com/trick77/riptide/internal/config"
 	"github.com/trick77/riptide/internal/httpapi"
-	"github.com/trick77/riptide/internal/onboarding"
 	"github.com/trick77/riptide/internal/settings"
 	"github.com/trick77/riptide/internal/store"
 )
 
-const usage = "usage: riptide [serve|migrate|version|onboard-bitbucket|check-onboarding|analyse|-healthcheck|-readycheck]"
+const usage = "usage: riptide [serve|migrate|version|check-onboarding|analyse|-healthcheck|-readycheck]"
 
 // serviceName is stamped on every log line: the image name.
 const serviceName = "riptide"
@@ -62,8 +60,6 @@ func main() {
 		err = withSettings(migrate)
 	case "version":
 		fmt.Println(version.String())
-	case "onboard-bitbucket":
-		os.Exit(onboarding.Main(args, os.Stdout, os.Stderr))
 	case "analyse":
 		err = withSettings(func(s settings.Settings, log *slog.Logger) error {
 			return analyse(s, log, args, os.Stdout)
@@ -215,7 +211,8 @@ func serve(s settings.Settings, log *slog.Logger) error {
 
 	go rt.Run(ctx, s.ReloadInterval)
 
-	deps := api.Deps{Store: db, Reader: db, Runtime: rt, Log: log}
+	deps := api.Deps{Store: db, Reader: db, Runtime: rt, Log: log,
+		Onboarding: api.Onboarding{PublicURL: s.PublicURL, BitbucketURL: s.BitbucketURL}}
 	svc, err := analysisService(ctx, s, db, deps, log)
 	if err != nil {
 		return err

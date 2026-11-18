@@ -1,87 +1,93 @@
 package onboarding
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 )
 
-// fakeBitbucket is just enough Bitbucket Data Center REST for the onboarder.
+// fakeBitbucket is just enough Bitbucket Data Center REST for the onboarder:
+// project and repo webhooks, a project's repos, paging.
 type fakeBitbucket struct {
-	mu        sync.Mutex
-	hooks     map[string][]map[string]any // "PROJ/repo" -> webhooks
-	nextID    int
-	calls     []string
-	denyRead  map[string]int // repo key -> status for GET repo
-	denyWrite int
-	pageSize  int
-	adminRepo [][2]string
+	mu       sync.Mutex
+	repos    map[string][]string         // project -> slugs
+	hooks    map[string][]map[string]any // "PROJ" or "PROJ/repo" -> webhooks
+	nextID   int
+	writes   []string
+	deny     map[string]int // "METHOD PROJ[/repo]" -> status
+	pageSize int
 }
 
 func newFake() *fakeBitbucket {
-	return &fakeBitbucket{hooks: map[string][]map[string]any{}, nextID: 1, denyRead: map[string]int{}, pageSize: 100}
+	return &fakeBitbucket{repos: map[string][]string{}, hooks: map[string][]map[string]any{}, nextID: 100,
+		deny: map[string]int{}, pageSize: 100}
+}
+
+func (f *fakeBitbucket) hook(key, name, url string, events ...string) {
+	if events == nil {
+		events = RequiredEvents
+	}
+	f.hooks[key] = append(f.hooks[key], map[string]any{"id": f.nextID, "name": name, "url": url,
+		"events": events, "active": true})
+	f.nextID++
 }
 
 func (f *fakeBitbucket) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.calls = append(f.calls, r.Method+" "+r.URL.Path)
 	if r.Header.Get("Authorization") != "Bearer bb-token" {
-		w.WriteHeader(401)
+		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/rest/api/1.0/"), "/")
-	if len(parts) == 1 && parts[0] == "repos" {
-		f.page(w, r, f.adminRepoValues())
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/rest/api/1.0/projects/"), "/")
+	key, rest := parts[0], parts[1:]
+	if len(rest) >= 2 && rest[0] == "repos" {
+		key, rest = key+"/"+rest[1], rest[2:]
+	} else if len(rest) == 1 && rest[0] == "repos" {
+		var values []map[string]any
+		for _, s := range f.repos[key] {
+			values = append(values, map[string]any{"slug": s})
+		}
+		f.page(w, r, values)
 		return
 	}
-	if len(parts) < 4 || parts[0] != "projects" || parts[2] != "repos" {
-		w.WriteHeader(404)
-		return
-	}
-	key := parts[1] + "/" + parts[3]
-	if code := f.denyRead[key]; code != 0 {
+	if code := f.deny[r.Method+" "+key]; code != 0 {
 		w.WriteHeader(code)
-		_, _ = io.WriteString(w, `{"errors":[{"message":"no"}]}`)
+		_, _ = io.WriteString(w, `{"errors":[{"message":"denied"}]}`)
 		return
+	}
+	if len(rest) == 0 || rest[0] != "webhooks" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if r.Method != http.MethodGet {
+		f.writes = append(f.writes, r.Method+" "+key)
 	}
 	switch {
-	case len(parts) == 4:
-		_, _ = io.WriteString(w, `{"slug":"`+parts[3]+`"}`)
-	case parts[4] == "pull-requests":
-		_, _ = io.WriteString(w, `{"values":[]}`)
-	case parts[4] == "webhooks" && len(parts) == 5 && r.Method == http.MethodGet:
+	case len(rest) == 1 && r.Method == http.MethodGet:
 		f.page(w, r, f.hooks[key])
-	case parts[4] == "webhooks" && len(parts) == 5 && r.Method == http.MethodPost:
-		if f.denyWrite != 0 {
-			w.WriteHeader(f.denyWrite)
-			return
-		}
+	case len(rest) == 1 && r.Method == http.MethodPost:
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		body["id"] = f.nextID
 		f.nextID++
 		f.hooks[key] = append(f.hooks[key], body)
 		_ = json.NewEncoder(w).Encode(body)
-	case parts[4] == "webhooks" && len(parts) == 6:
-		id, _ := strconv.Atoi(parts[5])
+	case len(rest) == 2:
+		id, _ := strconv.Atoi(rest[1])
 		for i, h := range f.hooks[key] {
 			if toInt(h["id"]) != id {
 				continue
 			}
 			if r.Method == http.MethodDelete {
-				f.hooks[key] = append(f.hooks[key][:i], f.hooks[key][i+1:]...)
-				w.WriteHeader(204)
+				f.hooks[key] = slices.Delete(f.hooks[key], i, i+1)
+				w.WriteHeader(http.StatusNoContent)
 				return
 			}
 			var body map[string]any
@@ -91,9 +97,9 @@ func (f *fakeBitbucket) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(body)
 			return
 		}
-		w.WriteHeader(404)
+		w.WriteHeader(http.StatusNotFound)
 	default:
-		w.WriteHeader(404)
+		w.WriteHeader(http.StatusNotFound)
 	}
 }
 
@@ -107,20 +113,10 @@ func toInt(v any) int {
 	return -1
 }
 
-func (f *fakeBitbucket) adminRepoValues() []map[string]any {
-	var out []map[string]any
-	for _, r := range f.adminRepo {
-		out = append(out, map[string]any{"slug": r[1], "project": map[string]any{"key": r[0]}})
-	}
-	return out
-}
-
 func (f *fakeBitbucket) page(w http.ResponseWriter, r *http.Request, values []map[string]any) {
 	start, _ := strconv.Atoi(r.URL.Query().Get("start"))
+	start = min(start, len(values))
 	end := min(start+f.pageSize, len(values))
-	if start > len(values) {
-		start = len(values)
-	}
 	resp := map[string]any{"values": values[start:end], "isLastPage": end >= len(values)}
 	if end < len(values) {
 		resp["nextPageStart"] = end
@@ -128,303 +124,202 @@ func (f *fakeBitbucket) page(w http.ResponseWriter, r *http.Request, values []ma
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-func onboarder(_ *fakeBitbucket, srv *httptest.Server) *Onboarder {
-	return &Onboarder{Client: NewClient(srv.URL, "bb-token"), WebhookURL: "https://riptide.example.com/webhooks/bitbucket/",
-		Team: "platform", TeamKey: "hmac-secret", Name: DefaultWebhookName}
-}
+const (
+	wantURL  = "https://riptide.example.com/webhooks/bitbucket/platform"
+	oldURL   = "https://riptide-collector.example.com/webhooks/bitbucket/platform"
+	otherURL = "https://riptide.example.com/webhooks/bitbucket/checkout"
+)
 
-func TestOnboardCreatesThenUpdates(t *testing.T) {
+func setup(t *testing.T) (*fakeBitbucket, *Onboarder) {
+	t.Helper()
 	f := newFake()
 	srv := httptest.NewServer(f)
-	defer srv.Close()
-	o := onboarder(f, srv)
-	var logs []string
-	o.Log = func(format string, a ...any) { logs = append(logs, fmt.Sprintf(format, a...)) }
-	p := RepoSpec{Project: "PLAT", Repo: "riptide"}
+	t.Cleanup(srv.Close)
+	return f, &Onboarder{Client: NewClient(srv.URL, "bb-token", srv.Client()), Team: "platform",
+		WebhookURL: wantURL, Secret: "hmac-secret"}
+}
 
-	res := o.Onboard(context.Background(), p)
-	if res.Status != "ok" || res.Detail != "webhook configured" || res.Diff[0] != "create" {
-		t.Fatalf("create: %+v", res)
-	}
-	hook := f.hooks["PLAT/riptide"][0]
-	if hook["url"] != "https://riptide.example.com/webhooks/bitbucket/platform" || hook["active"] != true ||
-		hook["configuration"].(map[string]any)["secret"] != "hmac-secret" || len(hook["events"].([]any)) != len(RequiredEvents) {
-		t.Errorf("hook = %v", hook)
-	}
+var (
+	proj = Target{Project: "PLAT"}
+	repo = Target{Project: "~ME", Repo: "tool"}
+)
 
-	// Drift: wrong URL, missing and extra events, inactive.
-	hook["url"] = "https://old.example.com/hook"
-	hook["events"] = []any{"pr:opened", "repo:comment:added"}
-	hook["active"] = false
-	res = o.Onboard(context.Background(), p)
-	if res.Status != "ok" || len(res.Diff) != 4 || !strings.Contains(res.Diff[1], "extra=[repo:comment:added]") || res.Diff[2] != "active: false -> true" {
-		t.Fatalf("update: %+v", res)
+func TestOnboardProjectCreatesThenRewrites(t *testing.T) {
+	f, o := setup(t)
+	r := o.Onboard(t.Context(), proj)
+	if r.Status != "ok" || !slices.Equal(r.Diff, []string{"create"}) {
+		t.Fatalf("create: %+v", r)
 	}
-	if len(f.hooks["PLAT/riptide"]) != 1 || f.hooks["PLAT/riptide"][0]["url"] != "https://riptide.example.com/webhooks/bitbucket/platform" {
-		t.Errorf("hooks = %v", f.hooks["PLAT/riptide"])
+	h := f.hooks["PLAT"][0]
+	cfg, _ := h["configuration"].(map[string]any)
+	if h["url"] != wantURL || h["name"] != "riptide" || cfg["secret"] != "hmac-secret" || h["sslVerificationRequired"] != true {
+		t.Fatalf("hook = %v", h)
 	}
-	// Up to date apart from the secret, which is always rewritten.
-	res = o.Onboard(context.Background(), p)
-	if len(res.Diff) != 1 || !strings.HasPrefix(res.Diff[0], "configuration.secret") {
-		t.Errorf("diff = %v", res.Diff)
+	if len(h["events"].([]any)) != len(RequiredEvents) {
+		t.Fatalf("events = %v", h["events"])
 	}
-	if !strings.Contains(strings.Join(logs, "\n"), "read permissions OK") {
-		t.Errorf("logs = %v", logs)
+	// Up to date, and still written: the secret cannot be compared.
+	r = o.Onboard(t.Context(), proj)
+	if r.Status != "ok" || len(r.Diff) != 0 || !strings.Contains(r.Detail, "secret rewritten") {
+		t.Fatalf("rerun: %+v", r)
+	}
+	if !slices.Equal(f.writes, []string{"POST PLAT", "PUT PLAT"}) {
+		t.Fatalf("writes = %v", f.writes)
 	}
 }
 
-func TestOnboardDryRunWritesNothing(t *testing.T) {
-	f := newFake()
-	srv := httptest.NewServer(f)
-	defer srv.Close()
-	o := onboarder(f, srv)
+// The case it was built for: hooks left on a host riptide moved away from.
+func TestOnboardMovesTheHostAndPrunesRepoHooks(t *testing.T) {
+	f, o := setup(t)
+	f.repos["PLAT"] = []string{"a", "b", "c", "d"}
+	f.hook("PLAT/a", "riptide", oldURL)
+	f.hook("PLAT/b", "riptide", otherURL)
+	f.hook("PLAT/c", "noergler", "https://noergler.example.com/webhook/platform")
+	f.hook("PLAT/d", "riptide", oldURL, "pr:opened")
+
+	st := o.Status(t.Context(), proj)
+	if st.Status != "missing" || !slices.Equal(st.RepoHooks, []string{"a", "d"}) || len(st.Foreign) != 1 {
+		t.Fatalf("status: %+v", st)
+	}
+
+	r := o.Onboard(t.Context(), proj)
+	if r.Status != "ok" || !slices.Equal(r.RepoHooks, []string{"a", "d"}) ||
+		!slices.Equal(r.Foreign, []string{"PLAT/b -> " + otherURL}) {
+		t.Fatalf("onboard: %+v", r)
+	}
+	if len(f.hooks["PLAT/a"]) != 0 || len(f.hooks["PLAT/d"]) != 0 || len(f.hooks["PLAT/b"]) != 1 || len(f.hooks["PLAT/c"]) != 1 {
+		t.Fatalf("hooks = %v", f.hooks)
+	}
+	if st := o.Status(t.Context(), proj); st.Status != "ok" || len(st.RepoHooks) != 0 {
+		t.Fatalf("status after: %+v", st)
+	}
+}
+
+func TestOnboardUpdatesAStaleHook(t *testing.T) {
+	f, o := setup(t)
+	f.hook("PLAT", "riptide", oldURL, "pr:opened", "repo:forked")
+	st := o.Status(t.Context(), proj)
+	if st.Status != "stale" || len(st.Diff) != 3 || !strings.HasPrefix(st.Diff[0], "url: "+oldURL) {
+		t.Fatalf("status: %+v", st)
+	}
+	r := o.Onboard(t.Context(), proj)
+	if r.Status != "ok" || len(r.Diff) != 3 || f.hooks["PLAT"][0]["url"] != wantURL {
+		t.Fatalf("onboard: %+v %v", r, f.hooks["PLAT"])
+	}
+}
+
+func TestDryRunWritesNothing(t *testing.T) {
+	f, o := setup(t)
 	o.DryRun = true
-	var logs []string
-	o.Log = func(format string, a ...any) { logs = append(logs, fmt.Sprintf(format, a...)) }
-	res := o.Onboard(context.Background(), RepoSpec{"PLAT", "riptide"})
-	if res.Status != "ok" || res.Detail != "dry-run" || len(f.hooks) != 0 {
-		t.Fatalf("res = %+v, hooks = %v", res, f.hooks)
+	f.repos["PLAT"] = []string{"a"}
+	f.hook("PLAT/a", "riptide", oldURL)
+	if r := o.Onboard(t.Context(), proj); r.Status != "ok" || !strings.HasPrefix(r.Detail, "dry run") ||
+		!slices.Equal(r.RepoHooks, []string{"a"}) {
+		t.Fatalf("project: %+v", r)
 	}
-	if joined := strings.Join(logs, "\n"); strings.Contains(joined, "hmac-secret") || !strings.Contains(joined, `"secret":"***"`) {
-		t.Errorf("secret not redacted: %s", joined)
+	f.hook("PLAT", "riptide", wantURL)
+	if r := o.Remove(t.Context(), proj); r.Status != "ok" || !strings.Contains(r.Detail, "would remove") {
+		t.Fatalf("remove: %+v", r)
 	}
-	f.hooks["PLAT/riptide"] = []map[string]any{{"id": 7, "name": "riptide", "url": "x"}}
-	res = o.Onboard(context.Background(), RepoSpec{"PLAT", "riptide"})
-	if res.Detail != "dry-run" || f.hooks["PLAT/riptide"][0]["url"] != "x" {
-		t.Errorf("dry-run update wrote: %+v", res)
-	}
-	res = o.Remove(context.Background(), RepoSpec{"PLAT", "riptide"})
-	if res.Detail != "dry-run: would remove webhook id=7" || len(f.hooks["PLAT/riptide"]) != 1 {
-		t.Errorf("dry-run remove: %+v", res)
+	if len(f.writes) != 0 {
+		t.Fatalf("writes = %v", f.writes)
 	}
 }
 
-func TestOnboardFailures(t *testing.T) {
-	f := newFake()
-	srv := httptest.NewServer(f)
-	defer srv.Close()
-	o := onboarder(f, srv)
-	f.denyRead["PLAT/secret"] = 403
-	res := o.Onboard(context.Background(), RepoSpec{"PLAT", "secret"})
-	if res.Status != "failed" || !strings.HasPrefix(res.Detail, "permission check HTTP 403") {
-		t.Errorf("read denied: %+v", res)
+func TestAnotherTeamsHookIsLeftAlone(t *testing.T) {
+	f, o := setup(t)
+	f.hook("PLAT", "riptide", otherURL)
+	if r := o.Status(t.Context(), proj); r.Status != "foreign" {
+		t.Fatalf("status: %+v", r)
 	}
-	f.denyWrite = 403
-	res = o.Onboard(context.Background(), RepoSpec{"PLAT", "riptide"})
-	if res.Status != "failed" || !strings.HasPrefix(res.Detail, "upsert webhook HTTP 403") {
-		t.Errorf("write denied: %+v", res)
+	if r := o.Onboard(t.Context(), proj); r.Status != "failed" || !strings.Contains(r.Detail, otherURL) {
+		t.Fatalf("onboard: %+v", r)
 	}
-	res = o.Remove(context.Background(), RepoSpec{"PLAT", "secret"})
-	if res.Status != "failed" || !strings.HasPrefix(res.Detail, "list webhooks HTTP 403") {
-		t.Errorf("remove denied: %+v", res)
+	if r := o.Remove(t.Context(), proj); r.Status != "skipped" {
+		t.Fatalf("remove: %+v", r)
 	}
-	dead := &Onboarder{Client: NewClient("http://127.0.0.1:1", "t"), Name: "riptide"}
-	if res := dead.Onboard(context.Background(), RepoSpec{"A", "b"}); res.Status != "failed" || !strings.HasPrefix(res.Detail, "permission check: ") {
-		t.Errorf("unreachable: %+v", res)
+	if len(f.writes) != 0 {
+		t.Fatalf("writes = %v", f.writes)
 	}
-	if !strings.Contains((&HTTPError{Status: 500, Body: strings.Repeat("x", 300), URL: "u"}).Error(), "HTTP 500 for u") {
-		t.Error("HTTPError message")
+}
+
+func TestRepoTargets(t *testing.T) {
+	f, o := setup(t)
+	if r := o.Onboard(t.Context(), repo); r.Status != "ok" || len(f.hooks["~ME/tool"]) != 1 {
+		t.Fatalf("personal repo: %+v", r)
+	}
+	// No project admin on ~ME: the project check is skipped, not failed.
+	f.deny["GET ~ME"] = http.StatusForbidden
+	if r := o.Status(t.Context(), repo); r.Status != "ok" {
+		t.Fatalf("status: %+v", r)
+	}
+	delete(f.deny, "GET ~ME")
+
+	// Under a project hook: skipped, and a leftover repo hook is double.
+	f.hook("~ME", "riptide", wantURL)
+	if r := o.Onboard(t.Context(), repo); r.Status != "skipped" {
+		t.Fatalf("under a project hook: %+v", r)
+	}
+	if r := o.Status(t.Context(), repo); r.Status != "double" {
+		t.Fatalf("double: %+v", r)
+	}
+	f.hooks["~ME/tool"] = nil
+	if r := o.Status(t.Context(), repo); r.Status != "ok" || !strings.Contains(r.Detail, "covered") {
+		t.Fatalf("covered: %+v", r)
+	}
+}
+
+func TestFailuresAreRows(t *testing.T) {
+	f, o := setup(t)
+	f.deny["POST PLAT"] = http.StatusForbidden
+	r := o.Onboard(t.Context(), proj)
+	if r.Status != "failed" || !strings.Contains(r.Detail, "create webhook: HTTP 403") {
+		t.Fatalf("onboard: %+v", r)
+	}
+	f.deny["GET OTHER"] = http.StatusNotFound
+	rows, healthy := Run(t.Context(), o, ActionOnboard, []Target{{Project: "OTHER"}, proj})
+	if healthy || len(rows) != 2 || rows[0].Status != "failed" || rows[1].Status != "failed" {
+		t.Fatalf("run: %v %+v", healthy, rows)
 	}
 }
 
 func TestRemove(t *testing.T) {
-	f := newFake()
-	srv := httptest.NewServer(f)
-	defer srv.Close()
-	o := onboarder(f, srv)
-	p := RepoSpec{"PLAT", "riptide"}
-	if res := o.Remove(context.Background(), p); res.Status != "skipped" {
-		t.Errorf("absent: %+v", res)
+	f, o := setup(t)
+	f.hook("PLAT", "riptide", oldURL)
+	if r := o.Remove(t.Context(), proj); r.Status != "ok" || len(f.hooks["PLAT"]) != 0 {
+		t.Fatalf("remove: %+v", r)
 	}
-	o.Onboard(context.Background(), p)
-	f.hooks["PLAT/riptide"] = append(f.hooks["PLAT/riptide"], map[string]any{"id": 99, "name": "someone-else"})
-	res := o.Remove(context.Background(), p)
-	if res.Status != "ok" || res.Detail != "webhook removed: id=1" || len(f.hooks["PLAT/riptide"]) != 1 {
-		t.Errorf("remove: %+v, hooks %v", res, f.hooks)
+	if r := o.Remove(t.Context(), proj); r.Status != "skipped" {
+		t.Fatalf("again: %+v", r)
+	}
+}
+
+func TestRunHealthAndRender(t *testing.T) {
+	f, o := setup(t)
+	f.hook("PLAT", "riptide", wantURL)
+	rows, healthy := Run(t.Context(), o, ActionStatus, []Target{proj})
+	if !healthy {
+		t.Fatalf("rows = %+v", rows)
+	}
+	rows, healthy = Run(t.Context(), o, ActionStatus, []Target{proj, repo})
+	if healthy || rows[1].Status != "missing" {
+		t.Fatalf("rows = %+v", rows)
+	}
+	text := Render(rows)
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "PLAT (project)   ok") || !strings.HasPrefix(lines[1], "~ME/tool (repo)  missing") {
+		t.Fatalf("text:\n%s", text)
 	}
 }
 
 func TestPaginationFollowsNextPageStart(t *testing.T) {
-	f := newFake()
+	f, o := setup(t)
 	f.pageSize = 2
-	for i := 0; i < 5; i++ {
-		f.hooks["PLAT/r"] = append(f.hooks["PLAT/r"], map[string]any{"id": i, "name": fmt.Sprintf("h%d", i)})
+	for i := range 5 {
+		f.repos["PLAT"] = append(f.repos["PLAT"], "r"+strconv.Itoa(i))
 	}
-	srv := httptest.NewServer(f)
-	defer srv.Close()
-	hooks, err := NewClient(srv.URL, "bb-token").ListWebhooks(context.Background(), RepoSpec{"PLAT", "r"})
-	if err != nil || len(hooks) != 5 || hooks[4].Name != "h4" {
-		t.Errorf("hooks = %v, %v", hooks, err)
-	}
-}
-
-func TestParseInput(t *testing.T) {
-	good := `{"bitbucket_url": "https://bb.example.com/", "webhook_url": "http://riptide/webhooks/bitbucket", "team": " platform ",
-		"projects": [{"project": "PLAT", "repos": ["riptide", " noergler "]}, {"project": "APP", "repos": ["foo"]}]}`
-	in, err := ParseInput([]byte(good))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if in.BitbucketURL != "https://bb.example.com" || in.Team != "platform" || len(in.Repos) != 3 || in.Repos[1].Key() != "PLAT/noergler" {
-		t.Errorf("input = %+v", in)
-	}
-	for _, c := range []struct{ body, want string }{
-		{`[]`, "JSON object"},
-		{`{"webhook_url": "https://r", "team": "t", "projects": []}`, "'bitbucket_url' must be a non-empty string"},
-		{`{"bitbucket_url": "http://bb", "webhook_url": "https://r", "team": "t"}`, "'bitbucket_url' must be an https URL"},
-		{`{"bitbucket_url": "https://bb", "webhook_url": "ftp://r", "team": "t"}`, "'webhook_url' must be an http(s) URL"},
-		{`{"bitbucket_url": "https://bb", "webhook_url": "https://r", "team": " "}`, "'team'"},
-		{`{"bitbucket_url": "https://bb", "webhook_url": "https://r", "team": "t", "projects": []}`, "'projects'"},
-		{`{"bitbucket_url": "https://bb", "webhook_url": "https://r", "team": "t", "projects": ["x"]}`, "projects[0] must be an object"},
-		{`{"bitbucket_url": "https://bb", "webhook_url": "https://r", "team": "t", "projects": [{"repos": ["a"]}]}`, "projects[0].project"},
-		{`{"bitbucket_url": "https://bb", "webhook_url": "https://r", "team": "t", "projects": [{"project": "P"}]}`, "projects[0].repos must be"},
-		{`{"bitbucket_url": "https://bb", "webhook_url": "https://r", "team": "t", "projects": [{"project": "P", "repos": [1]}]}`, "projects[0].repos[0]"},
-		{`{"bitbucket_url": "https://bb", "webhook_url": "https://r", "team": "t", "projects": [{"project": "P", "repos": ["a", "a"]}]}`, "duplicate repo entry: P/a"},
-	} {
-		if _, err := ParseInput([]byte(c.body)); err == nil || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("%s: %v, want %q", c.body, err, c.want)
-		}
-	}
-	if _, err := LoadInput(filepath.Join(t.TempDir(), "missing.json")); err == nil {
-		t.Error("missing file accepted")
-	}
-}
-
-// --- CLI -----------------------------------------------------------------------
-
-func writeFile(t *testing.T, dir, name, content string) string {
-	t.Helper()
-	p := filepath.Join(dir, name)
-	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
-
-func runMain(args ...string) (int, string, string) {
-	var out, errb bytes.Buffer
-	code := Main(args, &out, &errb)
-	return code, out.String(), errb.String()
-}
-
-func TestMainOnboardsAndRemoves(t *testing.T) {
-	f := newFake()
-	dir := t.TempDir()
-	t.Chdir(dir)
-	env := writeFile(t, dir, "secrets.env", "BITBUCKET_TOKEN=bb-token\nBACKEND_TEAM_KEY=\"hmac-secret\"\n")
-	// The config insists on https, so the fake runs behind TLS.
-	tls := httptest.NewTLSServer(f)
-	defer tls.Close()
-	cfgPath := writeFile(t, dir, "onboard.json", `{"bitbucket_url": "`+tls.URL+`", "webhook_url": "http://riptide/webhooks/bitbucket",
-		"team": "platform", "projects": [{"project": "PLAT", "repos": ["a", "b"]}]}`)
-	saved := defaultHTTP
-	defaultHTTP = tls.Client()
-	defer func() { defaultHTTP = saved }()
-
-	code, out, errOut := runMain(cfgPath, "--env-file", env, "--dry-run")
-	if code != 0 || !strings.Contains(out, "PLAT/a") || !strings.Contains(out, "dry-run") || len(f.hooks) != 0 {
-		t.Fatalf("dry run: %d\n%s\n%s", code, out, errOut)
-	}
-	if !strings.Contains(errOut, "bb-t-****") || strings.Contains(errOut, "hmac-secret") || !strings.Contains(errOut, "travel unencrypted") {
-		t.Errorf("stderr = %s", errOut)
-	}
-	code, out, _ = runMain(cfgPath, "--env-file", env)
-	if code != 0 || len(f.hooks["PLAT/a"]) != 1 || len(f.hooks["PLAT/b"]) != 1 || !strings.Contains(out, "webhook configured") {
-		t.Fatalf("onboard: %d %s", code, out)
-	}
-	code, out, _ = runMain("--remove", cfgPath, "--env-file", env, "--name", "riptide")
-	if code != 0 || len(f.hooks["PLAT/a"]) != 0 || !strings.Contains(out, "webhook removed") {
-		t.Fatalf("remove: %d %s", code, out)
-	}
-	// A failing repo stops the run and names what was not processed.
-	f.denyRead["PLAT/a"] = 403
-	code, out, errOut = runMain(cfgPath, "--env-file", env)
-	if code != 1 || !strings.Contains(out, "failed") || !strings.Contains(errOut, "not processed: PLAT/b") {
-		t.Fatalf("failure: %d\n%s\n%s", code, out, errOut)
-	}
-
-	// Discover lists admin repos grouped by project, JSON on stdout only.
-	f.adminRepo = [][2]string{{"PLAT", "b"}, {"APP", "x"}, {"PLAT", "a"}}
-	code, out, _ = runMain("--discover", "--bitbucket-url", tls.URL, "--env-file", env)
-	var projects []struct {
-		Project string   `json:"project"`
-		Repos   []string `json:"repos"`
-	}
-	if code != 0 || json.Unmarshal([]byte(out), &projects) != nil || len(projects) != 2 || projects[1].Project != "PLAT" ||
-		strings.Join(projects[1].Repos, ",") != "a,b" {
-		t.Fatalf("discover: %d %s", code, out)
-	}
-}
-
-func TestMainUsageErrors(t *testing.T) {
-	dir := t.TempDir()
-	t.Chdir(dir)
-	t.Setenv("BITBUCKET_TOKEN", "")
-	t.Setenv("BACKEND_TEAM_KEY", "")
-	for _, c := range []struct {
-		args []string
-		code int
-		want string
-	}{
-		{nil, 2, "config path is required"},
-		{[]string{"--bogus"}, 2, "flag provided but not defined"},
-		{[]string{"a.json", "b.json"}, 2, ""},
-		{[]string{"cfg.json"}, 2, "missing required environment variable(s): BITBUCKET_TOKEN, BACKEND_TEAM_KEY"},
-		{[]string{"cfg.json", "--env-file", "nope.env"}, 2, "nope.env"},
-		{[]string{"--discover"}, 2, "--discover requires --bitbucket-url"},
-		{[]string{"--discover", "--bitbucket-url", "http://bb"}, 2, "must be an https URL"},
-		{[]string{"--discover", "--bitbucket-url", "https://bb"}, 2, "BITBUCKET_TOKEN"},
-		{[]string{"-h"}, 0, "usage: riptide onboard-bitbucket"},
-	} {
-		code, _, errOut := runMain(c.args...)
-		if code != c.code || !strings.Contains(errOut, c.want) {
-			t.Errorf("%v: %d %q, want %d %q", c.args, code, errOut, c.code, c.want)
-		}
-	}
-	// Secrets resolved, but the config is bad.
-	writeFile(t, dir, ".env", "BITBUCKET_TOKEN=x\nBACKEND_TEAM_KEY=y\n")
-	writeFile(t, dir, "cfg.json", `[]`)
-	if code, _, errOut := runMain("cfg.json"); code != 2 || !strings.Contains(errOut, "JSON object") {
-		t.Errorf("bad config: %d %s", code, errOut)
-	}
-	// Discover against an unreachable host fails with 1.
-	if code, _, _ := runMain("--discover", "--bitbucket-url", "https://127.0.0.1:1"); code != 1 {
-		t.Errorf("unreachable discover = %d", code)
-	}
-}
-
-func TestResolveEnvPrecedence(t *testing.T) {
-	dir := t.TempDir()
-	t.Chdir(dir)
-	t.Setenv("BITBUCKET_TOKEN", "from-env")
-	t.Setenv("BACKEND_TEAM_KEY", "key-from-env")
-	writeFile(t, dir, ".env", "# c\nBITBUCKET_TOKEN=from-dotenv\nnot a pair\n=x\n")
-	explicit := writeFile(t, dir, "x.env", "BITBUCKET_TOKEN='from-file'\n")
-	got, err := resolveEnv(explicit, "BITBUCKET_TOKEN", "BACKEND_TEAM_KEY")
-	if err != nil || got["BITBUCKET_TOKEN"] != "from-file" || got["BACKEND_TEAM_KEY"] != "key-from-env" {
-		t.Errorf("explicit file: %v %v", got, err)
-	}
-	got, _ = resolveEnv("", "BITBUCKET_TOKEN")
-	if got["BITBUCKET_TOKEN"] != "from-dotenv" {
-		t.Errorf("dotenv over environment: %v", got)
-	}
-	if mask("abc") != "****" || mask("abcdef") != "abcd-****" {
-		t.Error("mask")
-	}
-}
-
-// The pre-rename team key name is refused, even from ./.env, while a run
-// that does not need the key (discover) is not blocked by it.
-func TestResolveEnvRefusesTheOldTeamKeyName(t *testing.T) {
-	dir := t.TempDir()
-	t.Chdir(dir)
-	t.Setenv("BITBUCKET_TOKEN", "tok")
-	t.Setenv("BACKEND_TEAM_KEY", "")
-	writeFile(t, dir, ".env", "RIPTIDE_TEAM_KEY=old\n")
-	if _, err := resolveEnv("", "BITBUCKET_TOKEN", "BACKEND_TEAM_KEY"); err == nil || !strings.Contains(err.Error(), "RIPTIDE_TEAM_KEY") {
-		t.Errorf("err = %v", err)
-	}
-	if _, err := resolveEnv("", "BITBUCKET_TOKEN"); err != nil {
-		t.Errorf("discover blocked: %v", err)
+	slugs, err := o.Client.ListRepos(t.Context(), "PLAT")
+	if err != nil || len(slugs) != 5 {
+		t.Fatalf("slugs = %v, %v", slugs, err)
 	}
 }
