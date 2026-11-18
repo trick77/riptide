@@ -3,6 +3,7 @@ package metrics
 import (
 	"cmp"
 	"fmt"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -197,10 +198,35 @@ func jiraPrefix(keys []string, title []TitlePart, base string) ([]JiraRef, int) 
 	return refs, more
 }
 
+// prLink is the PR's page as its payload links it (the dataset drops it for
+// a PR deleted since): an absolute http(s) URL without credentials, on the
+// Bitbucket host when BACKEND_BITBUCKET_URL names one, else nil. The sender
+// writes it and the UI puts it in an href: a team key must not plant a
+// link to elsewhere under "open in Bitbucket".
+func prLink(raw *string, bitbucket string) *string {
+	if raw == nil {
+		return nil
+	}
+	u, err := url.Parse(*raw)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() == "" || u.User != nil {
+		return nil
+	}
+	if bitbucket != "" {
+		b, err := url.Parse(bitbucket)
+		if err != nil || u.Scheme != b.Scheme || !strings.EqualFold(u.Host, b.Host) {
+			return nil
+		}
+	}
+	s := u.String()
+	return &s
+}
+
 // PRFact is one row of the PR table.
 type PRFact struct {
-	Repo       string      `json:"repo"`
-	PRID       int64       `json:"pr_id"`
+	Repo string `json:"repo"`
+	PRID int64  `json:"pr_id"`
+	// URL is the PR in Bitbucket; null for a deleted PR or none sent.
+	URL        *string     `json:"url"`
 	Title      *string     `json:"title"`
 	TitleParts []TitlePart `json:"title_parts"`
 	JiraPrefix []JiraRef   `json:"jira_prefix"`
@@ -431,7 +457,7 @@ func factPRs(ds *dataset.Dataset) []factPR {
 		if !ok {
 			opened := o.OpenedAt
 			pr = dataset.PR{
-				Repo: o.Repo, Project: o.Project, PRID: o.PRID, Title: o.Title, Bot: o.Bot,
+				Repo: o.Repo, Project: o.Project, PRID: o.PRID, Title: o.Title, URL: o.URL, Bot: o.Bot,
 				ChangeType: o.ChangeType, JiraKeys: o.JiraKeys, OpenedAt: &opened, ReadyAt: o.ReadyAt,
 				Environments: []dataset.EnvironmentDeploy{},
 			}
@@ -440,6 +466,8 @@ func factPRs(ds *dataset.Dataset) []factPR {
 		// filtered as the open-PR numbers count it.
 		pr.State = "open"
 		pr.Bot, pr.Title, pr.JiraKeys = o.Bot, o.Title, o.JiraKeys
+		// The window's link is the newest of the PR's whole history.
+		pr.URL = cmp.Or(pr.URL, o.URL)
 		on := waitsOn(o)
 		if row.inactive {
 			on = WaitInactive
@@ -497,7 +525,7 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 			parts := titleParts(pr.Title, p.JiraURL)
 			keys, more := jiraPrefix(pr.JiraKeys, parts, p.JiraURL)
 			return PRFact{
-				Repo: pr.Repo, PRID: pr.PRID, Title: pr.Title, TitleParts: parts,
+				Repo: pr.Repo, PRID: pr.PRID, URL: prLink(pr.URL, p.BitbucketURL), Title: pr.Title, TitleParts: parts,
 				JiraPrefix: keys, JiraMore: more,
 				GitOps: pr.GitOps, ChangeType: pr.ChangeType,
 				State:   pr.State,

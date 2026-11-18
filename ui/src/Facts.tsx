@@ -50,24 +50,53 @@ const RUN_TONE: Record<RunFact["verdict"], Tone> = {
   none: "none",
 };
 
+// Text linking out in a new tab when the backend sends a URL, in the
+// surrounding colour; plain text without one.
+function OutLink({
+  href,
+  title,
+  children,
+}: {
+  href: string | null;
+  title?: string;
+  children: string;
+}) {
+  return href ? (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={title}
+      className="text-inherit no-underline hover:underline"
+    >
+      {children}
+    </a>
+  ) : (
+    children
+  );
+}
+
 // A Jira key, orange wherever it stands; a link to the ticket when the
 // backend sends its URL (jira.base_url in the config).
 function JiraKey({ jira }: { jira: JiraRef }) {
   return (
     <Mono className="text-accent-strong">
-      {jira.url ? (
-        <a
-          href={jira.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-inherit no-underline hover:underline"
-        >
-          {jira.key}
-        </a>
-      ) : (
-        jira.key
-      )}
+      <OutLink href={jira.url}>{jira.key}</OutLink>
     </Mono>
+  );
+}
+
+// A PR's number, a link to it in Bitbucket when the backend sends its URL
+// (none for a deleted PR). Beside the title, never around it: the title
+// holds Jira links of its own.
+function PRNumber({ pr }: { pr: PRFact }) {
+  const { t } = useTranslation();
+  return (
+    <span className="whitespace-nowrap text-muted">
+      <OutLink href={pr.url} title={t("facts.openPR")}>
+        {`#${pr.pr_id}`}
+      </OutLink>
+    </span>
   );
 }
 
@@ -233,19 +262,20 @@ function FactsTables({
             {p.jira_more > 0 && (
               <Mono className="text-accent-strong">+{p.jira_more} </Mono>
             )}
-            {p.title_parts.length > 0 ? (
-              <span>
-                {p.title_parts.map((part, i) =>
-                  part.jira ? (
-                    <JiraKey key={i} jira={part.jira} />
-                  ) : (
-                    <Fragment key={i}>{part.text}</Fragment>
-                  ),
-                )}
-              </span>
-            ) : (
-              <span className="text-muted">#{p.pr_id}</span>
+            {p.title_parts.length > 0 && (
+              <>
+                <span>
+                  {p.title_parts.map((part, i) =>
+                    part.jira ? (
+                      <JiraKey key={i} jira={part.jira} />
+                    ) : (
+                      <Fragment key={i}>{part.text}</Fragment>
+                    ),
+                  )}
+                </span>{" "}
+              </>
             )}
+            <PRNumber pr={p} />
           </>,
           <Mono className="whitespace-nowrap">{p.repo}</Mono>,
           <span className="text-muted">{prType(p)}</span>,

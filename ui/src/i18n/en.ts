@@ -876,6 +876,7 @@ export const en = {
     noHits: "No hits for “{{q}}”.",
     empty: "No entries in the period.",
     colPR: "PR",
+    openPR: "Open the PR in Bitbucket",
     colRepo: "Repo",
     colType: "Type",
     colReview: "Review",

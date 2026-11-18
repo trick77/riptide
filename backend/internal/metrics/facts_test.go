@@ -326,6 +326,58 @@ func TestJiraPrefix(t *testing.T) {
 	}
 }
 
+func TestPRLink(t *testing.T) {
+	const ok = "https://bb.example.com/projects/KASSE/repos/kasse-api/pull-requests/7"
+	const local = "http://bb.local/projects/K/repos/r/pull-requests/1"
+	for _, c := range []struct {
+		raw       *string
+		bitbucket string
+		want      string
+	}{
+		{s(ok), "", ok},
+		{s(local), "", local},
+		{nil, "", ""},
+		// the sender writes it, the UI puts it in an href
+		{s("javascript:alert(1)"), "", ""},
+		{s("/projects/K/repos/r/pull-requests/1"), "", ""},
+		{s("https://user:pw@bb.example.com/x"), "", ""},
+		{s("https://"), "", ""},
+		{s("https://:443/projects/K/repos/r/pull-requests/1"), "", ""},
+		{s("%zz"), "", ""},
+		// BACKEND_BITBUCKET_URL set: its host only, a context path allowed
+		{s(ok), "https://BB.example.com/bitbucket", ok},
+		{s("https://evil.example/login"), "https://bb.example.com", ""},
+		{s("http://bb.example.com/x"), "https://bb.example.com", ""},
+	} {
+		got := prLink(c.raw, c.bitbucket)
+		if (got == nil) != (c.want == "") || (got != nil && *got != c.want) {
+			t.Errorf("prLink(%v, %q) = %v, want %q", str(c.raw), c.bitbucket, str(got), c.want)
+		}
+	}
+
+	// The facts row carries it. An open PR outside the window takes its own;
+	// one in it the window's, the newest of its history.
+	ds := factsData()
+	ds.PRs[0].URL = s(ok)
+	ds.PRs[1].URL = s("https://bb.example.com/projects/NEW/repos/kasse-api/pull-requests/2")
+	ds.OpenPRs = []dataset.OpenPR{
+		{Repo: "kasse/kasse-api", Project: "kasse", PRID: 2, OpenedAt: ago(1), LastEventAt: ago(1),
+			URL: s("https://bb.example.com/projects/OLD/repos/kasse-api/pull-requests/2")},
+		{Repo: "kasse/kasse-api", Project: "kasse", PRID: 9, OpenedAt: ago(40), LastEventAt: ago(1),
+			URL: s("https://bb.example.com/projects/KASSE/repos/kasse-api/pull-requests/9")},
+	}
+	urls := map[int64]string{}
+	p := all()
+	p.BitbucketURL = "https://bb.example.com"
+	for _, r := range ComputeFacts(ds, p, "").PRs.Rows {
+		urls[r.PRID] = str(r.URL)
+	}
+	if urls[1] != ok || urls[2] != "https://bb.example.com/projects/NEW/repos/kasse-api/pull-requests/2" || urls[4] != "<nil>" ||
+		urls[9] != "https://bb.example.com/projects/KASSE/repos/kasse-api/pull-requests/9" {
+		t.Errorf("urls = %v", urls)
+	}
+}
+
 func TestTitleParts(t *testing.T) {
 	const base = "https://jira.example.com"
 	type part struct{ text, url string }

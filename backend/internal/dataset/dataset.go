@@ -120,10 +120,12 @@ type Product struct {
 
 // PR is one pull request. See sql/prs.sql for the rules.
 type PR struct {
-	Repo       string     `json:"repo" db:"repo"`
-	Project    string     `json:"project" db:"project"`
-	PRID       int64      `json:"pr_id" db:"pr_id"`
-	Title      *string    `json:"title" db:"title"`
+	Repo    string  `json:"repo" db:"repo"`
+	Project string  `json:"project" db:"project"`
+	PRID    int64   `json:"pr_id" db:"pr_id"`
+	Title   *string `json:"title" db:"title"`
+	// URL is the PR's page from its latest event's links.self, unchecked.
+	URL        *string    `json:"url" db:"url"`
 	GitOps     bool       `json:"gitops" db:"gitops"`
 	Bot        bool       `json:"bot" db:"bot"`
 	ChangeType *string    `json:"change_type" db:"change_type"`
@@ -155,10 +157,12 @@ type PR struct {
 // OpenPR is a pull request open at the window's end. See sql/open_prs.sql
 // for the rules.
 type OpenPR struct {
-	Repo       string    `json:"repo" db:"repo"`
-	Project    string    `json:"project" db:"project"`
-	PRID       int64     `json:"pr_id" db:"pr_id"`
-	Title      *string   `json:"title" db:"title"`
+	Repo    string  `json:"repo" db:"repo"`
+	Project string  `json:"project" db:"project"`
+	PRID    int64   `json:"pr_id" db:"pr_id"`
+	Title   *string `json:"title" db:"title"`
+	// URL as on PR.
+	URL        *string   `json:"url" db:"url"`
 	Bot        bool      `json:"bot" db:"bot"`
 	ChangeType *string   `json:"change_type" db:"change_type"`
 	JiraKeys   []string  `json:"jira_keys" db:"jira_keys"`

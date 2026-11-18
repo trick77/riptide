@@ -893,7 +893,17 @@ describe("App", () => {
       "data-dim",
     );
     expect(key.closest("tr")).not.toHaveAttribute("data-dim");
+    // The PR's number beside its title links to it in Bitbucket; without a
+    // URL it is plain text.
+    const pr = screen.getByRole("link", { name: "#1" });
+    expect(pr).toHaveAttribute(
+      "href",
+      "https://bitbucket.example.com/projects/KASSE/repos/kasse-api/pull-requests/1",
+    );
+    expect(pr).toHaveAttribute("target", "_blank");
+    expect(pr.closest("td")).toBe(key.closest("td"));
     expect(screen.getByText("#4")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "#4" })).toBeNull();
     fireEvent.change(screen.getByLabelText(/Suche nach/), {
       target: { value: "portal" },
     });

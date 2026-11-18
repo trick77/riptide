@@ -23,6 +23,9 @@ type Params struct {
 	Product string
 	// JiraURL is the config's jira.base_url: Jira keys link there.
 	JiraURL string
+	// BitbucketURL is BACKEND_BITBUCKET_URL: a PR link elsewhere is dropped.
+	// Empty: any http(s) link.
+	BitbucketURL string
 }
 
 // filter is the product selection, resolved against the dataset. Bots'
