@@ -241,8 +241,9 @@ type BuildStats struct {
 	NoVerdict int    `json:"no_verdict"`
 	// SuccessRate is Succeeded over Runs.
 	SuccessRate *float64 `json:"success_rate"`
-	// Duration is over Runs, outliers aside: an aborted run's is no build
-	// time, nor is a day spent waiting for an agent.
+	// Duration is over the green runs, outliers aside: a red run stops
+	// wherever it failed, an aborted run's is no build time, nor is a day
+	// spent waiting for an agent.
 	Duration Spread `json:"duration"`
 	// Waiting and Building split Duration's runs at the moment each got its
 	// build agent: the wait for one, which grows with cluster load, and the
@@ -455,12 +456,15 @@ func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
 				}
 			default:
 				b.succeeded += seconds(r)
-			}
-			if r.DurationS != nil {
-				durations = append(durations, float64(*r.DurationS))
-				if wait, work, ok := agentSplit(r); ok {
-					waits = append(waits, wait)
-					works = append(works, work)
+				// A duration is a green run's: how long a build takes. A red
+				// run stops wherever it failed, its time is wasted, not typical
+				// (user, 2026-11-18: mixing them is "stupide").
+				if r.DurationS != nil {
+					durations = append(durations, float64(*r.DurationS))
+					if wait, work, ok := agentSplit(r); ok {
+						waits = append(waits, wait)
+						works = append(works, work)
+					}
 				}
 			}
 		}
@@ -796,9 +800,12 @@ func flakyRuns(by map[string][]dataset.Run) map[runRef]bool {
 	return set
 }
 
-// timed: a run with a verdict and a duration, the runs medians are over.
+// timed: a green run with a duration, the runs every duration median is
+// over. A red run stops wherever it failed: its duration says nothing about
+// how long the build takes, and mixed in it makes a repo that fails early
+// read fast.
 func (kr kindRuns) timed(i int) bool {
-	return kr.verdicts[i] != VerdictNone && kr.runs[i].DurationS != nil
+	return kr.verdicts[i] == VerdictSuccess && kr.runs[i].DurationS != nil
 }
 
 // outlierCut tells one kind's outliers: runs past OutlierFactor times the
@@ -925,7 +932,8 @@ const SlowestMinRuns = 3
 // KindHotspots are one kind's repos, each against its own previous period.
 type KindHotspots struct {
 	Kind string `json:"kind"`
-	// Duration is the team's, all repos of the kind, outliers aside.
+	// Duration is the team's, all repos of the kind, green runs only,
+	// outliers aside.
 	Duration    Spread   `json:"duration"`
 	FailureRate *float64 `json:"failure_rate"`
 	// Repos are a row per repo: those failing more by wasted CI time, then the
@@ -936,13 +944,14 @@ type KindHotspots struct {
 	// SlowestMinRuns timed runs or more, outliers aside; the rows of Repos,
 	// before its cut.
 	Slowest []RepoHotspot `json:"slowest"`
-	// OutlierThresholdS is OutlierFactor times the team's median, outliers
-	// included, at least OutlierMinS; null without a run with a verdict and
-	// a duration. A repo with a longer median of its own has a higher one.
+	// OutlierThresholdS is OutlierFactor times the team's median of green
+	// runs, outliers included, at least OutlierMinS; null without a green run
+	// with a duration. A repo with a longer median of its own has a higher
+	// one. Any run past it is stuck, red or green.
 	OutlierThresholdS *float64 `json:"outlier_threshold_s"`
 	// Unplotted are the kind's repos without a median and a failure rate in
-	// Repos: past its cut, without a run with a verdict, or every timed run
-	// an outlier.
+	// Repos: past its cut, without a run with a verdict, without a green run,
+	// or every timed run an outlier.
 	Unplotted int `json:"unplotted"`
 	// Heatmap is a row per repo of Repos, in its order: the failure rate per
 	// week.
@@ -998,7 +1007,7 @@ type Hotspots struct {
 // the previous period, duration and failures in one row.
 type RepoHotspot struct {
 	Repo string `json:"repo"`
-	// Runs have a verdict; Duration is over those with a duration too,
+	// Runs have a verdict; Duration is over the green ones with a duration,
 	// outliers aside.
 	Runs     int    `json:"runs"`
 	Duration Spread `json:"duration"`
@@ -1153,7 +1162,7 @@ type repoRuns struct {
 	// waits and works split the runs of durations that report their agent
 	// start.
 	waits, works []float64
-	// timed are the runs with a verdict and a duration, outliers included.
+	// timed are the green runs with a duration, outliers included.
 	timed, counted, failures, flaky int
 	wasted, flakySecs               float64
 	// ci is every run's time, those without a verdict included; stuck the

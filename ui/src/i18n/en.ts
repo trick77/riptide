@@ -236,7 +236,7 @@ export const en = {
           "Three or more PRs open a week or longer. Why they wait is not in the data: a freeze, a dependency, holidays or nobody feeling responsible.",
         slow_stage: "The stage with the longest median to production.",
         slower_build:
-          "The median run takes one and a half times as long as last period or longer: slower than the repo itself, not than others. What inside the build got slower is not in the data.",
+          "The median green run takes one and a half times as long as last period or longer: slower than the repo itself, not than others. What inside the build got slower is not in the data.",
         steady_slow:
           "Among the slowest of its kind in this period and the previous one, slower than the kind's median: slow as a habit, not as a change.",
         failing_more:
@@ -306,7 +306,7 @@ export const en = {
         failure_rate: "runs failed",
         wasted: "CI time in failed runs",
         runs: "runs",
-        build_p50: "median run",
+        build_p50: "median green run",
         kind_p50: "typical run of the kind",
         build_wait_p50: "waiting for an agent",
         build_work_p50: "building",
@@ -696,7 +696,7 @@ export const en = {
       "Recognised are branches starting feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/ and PR builds. {{count}} runs on branches without a known prefix are under “Other branches” (release/, docs/, doc/, nightlies and bots not counted), likely the team's feature builds.",
     sparkAria: "Success rate per week, {{kind}}: {{parts}}",
     successful: "successful",
-    typicalDuration: "typical duration, all repos",
+    typicalDuration: "typical green build, all repos",
     repos:
       "Of {{compared}} repos, {{slower}} got slower and {{failing}} fail more often than in the previous period",
     reposNone: "Repos: no comparison with the previous period",
@@ -773,7 +773,7 @@ export const en = {
     noneOfKind: "No runs of this kind with a result.",
     slowestTitle: "Longest builds",
     slowestSub:
-      "By median, outliers aside, from {{min}} runs with a result and a duration.",
+      "By the median of green runs, outliers aside, from {{min}} of them.",
     colMedian: "Median",
     colSlowest: "Slowest 10 %",
     colWaitBuild: "Waiting / building",
@@ -791,7 +791,7 @@ export const en = {
     showAll: "Show runs",
     noOutliers: "No outliers in the period.",
     stuckRule:
-      "A repo with at least {{min}} runs of its own with a result and a duration must also exceed its own median {{factor}}×. Aborted runs still appear.",
+      "A repo with at least {{min}} green runs of its own must also exceed its own median {{factor}}×. Aborted runs still appear.",
     flow: {
       title: "Where the CI hours go",
       sub: "Each kind's CI time by outcome, outliers included{{sep}}band width = hours",
