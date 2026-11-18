@@ -434,7 +434,7 @@ func TestRepoHotspotsAndOutlierGroups(t *testing.T) {
 	if fmt.Sprint(order) != "[kasse/flaky kasse/slow kasse/quick]" {
 		t.Errorf("repos = %v", order)
 	}
-	if !k.Repos[0].Flaky || !k.Repos[1].Slow || k.Repos[2].Flaky || k.Repos[2].Slow {
+	if !k.Repos[0].FailingMore || !k.Repos[1].Slow || k.Repos[2].FailingMore || k.Repos[2].Slow {
 		t.Errorf("flags = %+v", k.Repos)
 	}
 	g := b.Hotspots.OutlierGroups

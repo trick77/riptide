@@ -141,7 +141,7 @@ function kindHotspots(
         failure_rate: failures,
         failure_change: change("none", null, "low_sample"),
         wasted_seconds: failures * 600,
-        flaky: false,
+        failing_more: false,
         ci_seconds: 600,
         compared: false,
         prev_complete: false,
@@ -374,9 +374,9 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       hotspots: {
         min_runs: 10,
         slow_factor: 1.5,
-        flaky_factor: 2,
-        flaky_min_points: 0.05,
-        flaky_min_failures: 2,
+        failing_more_factor: 2,
+        failing_more_min_points: 0.05,
+        failing_more_min_failures: 2,
         outlier_factor: 6,
         outlier_min_s: 3600,
         outlier_repo_min_runs: 3,
@@ -505,21 +505,21 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
           kind: "release",
           success: lowSample,
           slower: 0,
-          flakier: 0,
+          failing_more: 0,
           compared: 0,
         },
         {
           kind: "main",
           success: lowSample,
           slower: 0,
-          flakier: 0,
+          failing_more: 0,
           compared: 0,
         },
         {
           kind: "feature",
           success: lowSample,
           slower: 0,
-          flakier: 0,
+          failing_more: 0,
           compared: 0,
         },
       ],
@@ -725,7 +725,7 @@ function signal(o: Partial<Signal> & Pick<Signal, "id" | "kind">): Signal {
 
 // The assessment of the sample team's closed weeks: a jam that was there
 // before, a steady slow feature build, a review time that doubled through
-// one repo, deploys notably more often, a flaky build resolved, forgotten
+// one repo, deploys notably more often, a build failing more resolved, forgotten
 // PRs no wording covers, and Argo CD silent.
 export function assessment(): Assessment {
   const w = weeks(4);
@@ -820,17 +820,17 @@ export function assessment(): Assessment {
         ],
       }),
       signal({
-        id: "resolved:flaky:feature:kasse/policy",
+        id: "resolved:failing_more:feature:kasse/policy",
         kind: "resolved",
         tone: "good",
         source: "pipeline",
         repo: "kasse/policy",
         run_kind: "feature",
-        metric: "flaky:feature:kasse/policy",
+        metric: "failing_more:feature:kasse/policy",
         weight: 2,
         facts: [
           fact(
-            "resolved:flaky:feature:kasse/policy.failure_rate",
+            "resolved:failing_more:feature:kasse/policy.failure_rate",
             "failure_rate",
             "share",
             0.02,
@@ -910,8 +910,8 @@ export function analysisText(): AnalysisText {
         lever: "find_what_changed",
       },
       {
-        signal: "resolved:flaky:feature:kasse/policy",
-        take: "Die Flaky-Tests sind weg.",
+        signal: "resolved:failing_more:feature:kasse/policy",
+        take: "Die Fehlerquote ist zurück.",
         retro: null,
         lever: "name_what_helped",
       },
@@ -944,7 +944,7 @@ export function analysisStatus(
           lever: "name_what_helped",
         },
         {
-          signal: "resolved:flaky:feature:kasse/policy",
+          signal: "resolved:failing_more:feature:kasse/policy",
           column: "done",
           lever: "name_what_helped",
         },
@@ -989,7 +989,7 @@ export function analysedStatus(
           lever: "find_what_changed",
         },
         {
-          signal: "resolved:flaky:feature:kasse/policy",
+          signal: "resolved:failing_more:feature:kasse/policy",
           column: "done",
           lever: "name_what_helped",
         },

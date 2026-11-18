@@ -186,7 +186,7 @@ export const en = {
         slow_stage: "longest stage",
         slower_build: "got slower",
         steady_slow: "steady slow build",
-        flaky: "flaky",
+        failing_more: "fails more often",
         change: "notable change",
         bottleneck_moved: "bottleneck moved",
         throughput_instability: "throughput vs. stability",
@@ -203,7 +203,7 @@ export const en = {
         slow_stage: "Most of the time sits in “{{stage}}”",
         slower_build: "{{repo}}: {{kind}} slower than last period",
         steady_slow: "{{repo}}: {{kind}} among the slowest again",
-        flaky: "{{repo}}: {{kind}} fail more often",
+        failing_more: "{{repo}}: {{kind}} fail more often",
         changeGood: "{{label}}: notably better",
         changeBad: "{{label}}: notably worse",
         bottleneck_moved: "The bottleneck moved to “{{stage}}”",
@@ -225,7 +225,7 @@ export const en = {
           "The median run takes one and a half times as long as last period or longer: slower than the repo itself, not than others. What inside the build got slower is not in the data.",
         steady_slow:
           "Among the slowest of its kind in this period and the previous one, slower than the kind's median: slow as a habit, not as a change.",
-        flaky:
+        failing_more:
           "Fails far more often than in the previous period. Whether tests, infrastructure or real breakage is not in the data.",
         changeGood:
           "Moved past the notable threshold against the previous period.",
@@ -684,7 +684,7 @@ export const en = {
     successful: "successful",
     typicalDuration: "typical duration, all repos",
     repos:
-      "Of {{compared}} repos, {{slower}} got slower and {{flakier}} flakier than in the previous period",
+      "Of {{compared}} repos, {{slower}} got slower and {{failing}} fail more often than in the previous period",
     reposNone: "Repos: no comparison with the previous period",
     redRuns: "in red runs, of {{h}} h CI time",
     waitingTitle:
@@ -696,8 +696,8 @@ export const en = {
     runs_other: "{{count}} runs",
     noVerdict: " + {{n}} without a result",
     outliers: " · {{n}} outliers ({{h}} h) not in duration and CI time",
-    flaky: "Got flakier",
-    flakyText: "previous period {{prev}} → now {{rate}} red",
+    failingMore: "Fails more often",
+    failingMoreText: "previous period {{prev}} → now {{rate}} red",
     slow: "Got slower",
     slowText: "previous period {{prev}} → now {{p50}} ({{factor}}×)",
     fine: "Unremarkable",
@@ -746,7 +746,7 @@ export const en = {
     colRuns: "Runs",
     noAgentRepo: "None of the runs reports when it got an agent",
     hotspotsRule:
-      "Got flakier: rate at least {{flaky}}× the previous period's and {{points}} points above it, at most halfway between it and 100 %, with {{failures}} red runs or more. Got slower: median at least {{slow}}× the previous period's. Both from {{min}} runs in both periods.",
+      "Fails more often: rate at least {{failing}}× the previous period's and {{points}} points above it, at most halfway between it and 100 %, with {{failures}} red runs or more. Got slower: median at least {{slow}}× the previous period's. Both from {{min}} runs in both periods.",
     stuckTitle: "Stuck runs",
     stuckSub: "Runs over {{factor}}× the median of their kind and over {{min}}",
     stuck_one: "1 run got stuck",
@@ -787,13 +787,13 @@ export const en = {
     xAxis: "Median duration (log) →",
     yAxis: "↑ Failure rate",
     slower: "▲ ×{{factor}} duration",
-    flakier: "▲ failure rate {{prev}} → {{rate}}",
+    failingMore: "▲ failure rate {{prev}} → {{rate}}",
     median: "Median",
     rate: "Failure rate",
     runs: "Runs",
     ci: "CI time",
     legend:
-      "Arrow: previous period → now; a dot in or at the circle: barely moved · filled circle without a dot: only the median or only the failure rate compares · circle area: share of this kind's CI time · red: got slower or flakier, as below · dashed: no comparison.",
+      "Arrow: previous period → now; a dot in or at the circle: barely moved · filled circle without a dot: only the median or only the failure rate compares · circle area: share of this kind's CI time · red: got slower or fails more often, as below · dashed: no comparison.",
     unplotted_one:
       "{{count}} repo of this kind is not drawn: past the list, without a run with a result, or without a median.",
     unplotted_other:

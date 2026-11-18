@@ -243,7 +243,7 @@ export type RepoHotspot = {
   failure_rate: number | null;
   failure_change: Change;
   wasted_seconds: number;
-  flaky: boolean;
+  failing_more: boolean;
   // Every run's time of the kind, those without a verdict included,
   // outliers aside; the rows add up to at most the kind's.
   ci_seconds: number;
@@ -278,9 +278,9 @@ export type Outlier = {
 export type Hotspots = {
   min_runs: number;
   slow_factor: number;
-  flaky_factor: number;
-  flaky_min_points: number;
-  flaky_min_failures: number;
+  failing_more_factor: number;
+  failing_more_min_points: number;
+  failing_more_min_failures: number;
   outlier_factor: number;
   outlier_min_s: number;
   outlier_repo_min_runs: number;
@@ -377,12 +377,12 @@ export type Change = {
 };
 
 // A kind of run against the previous period: its success rate, and how
-// many of its repos got slower or flakier against their own.
+// many of its repos got slower or fail more against their own.
 export type KindChange = {
   kind: RunKind;
   success: Change;
   slower: number;
-  flakier: number;
+  failing_more: number;
   compared: number;
 };
 
@@ -565,7 +565,7 @@ export type SignalKind =
   | "slow_stage"
   | "slower_build"
   | "steady_slow"
-  | "flaky"
+  | "failing_more"
   | "change"
   | "bottleneck_moved"
   | "throughput_instability"

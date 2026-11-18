@@ -107,9 +107,9 @@ type Change struct {
 type KindChange struct {
 	Kind    string `json:"kind"`
 	Success Change `json:"success"`
-	// Slower and Flakier are the repos flagged slow and flaky.
-	Slower  int `json:"slower"`
-	Flakier int `json:"flakier"`
+	// Slower and FailingMore are the repos flagged slow and failing more.
+	Slower      int `json:"slower"`
+	FailingMore int `json:"failing_more"`
 	// Compared are the repos with enough runs in both periods.
 	Compared int `json:"compared"`
 }
@@ -398,8 +398,8 @@ func compare(cur, prev Metrics, period Period) Comparison {
 				if h.Slow {
 					kc.Slower++
 				}
-				if h.Flaky {
-					kc.Flakier++
+				if h.FailingMore {
+					kc.FailingMore++
 				}
 			}
 		}

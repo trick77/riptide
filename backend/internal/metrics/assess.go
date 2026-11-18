@@ -13,7 +13,7 @@ import (
 // The assessment is the overview's "what now": the patterns the numbers
 // raise over closed weeks, the few repos that move most. Every number and
 // every class of it is decided here; an LLM may word it, never compute or
-// judge it. It reads the same rules the page applies (jam, flaky, the
+// judge it. It reads the same rules the page applies (jam, failing more, the
 // tolerance), plus the starting values below, user-chosen 2026-11-16 and
 // not measured.
 const (
@@ -56,7 +56,7 @@ const (
 	SignalStage       = "slow_stage"
 	SignalSlower      = "slower_build"
 	SignalSteadySlow  = "steady_slow"
-	SignalFlaky       = "flaky"
+	SignalFailingMore = "failing_more"
 	SignalChange      = "change"
 	SignalBottleneck  = "bottleneck_moved"
 	SignalTradeoff    = "throughput_instability"
@@ -445,12 +445,12 @@ func (a *assessor) buildSignals() {
 						plain(id+".work", "build_work_p50", UnitSeconds, h.Building.P50)},
 				})
 			}
-			if !h.Flaky {
+			if !h.FailingMore {
 				continue
 			}
-			id := "flaky:" + kind + ":" + h.Repo
+			id := SignalFailingMore + ":" + kind + ":" + h.Repo
 			a.add(Signal{
-				ID: id, Kind: SignalFlaky, Tone: ToneAttention, Source: SourcePipeline, Repo: ptr(h.Repo),
+				ID: id, Kind: SignalFailingMore, Tone: ToneAttention, Source: SourcePipeline, Repo: ptr(h.Repo),
 				RunKind: ptr(kind), Weight: 3,
 				Facts: []Fact{fact(id+".failure_rate", "failure_rate", UnitShare, h.FailureRate, h.FailureChange),
 					plain(id+".wasted", "wasted", UnitSeconds, ptr(h.WastedSeconds)),
@@ -724,7 +724,7 @@ func (a *assessor) resolvedSignals() {
 	}
 	for _, id := range slices.Sorted(maps.Keys(a.h.Latest)) {
 		kind, rest, _ := strings.Cut(id, ":")
-		if now[id] || !slices.Contains([]string{SignalPRJam, SignalFlaky, SignalSteadySlow, SignalSlower, SignalChange}, kind) {
+		if now[id] || !slices.Contains([]string{SignalPRJam, SignalFailingMore, SignalSteadySlow, SignalSlower, SignalChange}, kind) {
 			continue
 		}
 		// Slower and steady slow are one problem under two names: a repo
@@ -745,7 +745,7 @@ func (a *assessor) resolvedSignals() {
 			if s.Facts == nil {
 				s.Facts = []Fact{plain(s.ID+".long", "open_long", UnitCount, ptr(0.0))}
 			}
-		case SignalFlaky, SignalSteadySlow, SignalSlower:
+		case SignalFailingMore, SignalSteadySlow, SignalSlower:
 			runKind, repo, _ := strings.Cut(rest, ":")
 			s.Source, s.Repo, s.RunKind = SourcePipeline, ptr(repo), ptr(runKind)
 			for _, k := range a.m.Build.Hotspots.Kinds {
@@ -756,7 +756,7 @@ func (a *assessor) resolvedSignals() {
 					if h.Repo != repo {
 						continue
 					}
-					if kind == SignalFlaky {
+					if kind == SignalFailingMore {
 						s.Facts = []Fact{fact(s.ID+".failure_rate", "failure_rate", UnitShare, h.FailureRate, h.FailureChange)}
 					} else {
 						s.Facts = []Fact{fact(s.ID+".p50", "build_p50", UnitSeconds, h.Duration.P50, h.DurationChange)}

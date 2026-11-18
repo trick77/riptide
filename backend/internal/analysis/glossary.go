@@ -55,7 +55,7 @@ var kinds = map[string]kindGloss{
 		"A repo among the slowest of its run kind in this period and the previous one, slower than the kind's median: slow as a habit, not as a change. build_wait_p50 against build_work_p50 tells whether the time is spent waiting for an agent or building. What inside the build takes the time is not in the data.",
 		[]string{LeverInspectBuildLog},
 	},
-	metrics.SignalFlaky: {
+	metrics.SignalFailingMore: {
 		"A repo's runs of a kind fail far more often than in the previous period. Whether tests, infrastructure or real breakage is not in the data.",
 		[]string{LeverInspectFailures},
 	},

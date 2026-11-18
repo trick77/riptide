@@ -2,8 +2,8 @@ package metrics
 
 import "time"
 
-// Heatmap: a kind's failure rate per repo and week. A flaky repo shows as
-// a red row, a shared outage as a red column, without reading a number.
+// Heatmap: a kind's failure rate per repo and week. A repo failing more shows
+// as a red row, a shared outage as a red column, without reading a number.
 
 // HeatMinRuns are the runs with a verdict a repo needs in a week for a
 // class: below it one red run would paint the cell at 100 %. A starting

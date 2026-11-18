@@ -307,7 +307,9 @@ describe("App", () => {
     expect(
       p.getByText("Treiber: kasse/kasse-api trägt 70 % der Zunahme"),
     ).toBeInTheDocument();
-    expect(p.getByText("kasse/policy (flaky): erledigt")).toBeInTheDocument();
+    expect(
+      p.getByText("kasse/policy (scheitert öfter): erledigt"),
+    ).toBeInTheDocument();
     // What no wording covers is still spotted.
     expect(p.getByText("Vergessene PRs")).toBeInTheDocument();
     expect(p.getByText("Für die nächste Retro")).toBeInTheDocument();
@@ -776,7 +778,7 @@ describe("App", () => {
             duration_change: change("same", 600),
             factor: 1,
             slow: false,
-            flaky: true,
+            failing_more: true,
             ci_seconds: 12_000,
             compared: true,
             prev_complete: true,
@@ -795,7 +797,7 @@ describe("App", () => {
             duration_change: change("worse", 600),
             factor: 3,
             slow: true,
-            flaky: false,
+            failing_more: false,
             ci_seconds: 21_600,
             compared: true,
             prev_complete: true,
@@ -814,7 +816,7 @@ describe("App", () => {
             duration_change: change("none", null, "no_value"),
             factor: null,
             slow: false,
-            flaky: false,
+            failing_more: false,
             ci_seconds: 3600,
             compared: false,
             prev_complete: false,
@@ -825,7 +827,7 @@ describe("App", () => {
       m.comparison.build[2] = {
         ...m.comparison.build[2],
         slower: 1,
-        flakier: 1,
+        failing_more: 1,
         compared: 2,
       };
       h.outlier_groups = [

@@ -397,8 +397,8 @@ func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
 		base = &baseline{repos: newRepoNamer(ds.Runs)}
 	}
 	out.Hotspots = Hotspots{
-		MinRuns: HotspotMinRuns, SlowFactor: SlowFactor, FlakyFactor: FlakyFactor,
-		FlakyMinPoints: FlakyMinPoints, FlakyMinFailures: FlakyMinFailures,
+		MinRuns: HotspotMinRuns, SlowFactor: SlowFactor, FailingMoreFactor: FailingMoreFactor,
+		FailingMoreMinPoints: FailingMoreMinPoints, FailingMoreMinFailures: FailingMoreMinFailures,
 		OutlierFactor: OutlierFactor, OutlierMinS: OutlierMinS, OutlierRepoMinRuns: OutlierRepoMinRuns,
 		SlowestMinRuns: SlowestMinRuns, Kinds: []KindHotspots{}, Outliers: []Outlier{}, OutlierGroups: []OutlierGroup{},
 		HeatMinRuns: HeatMinRuns, HeatSteps: slices.Clone(HeatSteps), HeatClasses: heatClasses(),
@@ -728,16 +728,18 @@ const (
 	// with Playwright smoke tests), so the team's median made every UI repo
 	// slow and hid a Gradle repo that doubled.
 	SlowFactor = 1.5
-	// FlakyFactor flags a repo whose failure rate is at least this many
-	// times its own of the previous period; see flakyThreshold.
-	FlakyFactor = 2.0
-	// FlakyMinPoints: a flaky repo's failure rate is also at least this
+	// FailingMoreFactor flags a repo whose failure rate is at least this
+	// many times its own of the previous period; see failingMoreThreshold.
+	// A trend, not flakiness: a repo steadily red half the time is never
+	// flagged, and flaky is a red run going green on the same commit.
+	FailingMoreFactor = 2.0
+	// FailingMoreMinPoints: a flagged repo's failure rate is also at least this
 	// much above its previous one, in points of 0..1. From 0 % any factor
 	// is 0.
-	FlakyMinPoints = 0.05
-	// FlakyMinFailures: one red run never makes a repo flaky. Over 10 to
+	FailingMoreMinPoints = 0.05
+	// FailingMoreMinFailures: one red run never flags a repo. Over 10 to
 	// 19 runs a single one is already 5 points or more.
-	FlakyMinFailures = 2
+	FailingMoreMinFailures = 2
 	// OutlierFactor makes a run an outlier past this many times the median
 	// of its kind (see outlierCut): a run waiting for an agent or an input
 	// step rather than a slow repo, and enough to wreck any sum. 6× the
@@ -779,7 +781,7 @@ type KindHotspots struct {
 	// Duration is the team's, all repos of the kind, outliers aside.
 	Duration    Spread   `json:"duration"`
 	FailureRate *float64 `json:"failure_rate"`
-	// Repos are a row per repo: the flaky ones by wasted CI time, then the
+	// Repos are a row per repo: those failing more by wasted CI time, then the
 	// slow ones by factor, then the rest by wasted time and median; the top
 	// 8 and every flagged one.
 	Repos []RepoHotspot `json:"repos"`
@@ -820,16 +822,16 @@ type Outlier struct {
 // Hotspots are the builds worth a look: repos slower or failing more than
 // in the previous period, same kind, and runs far past the kind's median.
 type Hotspots struct {
-	MinRuns            int            `json:"min_runs"`
-	SlowFactor         float64        `json:"slow_factor"`
-	FlakyFactor        float64        `json:"flaky_factor"`
-	FlakyMinPoints     float64        `json:"flaky_min_points"`
-	FlakyMinFailures   int            `json:"flaky_min_failures"`
-	OutlierFactor      float64        `json:"outlier_factor"`
-	OutlierMinS        float64        `json:"outlier_min_s"`
-	OutlierRepoMinRuns int            `json:"outlier_repo_min_runs"`
-	SlowestMinRuns     int            `json:"slowest_min_runs"`
-	Kinds              []KindHotspots `json:"kinds"`
+	MinRuns                int            `json:"min_runs"`
+	SlowFactor             float64        `json:"slow_factor"`
+	FailingMoreFactor      float64        `json:"failing_more_factor"`
+	FailingMoreMinPoints   float64        `json:"failing_more_min_points"`
+	FailingMoreMinFailures int            `json:"failing_more_min_failures"`
+	OutlierFactor          float64        `json:"outlier_factor"`
+	OutlierMinS            float64        `json:"outlier_min_s"`
+	OutlierRepoMinRuns     int            `json:"outlier_repo_min_runs"`
+	SlowestMinRuns         int            `json:"slowest_min_runs"`
+	Kinds                  []KindHotspots `json:"kinds"`
 	// Outliers across kinds, longest first, the top 10: runs of several
 	// repos stuck at the same time point at shared infrastructure.
 	Outliers []Outlier `json:"outliers"`
@@ -873,9 +875,9 @@ type RepoHotspot struct {
 	// WastedSeconds is the CI time of the FAILURE and UNSTABLE runs,
 	// outliers aside.
 	WastedSeconds float64 `json:"wasted_seconds"`
-	// Flaky: a failure rate of at least flakyThreshold of the previous
-	// period's and FlakyMinPoints above it.
-	Flaky bool `json:"flaky"`
+	// FailingMore: a failure rate of at least failingMoreThreshold of the
+	// previous period's and FailingMoreMinPoints above it.
+	FailingMore bool `json:"failing_more"`
 	// CISeconds is every run's time, those without a verdict included,
 	// outliers aside, counted as BuildStats.CISeconds. The rows add up to
 	// at most the kind's: a repo without a run with a verdict has no row,
@@ -903,12 +905,12 @@ type OutlierGroup struct {
 	Shared bool `json:"shared"`
 }
 
-// compareHotspots orders RepoHotspot rows: flaky by wasted CI time, then
-// slow by factor, then the rest by wasted time and median.
+// compareHotspots orders RepoHotspot rows: failing more by wasted CI time,
+// then slow by factor, then the rest by wasted time and median.
 func compareHotspots(a, b RepoHotspot) int {
 	rank := func(h RepoHotspot) int {
 		switch {
-		case h.Flaky:
+		case h.FailingMore:
 			return 0
 		case h.Slow:
 			return 1
@@ -971,12 +973,15 @@ func outlierGroups(outliers []Outlier) []OutlierGroup {
 	return out
 }
 
-// flakyThreshold is the failure rate that flags a repo whose rate was t in
-// the previous period: FlakyFactor times it and at least FlakyMinPoints
-// above it, capped halfway from it to 100 %. Without the cap a repo failing
-// over half its runs could never get flaky, not even when it starts
-// failing them all; the cap comes last, or a floor past 100 % would.
-func flakyThreshold(t float64) float64 { return min(max(FlakyFactor*t, t+FlakyMinPoints), (1+t)/2) }
+// failingMoreThreshold is the failure rate that flags a repo whose rate was
+// t in the previous period: FailingMoreFactor times it and at least
+// FailingMoreMinPoints above it, capped halfway from it to 100 %. Without
+// the cap a repo failing over half its runs could never be flagged, not
+// even when it starts failing them all; the cap comes last, or a floor past
+// 100 % would.
+func failingMoreThreshold(t float64) float64 {
+	return min(max(FailingMoreFactor*t, t+FailingMoreMinPoints), (1+t)/2)
+}
 
 // topOrFlagged keeps the first hotspotTop rows and every flagged one past
 // them, in order: a flagged repo ranked low by a few short-lived repos
@@ -1065,7 +1070,7 @@ func (h *RepoHotspot) against(rr, prev *repoRuns, incomplete bool) {
 	h.FailureChange = repoFailureMetric.judge(side{h.FailureRate, rr.counted >= HotspotMinRuns},
 		side{ratio(prev.failures, prev.counted), prev.counted >= HotspotMinRuns}, incomplete)
 	if p := h.FailureChange.Prev; p != nil {
-		h.Flaky = h.Failures >= FlakyMinFailures && *h.FailureRate+eps >= flakyThreshold(*p)
+		h.FailingMore = h.Failures >= FailingMoreMinFailures && *h.FailureRate+eps >= failingMoreThreshold(*p)
 	}
 }
 
@@ -1137,7 +1142,7 @@ func kindHotspots(kind string, kr kindRuns, repos map[string]*repoRuns, base *ba
 	k.Slowest = k.Slowest[:min(len(k.Slowest), slowestTop)]
 	slices.SortFunc(k.Repos, compareHotspots)
 	// Every flagged repo stays: compare counts them off this list.
-	k.Repos = topOrFlagged(k.Repos, func(h RepoHotspot) bool { return h.Flaky || h.Slow })
+	k.Repos = topOrFlagged(k.Repos, func(h RepoHotspot) bool { return h.FailingMore || h.Slow })
 	k.Unplotted = len(repos)
 	for _, h := range k.Repos {
 		if h.Plotted {
