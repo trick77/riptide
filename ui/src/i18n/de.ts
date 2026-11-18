@@ -149,22 +149,33 @@ export const de = {
         noergler: "noergler",
       },
       focus: "Im Fokus",
-      calm_one: "{{count}} weiteres aktives Repo ohne Auffälligkeiten",
-      calm_other: "{{count}} weitere aktive Repos ohne Auffälligkeiten",
+      focusBy: "nach Gewicht der Befunde",
       scopeAll: "Team, alle Produkte",
       scopeProduct: "Produkt {{product}}",
       col: {
         good: "Läuft",
         bad: "Hakt",
         done: "Erledigt",
+        calm: "Unauffällig",
       },
-      rest: "Sonst:",
-      empty: {
-        good: "nichts bemerkenswert besser",
-        bad: "nichts hakt",
-        done: "seit der letzten Einschätzung nichts erledigt",
-        first: "keine frühere Woche eingeschätzt, noch kein Vergleich",
+      tallyLabel: "Bilanz",
+      tally: {
+        good: "läuft",
+        done: "erledigt",
+        bad: "hakt",
+        calmOf: "{{calm}} von {{active}}",
+        calm_one: "aktiven Repo unauffällig",
+        calm_other: "aktiven Repos unauffällig",
       },
+      calmLine_one: "{{calm}} von {{active}} aktiven Repo ohne Befund.",
+      calmLine_other: "{{calm}} von {{active}} aktiven Repos ohne Befund.",
+      calmLabel_one: "aktiven Repo ohne Befund",
+      calmLabel_other: "aktiven Repos ohne Befund",
+      noGain: "Keine Verbesserung, die als Beleg zählt.",
+      noBaseline:
+        "Noch kein Vergleich: Für diese Wochen gibt es keine Vorperiodenwerte.",
+      nothingStuck: "Nichts hakt in diesen Wochen.",
+      stuckBelow: "Ohne eigene Karte: Die Befunde stehen weiter unten.",
       lowSample_one: "wenig belastbar · {{count}} PR",
       lowSample_other: "wenig belastbar · {{count}} PRs",
       waitingAll_one: "{{count}} wartet auf {{what}}",
@@ -199,6 +210,7 @@ export const de = {
         steady_slow: "{{repo}}: {{kind}} wieder unter den langsamsten",
         failing_more: "{{repo}}: {{kind}} scheitern öfter",
         changeGood: "{{label}}: deutlich besser",
+        changeGoodMinor: "{{label}}: besser",
         changeBad: "{{label}}: deutlich schlechter",
         bottleneck_moved: "Der Engpass ist zu «{{stage}}» gewandert",
         throughput_instability: "Throughput und Stabilität laufen auseinander",
@@ -223,6 +235,8 @@ export const de = {
           "Scheitert viel öfter als in der Vorperiode. Ob Tests, Infrastruktur oder echte Fehler, steht nicht in den Daten.",
         changeGood:
           "Über der Schwelle für eine wichtige Veränderung gegenüber der Vorperiode.",
+        changeGoodMinor:
+          "Besser als in der Vorperiode: über dem Rauschen, unter der Schwelle für eine wichtige Veränderung.",
         changeBad:
           "Über der Schwelle für eine wichtige Veränderung gegenüber der Vorperiode. Warum, steht nicht in den Daten.",
         bottleneck_moved:

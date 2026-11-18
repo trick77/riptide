@@ -3,6 +3,7 @@ package metrics
 import (
 	"cmp"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -147,6 +148,9 @@ type Signal struct {
 	Facts   []Fact   `json:"facts"`
 	Waiting *Waiting `json:"waiting"`
 	Drivers []Driver `json:"drivers"`
+	// score ranks good changes among themselves, the larger move first: the
+	// Change's |Score|. Not stored: the stored order already holds it.
+	score float64
 }
 
 // FocusRepo is a repo with movement: its signals and up to three numbers.
@@ -252,6 +256,8 @@ type assessor struct {
 	out      []Signal
 	// team are the compared team numbers, computed once.
 	team []teamChange
+	// held are the gains a trade-off holds back: no signal, still there.
+	held map[string]bool
 }
 
 func (a *assessor) run() Assessment {
@@ -265,14 +271,17 @@ func (a *assessor) run() Assessment {
 	a.resolvedSignals()
 	for i := range a.out {
 		a.out[i].Seen = a.h.Seen[a.out[i].ID]
+		// A change keeps its ID whether worse or better: a worsening after a
+		// gain starts a streak of its own (History ends a streak where the
+		// tone flips among earlier runs; this is the flip to now).
+		if tone, ok := a.h.Latest[a.out[i].ID]; ok && tone != a.out[i].Tone {
+			a.out[i].Seen = 0
+		}
 		if a.out[i].Drivers == nil {
 			a.out[i].Drivers = []Driver{}
 		}
 	}
-	slices.SortStableFunc(a.out, func(x, y Signal) int {
-		return cmp.Or(cmp.Compare(toneRank(x.Tone), toneRank(y.Tone)), cmp.Compare(y.Weight, x.Weight),
-			cmp.Compare(x.ID, y.ID))
-	})
+	rank(a.out)
 	out := Assessment{
 		Period: a.p.Period, Previous: a.p.Previous, Gaps: append([]string{}, slices.Sorted(maps.Keys(a.gaps))...),
 		Signals: a.out, Question: a.question(), Compared: a.h.Runs > 0,
@@ -288,6 +297,15 @@ func (a *assessor) run() Assessment {
 		out.Signals = []Signal{}
 	}
 	return out
+}
+
+// rank orders the signals: by tone, the gates first, then by weight; good
+// changes of one weight by the size of their move.
+func rank(ss []Signal) {
+	slices.SortStableFunc(ss, func(x, y Signal) int {
+		return cmp.Or(cmp.Compare(toneRank(x.Tone), toneRank(y.Tone)), cmp.Compare(y.Weight, x.Weight),
+			cmp.Compare(y.score, x.score), cmp.Compare(x.ID, y.ID))
+	})
 }
 
 func toneRank(t string) int {
@@ -577,16 +595,35 @@ func waitShare(c Chain) (*float64, bool) {
 	return nil, false
 }
 
-// changeSignals are the notable moves of the directed team numbers; the
-// worse ones carry the repos that drive them where riptide can tell.
+// changeSignals are the moves of the directed team numbers: every better
+// one past the tolerance, as what runs needs evidence and a small gain is
+// one; a worse one only when notable, or the stuck side fills with noise
+// (user, 2026-11-18). The worse ones carry the repos that drive them where
+// riptide can tell.
 func (a *assessor) changeSignals() {
+	a.held = map[string]bool{}
+	m := a.m
+	cf, ds := m.Comparison.DeployFreq, m.Comparison.DeploySuccess
+	tradeoff := (cf.Verdict == ChangeBetter && ds.Verdict == ChangeWorse) ||
+		(cf.Verdict == ChangeWorse && ds.Verdict == ChangeBetter)
 	for _, t := range a.team {
 		c := t.c
-		if c.Magnitude == nil || *c.Magnitude != MagnitudeNotable || !c.Directed ||
-			(c.Verdict != ChangeBetter && c.Verdict != ChangeWorse) {
+		if c.Magnitude == nil || !c.Directed {
+			continue
+		}
+		good := c.Verdict == ChangeBetter && *c.Magnitude != MagnitudeSame
+		bad := c.Verdict == ChangeWorse && *c.Magnitude == MagnitudeNotable
+		if !good && !bad {
 			continue
 		}
 		id := "change:" + t.metric
+		// The better half of a throughput / instability pair is no progress
+		// (the trade-off's own claim): never a good card beside it, and no
+		// resolution of its earlier worsening either.
+		if good && tradeoff && (t.metric == "deploy_frequency" || t.metric == "deploy_success") {
+			a.held[id] = true
+			continue
+		}
 		s := Signal{
 			ID: id, Kind: SignalChange, Tone: ToneGood, Source: t.source, Metric: ptr(t.metric), Weight: 2,
 			Facts: []Fact{fact(id+".value", t.label, t.unit, t.value, c)},
@@ -594,17 +631,17 @@ func (a *assessor) changeSignals() {
 		if kind, ok := strings.CutPrefix(t.metric, "build_success:"); ok {
 			s.RunKind = ptr(kind)
 		}
-		if c.Verdict == ChangeWorse {
+		if bad {
 			s.Tone = ToneAttention
 			if t.metric == "review_time" {
 				s.Drivers = a.reviewDrivers()
 			}
+		} else if c.Score != nil {
+			s.score = math.Abs(*c.Score)
 		}
 		a.add(s)
 	}
-	m := a.m
-	cf, ds := m.Comparison.DeployFreq, m.Comparison.DeploySuccess
-	if (cf.Verdict == ChangeBetter && ds.Verdict == ChangeWorse) || (cf.Verdict == ChangeWorse && ds.Verdict == ChangeBetter) {
+	if tradeoff {
 		a.add(Signal{
 			ID: "throughput_instability", Kind: SignalTradeoff, Tone: ToneHint, Source: SourceArgoCD, Weight: 2,
 			Facts: []Fact{fact("throughput_instability.freq", "deploy_per_week", UnitPerWeek, ptr(m.Delivery.Frequency.PerWeek), cf),
@@ -718,10 +755,18 @@ func (a *assessor) deploySignals() {
 // resolvedSignals: what the latest assessment of the window raised as a
 // problem and is gone now, with today's number where there is one.
 func (a *assessor) resolvedSignals() {
-	now := map[string]bool{}
+	// A worsening that turned into a gain is resolved, told once: as the
+	// resolution, not as a good change beside it.
+	now, gains := map[string]bool{}, map[string]bool{}
+	maps.Copy(now, a.held)
 	for _, s := range a.out {
-		now[s.ID] = true
+		if s.Tone == ToneGood {
+			gains[s.ID] = true
+		} else {
+			now[s.ID] = true
+		}
 	}
+	resolved := map[string]bool{}
 	for _, id := range slices.Sorted(maps.Keys(a.h.Latest)) {
 		kind, rest, _ := strings.Cut(id, ":")
 		if now[id] || !slices.Contains([]string{SignalPRJam, SignalFailingMore, SignalSteadySlow, SignalSlower, SignalChange}, kind) {
@@ -770,18 +815,21 @@ func (a *assessor) resolvedSignals() {
 				continue
 			}
 			// A number gone unknown (no PR reached production: no wait
-			// share) is no resolution: say nothing.
+			// share) is no resolution: say nothing. Nor is one still worse,
+			// only no longer notably: it is not done.
 			for _, t := range a.team {
-				if t.metric == rest && t.value != nil {
+				if t.metric == rest && t.value != nil && t.c.Verdict != ChangeWorse {
 					s.Source = t.source
 					s.Facts = []Fact{fact(s.ID+".value", t.label, t.unit, t.value, t.c)}
 				}
 			}
 		}
-		if s.Facts != nil {
+		if s.Facts != nil && !a.gaps[s.Source] {
 			a.add(s)
+			resolved[id] = true
 		}
 	}
+	a.out = slices.DeleteFunc(a.out, func(s Signal) bool { return gains[s.ID] && resolved[s.ID] })
 }
 
 // ---- Question --------------------------------------------------------------

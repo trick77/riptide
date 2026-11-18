@@ -229,17 +229,24 @@ func (al *aliases) hideSignal(s metrics.Signal) metrics.Signal {
 func ptr[T any](v T) *T { return &v }
 
 // mandatory are the ranked signals the answer must word: the top
-// MandatoryTop that are no gate (a gate is shown as is).
+// MandatoryTop that are no gate (a gate is shown as is), and the strongest
+// gain, which ranks last and would never be among them. A resolution is
+// never added that way: it has a slot of its own and shows unworded too.
 func mandatory(a metrics.Assessment) []string {
-	out := []string{}
+	out, good := []string{}, ""
 	for _, s := range a.Signals {
 		if s.Tone == metrics.ToneGate {
 			continue
 		}
-		if len(out) == MandatoryTop {
-			break
+		if good == "" && s.Tone == metrics.ToneGood && s.Kind == metrics.SignalChange {
+			good = s.ID
 		}
-		out = append(out, s.ID)
+		if len(out) < MandatoryTop {
+			out = append(out, s.ID)
+		}
+	}
+	if good != "" && !slices.Contains(out, good) {
+		out = append(out, good)
 	}
 	return out
 }

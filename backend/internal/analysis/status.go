@@ -34,8 +34,29 @@ type Layout struct {
 	Focus []LayoutFocus `json:"focus"`
 	Cards []LayoutCard  `json:"cards"`
 	// Also are the signals spotted without words, as chips.
-	Also []LayoutCard `json:"also"`
+	Also  []LayoutCard `json:"also"`
+	Tally Tally        `json:"tally"`
 }
+
+// Tally is the assessment in one line: its signals by column, gates aside,
+// counted whether worded or not. Good or done above 0 is what lets the page
+// say "runs"; without either it says "unremarkable" (user: "wenn nichts
+// läuft, ist läuft gut übertrieben").
+type Tally struct {
+	Good int `json:"good"`
+	Done int `json:"done"`
+	Bad  int `json:"bad"`
+	// Baseline: a team number has a previous period to read better against;
+	// without one nothing can.
+	Baseline bool `json:"baseline"`
+}
+
+// Card slots of the good and done columns, on top of MaxCards: ranked
+// last, a gain would otherwise never get past the worries.
+const (
+	GoodCards = 2
+	DoneCards = 1
+)
 
 // LayoutFocus is a focus repo as shown: its lever (the model's, else the
 // rules') and the facts table it links to.
@@ -88,10 +109,11 @@ func tab(s metrics.Signal) string {
 }
 
 // layout is the page's choice: what the analysis words, or without one the
-// first metrics.FocusMax candidates and MaxCards team-wide signals; the
-// rest, gates and the question aside, is "also spotted".
+// first metrics.FocusMax candidates and MaxCards team-wide signals; either
+// way the best GoodCards gains and DoneCards resolutions on top, worded or
+// not. The rest, gates and the question aside, is "also spotted".
 func layout(a metrics.Assessment, text *Text) Layout {
-	l := Layout{Focus: []LayoutFocus{}, Cards: []LayoutCard{}, Also: []LayoutCard{}}
+	l := Layout{Focus: []LayoutFocus{}, Cards: []LayoutCard{}, Also: []LayoutCard{}, Tally: tally(a)}
 	covered := map[string]bool{}
 	byID := map[string]metrics.Signal{}
 	for _, s := range a.Signals {
@@ -120,27 +142,52 @@ func layout(a metrics.Assessment, text *Text) Layout {
 			covered[id] = true
 		}
 	}
-	addCard := func(id, lever string) {
+	// A worded card always shows (the validator caps them at MaxCards); an
+	// unworded one only in a free slot of its column.
+	slots := map[string]int{ColumnBad: MaxCards, ColumnGood: GoodCards, ColumnDone: DoneCards}
+	addCard := func(id, lever string, worded bool) {
 		s, ok := byID[id]
-		if !ok || !cardSignal(s) || covered[id] || len(l.Cards) == MaxCards {
+		if !ok || !cardSignal(s) || covered[id] {
 			return
 		}
-		l.Cards = append(l.Cards, LayoutCard{Signal: id, Column: column(s), Lever: cmp.Or(lever, ruleLever(s))})
+		col := column(s)
+		if !worded && slots[col] <= 0 {
+			return
+		}
+		slots[col]--
+		l.Cards = append(l.Cards, LayoutCard{Signal: id, Column: col, Lever: cmp.Or(lever, ruleLever(s))})
 		covered[id] = true
 	}
 	if text != nil {
 		for _, f := range text.Focus {
 			addFocus(f.Repo, f.Lever)
 		}
+		// The worries in the model's order; what runs in the backend's rank,
+		// worded or not, so the largest gain leads whichever the model
+		// worded. Unworded, a card takes the rules' words.
+		worded := map[string]string{}
 		for _, k := range text.Cards {
-			addCard(k.Signal, k.Lever)
+			if s, ok := byID[k.Signal]; ok && column(s) != ColumnBad && cardSignal(s) {
+				// Its slot is taken whatever its rank.
+				worded[k.Signal] = k.Lever
+				slots[column(s)]--
+				continue
+			}
+			addCard(k.Signal, k.Lever, true)
+		}
+		for _, s := range a.Signals {
+			if column(s) == ColumnBad {
+				continue
+			}
+			lever, ok := worded[s.ID]
+			addCard(s.ID, lever, ok)
 		}
 	} else {
 		for _, f := range a.Focus[:min(len(a.Focus), metrics.FocusMax)] {
 			addFocus(f.Repo, "")
 		}
 		for _, s := range a.Signals {
-			addCard(s.ID, "")
+			addCard(s.ID, "", false)
 		}
 	}
 	for _, s := range a.Signals {
@@ -149,6 +196,26 @@ func layout(a metrics.Assessment, text *Text) Layout {
 		}
 	}
 	return l
+}
+
+// tally counts a's signals by column, gates aside.
+func tally(a metrics.Assessment) Tally {
+	var t Tally
+	for _, s := range a.Signals {
+		if s.Tone == metrics.ToneGate {
+			continue
+		}
+		switch column(s) {
+		case ColumnGood:
+			t.Good++
+		case ColumnDone:
+			t.Done++
+		default:
+			t.Bad++
+		}
+	}
+	t.Baseline = slices.ContainsFunc(a.Team, func(f metrics.Fact) bool { return f.Verdict != metrics.ChangeNone })
+	return t
 }
 
 // Failure is the view's latest attempt, failed after what is shown.

@@ -698,6 +698,9 @@ export type AnalysisStatus = {
     focus: { repo: string; lever: string; tab: "prs" | "runs" }[];
     cards: LayoutCard[];
     also: LayoutCard[];
+    // The signals by column, gates aside: good or done above 0 lets the
+    // page say "runs", else "unremarkable".
+    tally: { good: number; done: number; bad: number; baseline: boolean };
   };
   analysis: ShownAnalysis | null;
   failure: { at: string; detail: string } | null;

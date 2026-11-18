@@ -5,7 +5,7 @@
 // bars. The page never says who worded it (user, 2026-11-16: "slop").
 
 import type { TFunction } from "i18next";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   type AnalysisStatus,
@@ -25,7 +25,7 @@ import {
 import { stageNames } from "./Flow";
 import { clock, dayMonth, dur, money, num, pct, stage } from "./format";
 import type { Tab } from "./state";
-import { Delta } from "./ui";
+import { Delta, Eyebrow, Pill } from "./ui";
 
 const POLL_MS = 3000;
 // Small meta text: plain spaces around the middot are fine there.
@@ -37,7 +37,6 @@ const HEAD_SEP = `${EN}${String.fromCharCode(0x00b7)}${EN}`;
 // The column, lever and facts tab of an item are the backend's (layout):
 // the page only shows them.
 type Column = LayoutCard["column"];
-const COLUMNS: Column[] = ["good", "bad", "done"];
 
 // What a jam waits on, in the order of the wait chain: one shade of the
 // validated sequential ramp per step, the draft grey.
@@ -56,13 +55,33 @@ const WAIT_COLOR: Record<PRWaiting, string> = {
   draft: "bg-other",
 };
 
-const COLUMN_STYLE: Record<Column, { border: string; tag: string }> = {
-  good: { border: "border-l-online", tag: "border-online/45 text-online" },
-  bad: {
-    border: "border-l-danger-ink",
-    tag: "border-danger-ink/45 text-danger-ink",
+// A card in its column's colour: the left rule, a wash fading down from
+// the top, the tag. Green runs, red is stuck, blue is resolved.
+const COLUMN_STYLE: Record<
+  Column,
+  { border: string; wash: string; line: string; ink: string; dot: string }
+> = {
+  good: {
+    border: "border-online/35 border-l-online",
+    wash: "from-online/15",
+    line: "border-online/45",
+    ink: "text-online",
+    dot: "bg-online",
   },
-  done: { border: "border-l-s1", tag: "border-s1/45 text-s1" },
+  bad: {
+    border: "border-danger/45 border-l-danger",
+    wash: "from-danger/15",
+    line: "border-danger-ink/45",
+    ink: "text-danger-ink",
+    dot: "bg-danger",
+  },
+  done: {
+    border: "border-s1/35 border-l-s1",
+    wash: "from-s1/15",
+    line: "border-s1/45",
+    ink: "text-s1",
+    dot: "bg-s1",
+  },
 };
 
 export function fmtFact(
@@ -164,12 +183,7 @@ function signalTitle(t: TFunction, s: Signal, m: Metrics): string {
     what: "",
   };
   if (s.kind === "change")
-    return t(
-      s.tone === "good"
-        ? "overview.assess.title.changeGood"
-        : "overview.assess.title.changeBad",
-      vars,
-    );
+    return t(`overview.assess.title.${changeKey(s)}`, vars);
   if (s.kind === "resolved") {
     const was = (s.metric ?? "").split(":")[0];
     const kindWord = t(`overview.assess.kind.${was}`, { defaultValue: was });
@@ -178,13 +192,15 @@ function signalTitle(t: TFunction, s: Signal, m: Metrics): string {
   return t(`overview.assess.title.${s.kind}`, vars);
 }
 
+// A change's words by the backend's tone and magnitude: a small gain is
+// never "notably" better.
+function changeKey(s: Signal): "changeBad" | "changeGood" | "changeGoodMinor" {
+  if (s.tone !== "good") return "changeBad";
+  return s.facts[0]?.magnitude === "minor" ? "changeGoodMinor" : "changeGood";
+}
+
 function ruleText(t: TFunction, s: Signal): string {
-  if (s.kind === "change")
-    return t(
-      s.tone === "good"
-        ? "overview.assess.rule.changeGood"
-        : "overview.assess.rule.changeBad",
-    );
+  if (s.kind === "change") return t(`overview.assess.rule.${changeKey(s)}`);
   return t(`overview.assess.rule.${s.kind}`, { defaultValue: "" });
 }
 
@@ -204,16 +220,16 @@ function Seen({ n }: { n: number }) {
 }
 
 // LowSample says how few cases the signal rests on, where the backend
-// counted them.
+// counted them: ochre, read with care.
 function LowSample({ s }: { s: Signal }) {
   const { t } = useTranslation();
   if (!s.low_sample) return null;
   return (
-    <span className="inline-block rounded-full border border-border px-1.5 font-mono text-[10.5px] text-muted">
+    <Pill tone="warn">
       {s.sample != null
         ? t("overview.assess.lowSample", { count: s.sample })
         : t("common.lowSample")}
-    </span>
+    </Pill>
   );
 }
 
@@ -315,16 +331,6 @@ function Retro({ q }: { q: string | null }) {
   );
 }
 
-// A small heading of the section: one level, sentence case.
-function SubHead({ title, aside }: { title: string; aside?: string | null }) {
-  return (
-    <div className="mt-6 mb-2.5 flex flex-wrap items-baseline justify-between gap-3">
-      <h4 className="m-0 text-[13px] font-medium text-ink">{title}</h4>
-      {aside && <span className="text-[12px] text-faint">{aside}</span>}
-    </div>
-  );
-}
-
 type OnFacts = (tab: Tab, q: string) => void;
 
 type FocusView = {
@@ -340,10 +346,13 @@ type FocusView = {
 
 function FocusBlock({
   f,
+  n,
   wide,
   onFacts,
 }: {
   f: FocusView;
+  // n: its place in the backend's ranking, from 1.
+  n: number;
   // wide: the only repo in focus, its numbers beside its words.
   wide: boolean;
   onFacts: OnFacts;
@@ -352,12 +361,15 @@ function FocusBlock({
   const first = f.r.facts[0];
   return (
     <article
-      className={`min-w-0 rounded-ui-lg border border-border bg-bg/40 px-4 pt-4 pb-3 ${
+      className={`min-w-0 rounded-ui-lg border border-border bg-linear-to-b from-danger/10 to-transparent to-60% px-4 pt-4 pb-3 ${
         wide ? "md:grid md:grid-cols-[minmax(220px,1fr)_2fr] md:gap-x-7" : ""
       }`}
     >
       <div className="min-w-0">
         <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="font-serif text-[24px] leading-none text-danger-ink tabular-nums">
+            {n}
+          </span>
           <h4 className="m-0 font-mono text-[16px] font-semibold break-all text-ink">
             {f.r.repo}
           </h4>
@@ -412,23 +424,31 @@ type CardView = {
   lever: string;
 };
 
-function Card({ c }: { c: CardView }) {
+function SignalCard({ c }: { c: CardView }) {
   const { t } = useTranslation();
   const f = c.s.facts[0];
   const d = c.s.drivers?.[0];
+  const style = COLUMN_STYLE[c.column];
+  // The column says "runs" or "stuck"; only a resolution, which shares the
+  // left with the gains, names its own.
+  const tags = c.column === "done" || c.s.low_sample || c.s.seen > 0;
   return (
     <article
-      className={`min-w-0 rounded-ui border border-l-[3px] border-border bg-panel px-3.5 pt-3 pb-3 ${COLUMN_STYLE[c.column].border}`}
+      className={`min-w-0 rounded-ui border border-l-[3px] bg-linear-to-b ${style.wash} to-transparent to-75% px-3.5 pt-3 pb-3 ${style.border}`}
     >
-      <div className="mb-2 flex flex-wrap items-center gap-1.5">
-        <span
-          className={`rounded-full border px-1.5 font-mono text-[10.5px] tracking-[.06em] uppercase ${COLUMN_STYLE[c.column].tag}`}
-        >
-          {t(`overview.assess.col.${c.column}`)}
-        </span>
-        <LowSample s={c.s} />
-        <Seen n={c.s.seen} />
-      </div>
+      {tags && (
+        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+          {c.column === "done" && (
+            <span
+              className={`rounded-full border px-1.5 font-mono text-[10.5px] tracking-[.06em] uppercase ${style.line} ${style.ink}`}
+            >
+              {t("overview.assess.col.done")}
+            </span>
+          )}
+          <LowSample s={c.s} />
+          <Seen n={c.s.seen} />
+        </div>
+      )}
       <p className="m-0 mb-2.5 text-[15px] leading-snug font-semibold text-ink">
         {c.title}
       </p>
@@ -453,6 +473,68 @@ function Card({ c }: { c: CardView }) {
       <Retro q={c.retro} />
       <Lever k={c.lever} />
     </article>
+  );
+}
+
+// A count of the tally, in its column's colour; the calm repos grey.
+function TallyChip({
+  col,
+  n,
+  children,
+}: {
+  col?: Column;
+  n: string;
+  children: ReactNode;
+}) {
+  const style = col ? COLUMN_STYLE[col] : null;
+  return (
+    <li
+      className={`inline-flex items-baseline gap-[7px] rounded-full border py-[5px] pr-[13px] pl-[11px] text-[13px] text-muted ${
+        style ? style.line : "border-border"
+      }`}
+    >
+      <span
+        aria-hidden="true"
+        className={`size-2 self-center rounded-full ${style ? style.dot : "bg-faint"}`}
+      />
+      <strong
+        className={`font-serif text-[17px] font-medium ${style ? style.ink : "text-ink"}`}
+      >
+        {n}
+      </strong>
+      {children}
+    </li>
+  );
+}
+
+// One side of the assessment: what runs (or, without evidence, what is
+// unremarkable) and what is stuck.
+function Side({ col, children }: { col?: Column; children: ReactNode }) {
+  const { t } = useTranslation();
+  const style = col ? COLUMN_STYLE[col] : null;
+  return (
+    <section className="flex min-w-0 flex-col gap-2.5">
+      <h4
+        className={`m-0 flex items-center gap-2 text-[11px] font-medium tracking-[.12em] uppercase ${
+          style ? style.ink : "text-muted"
+        }`}
+      >
+        <span
+          aria-hidden="true"
+          className={`size-2 rounded-full ${style ? style.dot : "bg-faint"}`}
+        />
+        {t(`overview.assess.col.${col ?? "calm"}`)}
+      </h4>
+      {children}
+    </section>
+  );
+}
+
+function Quiet({ children }: { children: ReactNode }) {
+  return (
+    <p className="m-0 rounded-ui border border-dashed border-border px-3.5 py-3 text-[13px] text-faint">
+      {children}
+    </p>
   );
 }
 
@@ -591,17 +673,15 @@ function Panel({
     }
   };
 
-  // The columns without a card, in one quiet line. "Resolved" needs an
-  // assessment of an earlier week; without a model there never is one, so
-  // the line says nothing about it then.
-  const rest = COLUMNS.filter(
-    (col) =>
-      !w.cards.some((c) => c.column === col) && (col !== "done" || st.enabled),
-  ).map((col) =>
-    col === "done" && !a.compared
-      ? t("overview.assess.empty.first")
-      : t(`overview.assess.empty.${col}`),
-  );
+  const tally = st.layout.tally;
+  // Each side in the backend's order: gains and resolutions as it ranked
+  // them, the worries as worded.
+  const left = w.cards.filter((c) => c.column !== "bad");
+  const stuck = w.cards.filter((c) => c.column === "bad");
+  const calmOf = t("overview.assess.tally.calmOf", {
+    calm: num(a.calm),
+    active: num(a.active),
+  });
 
   const button =
     st.enabled &&
@@ -709,56 +789,113 @@ function Panel({
         </p>
       )}
 
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <ul
+          aria-label={t("overview.assess.tallyLabel")}
+          className="m-0 flex list-none flex-wrap gap-2 p-0"
+        >
+          {tally.good > 0 && (
+            <TallyChip col="good" n={num(tally.good)}>
+              {t("overview.assess.tally.good")}
+            </TallyChip>
+          )}
+          {tally.done > 0 && (
+            <TallyChip col="done" n={num(tally.done)}>
+              {t("overview.assess.tally.done")}
+            </TallyChip>
+          )}
+          <TallyChip col="bad" n={num(tally.bad)}>
+            {t("overview.assess.tally.bad")}
+          </TallyChip>
+          {a.calm > 0 && (
+            <TallyChip n={calmOf}>
+              {t("overview.assess.tally.calm", { count: a.active })}
+            </TallyChip>
+          )}
+        </ul>
+        {/* Whose the counts and cards are: the team or one product. */}
+        <span className="text-[12px] text-faint">
+          {m.product
+            ? t("overview.assess.scopeProduct", { product: m.product })
+            : t("overview.assess.scopeAll")}
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-[18px] md:grid-cols-2">
+        {tally.good > 0 || tally.done > 0 ? (
+          <Side col="good">
+            {left.map((c) => (
+              <SignalCard key={c.s.id} c={c} />
+            ))}
+            {a.calm > 0 && (
+              <Quiet>
+                {t("overview.assess.calmLine", {
+                  count: a.active,
+                  calm: num(a.calm),
+                  active: num(a.active),
+                })}
+              </Quiet>
+            )}
+          </Side>
+        ) : (
+          <Side>
+            {a.calm > 0 && (
+              <article className="min-w-0 rounded-ui border border-l-[3px] border-border border-l-faint px-3.5 pt-3 pb-3">
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <span className="font-serif text-[32px] leading-none text-ink tabular-nums">
+                    {calmOf}
+                  </span>
+                  <span className="text-[13px] text-muted">
+                    {t("overview.assess.calmLabel", { count: a.active })}
+                  </span>
+                </div>
+              </article>
+            )}
+            <Quiet>
+              {tally.baseline
+                ? t("overview.assess.noGain")
+                : t("overview.assess.noBaseline")}
+            </Quiet>
+          </Side>
+        )}
+        <Side col="bad">
+          {stuck.map((c) => (
+            <SignalCard key={c.s.id} c={c} />
+          ))}
+          {stuck.length === 0 && (
+            <Quiet>
+              {tally.bad > 0
+                ? t("overview.assess.stuckBelow")
+                : t("overview.assess.nothingStuck")}
+            </Quiet>
+          )}
+        </Side>
+      </div>
+
       {w.focus.length > 0 && (
         <>
-          <SubHead
-            title={t("overview.assess.focus")}
-            aside={
-              a.calm > 0 ? t("overview.assess.calm", { count: a.calm }) : null
-            }
-          />
+          <div className="mt-7 mb-2.5 flex flex-wrap items-baseline justify-between gap-3">
+            <Eyebrow className="text-ink-dim">
+              {t("overview.assess.focus")}
+            </Eyebrow>
+            <span className="text-[12px] text-faint">
+              {t("overview.assess.focusBy")}
+            </span>
+          </div>
           <div
             className={`grid gap-3 ${w.focus.length > 1 ? "md:grid-cols-[repeat(auto-fit,minmax(260px,1fr))]" : ""}`}
           >
-            {w.focus.map((f) => (
+            {w.focus.map((f, i) => (
               <FocusBlock
                 key={f.r.repo}
                 f={f}
+                n={i + 1}
                 wide={w.focus.length === 1}
                 onFacts={onFacts}
               />
             ))}
           </div>
         </>
-      )}
-
-      {w.focus.length > 0 ? (
-        <SubHead
-          title={
-            m.product
-              ? t("overview.assess.scopeProduct", { product: m.product })
-              : t("overview.assess.scopeAll")
-          }
-        />
-      ) : (
-        <div className="mt-5" />
-      )}
-      {w.cards.length > 0 && (
-        <div className="grid gap-3 md:grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
-          {COLUMNS.flatMap((col) =>
-            w.cards
-              .filter((c) => c.column === col)
-              .map((c) => <Card key={c.s.id} c={c} />),
-          )}
-        </div>
-      )}
-      {rest.length > 0 && (
-        <p className="mt-2.5 mb-0 text-[13px] text-faint">
-          <span className="mr-1 font-medium text-muted">
-            {t("overview.assess.rest")}
-          </span>
-          {rest.join(SEP)}.
-        </p>
       )}
 
       {(retros.length > 0 || w.question) && (
@@ -799,7 +936,7 @@ function Panel({
           {also.map(({ s, column }) => (
             <span
               key={s.id}
-              className={`rounded-full border px-2.5 py-0.5 text-[12.5px] ${COLUMN_STYLE[column].tag}`}
+              className={`rounded-full border px-2.5 py-0.5 text-[12.5px] ${COLUMN_STYLE[column].line} ${COLUMN_STYLE[column].ink}`}
             >
               {signalTitle(t, s, m)}
             </span>

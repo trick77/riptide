@@ -1928,10 +1928,12 @@ components:
           description: |
             What the page shows where, decided by the backend: the focus
             repos and the cards in order (what the analysis words, or the
-            first 3 candidates and 4 team-wide signals), and the signals
-            spotted without words. Gates and the question are in neither.
+            first 3 candidates and 4 team-wide signals; either way the best
+            2 good and 1 done signal on top, worded or not), the signals
+            spotted without words, and the tally. Gates and the question
+            are in none.
           additionalProperties: false
-          required: [focus, cards, also]
+          required: [focus, cards, also, tally]
           properties:
             focus:
               type: array
@@ -1948,6 +1950,19 @@ components:
               type: array
               description: The signals spotted without words, as chips.
               items: { $ref: "#/components/schemas/LayoutCard" }
+            tally:
+              type: object
+              description: |
+                The signals by column, gates aside, worded or not. Good or
+                done above 0 lets the page say "runs"; without either it
+                says "unremarkable".
+              additionalProperties: false
+              required: [good, done, bad, baseline]
+              properties:
+                good: { type: integer, minimum: 0 }
+                done: { type: integer, minimum: 0 }
+                bad: { type: integer, minimum: 0 }
+                baseline: { type: boolean, description: A team number has a previous period to read better against. }
         enabled: { type: boolean, description: A model is configured; the page offers to ask. }
         running: { type: boolean, description: An attempt is under way. }
         assessment: { $ref: "#/components/schemas/Assessment" }

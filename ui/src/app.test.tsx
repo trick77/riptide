@@ -283,15 +283,32 @@ describe("App", () => {
         "Argo CD meldet seit 6 Tagen nichts: Aussagen dazu ausgelassen.",
       ),
     ).toBeInTheDocument();
-    // The focus, the placeholders filled with the backend's numbers.
-    expect(p.getByText("Im Fokus")).toBeInTheDocument();
-    expect(
-      p.getByText("9 weitere aktive Repos ohne Auffälligkeiten"),
-    ).toBeInTheDocument();
+    // The tally in one line, the backend's counts.
+    const tally = within(p.getByRole("list", { name: "Bilanz" }));
+    expect(tally.getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "1läuft",
+      "1erledigt",
+      "4hakt",
+      "9 von 11aktiven Repos unauffällig",
+    ]);
+    // Whose they are: the team or one product.
     expect(p.getByText("Team, alle Produkte")).toBeInTheDocument();
+    // Two sides: what runs with its evidence, what is stuck.
+    expect(p.getByRole("heading", { name: "Läuft" })).toBeInTheDocument();
+    expect(p.getByRole("heading", { name: "Hakt" })).toBeInTheDocument();
+    expect(p.queryByRole("heading", { name: "Unauffällig" })).toBeNull();
     expect(
-      p.getByRole("heading", { name: "kasse/kasse-api" }),
+      p.getByText("9 von 11 aktiven Repos ohne Befund."),
     ).toBeInTheDocument();
+    // The focus below, ranked, the placeholders filled with the backend's
+    // numbers.
+    expect(p.getByText("Im Fokus")).toBeInTheDocument();
+    const api = p.getByRole("heading", { name: "kasse/kasse-api" });
+    expect(api.previousElementSibling?.textContent).toBe("1");
+    expect(
+      p.getByRole("heading", { name: "kasse/kasse-web" }).previousElementSibling
+        ?.textContent,
+    ).toBe("2");
     expect(
       p.getByText("5 PRs liegen, und Reviews dauern."),
     ).toBeInTheDocument();
@@ -484,7 +501,7 @@ describe("App", () => {
     expect((await row("d")).getByText("spike")).toBeInTheDocument();
   });
 
-  it("says how few, what all wait on, and that a first one has no past", async () => {
+  it("says how few, and what all wait on", async () => {
     mockFetch((url) => {
       if (url.pathname === "/api/facts") return facts();
       if (url.pathname === "/api/analysis") {
@@ -493,7 +510,11 @@ describe("App", () => {
         return analysisStatus({
           enabled: true,
           // Without an earlier assessment nothing can be resolved.
-          layout: { ...l, cards: l.cards.filter((c) => c.column !== "done") },
+          layout: {
+            ...l,
+            cards: l.cards.filter((c) => c.column !== "done"),
+            tally: { ...l.tally, done: 0 },
+          },
           assessment: {
             ...a,
             compared: false,
@@ -519,9 +540,82 @@ describe("App", () => {
     const p = within(await screen.findByTestId("assessment"));
     expect(p.getByText("wenig belastbar · 7 PRs")).toBeInTheDocument();
     expect(p.getByText("alle 3 warten auf Änderungen")).toBeInTheDocument();
-    expect(
-      p.getByText(/keine frühere Woche eingeschätzt, noch kein Vergleich/),
-    ).toBeInTheDocument();
+    // The gain alone is evidence enough: the left side runs.
+    expect(p.getByRole("heading", { name: "Läuft" })).toBeInTheDocument();
+    expect(p.queryByText("erledigt")).toBeNull();
+  });
+
+  // Without a gain or a resolution the left side is unremarkable, grey:
+  // "wenn nichts läuft, ist läuft gut übertrieben" (user). With the model's
+  // words or the rules', the same.
+  it.each([
+    ["the rules' words", false],
+    ["the model's words", true],
+  ])(
+    "says unremarkable without evidence of what runs, with %s",
+    async (_, worded) => {
+      mockFetch((url) => {
+        if (url.pathname === "/api/facts") return facts();
+        if (url.pathname === "/api/analysis") {
+          const a = assessment();
+          const base = worded ? analysedStatus() : analysisStatus();
+          const keep = (s: { tone: string }) => s.tone !== "good";
+          return {
+            ...base,
+            assessment: { ...a, signals: a.signals.filter(keep) },
+            layout: {
+              ...base.layout,
+              cards: base.layout.cards.filter((c) => c.column === "bad"),
+              // The backend's tally: its gains it never had.
+              tally: { good: 0, done: 0, bad: 4, baseline: worded },
+            },
+          };
+        }
+        return metrics();
+      });
+      render(<App />);
+      const p = within(await screen.findByTestId("assessment"));
+      expect(
+        p.getByRole("heading", { name: "Unauffällig" }),
+      ).toBeInTheDocument();
+      expect(p.queryByRole("heading", { name: "Läuft" })).toBeNull();
+      expect(p.getByText("aktiven Repos ohne Befund")).toBeInTheDocument();
+      expect(
+        p.getByText(
+          worded
+            ? "Keine Verbesserung, die als Beleg zählt."
+            : "Noch kein Vergleich: Für diese Wochen gibt es keine Vorperiodenwerte.",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        within(p.getByRole("list", { name: "Bilanz" })).queryByText("läuft"),
+      ).toBeNull();
+    },
+  );
+
+  // A gain the cards left out still makes the left side run: the side
+  // follows the backend's tally, never the cards shown. Once a gain stood
+  // as a green chip under "also spotted" while the page said nothing was
+  // better.
+  it("never calls a period unremarkable with a gain spotted", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis") {
+        const base = analysisStatus();
+        return analysisStatus({
+          layout: {
+            ...base.layout,
+            cards: base.layout.cards.filter((c) => c.column === "bad"),
+            also: base.layout.cards.filter((c) => c.column !== "bad"),
+          },
+        });
+      }
+      return metrics();
+    });
+    render(<App />);
+    const p = within(await screen.findByTestId("assessment"));
+    expect(p.getByRole("heading", { name: "Läuft" })).toBeInTheDocument();
+    expect(p.queryByText(/Keine Verbesserung|Noch kein Vergleich/)).toBeNull();
   });
 
   it("says drafts are drafts, and copies with team and product", async () => {
@@ -581,20 +675,58 @@ describe("App", () => {
             focus: [],
             question: null,
           },
+          layout: {
+            focus: [],
+            cards: [],
+            also: [],
+            tally: { good: 0, done: 0, bad: 0, baseline: true },
+          },
         });
       }
       return metrics(4);
     });
     render(<App />);
     const p = within(await screen.findByTestId("assessment"));
-    // The empty columns in one quiet line, no empty boxes.
+    // Each side in one sentence, no empty boxes.
+    expect(p.getByRole("heading", { name: "Unauffällig" })).toBeInTheDocument();
     expect(
-      p.getByText(
-        "nichts bemerkenswert besser · nichts hakt · seit der letzten Einschätzung nichts erledigt.",
-      ),
+      p.getByText("Keine Verbesserung, die als Beleg zählt."),
     ).toBeInTheDocument();
+    expect(p.getByText("Nichts hakt in diesen Wochen.")).toBeInTheDocument();
     expect(p.queryByText("Im Fokus")).toBeNull();
     expect(p.queryByText("Für die nächste Retro")).toBeNull();
+  });
+
+  it("says nothing is stuck beside what runs", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis") {
+        const a = assessment();
+        const base = analysedStatus();
+        return analysedStatus({
+          assessment: {
+            ...a,
+            signals: a.signals.filter((s) => s.tone === "good"),
+            focus: [],
+          },
+          layout: {
+            focus: [],
+            cards: base.layout.cards.filter((c) => c.column !== "bad"),
+            also: [],
+            tally: { good: 1, done: 1, bad: 0, baseline: true },
+          },
+        });
+      }
+      return metrics();
+    });
+    render(<App />);
+    const p = within(await screen.findByTestId("assessment"));
+    expect(p.getByRole("heading", { name: "Läuft" })).toBeInTheDocument();
+    expect(p.getByText("Mehr PRs kommen durch.")).toBeInTheDocument();
+    expect(p.getByText("Nichts hakt in diesen Wochen.")).toBeInTheDocument();
+    expect(
+      within(p.getByRole("list", { name: "Bilanz" })).getByText("0"),
+    ).toBeInTheDocument();
   });
 
   it("asks for a product, keeps it in the URL", async () => {

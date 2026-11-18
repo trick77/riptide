@@ -156,22 +156,33 @@ export const en = {
         noergler: "noergler",
       },
       focus: "In focus",
-      calm_one: "{{count}} more active repo without anything notable",
-      calm_other: "{{count}} more active repos without anything notable",
+      focusBy: "by weight of the findings",
       scopeAll: "Team, all products",
       scopeProduct: "Product {{product}}",
       col: {
         good: "Running well",
         bad: "Stuck",
         done: "Resolved",
+        calm: "Unremarkable",
       },
-      rest: "Otherwise:",
-      empty: {
-        good: "nothing notably better",
-        bad: "nothing stuck",
-        done: "nothing resolved since the last assessment",
-        first: "no earlier week assessed, nothing to compare yet",
+      tallyLabel: "Tally",
+      tally: {
+        good: "running well",
+        done: "resolved",
+        bad: "stuck",
+        calmOf: "{{calm}} of {{active}}",
+        calm_one: "active repo unremarkable",
+        calm_other: "active repos unremarkable",
       },
+      calmLine_one: "{{calm}} of {{active}} active repo without a finding.",
+      calmLine_other: "{{calm}} of {{active}} active repos without a finding.",
+      calmLabel_one: "active repo without a finding",
+      calmLabel_other: "active repos without a finding",
+      noGain: "No gain that counts as evidence.",
+      noBaseline:
+        "No comparison yet: there are no previous-period values for these weeks.",
+      nothingStuck: "Nothing is stuck in these weeks.",
+      stuckBelow: "No card of its own: the findings are further down.",
       lowSample_one: "not very reliable · {{count}} PR",
       lowSample_other: "not very reliable · {{count}} PRs",
       waitingAll_one: "{{count}} waits for {{what}}",
@@ -206,6 +217,7 @@ export const en = {
         steady_slow: "{{repo}}: {{kind}} among the slowest again",
         failing_more: "{{repo}}: {{kind}} fail more often",
         changeGood: "{{label}}: notably better",
+        changeGoodMinor: "{{label}}: better",
         changeBad: "{{label}}: notably worse",
         bottleneck_moved: "The bottleneck moved to “{{stage}}”",
         throughput_instability: "Throughput and stability drift apart",
@@ -230,6 +242,8 @@ export const en = {
           "Fails far more often than in the previous period. Whether tests, infrastructure or real breakage is not in the data.",
         changeGood:
           "Moved past the notable threshold against the previous period.",
+        changeGoodMinor:
+          "Better than in the previous period: past the noise, below the notable threshold.",
         changeBad:
           "Moved past the notable threshold against the previous period. Why is not in the data.",
         bottleneck_moved:

@@ -543,15 +543,27 @@ against the same number before. `metrics.Assess` raises the signals:
 - a steady slow build: among a kind's 3 slowest repos in both periods and
   slower than the kind's median. No factor, since a kind mixes toolchains;
 - repos failing more, as the hotspots flag them;
-- a notable change: a directed team number past 25 % (5 points for a
-  share), the review time's worsening split by repo. That covers deploys,
-  lead time, review, within-day, jammed repos, build success per kind,
-  merged PRs per week, open PRs over that throughput (weeks of work
-  standing open) and the waiting part of the lead time;
-- a moved bottleneck, deploy frequency and success moving opposite ways,
-  agent waits of half a run or more, several repos stuck at once,
-  forgotten PRs, re-syncs over half the syncs;
-- what the latest analysis of the window raised and is gone now.
+- a change of a directed team number: any gain past the tolerance (10 %,
+  3 points for a share), a worsening only past 25 % (5 points), the review
+  time's worsening split by repo. A small gain is evidence of what runs; a
+  small worsening would fill the stuck side with noise (user, 2026-11-18).
+  That covers deploys, lead time, review, within-day, jammed repos, build
+  success per kind, merged PRs per week, open PRs over that throughput
+  (weeks of work standing open) and the waiting part of the lead time.
+  Gains rank by the size of their move;
+- a moved bottleneck, deploy frequency and success moving opposite ways
+  (then the better one of the two is no gain: more throughput with rising
+  instability is no progress), agent waits of half a run or more, several
+  repos stuck at once, forgotten PRs, re-syncs over half the syncs;
+- what the latest analysis of the window raised and is gone now; a
+  worsening that turned into a gain shows as resolved only.
+
+The layout puts the gains and resolutions on the left ("runs") and the rest
+on the right ("stuck"), with a tally of each. Gains rank last, so they get
+slots of their own (the best 2 gains, 1 resolution) on top of the 4 cards,
+worded or not. Without a gain or a resolution the left says
+"unremarkable": a quiet period is no success (user: "wenn nichts läuft, ist
+läuft gut übertrieben").
 
 A source silent for 7 days at the end is a gap: its signals are left out.
 The repos are ranked by their signals' weight; a jam or a steady slow build
@@ -570,8 +582,9 @@ The model (`BACKEND_ANALYSIS_MODEL`) words this and nothing else:
 
 The validator drops what breaks a rule: a digit, an unknown fact, a
 foreign lever, a sharp s, a repo outside the candidates or an overlong text.
-It lists the top 3 signals the text missed; the page shows them as "also
-spotted". The schedule words every team's views, all products and then each product with data, after its week
+It lists the mandatory signals the text missed (the top 3, and the
+strongest gain, which ranks last); the page shows a missed gain or
+resolution in its slot with the rule text, the rest as "also spotted". The schedule words every team's views, all products and then each product with data, after its week
 closes, Monday 06:00: 4 weeks weekly, 12 every second week, 26 monthly.
 The page shows the newest analysis of the same window while it is no
 older than its schedule's gap; without one, the same signals with the rule

@@ -963,6 +963,7 @@ export function analysisStatus(
         { signal: "inactive_prs", column: "bad", lever: "tidy_up" },
       ],
       also: [],
+      tally: { good: 1, done: 1, bad: 4, baseline: true },
     },
     analysis: null,
     failure: null,
@@ -1007,6 +1008,7 @@ export function analysedStatus(
         },
       ],
       also: [{ signal: "inactive_prs", column: "bad", lever: "tidy_up" }],
+      tally: { good: 1, done: 1, bad: 4, baseline: true },
     },
     analysis: {
       id: 7,

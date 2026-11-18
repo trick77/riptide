@@ -199,3 +199,92 @@ func TestAssessHistory(t *testing.T) {
 		t.Errorf("resolved without a number")
 	}
 }
+
+// Every better team number is evidence of what runs, a small gain too; a
+// worse one waits for notable, the larger gain ranks first, and the better
+// half of a throughput / instability pair is no gain.
+func TestChangeSignalsGood(t *testing.T) {
+	ch := func(verdict, mag string, score float64) Change {
+		return Change{Verdict: verdict, Directed: true, Magnitude: ptr(mag), Score: ptr(score), Prev: ptr(1.0)}
+	}
+	team := func(metric string, c Change) teamChange {
+		return teamChange{metric, metric, UnitSeconds, SourceBitbucket, ptr(2.0), c}
+	}
+	a := &assessor{gaps: map[string]bool{}, team: []teamChange{
+		team("lead_time", ch(ChangeBetter, MagnitudeMinor, 0.2)),
+		team("within_day", ch(ChangeBetter, MagnitudeNotable, 0.6)),
+		team("wip_weeks", ch(ChangeWorse, MagnitudeMinor, -0.2)),
+		team("merged_per_week", ch(ChangeBetter, MagnitudeSame, 0)),
+		{"deploy_frequency", "deploy_per_week", UnitPerWeek, SourceArgoCD, ptr(2.0), ch(ChangeBetter, MagnitudeMinor, 0.3)},
+	}}
+	a.m.Comparison.DeployFreq = ch(ChangeBetter, MagnitudeMinor, 0.3)
+	a.m.Comparison.DeploySuccess = ch(ChangeWorse, MagnitudeMinor, -0.1)
+	a.changeSignals()
+	rank(a.out)
+	ids := []string{}
+	for _, s := range a.out {
+		ids = append(ids, s.ID+"/"+s.Tone)
+	}
+	want := []string{"throughput_instability/hint", "change:within_day/good", "change:lead_time/good"}
+	if !slices.Equal(ids, want) {
+		t.Errorf("signals = %v, want %v", ids, want)
+	}
+}
+
+// A worsening the latest assessment raised that is a gain now is resolved,
+// told once: no good change beside the resolution.
+func TestResolvedGainToldOnce(t *testing.T) {
+	c := Change{Verdict: ChangeBetter, Directed: true, Magnitude: ptr(MagnitudeMinor), Score: ptr(0.2), Prev: ptr(3.0)}
+	a := &assessor{gaps: map[string]bool{},
+		h:    History{Latest: map[string]string{"change:lead_time": ToneAttention}},
+		team: []teamChange{{"lead_time", "lead_time_p50", UnitSeconds, SourceArgoCD, ptr(2.0), c}}}
+	a.changeSignals()
+	a.resolvedSignals()
+	if len(a.out) != 1 || a.out[0].ID != "resolved:change:lead_time" {
+		t.Errorf("signals = %+v, want the resolution alone", a.out)
+	}
+}
+
+// A change that flips between gain and worsening keeps its ID but starts a
+// streak of its own: no "seen before" carried over from the other tone.
+func TestSeenPerTone(t *testing.T) {
+	a := assessFixture(t, History{
+		Seen:   map[string]int{"change:review_time": 2, "pr_jam:kasse/kasse-api": 2},
+		Latest: map[string]string{"change:review_time": ToneGood, "pr_jam:kasse/kasse-api": ToneAttention},
+	})
+	if s := signal(a, "change:review_time"); s == nil || s.Seen != 0 {
+		t.Errorf("worsening after gains seen = %+v", s)
+	}
+	if s := signal(a, "pr_jam:kasse/kasse-api"); s == nil || s.Seen != 2 {
+		t.Errorf("jam seen = %+v", s)
+	}
+}
+
+// A worsening still worse, only no longer notably, is not done.
+func TestStillWorseNotResolved(t *testing.T) {
+	c := Change{Verdict: ChangeWorse, Directed: true, Magnitude: ptr(MagnitudeMinor), Score: ptr(-0.2), Prev: ptr(3.0)}
+	a := &assessor{gaps: map[string]bool{},
+		h:    History{Latest: map[string]string{"change:lead_time": ToneAttention}},
+		team: []teamChange{{"lead_time", "lead_time_p50", UnitSeconds, SourceArgoCD, ptr(3.5), c}}}
+	a.changeSignals()
+	a.resolvedSignals()
+	if len(a.out) != 0 {
+		t.Errorf("signals = %+v, want none", a.out)
+	}
+}
+
+// The better half of a trade-off resolves nothing: the earlier worsening
+// of deploy success is not done while the trade-off says it is no gain.
+func TestTradeoffResolvesNothing(t *testing.T) {
+	better := Change{Verdict: ChangeBetter, Directed: true, Magnitude: ptr(MagnitudeMinor), Score: ptr(0.2), Prev: ptr(0.8)}
+	worse := Change{Verdict: ChangeWorse, Directed: true, Magnitude: ptr(MagnitudeMinor), Score: ptr(-0.2), Prev: ptr(4.0)}
+	a := &assessor{gaps: map[string]bool{},
+		h:    History{Latest: map[string]string{"change:deploy_success": ToneAttention}},
+		team: []teamChange{{"deploy_success", "deploy_success", UnitShare, SourceArgoCD, ptr(0.9), better}}}
+	a.m.Comparison.DeployFreq, a.m.Comparison.DeploySuccess = worse, better
+	a.changeSignals()
+	a.resolvedSignals()
+	if len(a.out) != 1 || a.out[0].ID != "throughput_instability" {
+		t.Errorf("signals = %+v, want the trade-off alone", a.out)
+	}
+}

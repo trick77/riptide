@@ -60,7 +60,7 @@ var kinds = map[string]kindGloss{
 		[]string{LeverInspectFailures},
 	},
 	metrics.SignalChange: {
-		"A team number moved notably against the previous period (past the notable threshold, not noise). tone attention: worse; tone good: better. drivers: the repos that carry a worsening, a rough split.",
+		"A team number moved against the previous period, past the tolerance (not noise). tone good: better, by the fact's magnitude minor (a small gain) or notable; tone attention: notably worse. drivers: the repos that carry a worsening, a rough split.",
 		[]string{LeverFindWhatChanged, LeverNameWhatHelped},
 	},
 	metrics.SignalBottleneck: {

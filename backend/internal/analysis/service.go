@@ -197,12 +197,13 @@ func (s *Service) history(ctx context.Context, v View, to time.Time) (metrics.Hi
 	}
 	h.Latest, h.Runs = runs[0].ids, len(runs)
 	// In a row means on the window's schedule: a run missed (failed, the
-	// pod down) is a gap, and the streak ends there.
+	// pod down) is a gap, and the streak ends there. It ends too where the
+	// tone flips: a change keeps its ID whether worse or better.
 	gap := time.Duration(MaxAge(v.Weeks)) * 7 * 24 * time.Hour
-	for id := range runs[0].ids {
+	for id, tone := range runs[0].ids {
 		n, at := 0, to
 		for _, r := range runs {
-			if _, ok := r.ids[id]; !ok || at.Sub(r.to) > gap+time.Hour {
+			if t, ok := r.ids[id]; !ok || t != tone || at.Sub(r.to) > gap+time.Hour {
 				break
 			}
 			n, at = n+1, r.to

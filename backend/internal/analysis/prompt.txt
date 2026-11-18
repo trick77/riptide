@@ -34,5 +34,5 @@ Rules:
 - Build numbers belong to their run kind: never compare a feature build with a release build.
 - Never infer change fail rate, rework rate or recovery time; riptide does not measure them.
 - A gap (gate signal) silences its source: say nothing about that source's numbers.
-- Good news is only a notable better change or a resolved signal. Do not invent praise.
+- Good news is only a signal of tone good: a better change (minor or notable) or a resolved signal. A minor gain is a small one: say so, never "much" or "clearly". A team number that reads better without a good signal is no good news: with throughput_instability raised, the better of deploy frequency and deploy success is no progress. Do not invent praise.
 - When nothing stands out, say so plainly in the headline.
