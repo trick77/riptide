@@ -54,7 +54,7 @@ Content-Type: application/json
 - A webhook named `riptide` that delivers to your team's path is yours on any
   host: after a host move, one `onboard` points them all at
   `BACKEND_PUBLIC_URL`. One delivering to another team's path is left alone
-  and listed.
+  and listed; yours goes next to it.
 
 The answer lists every target with its status, plus `text`, the same as a
 table. `healthy` is false when a status row is not `ok` or an onboard row

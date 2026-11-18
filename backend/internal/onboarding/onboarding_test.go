@@ -20,13 +20,14 @@ type fakeBitbucket struct {
 	hooks    map[string][]map[string]any // "PROJ" or "PROJ/repo" -> webhooks
 	nextID   int
 	writes   []string
+	reads    map[string]int // "PROJ[/repo]" -> webhook listings
 	deny     map[string]int // "METHOD PROJ[/repo]" -> status
 	pageSize int
 }
 
 func newFake() *fakeBitbucket {
 	return &fakeBitbucket{repos: map[string][]string{}, hooks: map[string][]map[string]any{}, nextID: 100,
-		deny: map[string]int{}, pageSize: 100}
+		reads: map[string]int{}, deny: map[string]int{}, pageSize: 100}
 }
 
 func (f *fakeBitbucket) hook(key, name, url string, events ...string) {
@@ -68,6 +69,8 @@ func (f *fakeBitbucket) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodGet {
 		f.writes = append(f.writes, r.Method+" "+key)
+	} else {
+		f.reads[key]++
 	}
 	switch {
 	case len(rest) == 1 && r.Method == http.MethodGet:
@@ -226,20 +229,65 @@ func TestDryRunWritesNothing(t *testing.T) {
 	}
 }
 
+// A shared project: the other team's hook stays, ours goes next to it, and
+// ours is found whichever comes first.
 func TestAnotherTeamsHookIsLeftAlone(t *testing.T) {
 	f, o := setup(t)
 	f.hook("PLAT", "riptide", otherURL)
 	if r := o.Status(t.Context(), proj); r.Status != "foreign" {
 		t.Fatalf("status: %+v", r)
 	}
-	if r := o.Onboard(t.Context(), proj); r.Status != "failed" || !strings.Contains(r.Detail, otherURL) {
+	if r := o.Remove(t.Context(), proj); r.Status != "skipped" || len(f.writes) != 0 {
+		t.Fatalf("remove: %+v %v", r, f.writes)
+	}
+	r := o.Onboard(t.Context(), proj)
+	if r.Status != "ok" || !slices.Equal(r.Diff, []string{"create"}) || !slices.Equal(r.Foreign, []string{"PLAT -> " + otherURL}) {
 		t.Fatalf("onboard: %+v", r)
 	}
-	if r := o.Remove(t.Context(), proj); r.Status != "skipped" {
+	if st := o.Status(t.Context(), proj); st.Status != "ok" {
+		t.Fatalf("status after: %+v", st)
+	}
+	if r := o.Remove(t.Context(), proj); r.Status != "ok" || len(f.hooks["PLAT"]) != 1 || f.hooks["PLAT"][0]["url"] != otherURL {
+		t.Fatalf("remove: %+v %v", r, f.hooks["PLAT"])
+	}
+}
+
+// A public URL with a prefix: the hooks riptide wrote are still its own.
+func TestPrefixedPublicURL(t *testing.T) {
+	f, o := setup(t)
+	o.WebhookURL = "https://gw.example.com/riptide/webhooks/bitbucket/platform"
+	o.Onboard(t.Context(), proj)
+	if r := o.Status(t.Context(), proj); r.Status != "ok" {
+		t.Fatalf("status: %+v", r)
+	}
+	if r := o.Remove(t.Context(), proj); r.Status != "ok" || len(f.hooks["PLAT"]) != 0 {
 		t.Fatalf("remove: %+v", r)
 	}
-	if len(f.writes) != 0 {
-		t.Fatalf("writes = %v", f.writes)
+}
+
+func TestDryRunSaysWouldPrune(t *testing.T) {
+	f, o := setup(t)
+	o.DryRun = true
+	f.repos["PLAT"] = []string{"a"}
+	f.hook("PLAT/a", "riptide", oldURL)
+	if r := o.Onboard(t.Context(), proj); !strings.Contains(r.Detail, "would prune 1") {
+		t.Fatalf("onboard: %+v", r)
+	}
+}
+
+// A repo gone between the repo list and its hook list has none; the rest
+// are still pruned.
+func TestRepoGoneMidwayIsNoFailure(t *testing.T) {
+	f, o := setup(t)
+	f.repos["PLAT"] = []string{"gone", "a"}
+	f.hook("PLAT/a", "riptide", oldURL)
+	f.deny["GET PLAT/gone"] = http.StatusNotFound
+	if r := o.Onboard(t.Context(), proj); r.Status != "ok" || !slices.Equal(r.RepoHooks, []string{"a"}) {
+		t.Fatalf("onboard: %+v", r)
+	}
+	f.deny["GET PLAT/gone"] = http.StatusInternalServerError
+	if r := o.Status(t.Context(), proj); r.Status != "failed" || !strings.Contains(r.Detail, "HTTP 500") {
+		t.Fatalf("status: %+v", r)
 	}
 }
 
@@ -248,15 +296,23 @@ func TestRepoTargets(t *testing.T) {
 	if r := o.Onboard(t.Context(), repo); r.Status != "ok" || len(f.hooks["~ME/tool"]) != 1 {
 		t.Fatalf("personal repo: %+v", r)
 	}
-	// No project admin on ~ME: the project check is skipped, not failed.
-	f.deny["GET ~ME"] = http.StatusForbidden
-	if r := o.Status(t.Context(), repo); r.Status != "ok" {
-		t.Fatalf("status: %+v", r)
+	// No project admin on ~ME, or no project hooks there: the project check
+	// is skipped, not failed.
+	for _, code := range []int{http.StatusForbidden, http.StatusNotFound, http.StatusBadRequest} {
+		o.projectHooks = nil
+		f.deny["GET ~ME"] = code
+		if r := o.Status(t.Context(), repo); r.Status != "ok" {
+			t.Fatalf("status with %d: %+v", code, r)
+		}
 	}
 	delete(f.deny, "GET ~ME")
+	o.projectHooks = nil
 
 	// Under a project hook: skipped, and a leftover repo hook is double.
-	f.hook("~ME", "riptide", wantURL)
+	// Onboarding the project in the same run is seen by the repo targets.
+	if r := o.Onboard(t.Context(), Target{Project: "~ME"}); r.Status != "ok" {
+		t.Fatalf("project: %+v", r)
+	}
 	if r := o.Onboard(t.Context(), repo); r.Status != "skipped" {
 		t.Fatalf("under a project hook: %+v", r)
 	}
@@ -266,6 +322,16 @@ func TestRepoTargets(t *testing.T) {
 	f.hooks["~ME/tool"] = nil
 	if r := o.Status(t.Context(), repo); r.Status != "ok" || !strings.Contains(r.Detail, "covered") {
 		t.Fatalf("covered: %+v", r)
+	}
+}
+
+// Repo targets of one project read its webhooks once per run.
+func TestProjectHookReadOncePerProject(t *testing.T) {
+	f, o := setup(t)
+	targets := []Target{{Project: "PLAT", Repo: "a"}, {Project: "PLAT", Repo: "b"}, {Project: "PLAT", Repo: "c"}}
+	rows, healthy := Run(t.Context(), o, ActionOnboard, targets)
+	if !healthy || len(rows) != 3 || f.reads["PLAT"] != 1 {
+		t.Fatalf("rows = %+v, project reads = %d", rows, f.reads["PLAT"])
 	}
 }
 

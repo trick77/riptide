@@ -22,7 +22,7 @@ project deletes the team's repo hooks below it.
 in front of riptide must pass `/onboard` without a login, like
 `/webhooks`, and riptide must reach Bitbucket outbound. Onboarding a project
 of dozens of repos lists every repo's hooks: give that route a router
-timeout of a few minutes.
+timeout of 300 s; riptide stops one request's work at 270 s.
 
 **After a host move run `onboard` once per team**: hooks named `riptide`
 delivering to the team's path are rewritten whatever host they point at.

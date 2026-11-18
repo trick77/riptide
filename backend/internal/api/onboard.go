@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,7 +10,9 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
+	"github.com/trick77/riptide/internal/config"
 	"github.com/trick77/riptide/internal/httpapi"
 	"github.com/trick77/riptide/internal/onboarding"
 )
@@ -47,6 +50,10 @@ type onboardResponse struct {
 	Text       string           `json:"text"`
 }
 
+// onboardTimeout bounds one request's Bitbucket work, short of the route's
+// 300 s in front (infra) so riptide answers before the router cuts.
+const onboardTimeout = 270 * time.Second
+
 var onboardActions = []string{string(onboarding.ActionStatus), string(onboarding.ActionOnboard), string(onboarding.ActionRemove)}
 
 // onboard puts the team's Bitbucket webhook on the projects and repos in the
@@ -56,10 +63,14 @@ var onboardActions = []string{string(onboarding.ActionStatus), string(onboarding
 // A Bitbucket failure is a row, not an error status: the other targets
 // still run.
 func (d Deps) onboard(w http.ResponseWriter, r *http.Request) {
-	team, ok := d.bearer(w, r, "bitbucket")
+	team, ok := d.bearer(w, r, config.SourceBitbucket)
 	if !ok {
 		return
 	}
+	// The bearer just proved equal to the team's bitbucket key, the hooks'
+	// HMAC secret: no second lookup a key reload could answer with "".
+	_, secret, _ := strings.Cut(r.Header.Get("Authorization"), " ")
+	secret = strings.TrimSpace(secret)
 	// Same answer as a wrong key: a valid key does not reveal other teams.
 	if team != r.PathValue("team") {
 		httpapi.WriteDetail(w, http.StatusUnauthorized, "Invalid credentials.")
@@ -85,7 +96,6 @@ func (d Deps) onboard(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteDetail(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	secret, _ := d.Runtime.Keys().Secret(team, "bitbucket")
 	o := &onboarding.Onboarder{
 		Client:     onboarding.NewClient(d.Onboarding.BitbucketURL, token, d.Onboarding.HTTP),
 		Team:       team,
@@ -94,7 +104,12 @@ func (d Deps) onboard(w http.ResponseWriter, r *http.Request) {
 		DryRun:     req.DryRun,
 		Log:        d.Log,
 	}
-	rows, healthy := onboarding.Run(r.Context(), o, onboarding.Action(req.Action), targets)
+	// Not the request's context: the collector's ReadTimeout cancels it 60 s
+	// in, and a project of a hundred repos takes longer. Its own deadline,
+	// so a run is never cut halfway by a gone caller or that timeout.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), onboardTimeout)
+	defer cancel()
+	rows, healthy := onboarding.Run(ctx, o, onboarding.Action(req.Action), targets)
 	d.Log.InfoContext(r.Context(), "onboard_processed", "team", team, "action", req.Action,
 		"dry_run", req.DryRun, "targets", len(targets), "healthy", healthy)
 	httpapi.WriteJSON(w, http.StatusOK, onboardResponse{

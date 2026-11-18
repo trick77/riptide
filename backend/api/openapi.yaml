@@ -210,7 +210,8 @@ paths:
         `<BACKEND_PUBLIC_URL>/webhooks/bitbucket/{team}`, signed with the
         team's `bitbucket` key. A `riptide` webhook delivering to this team's
         path on any host is the team's and is rewritten (a host move is one
-        `onboard`); one delivering to another team's path is left alone.
+        `onboard`); one delivering to another team's path is left alone, the
+        team's own goes next to it.
 
         Authenticated with the team's `bitbucket` key as a bearer. The
         Bitbucket calls run on the caller's own token in `X-Bitbucket-Token`
@@ -634,7 +635,8 @@ components:
                 enum: [ok, stale, missing, foreign, double, skipped, failed]
                 description: |
                   status: ok, stale (onboard rewrites it), missing, foreign
-                  (delivers to another team), double (a project and a repo
+                  (only another team's webhook; onboard adds the team's own),
+                  double (a project and a repo
                   webhook both deliver) or failed. onboard and remove: ok,
                   skipped or failed.
               detail: { type: string }
