@@ -110,6 +110,11 @@ function kindStats(
     building: { n: 0, p50: null, p90: null },
     ci_seconds: runs * 600,
     wasted_seconds: (runs - succeeded) * 600,
+    flaky_runs: 0,
+    flaky_rate: runs ? 0 : null,
+    flaky_of_failed: runs - succeeded ? 0 : null,
+    flaky_seconds: 0,
+    unjudged: 0,
     outlier_runs: 0,
     outlier_seconds: 0,
     weekly: Array.from({ length: n }, (_, i) =>
@@ -142,6 +147,8 @@ function kindHotspots(
         failure_change: change("none", null, "low_sample"),
         wasted_seconds: failures * 600,
         failing_more: false,
+        flaky_runs: 0,
+        flaky_seconds: 0,
         ci_seconds: 600,
         compared: false,
         prev_complete: false,
@@ -504,6 +511,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
         {
           kind: "release",
           success: lowSample,
+          flaky: lowSample,
           slower: 0,
           failing_more: 0,
           compared: 0,
@@ -511,6 +519,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
         {
           kind: "main",
           success: lowSample,
+          flaky: lowSample,
           slower: 0,
           failing_more: 0,
           compared: 0,
@@ -518,6 +527,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
         {
           kind: "feature",
           success: lowSample,
+          flaky: lowSample,
           slower: 0,
           failing_more: 0,
           compared: 0,
@@ -591,6 +601,7 @@ export function runFact(o: Partial<RunFact> = {}): RunFact {
     verdict: "success",
     outcome: "succeeded",
     gitops: false,
+    flaky: false,
     ...o,
   };
 }

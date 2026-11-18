@@ -690,6 +690,23 @@ export const de = {
     runs_other: "{{count}} Läufe",
     noVerdict: " + {{n}} ohne Ergebnis",
     outliers: " · {{n}} Ausreisser ({{h}} h) nicht in Dauer und CI-Zeit",
+    flaky_one:
+      "{{count}} roter Lauf flaky: danach grün auf demselben Commit ({{share}} der roten, {{h}} h)",
+    flaky_other:
+      "{{count}} rote Läufe flaky: danach grün auf demselben Commit ({{share}} der roten, {{h}} h)",
+    flakyNone: "Kein roter Lauf wurde auf demselben Commit danach grün",
+    flakyNoRed: "Kein roter Lauf, also auch kein flaky",
+    unjudged_one: " · {{count}} Lauf ohne Commit nicht beurteilt",
+    unjudged_other: " · {{count}} Läufe ohne Commit nicht beurteilt",
+    flakyRate: "Flaky-Quote {{rate}} der Läufe mit Commit",
+    flakyRatePrev:
+      "Flaky-Quote {{rate}} der Läufe mit Commit, Vorperiode {{prev}}",
+    viewFlaky: "Flaky-Läufe ansehen →",
+    flakyTitle:
+      "Flaky: Ein Lauf scheitert, ein späterer Lauf derselben Pipeline auf demselben Commit ist grün. Untergrenze: Wiederholungen innerhalb eines Laufs, nur einmal gebaute Commits und Reruns nach dem Periodenende fehlen. Ob Tests oder Infrastruktur scheiterten, steht nicht in den Daten.",
+    repoFlaky: "{{n}} flaky",
+    repoFlakyTitle:
+      "{{h}} h davon in Läufen, die ein späterer Lauf auf demselben Commit grün machte",
     failingMore: "Fehleranfälliger geworden",
     failingMoreText: "Vorperiode {{prev}} → jetzt {{rate}} rot",
     slow: "Langsamer geworden",
@@ -756,6 +773,7 @@ export const de = {
       sub: "CI-Zeit jeder Lauf-Art nach Ausgang, Ausreisser eingerechnet{{sep}}Bandbreite = Stunden",
       outcome: {
         succeeded: "Erfolgreich",
+        flaky: "Flaky (danach grün)",
         failed: "Fehlgeschlagen",
         no_verdict: "Ohne Ergebnis",
         outlier: "Ausreisser",
@@ -766,13 +784,13 @@ export const de = {
       aria: "CI-Zeit von der Lauf-Art zum Ausgang: {{parts}}",
       withOutliers: "{{h}} inkl. Ausreisser",
       repos: "Nach Repo, über alle Lauf-Arten",
-      reposMeta: "schraffiert: fehlgeschlagen, ohne Ausreisser",
-      repoFailed: "{{repo}}: {{h}}, davon {{failed}} fehlgeschlagen",
+      reposMeta: "schraffiert: rot (flaky und fehlgeschlagen), ohne Ausreisser",
+      repoFailed: "{{repo}}: {{h}}, davon {{failed}} rot",
       repoFailedShort: " · {{h}} rot",
       reposOther_one: "{{count}} weiteres",
       reposOther_other: "{{count}} weitere",
       reposAria: "CI-Zeit nach Repo: {{parts}}",
-      rule: "Fehlgeschlagen: FAILURE, UNSTABLE, Failed. Ohne Ergebnis: ABORTED, NOT_BUILT, Tekton None, Jenkins-Timeouts eingeschlossen. Ausreisser: {{outliers}} (ein Repo mit genug eigenen Läufen zudem über seinem eigenen Median). Ein Ausreisser zählt nur als Ausreisser, egal mit welchem Ergebnis; darum sind hier die Stunden der Ausreisser dabei, die die Karten oben weglassen. Die Bänder jeder Art zeigen ihre eigene Aufteilung, die Höhe eines Knotens nur die Menge: kein Vergleich zwischen den Arten.",
+      rule: "Fehlgeschlagen: FAILURE, UNSTABLE, Failed. Flaky: ebenso rot, doch ein späterer Lauf derselben Pipeline war auf demselben Commit grün. Ohne Ergebnis: ABORTED, NOT_BUILT, Tekton None, Jenkins-Timeouts eingeschlossen. Ausreisser: {{outliers}} (ein Repo mit genug eigenen Läufen zudem über seinem eigenen Median). Ein Ausreisser zählt nur als Ausreisser, egal mit welchem Ergebnis; darum sind hier die Stunden der Ausreisser dabei, die die Karten oben weglassen. Die Bänder jeder Art zeigen ihre eigene Aufteilung, die Höhe eines Knotens nur die Menge: kein Vergleich zwischen den Arten.",
     },
   },
   quiver: {

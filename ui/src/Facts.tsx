@@ -326,11 +326,15 @@ function FactsTables({
               : "–"}
           </Mono>,
           r.status ? (
-            <Pill tone={RUN_TONE[r.verdict]}>
-              {r.outcome
-                ? t(`facts.runOutcome.${r.outcome}`)
-                : ciWord(r.status)}
-            </Pill>
+            <span className="inline-flex gap-1">
+              <Pill tone={RUN_TONE[r.verdict]}>
+                {r.outcome
+                  ? t(`facts.runOutcome.${r.outcome}`)
+                  : ciWord(r.status)}
+              </Pill>
+              {/* red, then green on the same commit */}
+              {r.flaky && <Pill tone="warn">{t("facts.flaky")}</Pill>}
+            </span>
           ) : (
             "–"
           ),
