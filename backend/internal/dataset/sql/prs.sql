@@ -47,6 +47,9 @@ prs AS (
          -- author may have edited it since opening.
          (array_agg(e.payload->'pullRequest'->>'title' ORDER BY e.occurred_at DESC, e.id DESC)
              FILTER (WHERE e.payload->'pullRequest'->>'title' IS NOT NULL))[1] AS title,
+         -- The PR's page as Bitbucket links it; Go keeps only an http(s) URL.
+         (array_agg(e.payload->'pullRequest'->'links'->'self'->0->>'href' ORDER BY e.occurred_at DESC, e.id DESC)
+             FILTER (WHERE e.payload->'pullRequest'->'links'->'self'->0->>'href' IS NOT NULL))[1] AS url,
          bool_or(e.is_automated) FILTER (WHERE e.event_type IN ('pr:opened', 'pr:merged')) AS automated,
          -- change_type means something only on these two (docs/metrics.md).
          coalesce(max(e.change_type) FILTER (WHERE e.event_type = 'pr:opened'),
@@ -148,6 +151,8 @@ SELECT c.repo_full_name AS repo,
        split_part(c.repo_full_name, '/', 1) AS project,
        c.pr_id,
        c.title,
+       -- none for a PR deleted since: its page is gone
+       CASE WHEN c.deleted_at IS NULL THEN c.url END AS url,
        c.repo_full_name = ANY($4::text[]) AS gitops,
        coalesce(c.automated, false)
          OR EXISTS (SELECT 1 FROM non_human_identities n WHERE n.handle = lower(c.pr_opener)) AS bot,

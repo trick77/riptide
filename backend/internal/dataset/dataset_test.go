@@ -137,6 +137,10 @@ func TestDataset(t *testing.T) {
 		if str(p7.Title) != "Pay by card" || byKey[kasseAPI+"#5"].Title != nil {
 			t.Errorf("titles = %v %v", str(p7.Title), str(byKey[kasseAPI+"#5"].Title))
 		}
+		// The link as last seen too: the project was renamed since opening.
+		if str(p7.URL) != "https://bb.example.com/projects/KASSE/repos/kasse-api/pull-requests/7" || byKey[kasseAPI+"#5"].URL != nil {
+			t.Errorf("urls = %v %v", str(p7.URL), str(byKey[kasseAPI+"#5"].URL))
+		}
 		if p7.Project != "kasse" || p7.GitOps || p7.Bot || str(p7.ChangeType) != "feature" || p7.State != "merged" ||
 			strings.Join(p7.JiraKeys, ",") != "KAS-7" || str(p7.MergeCommit) != sha("2") {
 			t.Errorf("pr 7 = %+v", p7)

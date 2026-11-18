@@ -64,6 +64,8 @@ status AS (
              AS latest_state,
          coalesce(bool_or(event_type IN ('pr:merged', 'pr:deleted')) FILTER (WHERE before), false) AS closed,
          coalesce(bool_or(event_type = 'pr:declined') FILTER (WHERE before), false) AS declined,
+         -- After T too: a PR deleted since has no page to link to.
+         bool_or(event_type = 'pr:deleted') AS deleted_ever,
          (array_agg(id ORDER BY occurred_at, id) FILTER (WHERE NOT before))[1] AS next_id,
          (array_agg(event_type ORDER BY occurred_at, id) FILTER (WHERE NOT before))[1] AS next_type,
          (array_agg(state ORDER BY occurred_at, id) FILTER (WHERE NOT before))[1] AS next_state,
@@ -72,7 +74,8 @@ status AS (
   GROUP BY repo_full_name, pr_id
 ),
 open_keys AS (
-  SELECT s.repo_full_name, s.pr_id, s.seen, s.created_at, s.latest_at, coalesce(s.latest_id, s.next_id) AS payload_id
+  SELECT s.repo_full_name, s.pr_id, s.seen, s.created_at, s.latest_at, s.deleted_ever,
+         coalesce(s.latest_id, s.next_id) AS payload_id
   FROM status s
   WHERE CASE WHEN s.seen
              THEN NOT s.closed AND s.latest_type <> 'pr:declined'
@@ -123,7 +126,7 @@ details AS (
   GROUP BY o.repo_full_name, o.pr_id
 ),
 prs AS (
-  SELECT o.repo_full_name, o.pr_id, o.seen, o.created_at, o.latest_at, d.opened_event_at, d.ready_event_at, d.opened_author,
+  SELECT o.repo_full_name, o.pr_id, o.seen, o.created_at, o.latest_at, o.deleted_ever, d.opened_event_at, d.ready_event_at, d.opened_author,
          d.opened_display_name, d.automated, d.change_type, d.touches, d.opened_jira_keys,
          l.payload->'pullRequest' AS pull, l.jira_keys AS latest_jira_keys,
          -- A PR not seen before T: what it looked like then is unknown.
@@ -136,6 +139,8 @@ SELECT p.repo_full_name AS repo,
        split_part(p.repo_full_name, '/', 1) AS project,
        p.pr_id,
        p.pull->>'title' AS title,
+       -- The PR's page as Bitbucket links it; Go keeps only an http(s) URL.
+       CASE WHEN NOT p.deleted_ever THEN p.pull->'links'->'self'->0->>'href' END AS url,
        p.automated
          OR lower(coalesce(p.opened_author, p.pull->'author'->'user'->>'name')) IN (SELECT handle FROM non_human_identities)
          AS bot,

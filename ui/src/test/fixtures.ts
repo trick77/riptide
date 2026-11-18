@@ -557,6 +557,7 @@ export function prFact(o: Partial<PRFact> = {}): PRFact {
   return {
     repo: "kasse/kasse-api",
     pr_id: 1,
+    url: "https://bitbucket.example.com/projects/KASSE/repos/kasse-api/pull-requests/1",
     title,
     title_parts: titleParts(title),
     jira_prefix: [],
@@ -625,6 +626,7 @@ export function facts(o: Partial<Facts> = {}): Facts {
     prFact({
       pr_id: 4,
       repo: "portal/portal-web",
+      url: null,
       title: null,
       change_type: "bugfix",
       state: "open",

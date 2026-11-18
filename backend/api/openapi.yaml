@@ -1912,11 +1912,18 @@ components:
         inactive ones after them; then a PR opened or merged in the period,
         newest merge or opening first.
       additionalProperties: false
-      required: [repo, pr_id, title, title_parts, jira_prefix, jira_more, gitops, change_type, state, review_s,
+      required: [repo, pr_id, url, title, title_parts, jira_prefix, jira_more, gitops, change_type, state, review_s,
                  cycle_s, merged_at, prod_at, to_prod_s, age_s, waiting, idle_s]
       properties:
         repo: { type: string }
         pr_id: { type: integer }
+        url:
+          type: [string, "null"]
+          description: |
+            The PR in Bitbucket, as its latest event's payload links it
+            (`pullRequest.links.self`): http(s) only, on the host of
+            `BACKEND_BITBUCKET_URL` when set. Null for a PR deleted since, or
+            when no event carries such a link.
         title: { type: [string, "null"] }
         title_parts:
           type: array

@@ -871,6 +871,7 @@ export const de = {
     noHits: "Keine Treffer für «{{q}}».",
     empty: "Keine Einträge im Zeitraum.",
     colPR: "PR",
+    openPR: "PR in Bitbucket öffnen",
     colRepo: "Repo",
     colType: "Typ",
     colReview: "Review",

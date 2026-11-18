@@ -26,6 +26,31 @@ func TestDatasetOpenPRsWithoutGitOps(t *testing.T) {
 	}
 }
 
+// A PR deleted, even after the window, has no page to link to.
+func TestDatasetPRDeletedHasNoLink(t *testing.T) {
+	st, pool := migrated(t)
+	s := &seeder{t: t, pool: pool}
+	link := func(id int64) func(*prEvent) {
+		return func(e *prEvent) {
+			e.link = "https://bb.example.com/projects/KASSE/repos/kasse-api/pull-requests/" + strconv.FormatInt(id, 10)
+		}
+	}
+	for _, id := range []int64{1, 2} {
+		e := prEvent{event: "pr:opened", repo: kasseAPI, id: id, author: "dev-anna", branch: "feature/kas-1", state: "OPEN", at: days(1)}
+		link(id)(&e)
+		s.pr(e)
+	}
+	s.pr(prEvent{event: "pr:deleted", repo: kasseAPI, id: 2, author: "dev-anna", state: "OPEN", at: days(12)})
+	d := load(t, st, t0, days(10))
+	urls := map[int64]string{}
+	for _, p := range d.PRs {
+		urls[p.PRID] = str(p.URL)
+	}
+	if urls[1] != "https://bb.example.com/projects/KASSE/repos/kasse-api/pull-requests/1" || urls[2] != "<nil>" {
+		t.Errorf("urls = %v", urls)
+	}
+}
+
 // The PRs open at the window's end, from the events before it only.
 func TestDatasetOpenPRs(t *testing.T) {
 	st, pool := migrated(t)
@@ -68,6 +93,7 @@ func TestDatasetOpenPRs(t *testing.T) {
 	// createdDate a later event carries, its opener the PR's author.
 	event(27, "pr:comment:added", "rita", "OPEN", days(5), func(e *prEvent) {
 		e.created, e.prAuthor, e.title = days(-60), "dev-otto", "Old work"
+		e.link = "https://bb.example.com/projects/KASSE/repos/kasse-api/pull-requests/27"
 	})
 	// #28: a draft.
 	opened(28, days(1), func(e *prEvent) { e.draft = true })
@@ -112,6 +138,9 @@ func TestDatasetOpenPRs(t *testing.T) {
 	opened(38, days(1), func(e *prEvent) { e.draft = true })
 	event(38, "pr:modified", "dev-anna", "OPEN", days(2))
 	event(38, "pr:comment:added", "rita", "OPEN", days(3))
+	// #39: open at the end, deleted after it: open then, its page gone now.
+	opened(39, days(1), func(e *prEvent) { e.link = "https://bb.example.com/projects/KASSE/repos/kasse-api/pull-requests/39" })
+	event(39, "pr:deleted", "dev-anna", "OPEN", days(12))
 	// A GitOps repo's PR and another team's: never.
 	s.push(kasseOps, "master", days(1), commit{sha: sha("c"), authored: days(1), message: "kasse 1.1"})
 	s.deploy(team, "kasse-prod", "prod", sha("c"), "Succeeded", days(2), "reg/kasse-api:1.1")
@@ -128,8 +157,11 @@ func TestDatasetOpenPRs(t *testing.T) {
 		byID[o.PRID] = o
 		ids = append(ids, strconv.FormatInt(o.PRID, 10))
 	}
-	if got := strings.Join(ids, " "); got != "21 23 25 27 28 29 30 32 33 35 38" {
+	if got := strings.Join(ids, " "); got != "21 23 25 27 28 29 30 32 33 35 38 39" {
 		t.Fatalf("open = %s", got)
+	}
+	if o := byID[39]; o.URL != nil {
+		t.Errorf("#39 deleted since, url %v", str(o.URL))
 	}
 	if o33 := byID[33]; !o33.Bot || !o33.OpenedAt.Equal(days(-40)) {
 		t.Errorf("#33 = %+v", o33)
@@ -152,8 +184,11 @@ func TestDatasetOpenPRs(t *testing.T) {
 	}
 	o27 := byID[27]
 	if !o27.OpenedAt.Equal(days(-60)) || str(o27.Title) != "Old work" || o27.ReadyAt == nil || !o27.ReadyAt.Equal(days(-60)) ||
-		!o27.Touched || o27.Bot {
+		!o27.Touched || o27.Bot || str(o27.URL) != "https://bb.example.com/projects/KASSE/repos/kasse-api/pull-requests/27" {
 		t.Errorf("#27 = %+v", o27)
+	}
+	if o := byID[28]; o.URL != nil {
+		t.Errorf("#28 url = %v", str(o.URL))
 	}
 	if o28 := byID[28]; !o28.Draft || o28.ReadyAt != nil {
 		t.Errorf("#28 = %+v", o28)

@@ -440,6 +440,8 @@ export type TitlePart = { text: string; jira: JiraRef | null };
 export type PRFact = {
   repo: string;
   pr_id: number;
+  // The PR in Bitbucket; null for a deleted PR or none sent.
+  url: string | null;
   title: string | null;
   // The title split at its Jira keys; empty without a title.
   title_parts: TitlePart[];

@@ -135,7 +135,7 @@ func (d Deps) readView(w http.ResponseWriter, r *http.Request) (view, bool) {
 	now := d.now().UTC().Truncate(time.Second)
 	return view{team: team, now: now, cfg: cfg, params: metrics.Params{
 		Period: metrics.NewPeriod(weeks, now, loc), Previous: metrics.PreviousPeriod(weeks, now, loc),
-		Product: strings.TrimSpace(q.Get("product")), JiraURL: cfg.JiraBaseURL,
+		Product: strings.TrimSpace(q.Get("product")), JiraURL: cfg.JiraBaseURL, BitbucketURL: d.Onboarding.BitbucketURL,
 	}}, true
 }
 

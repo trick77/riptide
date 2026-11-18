@@ -53,7 +53,8 @@ type Settings struct {
 	// points the Bitbucket webhooks at it. Empty switches onboarding off.
 	PublicURL string
 	// BitbucketURL is the Bitbucket Data Center base URL POST /onboard
-	// calls. Empty switches onboarding off.
+	// calls, and the only host the facts' PR links may point to. Empty
+	// switches onboarding off and lets any http(s) PR link through.
 	BitbucketURL string
 	// Lookup is the environment with ./.env, for llmwire's variables.
 	Lookup Lookup
