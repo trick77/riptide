@@ -692,11 +692,42 @@ func TestDue(t *testing.T) {
 		last = i
 	}
 	s := service(&fakeLLM{answer: goodAnswer}, &memStore{})
-	if got, want := s.NextRun(26), time.Date(2026, 12, 7, 6, 0, 0, 0, zurich); !got.Equal(want) {
-		t.Errorf("next 26-week run %v, want %v", got, want)
+	if got, ok := s.NextRun(26); !ok || !got.Equal(time.Date(2026, 12, 7, 6, 0, 0, 0, zurich)) {
+		t.Errorf("next 26-week run %v (%v), want 07.12. 06:00", got, ok)
 	}
-	if got, want := s.NextRun(4), time.Date(2026, 11, 16, 6, 0, 0, 0, zurich); !got.Equal(want) {
-		t.Errorf("next 4-week run %v, want %v", got, want)
+	if got, ok := s.NextRun(4); !ok || !got.Equal(time.Date(2026, 11, 16, 6, 0, 0, 0, zurich)) {
+		t.Errorf("next 4-week run %v (%v), want 16.11. 06:00", got, ok)
+	}
+	// A cadence never due ends the search instead of spinning.
+	cadences[-1] = cadence{due: func(time.Time) bool { return false }, maxAge: 1}
+	defer delete(cadences, -1)
+	if got, ok := s.NextRun(-1); ok {
+		t.Errorf("never-due cadence runs at %v", got)
+	}
+}
+
+// Every cadence comes due within maxAge weeks of any week, and its widest
+// gap between two due weeks is maxAge: MaxAge keeps the last analysis
+// showing until the next. Mondays across years and DST switches in Zurich.
+func TestCadenceGaps(t *testing.T) {
+	all := map[string]cadence{"weekly": weekly}
+	for w, c := range cadences {
+		all[strconv.Itoa(w)] = c
+	}
+	first := weekStart(time.Date(2020, 1, 1, 12, 0, 0, 0, zurich), zurich)
+	for name, c := range all {
+		widest, last := 0, -1
+		for i := range 52 * 12 {
+			if !c.due(first.AddDate(0, 0, 7*i)) {
+				continue
+			}
+			// The first due week counts from the start: due within maxAge.
+			widest = max(widest, i-last)
+			last = i
+		}
+		if widest != c.maxAge {
+			t.Errorf("%s: widest gap %d weeks, maxAge %d", name, widest, c.maxAge)
+		}
 	}
 }
 

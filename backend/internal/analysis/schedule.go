@@ -18,9 +18,7 @@ import (
 // The schedule words every view of every team once its week has closed,
 // all products first, then each product with data in the window (user,
 // 2026-11-16: a product tab must not show an assessment of all of them;
-// the cost is no reason against it): 4 weeks every Monday, 12 every second
-// Monday, 26 on the first Monday of the month (user, 2026-11-16: a long
-// window barely moves in a week, and a weekly run only repeats itself).
+// the cost is no reason against it), each window on its cadence (cadences).
 const (
 	// RunAfter is how long into Monday the schedule waits: the week's last
 	// webhooks are in, the team is not yet in its daily.
@@ -44,19 +42,42 @@ func settled(a store.Analysis, now time.Time) bool {
 	return now.Sub(a.CreatedAt) < StaleAfter
 }
 
-// due reports whether the window is worded for the closed weeks ending at
-// weekStart (a Monday 00:00). Every second week counts weeks from a fixed
-// Monday, never the ISO number: a year of 53 weeks has KW 53 and KW 1 both
-// odd, a gap of three weeks past MaxAge.
-func due(weeks int, weekStart time.Time) bool {
-	switch weeks {
-	case 12:
-		return weekNumber(weekStart)%2 == 0
-	case 26:
-		return weekStart.Day() <= 7
-	}
-	return true
+// cadence is how often the schedule words a window: which closed weeks, and
+// so how old its analysis may grow.
+type cadence struct {
+	// due reports whether the closed weeks ending at weekStart (a Monday
+	// 00:00) are worded.
+	due func(weekStart time.Time) bool
+	// maxAge is the widest gap between two due weeks, in weeks: MaxAge.
+	maxAge int
 }
+
+// weekly is every window's cadence the table does not name: the 4 weeks.
+var weekly = cadence{due: func(time.Time) bool { return true }, maxAge: 1}
+
+// cadences are the windows worded less often than weekly: 12 weeks every
+// second Monday, 26 on the first Monday of the month (user, 2026-11-16: a
+// long window barely moves in a week, and a weekly run only repeats itself).
+// Every second week counts weeks from a fixed Monday, never the ISO number:
+// a year of 53 weeks has KW 53 and KW 1 both odd, a gap of three weeks past
+// maxAge. The first Monday of a month follows the one before 4 or 5 weeks
+// later.
+var cadences = map[int]cadence{
+	12: {due: func(w time.Time) bool { return weekNumber(w)%2 == 0 }, maxAge: 2},
+	26: {due: func(w time.Time) bool { return w.Day() <= 7 }, maxAge: 5},
+}
+
+// cadenceOf is the window's cadence.
+func cadenceOf(weeks int) cadence {
+	if c, ok := cadences[weeks]; ok {
+		return c
+	}
+	return weekly
+}
+
+// due reports whether the window is worded for the closed weeks ending at
+// weekStart (a Monday 00:00).
+func due(weeks int, weekStart time.Time) bool { return cadenceOf(weeks).due(weekStart) }
 
 // weekNumber counts the weeks from Monday 5 January 1970 to the Monday
 // weekStart, by calendar days, whatever the zone's DST.
@@ -71,16 +92,20 @@ func weekNumber(weekStart time.Time) int {
 var weekStart = metrics.WeekStart
 
 // NextRun is when the schedule next words the window: the first due
-// Monday from now on, RunAfter in; this week's if not yet past.
-func (s *Service) NextRun(weeks int) time.Time {
+// Monday from now on, RunAfter in; this week's if not yet past. False when
+// none falls within twice the cadence's maxAge: a cadence never due would
+// spin forever.
+func (s *Service) NextRun(weeks int) (time.Time, bool) {
 	n := s.now()
 	w := weekStart(n, s.Loc)
-	for i := 0; ; i++ {
+	c := cadenceOf(weeks)
+	for i := range 2*c.maxAge + 1 {
 		start := w.AddDate(0, 0, 7*i)
-		if at := start.Add(RunAfter); due(weeks, start) && at.After(n) {
-			return at.UTC()
+		if at := start.Add(RunAfter); c.due(start) && at.After(n) {
+			return at.UTC(), true
 		}
 	}
+	return time.Time{}, false
 }
 
 // Schedule runs the due analyses until ctx ends: every team's views, every

@@ -367,8 +367,9 @@ func (s *Service) nextRun(ctx context.Context, v View, st *Status) {
 			return
 		}
 	}
-	next := s.NextRun(v.Weeks)
-	st.NextRun = &next
+	if next, ok := s.NextRun(v.Weeks); ok {
+		st.NextRun = &next
+	}
 }
 
 // backfillCompared reads Compared from the view's history for an analysis

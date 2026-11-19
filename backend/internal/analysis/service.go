@@ -66,17 +66,8 @@ const (
 )
 
 // MaxAge is how many weeks older than the last closed week a window's
-// analysis may be and still show: its schedule's gap (4 weeks weekly, 12
-// every second week, 26 monthly, user 2026-11-16).
-func MaxAge(weeks int) int {
-	switch weeks {
-	case 12:
-		return 2
-	case 26:
-		return 5
-	}
-	return 1
-}
+// analysis may be and still show: its cadence's widest gap (cadences).
+func MaxAge(weeks int) int { return cadenceOf(weeks).maxAge }
 
 // View is a page view: team, window, product.
 type View = store.AnalysisView
