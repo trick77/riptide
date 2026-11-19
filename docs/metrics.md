@@ -587,10 +587,12 @@ merged PRs have no weekly series, so their cards draw none.
 A source silent for 7 days at the end is a gap: its signals are left out.
 The repos are ranked by their signals' weight; a jam or a steady slow build
 alone makes a candidate, and repos without a signal stay out of it. The
-undirected number that moved most is the question, else the approvals
-without a comment: a conversation starter, not a finding (a PR that needs no
-change gets approved without one). Starting values, user-chosen 2026-11-16,
-not measured.
+question is the first undirected number that moved notably, in a fixed
+order (feature share, untracked, wasted share, cost per kLOC, open PRs,
+approvals without a comment), else the approvals without a comment when
+there are approvals and Bitbucket is no gap: a conversation starter, not a
+finding (a PR that needs no change gets approved without one). Starting
+values, user-chosen 2026-11-16, not measured.
 
 The model (`BACKEND_ANALYSIS_MODEL`) words this and nothing else:
 
