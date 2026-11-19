@@ -4,7 +4,7 @@ info:
   title: riptide API
   # The CONTRACT's version, not the binary's. The two move independently:
   # a release that changes no route leaves this alone.
-  version: 2.3.0
+  version: 2.4.0
   description: |
     DevOps delivery-metrics ingestion. Senders post raw events from Bitbucket
     Data Center, CI pipelines (Jenkins, Tekton, ...), Argo CD and noergler;
@@ -2034,7 +2034,9 @@ components:
           description: The team's first event per source over all history.
         data_end:
           $ref: "#/components/schemas/SourceTimes"
-          description: The team's latest event per source over all history, how fresh it is.
+          description: |
+            The team's latest event per source, how fresh it is: over all
+            history for a window ending now, before `to` for a past one.
         build_data_from:
           $ref: "#/components/schemas/NullableInstant"
           description: When riptide first received a pipeline event for the team.

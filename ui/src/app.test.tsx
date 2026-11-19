@@ -280,7 +280,7 @@ describe("App", () => {
     );
     expect(
       p.getByText(
-        "Argo CD meldet seit 6 Tagen nichts: Aussagen dazu ausgelassen.",
+        "Argo CD meldete in den letzten 6 Tagen der Periode nichts: Aussagen dazu ausgelassen.",
       ),
     ).toBeInTheDocument();
     // The tally in one line, the backend's counts.

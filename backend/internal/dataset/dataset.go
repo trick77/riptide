@@ -89,7 +89,8 @@ type Meta struct {
 	To              time.Time `json:"to"`
 	GeneratedAt     time.Time `json:"generated_at"`
 	ProductionStage string    `json:"production_stage"`
-	// The team's first and latest event per source, over all history.
+	// The team's first event per source over all history, and its latest:
+	// before To for a past window, so it sees a source gone quiet within it.
 	DataStart     SourceTimes `json:"data_start"`
 	DataEnd       SourceTimes `json:"data_end"`
 	BuildDataFrom *time.Time  `json:"build_data_from"`
@@ -311,7 +312,12 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 		Team: p.Team, From: p.From.UTC(), To: p.To.UTC(), GeneratedAt: p.Now.UTC(),
 		ProductionStage: p.ProductionStage,
 	}}
-	meta, err := one[metaRow](ctx, tx, "meta", metaSQL, p.Team)
+	// A past window's sources end at its end; one ending now reads them all.
+	var end *time.Time
+	if p.To.Before(p.Now) {
+		end = &p.To
+	}
+	meta, err := one[metaRow](ctx, tx, "meta", metaSQL, p.Team, end)
 	if err != nil {
 		return nil, err
 	}
