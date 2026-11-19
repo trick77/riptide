@@ -700,7 +700,7 @@ export const de = {
     repos:
       "Von {{compared}} Repos sind {{slower}} langsamer, {{failing}} fehleranfälliger geworden als in der Vorperiode",
     reposNone: "Repos: kein Vergleich mit der Vorperiode",
-    redRuns: "in roten Läufen, von {{h}} h CI-Zeit",
+    redRuns: "in roten Läufen, von {{h}} CI-Zeit",
     waitingTitle:
       "Median über {{n}} der {{total}} Läufe, die melden, wann sie einen Agent bekamen",
     waiting:
@@ -709,11 +709,11 @@ export const de = {
     runs_one: "{{count}} Lauf",
     runs_other: "{{count}} Läufe",
     noVerdict: " + {{n}} ohne Ergebnis",
-    outliers: " · {{n}} Ausreisser ({{h}} h) nicht in Dauer und CI-Zeit",
+    outliers: " · {{n}} Ausreisser ({{h}}) nicht in Dauer und CI-Zeit",
     flaky_one:
-      "{{count}} roter Lauf flaky: danach grün auf demselben Commit ({{share}} der roten, {{h}} h)",
+      "{{count}} roter Lauf flaky: danach grün auf demselben Commit ({{share}} der roten, {{h}})",
     flaky_other:
-      "{{count}} rote Läufe flaky: danach grün auf demselben Commit ({{share}} der roten, {{h}} h)",
+      "{{count}} rote Läufe flaky: danach grün auf demselben Commit ({{share}} der roten, {{h}})",
     flakyNone: "Kein roter Lauf wurde auf demselben Commit danach grün",
     flakyNoRed: "Kein roter Lauf, also auch kein flaky",
     unjudged_one: " · {{count}} Lauf ohne Commit nicht beurteilt",
@@ -724,7 +724,7 @@ export const de = {
       "Flaky: Ein Lauf scheitert, ein späterer Lauf derselben Pipeline auf demselben Commit ist grün. Untergrenze: Wiederholungen innerhalb eines Laufs, nur einmal gebaute Commits und Reruns nach dem Periodenende fehlen. Ob Tests oder Infrastruktur scheiterten, steht nicht in den Daten.",
     repoFlaky: "{{n}} flaky",
     repoFlakyTitle:
-      "{{h}} h davon in Läufen, die ein späterer Lauf auf demselben Commit grün machte",
+      "{{h}} davon in Läufen, die ein späterer Lauf auf demselben Commit grün machte",
     failingMore: "Fehleranfälliger geworden",
     failingMoreText: "Vorperiode {{prev}} → jetzt {{rate}} rot",
     slow: "Langsamer geworden",

@@ -706,7 +706,7 @@ export const en = {
     repos:
       "Of {{compared}} repos, {{slower}} got slower and {{failing}} fail more often than in the previous period",
     reposNone: "Repos: no comparison with the previous period",
-    redRuns: "in red runs, of {{h}} h CI time",
+    redRuns: "in red runs, of {{h}} CI time",
     waitingTitle:
       "Median over {{n}} of the {{total}} runs that report when they got an agent",
     waiting:
@@ -715,11 +715,11 @@ export const en = {
     runs_one: "{{count}} run",
     runs_other: "{{count}} runs",
     noVerdict: " + {{n}} without a result",
-    outliers: " · {{n}} outliers ({{h}} h) not in duration and CI time",
+    outliers: " · {{n}} outliers ({{h}}) not in duration and CI time",
     flaky_one:
-      "{{count}} red run flaky: green afterwards on the same commit ({{share}} of the red, {{h}} h)",
+      "{{count}} red run flaky: green afterwards on the same commit ({{share}} of the red, {{h}})",
     flaky_other:
-      "{{count}} red runs flaky: green afterwards on the same commit ({{share}} of the red, {{h}} h)",
+      "{{count}} red runs flaky: green afterwards on the same commit ({{share}} of the red, {{h}})",
     flakyNone: "No red run went green afterwards on the same commit",
     flakyNoRed: "No red run, so none flaky",
     unjudged_one: " · {{count}} run without a commit not judged",
@@ -730,7 +730,7 @@ export const en = {
       "Flaky: a run fails, a later run of the same pipeline on the same commit is green. A lower bound: retries inside a run, commits built once and reruns after the period's end are missing. Whether tests or infrastructure failed is not in the data.",
     repoFlaky: "{{n}} flaky",
     repoFlakyTitle:
-      "{{h}} h of it in runs a later run on the same commit turned green",
+      "{{h}} of it in runs a later run on the same commit turned green",
     failingMore: "Fails more often",
     failingMoreText: "previous period {{prev}} → now {{rate}} red",
     slow: "Got slower",

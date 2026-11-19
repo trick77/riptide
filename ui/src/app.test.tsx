@@ -2235,6 +2235,32 @@ describe("App", () => {
     expect(await screen.findByText(/\+ 3 ohne Ergebnis/)).toBeInTheDocument();
   });
 
+  it("reads a kind's hours under 3 min as < 0.1 h, never 0.0 h", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      const m = metrics();
+      m.build.kinds[0] = {
+        ...m.build.kinds[0],
+        failed: 1,
+        ci_seconds: 54000,
+        wasted_seconds: 120,
+        flaky_runs: 1,
+        flaky_of_failed: 1,
+        flaky_seconds: 60,
+      };
+      return m;
+    });
+    render(<App />);
+    expect(
+      await screen.findByText(
+        "1 roter Lauf flaky: danach grün auf demselben Commit (100 % der roten, < 0.1 h)",
+      ),
+    ).toBeInTheDocument();
+    const red = screen.getByText("in roten Läufen, von 15.0 h CI-Zeit");
+    // The big number above it: the red runs' time, under 3 min.
+    expect(red).toHaveTextContent(/^< 0\.1 hin roten Läufen/);
+  });
+
   it("shows a kind's flaky runs as the backend counted them, and the runs", async () => {
     const calls = mockFetch((url) => {
       if (url.pathname === "/api/facts") {

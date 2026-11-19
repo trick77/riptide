@@ -141,9 +141,9 @@ function KindCard({
           <div
             className={`${big} font-medium tabular-nums ${b.wasted_seconds > 0 ? "text-danger-ink" : "text-ink"}`}
           >
-            {t("common.hours", { n: num(b.wasted_seconds / 3600, 1) })}
+            {ciHours(b.wasted_seconds)}
           </div>
-          {t("build.redRuns", { h: num(b.ci_seconds / 3600, 1) })}
+          {t("build.redRuns", { h: ciHours(b.ci_seconds) })}
         </div>
       </div>
       {/* With the feature hint, the hint card lists them. */}
@@ -186,7 +186,7 @@ function KindCard({
         {b.outlier_runs > 0 &&
           t("build.outliers", {
             n: b.outlier_runs,
-            h: num(b.outlier_seconds / 3600, 1),
+            h: ciHours(b.outlier_seconds),
           })}
       </div>
       <Flaky b={b} c={c} onFacts={onFacts} />
@@ -222,7 +222,7 @@ function Flaky({
           ? t("build.flaky", {
               count: b.flaky_runs,
               share: pct(b.flaky_of_failed),
-              h: num(b.flaky_seconds / 3600, 1),
+              h: ciHours(b.flaky_seconds),
             })
           : b.failed > 0
             ? t("build.flakyNone")
@@ -911,14 +911,12 @@ export function Build({
                         <div
                           className={`${CELL} text-right ${r.wasted_seconds > 0 ? "text-danger-ink" : "text-ink-dim"}`}
                         >
-                          {t("common.hours", {
-                            n: num(r.wasted_seconds / 3600, 1),
-                          })}
+                          {ciHours(r.wasted_seconds)}
                           {r.flaky_runs > 0 && (
                             <div
                               className="text-[11.5px] text-muted"
                               title={t("build.repoFlakyTitle", {
-                                h: num(r.flaky_seconds / 3600, 1),
+                                h: ciHours(r.flaky_seconds),
                               })}
                             >
                               {t("build.repoFlaky", { n: r.flaky_runs })}

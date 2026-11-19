@@ -9,7 +9,7 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { KindHotspots, RepoHotspot } from "./api";
 import { Tip } from "./charts";
-import { dur, num, pct } from "./format";
+import { ciHours, dur, num, pct } from "./format";
 
 // Chart units. Below lg the chart keeps MIN_W px and scrolls, so the
 // smallest text (12.5 units) renders at 10px or more.
@@ -240,7 +240,7 @@ export function Quiver({
           : pct(h.failure_rate),
       ],
       [t("quiver.runs"), num(h.runs)],
-      [t("quiver.ci"), t("common.hours", { n: num(h.ci_seconds / 3600, 1) })],
+      [t("quiver.ci"), ciHours(h.ci_seconds)],
     ];
     const none = noCompare(h);
     if (none) rows.push([t("build.noCompare"), none]);
