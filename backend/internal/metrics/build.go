@@ -459,7 +459,7 @@ func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
 				// A duration is a green run's: how long a build takes. A red
 				// run stops wherever it failed, its time is wasted, not typical
 				// (user, 2026-11-18: mixing them is "stupide").
-				if r.DurationS != nil {
+				if kr.timed(i) {
 					durations = append(durations, float64(*r.DurationS))
 					if wait, work, ok := agentSplit(r); ok {
 						waits = append(waits, wait)
@@ -484,7 +484,7 @@ func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
 		out.Kinds = append(out.Kinds, b)
 		repos := kr.byRepo()
 		out.repos[kind] = repos
-		k, outliers, compared := kindHotspots(kind, kr, repos, base)
+		k, outliers, compared := kindHotspots(kind, b.Duration, ratio(b.Failed, b.Runs), kr, repos, base)
 		k.Heatmap = []HeatRow{}
 		if !base.previous {
 			k.Heatmap = heatmap(p, kr, k.Repos, out.GapWeeks)
@@ -1243,42 +1243,30 @@ func (h *RepoHotspot) against(rr, prev *repoRuns, incomplete bool) {
 }
 
 // kindHotspots is one kind's repos, repos its runs by repo, each against
-// base's of the previous period; compared counts those with a comparison,
+// base's of the previous period; duration and failureRate are the kind's,
+// as its BuildStats has them. compared counts the repos with a comparison,
 // before the cut to the top.
-func kindHotspots(kind string, kr kindRuns, repos map[string]*repoRuns, base *baseline) (
-	k KindHotspots, outliers []Outlier, compared int,
-) {
-	var durations []float64
-	counted, failures := 0, 0
+func kindHotspots(
+	kind string, duration Spread, failureRate *float64, kr kindRuns, repos map[string]*repoRuns, base *baseline,
+) (k KindHotspots, outliers []Outlier, compared int) {
 	for i, r := range kr.runs {
-		out := kr.stuck[i]
 		// Runs without a verdict too: a run stuck for a day and then
 		// cancelled is what an outlier is there to show.
-		if out {
-			o := Outlier{
-				Kind: kind, PipelineName: r.PipelineName, Repo: kr.repos[i], RunID: r.RunID,
-				StartedAt: r.StartedAt, DurationS: float64(*r.DurationS), Status: r.Status,
-				Factor: kr.cut.factor(r),
-			}
-			if wait, _, ok := agentSplit(r); ok {
-				o.WaitS = ptr(wait)
-			}
-			outliers = append(outliers, o)
-		}
-		v := kr.verdicts[i]
-		if v == VerdictNone {
+		if !kr.stuck[i] {
 			continue
 		}
-		if kr.timed(i) && !out {
-			durations = append(durations, float64(*r.DurationS))
+		o := Outlier{
+			Kind: kind, PipelineName: r.PipelineName, Repo: kr.repos[i], RunID: r.RunID,
+			StartedAt: r.StartedAt, DurationS: float64(*r.DurationS), Status: r.Status,
+			Factor: kr.cut.factor(r),
 		}
-		counted++
-		if v == VerdictFailure {
-			failures++
+		if wait, _, ok := agentSplit(r); ok {
+			o.WaitS = ptr(wait)
 		}
+		outliers = append(outliers, o)
 	}
 	k = KindHotspots{
-		Kind: kind, Duration: spread(durations), FailureRate: ratio(failures, counted),
+		Kind: kind, Duration: duration, FailureRate: failureRate,
 		Repos: []RepoHotspot{}, Slowest: []RepoHotspot{},
 	}
 	prev := base.kinds[kind]
