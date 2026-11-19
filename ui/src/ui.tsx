@@ -250,14 +250,6 @@ export function CardHead({
   );
 }
 
-export function Grid({ children }: { children: ReactNode }) {
-  return (
-    <div className="grid grid-cols-[repeat(auto-fit,minmax(230px,1fr))] gap-3">
-      {children}
-    </div>
-  );
-}
-
 export function WarnLine({ children }: { children: ReactNode }) {
   return (
     <div className="mt-2 flex items-start gap-1.5 text-xs text-ochre">
