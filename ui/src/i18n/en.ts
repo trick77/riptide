@@ -42,7 +42,6 @@ export const en = {
     shorterBetter: "shorter is better",
     ownHistory: "compare only with your own history",
     noDirection: "no direction",
-    teamQuestion: "Question for the team",
     withoutBots: "without bots",
     withoutGitOps: "without GitOps repos",
     // Counted nouns, for sentences that hold more than one count.
@@ -275,7 +274,6 @@ export const en = {
       retroBox: "For the next retro",
       copy: "Copy as Markdown",
       copied: "copied",
-      question: "Question for the team",
       questionFixed: {
         feature_share: "Is the share of feature work where we want it?",
         untracked: "PRs without a Jira key: on purpose or forgotten?",

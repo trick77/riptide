@@ -35,7 +35,6 @@ export const de = {
     shorterBetter: "kürzer ist besser",
     ownHistory: "nur mit dem eigenen Verlauf vergleichen",
     noDirection: "keine Richtung",
-    teamQuestion: "Frage fürs Team",
     withoutBots: "ohne Bots",
     withoutGitOps: "ohne GitOps-Repos",
     releases_one: "{{count}} Release",
@@ -269,7 +268,6 @@ export const de = {
       retroBox: "Für die nächste Retro",
       copy: "Als Markdown kopieren",
       copied: "kopiert",
-      question: "Frage ans Team",
       questionFixed: {
         feature_share: "Liegt der Anteil Feature-Arbeit da, wo wir ihn wollen?",
         untracked: "PRs ohne Jira-Key: Absicht oder vergessen?",
