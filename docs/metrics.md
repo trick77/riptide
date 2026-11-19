@@ -559,7 +559,9 @@ against the same number before. `metrics.Assess` raises the signals:
   instability is no progress), agent waits of half a run or more, several
   repos stuck at once, forgotten PRs, re-syncs over half the syncs;
 - what the latest analysis of the window raised and is gone now; a
-  worsening that turned into a gain shows as resolved only.
+  worsening that turned into a gain shows as resolved only. Gone means
+  judged and no worse: a number unknown now, or a build repo with too few
+  runs to judge (10, a steady slow one 3 timed), resolves nothing.
 
 The layout puts the gains and resolutions on the left ("runs") and the rest
 on the right ("stuck"), with a tally of each. Gains rank last, so they get

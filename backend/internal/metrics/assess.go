@@ -385,7 +385,7 @@ func (a *assessor) gapSignals() {
 
 func (a *assessor) jamSignals() {
 	prevJammed := map[string]bool{}
-	for _, r := range a.pm.OpenPRs.Repos {
+	for _, r := range a.pm.OpenPRs.all {
 		if r.Jammed {
 			prevJammed[r.Repo] = true
 		}
@@ -404,8 +404,10 @@ func (a *assessor) jamSignals() {
 		if more || prevJammed[r.Repo] {
 			tone, w = ToneAttention, FocusMinWeight+1
 		}
-		var prevLong *float64
-		for _, p := range a.pm.OpenPRs.Repos {
+		// A repo without an open PR at the previous end had none open long;
+		// nor one with inactive PRs only, which count in no other number.
+		prevLong := ptr(0.0)
+		for _, p := range a.pm.OpenPRs.all {
 			if p.Repo == r.Repo {
 				prevLong = f64(p.Long)
 			}
@@ -414,7 +416,7 @@ func (a *assessor) jamSignals() {
 			Verdict: ChangeNone}
 		// Against the previous end only where Bitbucket covers that period:
 		// a repo riptide did not hear of yet reads as 0 then.
-		if incomplete := before(a.m.Meta.DataStart.Bitbucket, a.p.Previous.From); prevLong != nil && !incomplete {
+		if incomplete := before(a.m.Meta.DataStart.Bitbucket, a.p.Previous.From); !incomplete {
 			c := openJammedMetric.judge(side{f64(r.Long), true}, side{prevLong, true}, false)
 			long.Verdict, long.Magnitude = c.Verdict, c.Magnitude
 		} else {
@@ -829,7 +831,7 @@ func (a *assessor) resolvedSignals() {
 		switch kind {
 		case SignalPRJam:
 			s.Source, s.Repo = SourceBitbucket, ptr(rest)
-			for _, r := range a.m.OpenPRs.Repos {
+			for _, r := range a.m.OpenPRs.all {
 				if r.Repo == rest {
 					s.Facts = []Fact{plain(s.ID+".long", "open_long", UnitCount, f64(r.Long))}
 				}
@@ -844,15 +846,21 @@ func (a *assessor) resolvedSignals() {
 				if k.Kind != runKind {
 					continue
 				}
-				for _, h := range k.Repos {
+				for _, h := range k.all {
 					if h.Repo != repo {
 						continue
 					}
+					// Resolved only on a number judged and no worse than
+					// before: a low sample or a repo still worse is not done,
+					// nor a steady slow build with too few runs to rank.
+					f := fact(s.ID+".p50", "build_p50", UnitSeconds, h.Duration.P50, h.DurationChange)
 					if kind == SignalFailingMore {
-						s.Facts = []Fact{fact(s.ID+".failure_rate", "failure_rate", UnitShare, h.FailureRate, h.FailureChange)}
-					} else {
-						s.Facts = []Fact{fact(s.ID+".p50", "build_p50", UnitSeconds, h.Duration.P50, h.DurationChange)}
+						f = fact(s.ID+".failure_rate", "failure_rate", UnitShare, h.FailureRate, h.FailureChange)
 					}
+					if f.Prev == nil || f.Verdict == ChangeWorse || kind == SignalSteadySlow && h.Duration.N < SlowestMinRuns {
+						continue
+					}
+					s.Facts = []Fact{f}
 				}
 			}
 		case SignalChange:
@@ -983,13 +991,14 @@ func (a *assessor) focus() (out []FocusRepo, active, calm int) {
 }
 
 // activeRepos are the repos with a merged PR, a run or an open PR in the
-// period, in the product.
+// period, in the product. An open PR inactive for OpenInactiveDays makes no
+// repo active: it counts in no number but its own.
 func (a *assessor) activeRepos() map[string]bool {
 	out := map[string]bool{}
 	for _, pr := range mergedPRs(a.ds, a.p.Period, a.f) {
 		out[pr.Repo] = true
 	}
-	for _, r := range a.m.OpenPRs.Repos {
+	for _, r := range a.m.OpenPRs.all {
 		out[r.Repo] = true
 	}
 	for _, repos := range a.m.Build.repos {

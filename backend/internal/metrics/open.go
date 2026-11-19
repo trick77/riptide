@@ -147,6 +147,8 @@ type OpenPRs struct {
 	// first, then by long-open PRs, then by the median age; the top openTop
 	// and every one with a long-open PR.
 	Repos []OpenRepo `json:"repos"`
+	// all are Repos before the cut: the assessment reads every repo.
+	all []OpenRepo
 }
 
 // openAge is an open PR's age at the instant; never negative.
@@ -237,6 +239,7 @@ func openSection(ds *dataset.Dataset, f filter) OpenPRs {
 		return cmp.Or(cmp.Compare(first(a.Jammed), first(b.Jammed)), cmp.Compare(b.Long, a.Long),
 			cmp.Compare(*b.Age.P50, *a.Age.P50), cmp.Compare(b.Inactive, a.Inactive), cmp.Compare(a.Repo, b.Repo))
 	})
+	out.all = rows
 	for i, r := range rows {
 		if i < openTop || r.Long > 0 {
 			out.Repos = append(out.Repos, r)
