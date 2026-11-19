@@ -5,7 +5,7 @@
 // bars. The page never says who worded it (user, 2026-11-16: "slop").
 
 import type { TFunction } from "i18next";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   type AnalysisStatus,
@@ -677,12 +677,16 @@ function Panel({
   st,
   m,
   onAsk,
+  asking,
   onFacts,
   askFailure,
 }: {
   st: AnalysisStatus;
   m: Metrics;
   onAsk: () => void;
+  // asking: the view's ask is on its way; its button already shows the run,
+  // and takes no second click.
+  asking: boolean;
   onFacts: OnFacts;
   askFailure: string | null;
 }) {
@@ -738,7 +742,7 @@ function Panel({
 
   const button =
     st.enabled &&
-    (st.running ? (
+    (st.running || asking ? (
       <button
         type="button"
         disabled
@@ -1009,23 +1013,64 @@ export function Assessment({
 }) {
   const { team, weeks, product } = query;
   const key = `${team}|${weeks}|${product ?? ""}`;
-  const [st, setSt] = useState<{ key: string; data: AnalysisStatus } | null>(
-    null,
-  );
+  // Every status and ask failure carries its place in one running order: a
+  // status asked for when its request was sent, an ask's answer or failure
+  // when it arrived (the server's state after the POST). An older status
+  // never replaces a newer one, nor drops a failure that came after it.
+  const order = useRef(0);
+  const [st, setSt] = useState<{
+    key: string;
+    data: AnalysisStatus;
+    seq: number;
+  } | null>(null);
   const [failure, setFailure] = useState<{ key: string; msg: string } | null>(
     null,
   );
-  const [askFailure, setAskFailure] = useState<{
-    key: string;
-    msg: string;
-  } | null>(null);
+  // Each view's failed ask, apart: one view's never hides another's.
+  const [askFailures, setAskFailures] = useState<
+    ReadonlyMap<string, { msg: string; seq: number }>
+  >(new Map());
+  // A failed ask reloads its view's status: the status says what the
+  // failure means (a run already going, a cooldown). That one load keeps the
+  // red box; it is the failure's, not newer than it. By view, the failure's
+  // place in the order, until the view's next load takes it.
+  const kept = useRef(new Map<string, number>());
+  // The views whose ask is on its way: a double click asks once. The ref
+  // holds before React commits, the state draws the button.
+  const inFlight = useRef(new Set<string>());
+  const [asking, setAsking] = useState<ReadonlySet<string>>(new Set());
   const [tick, setTick] = useState(0);
+  // The view on the page, for an ask that fails after the page moved on.
+  const shown = useRef(key);
+  useEffect(() => {
+    shown.current = key;
+  }, [key]);
 
   useEffect(() => {
     const ctl = new AbortController();
     const k = `${team}|${weeks}|${product ?? ""}`;
+    const sent = ++order.current;
+    const keep = kept.current.get(k);
+    kept.current.delete(k);
     fetchAnalysis({ team, weeks, product }, ctl.signal)
-      .then((data) => setSt({ key: k, data }))
+      .then((data) => {
+        setSt((prev) =>
+          prev?.key === k && prev.seq > sent
+            ? prev
+            : { key: k, data, seq: sent },
+        );
+        // A status asked for after the view's ask failed outdates the
+        // failure: back on the view, the old red box must not stand next
+        // to it. Other views' failures go too, but one their view has not
+        // loaded since: the page lives long, the map must not grow with it.
+        setAskFailures((prev) => {
+          const next = new Map<string, { msg: string; seq: number }>();
+          for (const [v, f] of prev)
+            if (v === k ? f.seq > sent || f.seq === keep : kept.current.has(v))
+              next.set(v, f);
+          return next.size === prev.size ? prev : next;
+        });
+      })
       .catch((e: unknown) => {
         if (!ctl.signal.aborted)
           setFailure({
@@ -1049,18 +1094,35 @@ export function Assessment({
   // The answer belongs to the view asked for: once the page shows another
   // view, it must not replace that one's status (nothing would reload it).
   const ask = () => {
-    setAskFailure(null);
+    if (inFlight.current.has(key)) return;
+    inFlight.current.add(key);
+    setAskFailures((prev) => {
+      if (!prev.has(key)) return prev;
+      const next = new Map(prev);
+      next.delete(key);
+      return next;
+    });
+    setAsking((prev) => new Set(prev).add(key));
     askAnalysis({ team, weeks, product })
-      .then((data) =>
-        setSt((prev) => (prev && prev.key !== key ? prev : { key, data })),
-      )
-      .catch((e: unknown) =>
-        setAskFailure((prev) =>
-          prev && prev.key !== key
-            ? prev
-            : { key, msg: e instanceof Error ? e.message : String(e) },
-        ),
-      );
+      .then((data) => {
+        const seq = ++order.current;
+        setSt((prev) => (prev && prev.key !== key ? prev : { key, data, seq }));
+      })
+      .catch((e: unknown) => {
+        const seq = ++order.current;
+        const msg = e instanceof Error ? e.message : String(e);
+        setAskFailures((prev) => new Map(prev).set(key, { msg, seq }));
+        kept.current.set(key, seq);
+        if (shown.current === key) setTick((n) => n + 1);
+      })
+      .finally(() => {
+        inFlight.current.delete(key);
+        setAsking((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
+      });
   };
 
   if (!current) {
@@ -1079,8 +1141,9 @@ export function Assessment({
       st={current}
       m={m}
       onAsk={ask}
+      asking={asking.has(key)}
       onFacts={onFacts}
-      askFailure={askFailure?.key === key ? askFailure.msg : null}
+      askFailure={askFailures.get(key)?.msg ?? null}
     />
   );
 }
