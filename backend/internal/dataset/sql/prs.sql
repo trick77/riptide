@@ -139,7 +139,7 @@ chain AS (
              AND e.event_type IN ('pr:comment:added', 'pr:reviewer:approved',
                                   'pr:reviewer:unapproved', 'pr:reviewer:needs_work',
                                   'pr:reviewer:updated')
-             AND e.author IS DISTINCT FROM p.pr_opener
+             AND lower(e.author) IS DISTINCT FROM lower(p.pr_opener)
              AND NOT e.is_automated
              AND NOT EXISTS (SELECT 1 FROM non_human_identities n WHERE n.handle = lower(e.author))
              AND e.occurred_at >= p.ready_at) AS touches

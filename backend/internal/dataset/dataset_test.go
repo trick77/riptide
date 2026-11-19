@@ -555,6 +555,35 @@ func TestDatasetApprovalCountsHumanReviewers(t *testing.T) {
 	}
 }
 
+// The opener's own comment is no review, whatever the case of the login:
+// open PRs compare case-insensitively too.
+func TestDatasetOpenerTouchIgnoresCase(t *testing.T) {
+	st, pool := migrated(t)
+	s := &seeder{t: t, pool: pool}
+	s.pr(prEvent{event: "pr:opened", repo: kasseAPI, id: 31, author: "Jdoe", branch: "feature/y", at: days(1)})
+	s.pr(prEvent{event: "pr:comment:added", repo: kasseAPI, id: 31, author: "jdoe", at: days(1).Add(time.Hour)})
+	s.pr(prEvent{event: "pr:merged", repo: kasseAPI, id: 31, author: "Jdoe", branch: "feature/y",
+		mergeCommit: sha("b"), at: days(1).Add(2 * time.Hour)})
+	// A reviewer-status touch by the opener is none either: the real
+	// reviewer's approval is the first touch.
+	s.pr(prEvent{event: "pr:opened", repo: kasseAPI, id: 32, author: "Jdoe", branch: "feature/z", at: days(2)})
+	s.pr(prEvent{event: "pr:reviewer:needs_work", repo: kasseAPI, id: 32, author: "jdoe", at: days(2).Add(time.Hour)})
+	s.pr(prEvent{event: "pr:reviewer:approved", repo: kasseAPI, id: 32, author: "rita", at: days(2).Add(2 * time.Hour)})
+	s.pr(prEvent{event: "pr:merged", repo: kasseAPI, id: 32, author: "Jdoe", branch: "feature/z",
+		mergeCommit: sha("c"), at: days(2).Add(3 * time.Hour)})
+	d := load(t, st, t0, days(28))
+	if len(d.PRs) != 2 {
+		t.Fatalf("prs = %+v", d.PRs)
+	}
+	if p := d.PRs[0]; p.FirstReviewAt != nil {
+		t.Errorf("first review %v: the opener's own comment", p.FirstReviewAt)
+	}
+	approved := ts(days(2).Add(2 * time.Hour))
+	if p := d.PRs[1]; !eqTime(p.FirstReviewAt, approved) || !eqTime(p.ApprovedAt, approved) || !p.ApprovedOnFirstTouch {
+		t.Errorf("first review %v, approved %v, first touch %v", p.FirstReviewAt, p.ApprovedAt, p.ApprovedOnFirstTouch)
+	}
+}
+
 // The facts tables' read skips the lead times and the reviews, nothing else.
 func TestDatasetFactsOnly(t *testing.T) {
 	st, pool := migrated(t)
