@@ -301,6 +301,54 @@ func TestActivePastTheOpenCut(t *testing.T) {
 	}
 }
 
+// Merged PRs per week count every merged PR, also one opened before
+// ingestion: its unknown opening keeps it out of the cycle time only.
+func TestMergedPerWeekCountsEveryMerge(t *testing.T) {
+	cur, prev := ClosedPeriod(4, now, zurich), ClosedPrevious(4, now, zurich)
+	mk := func(p Period) *dataset.Dataset {
+		return data(func(ds *dataset.Dataset) {
+			covered(ds, p)
+			for i := range 12 {
+				at := p.To.Add(-time.Duration(2+i) * 24 * time.Hour).UTC()
+				ds.PRs = append(ds.PRs, pr(func(x *dataset.PR) {
+					x.PRID, x.MergedAt, x.OpenedAt = int64(i+1), &at, ptr(at.Add(-time.Hour))
+					x.FirstCommitAt, x.ReadyAt = ptr(at.Add(-2*time.Hour)), ptr(at.Add(-time.Hour))
+					x.FirstReviewAt, x.ApprovedAt = ptr(at.Add(-30*time.Minute)), ptr(at.Add(-30*time.Minute))
+					if i < 4 {
+						x.OpenedAt = nil
+					}
+				}))
+			}
+			for i := range 3 {
+				at := p.To.Add(-48 * time.Hour).UTC()
+				ds.OpenPRs = append(ds.OpenPRs, openPR(func(o *dataset.OpenPR) {
+					o.PRID, o.OpenedAt, o.ReadyAt, o.LastEventAt = int64(50+i), at, ptr(at), at
+				}))
+			}
+		})
+	}
+	a := Assess(mk(cur), mk(prev), Params{Period: cur, Previous: prev}, History{})
+	team := func(id string) Fact {
+		for _, f := range a.Team {
+			if f.ID == id {
+				return f
+			}
+		}
+		t.Fatalf("no %s in %+v", id, a.Team)
+		return Fact{}
+	}
+	merged := team("team.merged_per_week")
+	expectNear(t, "merged per week", merged.Value, 12/cur.Span)
+	if merged.Prev == nil {
+		t.Errorf("merged per week not compared: %+v", merged)
+	}
+	wip := team("team.wip_weeks")
+	expectNear(t, "wip weeks", wip.Value, 3/(12/cur.Span))
+	if wip.Prev == nil {
+		t.Errorf("wip weeks not compared: %+v", wip)
+	}
+}
+
 // A repo without an open PR at the previous end had none open long: a jam
 // new since then compares against 0.
 func TestNewJamAgainstZero(t *testing.T) {

@@ -568,7 +568,7 @@ func (a *assessor) teamChanges() []teamChange {
 	bb := before(m.Meta.DataStart.Bitbucket, a.p.Previous.From)
 	// Flow numbers: throughput, work in progress against it, waiting.
 	merged, pmerged := a.mergedPerWeek(a.m), a.mergedPerWeek(a.pm)
-	ok, pok := a.m.Review.Cycle.N >= lowSample, a.pm.Review.Cycle.N >= lowSample
+	ok, pok := a.m.Review.Merged >= lowSample, a.pm.Review.Merged >= lowSample
 	out = append(out, teamChange{"merged_per_week", "merged_per_week", UnitPerWeek, SourceBitbucket, merged,
 		mergedPerWeekMetric.judgeX(side{merged, ok}, side{pmerged, pok}, bb)})
 	wip, pwip := wipWeeks(a.m, merged), wipWeeks(a.pm, pmerged)
@@ -581,11 +581,13 @@ func (a *assessor) teamChanges() []teamChange {
 	return out
 }
 
+// mergedPerWeek counts every merged PR, also one whose opening riptide never
+// heard of: that one is missing from the opened-to-merged numbers.
 func (a *assessor) mergedPerWeek(m Metrics) *float64 {
 	if m.Period.Span <= 0 {
 		return nil
 	}
-	return ptr(float64(m.Review.Cycle.N) / m.Period.Span)
+	return ptr(float64(m.Review.Merged) / m.Period.Span)
 }
 
 // wipWeeks is the open PRs at the period's end over the PRs merged per
@@ -890,8 +892,8 @@ func (a *assessor) resolvedSignals() {
 
 // ---- Question --------------------------------------------------------------
 
-// question is the undirected number that moved most, notable only; else
-// the approvals without a comment, the page's fixed one.
+// question is the first undirected number in a fixed order that moved
+// notably; else the approvals without a comment, the page's fixed one.
 func (a *assessor) question() *Signal {
 	m, c := a.m, a.m.Comparison
 	feature, pfeature := m.Review.MixShare.Feature, a.pm.Review.MixShare.Feature
