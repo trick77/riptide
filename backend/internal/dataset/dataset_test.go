@@ -220,7 +220,9 @@ func TestDataset(t *testing.T) {
 	})
 
 	t.Run("lead times", func(t *testing.T) {
-		got := map[string]string{}
+		// Keyed by environment and commit author, each author's flags
+		// sorted: dev-anna has two commits, 1 and the merge 2.
+		got := map[string][]string{}
 		for _, l := range d.LeadTimes {
 			flags := ""
 			for _, f := range []struct {
@@ -231,26 +233,34 @@ func TestDataset(t *testing.T) {
 					flags += f.name
 				}
 			}
-			got[l.Environment+":"+l.CommitSHA[:1]] = flags
+			if flags == "" {
+				flags = "-"
+			}
+			key := l.Environment + ":" + l.Author
+			got[key] = append(got[key], flags)
 			if l.Repo != kasseAPI || l.Project != "kasse" {
 				t.Errorf("lead time repo = %s %s", l.Repo, l.Project)
 			}
 		}
-		want := map[string]string{
-			"intg:1": "", "intg:3": "bot", "intg:f": "bot", "intg:c": "bot", "intg:2": "merge", "intg:4": "service",
-			"prod:1": "", "prod:3": "bot", "prod:f": "bot", "prod:c": "bot", "prod:2": "merge", "prod:4": "service",
+		want := map[string]string{}
+		for _, env := range []string{"intg", "prod"} {
+			for author, flags := range map[string]string{"dev-anna": "-,merge", "renovate-bot": "bot",
+				"deploy-bot": "bot", "ci-helper": "bot", "ci-release": "service"} {
+				want[env+":"+author] = flags
+			}
 		}
 		if len(got) != len(want) {
 			t.Fatalf("lead times = %v", got)
 		}
 		for k, v := range want {
-			if got[k] != v {
-				t.Errorf("%s = %q, want %q", k, got[k], v)
+			slices.Sort(got[k])
+			if g := strings.Join(got[k], ","); g != v {
+				t.Errorf("%s = %q, want %q", k, g, v)
 			}
 		}
 		for _, l := range d.LeadTimes {
-			if l.Environment == "prod" && l.CommitSHA == sha("1") &&
-				(l.LeadTimeS != int64((days(3).Sub(hours(19))).Seconds()) || !l.AuthoredAt.Equal(hours(19))) {
+			if l.Environment == "prod" && l.Author == "dev-anna" && !l.IsMerge &&
+				l.LeadTimeS != int64((days(3).Sub(hours(19))).Seconds()) {
 				t.Errorf("lead time = %+v", l)
 			}
 		}
@@ -266,7 +276,7 @@ func TestDataset(t *testing.T) {
 			"kasse-api/feature%2Fkas-7-pay|feature/kas-7-pay|feature|build|kasse/kasse-api|kasse",
 			"kasse-api/PR-7|PR-7|pr|<nil>|kasse/kasse-api|kasse",
 			"kasse-api/master|master|main|release|kasse/kasse-api|kasse",
-			"kasse-api/release%2F1.1|release/1.1|release|hotfix|kasse/kasse-api|kasse",
+			"kasse-api/release%2F1.1|release/1.1|other|hotfix|kasse/kasse-api|kasse",
 			"nightly||other|<nil>|<nil>|<nil>",
 		}
 		if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -288,9 +298,8 @@ func TestDataset(t *testing.T) {
 			t.Fatalf("reviews = %+v", d.Reviews)
 		}
 		r := d.Reviews[0]
-		if r.PRKey != kasseAPI+"#7" || str(r.Repo) != kasseAPI || str(r.Project) != "kasse" || r.GitOps || str(r.Outcome) != "merged" ||
-			str(r.CostUSD) != "0.123456" || *r.LinesAdded != 10 || *r.LinesRemoved != 2 || *r.FilesChanged != 3 ||
-			*r.FindingsCount != 4 || *r.TotalRuns != 2 || !r.ClosedAt.Equal(days(1).Add(5*time.Hour)) {
+		if str(r.Repo) != kasseAPI || str(r.Project) != "kasse" || r.GitOps || str(r.Outcome) != "merged" ||
+			str(r.CostUSD) != "0.123456" || *r.LinesAdded != 10 || *r.LinesRemoved != 2 {
 			t.Errorf("review = %+v", r)
 		}
 	})
@@ -501,9 +510,9 @@ func TestDatasetReviewOfPromotion(t *testing.T) {
 	d := load(t, st, t0, days(28))
 	gitops := map[string]bool{}
 	for _, r := range d.Reviews {
-		gitops[r.PRKey] = r.GitOps
+		gitops[str(r.Repo)] = r.GitOps
 	}
-	if len(gitops) != 2 || !gitops[kasseOps+"#3"] || gitops[kasseAPI+"#7"] {
+	if len(gitops) != 2 || !gitops[kasseOps] || gitops[kasseAPI] {
 		t.Errorf("reviews gitops = %v", gitops)
 	}
 }
@@ -891,8 +900,8 @@ func TestBranch(t *testing.T) {
 		{"kasse-api/master", "master", "main"},
 		{"kasse-api/main", "main", "main"},
 		{"kasse-api/MASTER", "MASTER", "main"},
-		{"kasse-api/release%2F1.1", "release/1.1", "release"},
-		{"kasse-api/release%2f1.1", "release/1.1", "release"},
+		{"kasse-api/release%2F1.1", "release/1.1", "other"},
+		{"kasse-api/release%2f1.1", "release/1.1", "other"},
 		{"kasse-api/feature%2FKAS-1-x", "feature/KAS-1-x", "feature"},
 		{"kasse-api/bugfix%2Fy", "bugfix/y", "feature"},
 		{"kasse-api/hotfix%2Fz", "hotfix/z", "feature"},

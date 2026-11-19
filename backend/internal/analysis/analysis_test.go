@@ -188,7 +188,7 @@ func (f *fakeLLM) Model() string { return "fake-model" }
 func (f *fakeLLM) Complete(_ context.Context, _, user string) (Call, error) {
 	f.calls++
 	f.digest = user
-	return Call{Model: "fake-model", Content: f.answer(user), InputTokens: ptr(int64(1000)),
+	return Call{Content: f.answer(user), InputTokens: ptr(int64(1000)),
 		OutputTokens: ptr(int64(500)), NanoUSD: ptr(int64(7_000_000))}, nil
 }
 
@@ -706,6 +706,11 @@ func TestWireAsksForTheSchema(t *testing.T) {
 	rf, _ := json.Marshal(last.Body["response_format"])
 	if !strings.Contains(string(rf), SchemaName) || !last.Stream() {
 		t.Errorf("request: stream %v, format %s", last.Stream(), rf)
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if call, err := w.Complete(cancelled, promptText, `{}`); err == nil || call.Content != "" {
+		t.Errorf("cancelled call = %+v, %v", call, err)
 	}
 	if _, err := NewWire("no-such-model", "", srv.Lookup, nil, llmwiretest.Registry()); err == nil {
 		t.Error("an unknown model built")

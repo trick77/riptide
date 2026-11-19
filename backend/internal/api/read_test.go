@@ -213,11 +213,9 @@ func TestReadMatchesOpenAPISpec(t *testing.T) {
 		Deploys: []dataset.Deploy{{App: "kasse-prod", Project: s("kasse"), Environment: s("prod"), Revision: "abc1234",
 			At: at, Phase: "Succeeded", DurationS: n(45), Images: []string{"reg/a:1"}, Kind: s("release"),
 			NewImages: []string{"reg/a:1"}}},
-		LeadTimes: []dataset.LeadTime{{Repo: "kasse/kasse-api", Project: "kasse", Environment: "prod", CommitSHA: "abc1234",
-			AuthoredAt: before, FirstDeployedAt: at, LeadTimeS: 3600}},
-		Reviews: []dataset.Review{{PRKey: "kasse/kasse-api#7", Repo: s("kasse/kasse-api"), Project: s("kasse"),
-			Outcome: s("merged"), CostUSD: s("0.123456"), LinesAdded: n(1), LinesRemoved: n(1), FilesChanged: n(1),
-			FindingsCount: n(1), TotalRuns: n(1), ClosedAt: at}},
+		LeadTimes: []dataset.LeadTime{{Repo: "kasse/kasse-api", Project: "kasse", Environment: "prod", LeadTimeS: 3600}},
+		Reviews: []dataset.Review{{Repo: s("kasse/kasse-api"), Project: s("kasse"),
+			Outcome: s("merged"), CostUSD: s("0.123456"), LinesAdded: n(1), LinesRemoved: n(1)}},
 	}
 	// Enough runs for every hotspot: a slow, failing repo and an outlier.
 	for i := range 12 {

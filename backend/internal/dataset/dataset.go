@@ -233,16 +233,13 @@ type Deploy struct {
 
 // LeadTime is one commit's first deploy to one environment.
 type LeadTime struct {
-	Repo            string    `json:"repo" db:"repo"`
-	Project         string    `json:"project" db:"project"`
-	Environment     string    `json:"environment" db:"environment"`
-	CommitSHA       string    `json:"commit_sha" db:"commit_sha"`
-	AuthoredAt      time.Time `json:"authored_at" db:"authored_at"`
-	FirstDeployedAt time.Time `json:"first_deployed_at" db:"first_deployed_at"`
-	LeadTimeS       int64     `json:"lead_time_s" db:"lead_time_s"`
-	IsMerge         bool      `json:"is_merge" db:"is_merge"`
-	ServiceAccount  bool      `json:"service_account" db:"service_account"`
-	Bot             bool      `json:"bot" db:"-"`
+	Repo           string `json:"repo" db:"repo"`
+	Project        string `json:"project" db:"project"`
+	Environment    string `json:"environment" db:"environment"`
+	LeadTimeS      int64  `json:"lead_time_s" db:"lead_time_s"`
+	IsMerge        bool   `json:"is_merge" db:"is_merge"`
+	ServiceAccount bool   `json:"service_account" db:"service_account"`
+	Bot            bool   `json:"bot" db:"-"`
 	// Read for the bot flag, never sent: no author names leave the API.
 	DeclaredBot       bool   `json:"-" db:"declared_bot"`
 	Author            string `json:"-" db:"author"`
@@ -283,18 +280,13 @@ type Run struct {
 // Review is one PR's final noergler rollup. CostUSD is the stored decimal
 // as text, so no float rounds it.
 type Review struct {
-	PRKey         string    `json:"pr_key" db:"pr_key"`
-	Repo          *string   `json:"repo" db:"repo"`
-	Project       *string   `json:"project" db:"project"`
-	GitOps        bool      `json:"gitops" db:"gitops"`
-	Outcome       *string   `json:"outcome" db:"outcome"`
-	CostUSD       *string   `json:"cost_usd" db:"cost_usd"`
-	LinesAdded    *int64    `json:"lines_added" db:"lines_added"`
-	LinesRemoved  *int64    `json:"lines_removed" db:"lines_removed"`
-	FilesChanged  *int64    `json:"files_changed" db:"files_changed"`
-	FindingsCount *int64    `json:"findings_count" db:"findings_count"`
-	TotalRuns     *int64    `json:"total_runs" db:"total_runs"`
-	ClosedAt      time.Time `json:"closed_at" db:"closed_at"`
+	Repo         *string `json:"repo" db:"repo"`
+	Project      *string `json:"project" db:"project"`
+	GitOps       bool    `json:"gitops" db:"gitops"`
+	Outcome      *string `json:"outcome" db:"outcome"`
+	CostUSD      *string `json:"cost_usd" db:"cost_usd"`
+	LinesAdded   *int64  `json:"lines_added" db:"lines_added"`
+	LinesRemoved *int64  `json:"lines_removed" db:"lines_removed"`
 }
 
 // DB is what Load needs: a pgxpool.Pool.
@@ -481,14 +473,8 @@ func (d *Dataset) utc() {
 	for i := range d.Deploys {
 		ptrs = append(ptrs, &d.Deploys[i].At, d.Deploys[i].RevisionFirstAt)
 	}
-	for i := range d.LeadTimes {
-		ptrs = append(ptrs, &d.LeadTimes[i].AuthoredAt, &d.LeadTimes[i].FirstDeployedAt)
-	}
 	for i := range d.Runs {
 		ptrs = append(ptrs, d.Runs[i].StartedAt, d.Runs[i].AgentStartedAt, d.Runs[i].FinishedAt, &d.Runs[i].OccurredAt)
-	}
-	for i := range d.Reviews {
-		ptrs = append(ptrs, &d.Reviews[i].ClosedAt)
 	}
 	for _, t := range ptrs {
 		if t != nil {
@@ -683,27 +669,25 @@ var (
 // Branch kinds.
 const (
 	BranchMain    = "main"
-	BranchRelease = "release"
 	BranchFeature = "feature"
 	BranchPR      = "pr"
 	BranchOther   = "other"
 )
 
-// BranchKind classifies a branch: main (master, main), release (release/*),
-// feature (every prefix the work mix knows but docs: feature/, feat/,
-// bugfix/, fix/, hotfix/, chore/, refactor/), pr (Jenkins' PR-<n>), other. A
-// feature build is what a developer waits on: a branch scheme missing here
-// hides those runs in other. The prefixes are the work mix's
-// (parse.FeatureBranch), one list for both; only here a prefix needs its
-// '/'. docs/ and doc/ are other (parse.DocsBranch says why). A PR-<n> build
-// of a docs branch stays pr: its name does not tell the source branch.
+// BranchKind classifies a branch: main (master, main), feature (every prefix
+// the work mix knows but docs: feature/, feat/, bugfix/, fix/, hotfix/,
+// chore/, refactor/), pr (Jenkins' PR-<n>), other (release/* included: a
+// release build is told by its build_type, not its branch). A feature build
+// is what a developer waits on: a branch scheme missing here hides those
+// runs in other. The prefixes are the work mix's (parse.FeatureBranch), one
+// list for both; only here a prefix needs its '/'. docs/ and doc/ are other
+// (parse.DocsBranch says why). A PR-<n> build of a docs branch stays pr: its
+// name does not tell the source branch.
 func BranchKind(branch string) string {
 	b := strings.ToLower(branch)
 	switch {
 	case b == "master" || b == "main":
 		return BranchMain
-	case strings.HasPrefix(b, "release/"):
-		return BranchRelease
 	case parse.FeatureBranch(b):
 		return BranchFeature
 	case prBranch.MatchString(b):
