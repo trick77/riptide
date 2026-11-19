@@ -81,12 +81,54 @@ func TestLayoutSlots(t *testing.T) {
 		t.Errorf("cards with the first resolution worded = %v", got)
 	}
 
+	// The model worded only lesser gains and resolutions: the best of each
+	// keeps its slot in the rules' words, the worded ones show beside it.
+	got = columns(layout(a, &Text{Cards: []CardText{{Signal: "g2"}, {Signal: "g3"}, {Signal: "d2"}}}).Cards)
+	if !slices.Equal(got[ColumnGood], []string{"g1", "g2", "g3"}) || !slices.Equal(got[ColumnDone], []string{"d1", "d2"}) {
+		t.Errorf("cards with lesser gains worded = %v", got)
+	}
+
 	// An analysis stored before small gains were signals: nothing good, no
 	// comparison, the page says "unremarkable".
 	old := metrics.Assessment{Signals: []metrics.Signal{sig("b1", metrics.ToneAttention)},
 		Team: []metrics.Fact{{Verdict: metrics.ChangeNone}}}
 	if l := layout(old, &Text{Cards: []CardText{{Signal: "b1"}}}); l.Tally != (Tally{Bad: 1}) || len(l.Cards) != 1 {
 		t.Errorf("old row = %+v", l)
+	}
+}
+
+// Gains and resolutions show as ranked, across both columns, whichever the
+// model worded.
+func TestLayoutKeepsRankAcrossColumns(t *testing.T) {
+	a := metrics.Assessment{Signals: []metrics.Signal{
+		sig("g1", metrics.ToneGood), sig("g2", metrics.ToneGood), sig("d1", "done"),
+	}}
+	var ids []string
+	for _, c := range layout(a, &Text{Cards: []CardText{{Signal: "g2"}}}).Cards {
+		ids = append(ids, c.Signal)
+	}
+	if !slices.Equal(ids, []string{"g1", "g2", "d1"}) {
+		t.Errorf("cards = %v", ids)
+	}
+}
+
+// A card the model worded shows though a focus repo carries its signal (a
+// review worsening's drivers do): its words are never dropped.
+func TestWordedCardBesideItsFocus(t *testing.T) {
+	a := metrics.Assessment{
+		Signals: []metrics.Signal{sig("review", metrics.ToneAttention), sig("b2", metrics.ToneHint)},
+		Focus:   []metrics.FocusRepo{{Repo: "kasse/kasse-api", Signals: []string{"review"}}},
+	}
+	l := layout(a, &Text{Focus: []FocusText{{Repo: "kasse/kasse-api"}}, Cards: []CardText{{Signal: "review", Lever: "pairing"}}})
+	if got := columns(l.Cards); !slices.Equal(got[ColumnBad], []string{"review"}) || l.Cards[0].Lever != "pairing" {
+		t.Errorf("cards = %+v", l.Cards)
+	}
+	if len(l.Focus) != 1 {
+		t.Errorf("focus = %+v", l.Focus)
+	}
+	// Unworded, the focus speaks for it: no card.
+	if l := layout(a, &Text{Focus: []FocusText{{Repo: "kasse/kasse-api"}}}); len(l.Cards) != 0 {
+		t.Errorf("unworded cards = %+v", l.Cards)
 	}
 }
 

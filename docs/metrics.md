@@ -577,7 +577,10 @@ its open PRs are those at the period's end, the page's those open now. `metrics.
 The layout puts the gains and resolutions on the left ("runs") and the rest
 on the right ("stuck"), with a tally of each. Gains rank last, so they get
 slots of their own (the best 2 gains, 1 resolution) on top of the 4 cards,
-worded or not. Without a gain or a resolution the left says
+worded or not. The best gain and resolution always keep theirs; a lesser
+one the model worded shows beside them, past the slots if need be, since
+worded text is never dropped (nor where a focus repo carries its signal).
+Without a gain or a resolution the left says
 "unremarkable": a quiet period is no success (user: "wenn nichts läuft, ist
 läuft gut übertrieben"). A change of deploy frequency or of a kind's build
 success carries its weeks in both periods (`series`), the numbers the
