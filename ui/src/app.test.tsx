@@ -568,6 +568,234 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
+  it("drops an ask failure once its view's status reloads", async () => {
+    let gets = 0;
+    const calls = mockFetch((url, init) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis") {
+        if (init?.method === "POST")
+          return new Response(JSON.stringify({ detail: "already running" }), {
+            status: 409,
+          });
+        gets++;
+        return analysisStatus({ state: "none", enabled: true });
+      }
+      return metrics();
+    });
+    render(<App />);
+    const p = within(await screen.findByTestId("assessment"));
+    fireEvent.click(p.getByRole("button", { name: "Jetzt einschätzen" }));
+    expect(
+      await p.findByText(/Einschätzung nicht gestartet: .*already running/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "12 W" }));
+    await waitFor(() =>
+      expect(
+        calls.some((c) => c.startsWith("/api/analysis") && /weeks=12/.test(c)),
+      ).toBe(true),
+    );
+    await screen.findByTestId("assessment");
+    const before = gets;
+    fireEvent.click(screen.getByRole("button", { name: "4 W" }));
+    // Back on the 4-week view with its status loaded anew.
+    await waitFor(() => expect(gets).toBeGreaterThan(before));
+    await screen.findByTestId("assessment");
+    expect(
+      screen.queryByText(/Einschätzung nicht gestartet/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("asks once on a double click", async () => {
+    let posts = 0;
+    const calls = mockFetch((url, init) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis") {
+        if (init?.method === "POST" && ++posts > 1)
+          return new Response(JSON.stringify({ detail: "already running" }), {
+            status: 409,
+          });
+        return analysisStatus({
+          state: "none",
+          enabled: true,
+          running: posts > 0,
+        });
+      }
+      return metrics();
+    });
+    render(<App />);
+    const p = within(await screen.findByTestId("assessment"));
+    const button = p.getByRole("button", { name: "Jetzt einschätzen" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    // Running from the click on, before the POST answers.
+    expect(p.getByRole("button", { name: "läuft …" })).toBeDisabled();
+    expect(await p.findByText(/läuft, meist unter einer Minute/)).toBeVisible();
+    expect(
+      calls.filter((c) => c.startsWith("POST /api/analysis")),
+    ).toHaveLength(1);
+    expect(p.queryByText(/Einschätzung nicht gestartet/)).toBeNull();
+  });
+
+  // Back on a view before the other one loaded, the page still shows the
+  // view's last status while its new one is on its way.
+  async function backBeforeLoad(): Promise<(r: Response) => void> {
+    const inner = globalThis.fetch;
+    const held: { raw: string; release: (r: Response) => void }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((raw: string, init?: RequestInit) =>
+        init?.method !== "POST" && raw.startsWith("/api/analysis")
+          ? new Promise<Response>((release) => held.push({ raw, release }))
+          : inner(raw, init),
+      ),
+    );
+    const fourWeeks = (h: { raw: string }) =>
+      new URL(h.raw, "http://riptide.test").searchParams.get("weeks") === "4";
+    fireEvent.click(screen.getByRole("button", { name: "12 W" }));
+    fireEvent.click(screen.getByRole("button", { name: "4 W" }));
+    await waitFor(() => expect(held.some(fourWeeks)).toBe(true));
+    return held.find(fourWeeks)!.release;
+  }
+
+  it("reloads the status after an ask that found a run going", async () => {
+    let started = false;
+    mockFetch((url, init) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis") {
+        // Someone else's run started meanwhile: the POST finds it going.
+        if (init?.method === "POST") {
+          started = true;
+          return new Response(JSON.stringify({ detail: "already running" }), {
+            status: 409,
+          });
+        }
+        return analysisStatus({
+          state: "none",
+          enabled: true,
+          running: started,
+        });
+      }
+      return metrics();
+    });
+    render(<App />);
+    const p = within(await screen.findByTestId("assessment"));
+    fireEvent.click(p.getByRole("button", { name: "Jetzt einschätzen" }));
+    expect(await p.findByText(/läuft, meist unter einer Minute/)).toBeVisible();
+    expect(p.getByRole("button", { name: "läuft …" })).toBeDisabled();
+    // Its own reload keeps the box: it says why nothing was started.
+    expect(
+      p.getByText(/Einschätzung nicht gestartet: .*already running/),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps an ask failure past a status sent before it", async () => {
+    mockFetch((url, init) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis") {
+        if (init?.method === "POST")
+          return new Response(JSON.stringify({ detail: "already running" }), {
+            status: 409,
+          });
+        return analysisStatus({ state: "none", enabled: true });
+      }
+      return metrics();
+    });
+    render(<App />);
+    await screen.findByTestId("assessment");
+    const release = await backBeforeLoad();
+    const p = within(screen.getByTestId("assessment"));
+    fireEvent.click(p.getByRole("button", { name: "Jetzt einschätzen" }));
+    await p.findByText(/Einschätzung nicht gestartet: .*already running/);
+    await act(async () =>
+      release(
+        new Response(
+          JSON.stringify(analysisStatus({ state: "none", enabled: true })),
+        ),
+      ),
+    );
+    expect(
+      p.getByText(/Einschätzung nicht gestartet: .*already running/),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps an ask's run past a status sent before it", async () => {
+    let asked = false;
+    mockFetch((url, init) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis") {
+        if (init?.method === "POST") asked = true;
+        return analysisStatus({ state: "none", enabled: true, running: asked });
+      }
+      return metrics();
+    });
+    render(<App />);
+    await screen.findByTestId("assessment");
+    const release = await backBeforeLoad();
+    const p = within(screen.getByTestId("assessment"));
+    fireEvent.click(p.getByRole("button", { name: "Jetzt einschätzen" }));
+    await p.findByText(/läuft, meist unter einer Minute/);
+    // The status asked before the POST says it is not running.
+    await act(async () =>
+      release(
+        new Response(
+          JSON.stringify(analysisStatus({ state: "none", enabled: true })),
+        ),
+      ),
+    );
+    expect(p.getByText(/läuft, meist unter einer Minute/)).toBeInTheDocument();
+    expect(p.getByRole("button", { name: "läuft …" })).toBeDisabled();
+  });
+
+  it("shows a view's late ask failure past another view's", async () => {
+    const calls = mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis")
+        return analysisStatus({ state: "none", enabled: true });
+      return metrics();
+    });
+    // The 4-week POST hangs until released; the 12-week one fails at once.
+    const inner = globalThis.fetch;
+    let release: (r: Response) => void = () => {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((raw: string, init?: RequestInit) => {
+        if (init?.method !== "POST") return inner(raw, init);
+        if (/weeks=12/.test(raw))
+          return Promise.resolve(
+            new Response(JSON.stringify({ detail: "cooling down" }), {
+              status: 429,
+            }),
+          );
+        return new Promise<Response>((r) => {
+          release = r;
+        });
+      }),
+    );
+    render(<App />);
+    let p = within(await screen.findByTestId("assessment"));
+    fireEvent.click(p.getByRole("button", { name: "Jetzt einschätzen" }));
+    fireEvent.click(screen.getByRole("button", { name: "12 W" }));
+    await waitFor(() =>
+      expect(
+        calls.some((c) => c.startsWith("/api/analysis") && /weeks=12/.test(c)),
+      ).toBe(true),
+    );
+    p = within(await screen.findByTestId("assessment"));
+    fireEvent.click(p.getByRole("button", { name: "Jetzt einschätzen" }));
+    await p.findByText(/Einschätzung nicht gestartet: .*cooling down/);
+    fireEvent.click(screen.getByRole("button", { name: "4 W" }));
+    // The 4-week panel with its status loaded anew, its POST still out.
+    p = within(await screen.findByTestId("assessment"));
+    await act(async () =>
+      release(
+        new Response(JSON.stringify({ detail: "boom" }), { status: 500 }),
+      ),
+    );
+    expect(
+      p.getByText(/Einschätzung nicht gestartet: .*boom/),
+    ).toBeInTheDocument();
+  });
+
   it("keeps polling a run after a failed poll", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
