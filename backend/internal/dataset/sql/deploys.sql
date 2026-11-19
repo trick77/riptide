@@ -2,11 +2,11 @@
 -- (Succeeded or Failed), with its kind per docs/metrics.md's deployment-frequency
 -- query:
 --   release     a successful deploy whose images differ from the same App's
---               previous successful deploy
+--               previous successful deploy naming images
 --   sync        a successful redeploy of the same images (config change,
---               manual re-sync)
---   first_seen  the App's first successful deploy in the data: nothing to
---               compare against, release or re-sync unknown
+--               manual re-sync), or one naming no images, even the App's first
+--   first_seen  the App's first successful deploy naming images in the data:
+--               nothing to compare against, release or re-sync unknown
 --   NULL        a failed sync: it deployed nothing
 -- The previous deploy is looked up over the App's whole history, not the
 -- window, so the window start does not turn every App's first deploy in it
@@ -25,7 +25,7 @@ WITH window_apps AS (
 history AS (
   SELECT a.id, a.images,
          lag(a.images) OVER w AS previous_images,
-         row_number() OVER w = 1 AS first_seen
+         a.images IS NOT NULL AND row_number() OVER w = 1 AS first_seen
   FROM (
     SELECT e.id, e.team, e.app_name, e.environment, e.occurred_at,
            -- Sorted: the same images in another order are not a change.
@@ -34,7 +34,9 @@ history AS (
     JOIN window_apps wa ON wa.app_name = e.app_name AND wa.environment IS NOT DISTINCT FROM e.environment
     WHERE e.team = $1 AND e.operation_phase = 'Succeeded' AND e.occurred_at < $3
   ) a
-  WINDOW w AS (PARTITION BY a.team, a.app_name, a.environment ORDER BY a.occurred_at, a.id)
+  -- A sync naming no images deployed none: its own partition, so it is a
+  -- sync and the next deploy compares with the images before it.
+  WINDOW w AS (PARTITION BY a.team, a.app_name, a.environment, a.images IS NULL ORDER BY a.occurred_at, a.id)
 )
 SELECT a.app_name AS app,
        -- The App's product is the project of the GitOps repo it deploys
