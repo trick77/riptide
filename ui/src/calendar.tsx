@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 import type { DeployDay, DeployWeekday, Week } from "./api";
 import { labelEvery, Tip } from "./charts";
 import { fullDate, num } from "./format";
+import { SEP } from "./shared";
 import { SrTable } from "./ui";
 
 const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
@@ -17,9 +18,6 @@ const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 const SHADE = ["bg-cell-empty", "bg-seq-1", "bg-seq-2", "bg-seq-3", "bg-seq-4"];
 // A filled cell's faint top highlight.
 const HIGHLIGHT = "bg-linear-to-b from-white/10 to-white/0";
-
-const EN = String.fromCharCode(0x2002);
-const SEP = `${EN}·${EN}`;
 
 // "2026-11-12" as a local date: new Date("2026-11-12") is UTC midnight,
 // the day before west of UTC.

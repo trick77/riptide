@@ -33,6 +33,7 @@ import { shareLow, Spark } from "./charts";
 import { FailureHeatmap } from "./heatmap";
 import { Quiver } from "./quiver";
 import { Sankey, type SankeyLink, type SankeyNode } from "./sankey";
+import { SEP, TABLE_CELL as CELL, TABLE_HEAD as HEAD } from "./shared";
 import type { Tab } from "./state";
 import {
   Card,
@@ -57,10 +58,6 @@ const KIND_STROKE: Record<RunKind, string> = {
   other: "var(--color-other)",
   unknown: "var(--color-axis)",
 };
-
-const HEAD =
-  "border-b border-border pb-2 text-[11px] font-medium tracking-[.12em] text-muted uppercase";
-const CELL = "border-b border-border-soft py-2 text-[13.5px] tabular-nums";
 
 // A kind's weekly success rate on the scale all cards share.
 function KindSpark({ b, low }: { b: BuildStats; low: number }) {
@@ -594,10 +591,6 @@ const OUTCOME_LOOK: Record<
   no_verdict: { color: "var(--color-faint)", linkOpacity: 0.45, hatch: true },
   outlier: { color: "var(--color-ochre)", linkOpacity: 0.45 },
 };
-
-// A middot between parts of a heading, an en space either side.
-const EN = String.fromCharCode(0x2002);
-const SEP = `${EN}·${EN}`;
 
 // The repos ranked by CI time: the sequential ramp, the largest brightest;
 // the series ramp's fixed order would put no rank in the colours. More

@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 import type { HeatCell, HeatClass, Hotspots, KindHotspots, Week } from "./api";
 import { labelEvery } from "./charts";
 import { num, pct } from "./format";
+import { SEP } from "./shared";
 import { SrTable } from "./ui";
 
 type Look = { className: string; style?: CSSProperties };
@@ -70,10 +71,6 @@ function cellLook(c: HeatCell): Look {
   if (c.step == null) return NO_VERDICT;
   return stepLook(c.step);
 }
-
-// A title separator: the middot with an en space each side.
-const EN = String.fromCharCode(0x2002);
-const SEP = `${EN}·${EN}`;
 
 const TIP_W = 290;
 

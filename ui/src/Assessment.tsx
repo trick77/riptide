@@ -17,7 +17,6 @@ import {
   type FocusRepo,
   type LayoutCard,
   type Metrics,
-  type PRWaiting,
   type Query,
   type Signal,
   type WaitingCounts,
@@ -25,36 +24,17 @@ import {
 import { shareLow, Spark } from "./charts";
 import { stageNames } from "./Flow";
 import { clock, dayMonth, dur, money, num, pct, stage } from "./format";
+import { SEP, WAIT_FILL, WAITS } from "./shared";
 import type { Tab } from "./state";
 import { Delta, Eyebrow, Pill } from "./ui";
 
 const POLL_MS = 3000;
 // Small meta text: plain spaces around the middot are fine there.
-const SEP = ` ${String.fromCharCode(0x00b7)} `;
-// In a heading an en space each side: plain spaces read cramped (user).
-const EN = String.fromCharCode(0x2002);
-const HEAD_SEP = `${EN}${String.fromCharCode(0x00b7)}${EN}`;
+const META_SEP = ` ${String.fromCharCode(0x00b7)} `;
 
 // The column, lever and facts tab of an item are the backend's (layout):
 // the page only shows them.
 type Column = LayoutCard["column"];
-
-// What a jam waits on, in the order of the wait chain: one shade of the
-// validated sequential ramp per step, the draft grey.
-const WAIT_ORDER: PRWaiting[] = [
-  "first_review",
-  "review",
-  "changes",
-  "merge",
-  "draft",
-];
-const WAIT_COLOR: Record<PRWaiting, string> = {
-  first_review: "bg-seq-4",
-  review: "bg-seq-3",
-  changes: "bg-seq-2",
-  merge: "bg-seq-1",
-  draft: "bg-other",
-};
 
 // A card in its column's colour: the left rule, a wash fading down from
 // the top, the tag. Green runs, red is stuck, blue is resolved.
@@ -238,7 +218,7 @@ function LowSample({ s }: { s: Signal }) {
 // a bar with its legend when they differ.
 function WaitingBar({ w }: { w: WaitingCounts }) {
   const { t } = useTranslation();
-  const parts = WAIT_ORDER.filter((k) => w[k] > 0);
+  const parts = WAITS.filter((k) => w[k] > 0);
   const total = parts.reduce((s, k) => s + w[k], 0);
   if (!total) return null;
   if (parts.length === 1)
@@ -258,7 +238,7 @@ function WaitingBar({ w }: { w: WaitingCounts }) {
         {parts.map((k) => (
           <span
             key={k}
-            className={`rounded-sm ${WAIT_COLOR[k]}`}
+            className={`rounded-sm ${WAIT_FILL[k].swatch}`}
             style={{ flex: w[k] }}
           />
         ))}
@@ -267,7 +247,7 @@ function WaitingBar({ w }: { w: WaitingCounts }) {
         {parts.map((k) => (
           <span key={k}>
             <i
-              className={`mr-1 inline-block size-2 rounded-sm ${WAIT_COLOR[k]}`}
+              className={`mr-1 inline-block size-2 rounded-sm ${WAIT_FILL[k].swatch}`}
             />
             {t("overview.assess.waitingOn", {
               what: t(`overview.assess.waiting.${k}`),
@@ -717,7 +697,7 @@ function Panel({
     // board.
     const scope = m.product ?? t("page.allProducts");
     const lines = [
-      `## Retro-Input riptide${HEAD_SEP}${m.meta.team}${HEAD_SEP}${scope}${HEAD_SEP}${weeks}`,
+      `## Retro-Input riptide${SEP}${m.meta.team}${SEP}${scope}${SEP}${weeks}`,
       "",
       ...retros.map(([q, ctx]) => `- ${q} (${ctx})`),
       ...(w.question ? [`- ${w.question}`] : []),
@@ -776,18 +756,18 @@ function Panel({
         <p className="m-0 text-[12.5px] text-muted">
           {/* The whole page reads closed weeks: nothing to set apart. */}
           {weeks}
-          {SEP}
+          {META_SEP}
           {daysLabel(a, st.zone || undefined)}
           {shown && (
             <>
-              {SEP}
+              {META_SEP}
               {t("overview.assess.madeAt", {
                 date: stamp(shown.finished_at, lang),
               })}
               , {t(`overview.assess.trigger.${shown.trigger}`)}
               {shown.weeks_old > 0 && (
                 <>
-                  {SEP}
+                  {META_SEP}
                   <span className="text-ochre">
                     {t("overview.assess.older", { count: shown.weeks_old })}
                   </span>
@@ -797,7 +777,7 @@ function Panel({
           )}
           {st.next_run && (
             <>
-              {SEP}
+              {META_SEP}
               {t("overview.assess.next", { date: stamp(st.next_run, lang) })}
             </>
           )}

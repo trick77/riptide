@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import type { LeadChain, Stage, StageKey } from "./api";
 import { Tip } from "./charts";
 import { dur, num } from "./format";
+import { SEP } from "./shared";
 import { Card, CardHead, SrTable } from "./ui";
 
 // Drawn in rendered px: the plot measures its width, so dots and labels
@@ -27,7 +28,6 @@ const DOT_LEVELS = 3;
 const FALLBACK_W = 640;
 // Below this the minor ticks' labels would overprint.
 const NARROW = 480;
-const SEP = `${String.fromCharCode(0x2002)}·${String.fromCharCode(0x2002)}`;
 
 // Axis ticks in seconds; the ones outside the backend's bounds drop out,
 // the minor ones on a narrow plot.

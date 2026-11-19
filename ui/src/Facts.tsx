@@ -12,6 +12,7 @@ import type {
 } from "./api";
 import { ciWord, dateTime, dur, shortImage, shortSha, stage } from "./format";
 import terms from "./i18n/terms.json";
+import { TABLE_HEAD } from "./shared";
 import type { Tab } from "./state";
 import { Mono, Pill, SectionHead, type Tone } from "./ui";
 
@@ -120,7 +121,7 @@ function Table({
           {cols.map((c, i) => (
             <th
               key={c.label}
-              className={`border-b border-border pb-2 text-[11px] font-medium tracking-[.12em] text-muted uppercase ${
+              className={`${TABLE_HEAD} ${
                 c.right ? "text-right" : "text-left"
               } ${i < cols.length - 1 ? "pr-2.5" : ""}`}
             >

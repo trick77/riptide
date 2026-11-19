@@ -1060,6 +1060,53 @@ describe("App", () => {
     );
   });
 
+  it("colours a jam's waits as the open PRs chart does", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis") {
+        const a = assessment();
+        return analysedStatus({
+          assessment: {
+            ...a,
+            focus: a.focus.map((f) =>
+              f.waiting
+                ? {
+                    ...f,
+                    waiting: {
+                      draft: 1,
+                      first_review: 4,
+                      review: 2,
+                      changes: 1,
+                      merge: 3,
+                    },
+                  }
+                : f,
+            ),
+          },
+        });
+      }
+      return metrics();
+    });
+    render(<App />);
+    const p = within(await screen.findByTestId("assessment"));
+    // Legend and bar in the wait chain's order, one colour per wait.
+    const want: [string, string][] = [
+      ["wartet auf erstes Review: 4", "bg-s1"],
+      ["wartet auf Review: 2", "bg-s3"],
+      ["wartet auf Änderungen: 1", "bg-s4"],
+      ["wartet auf Merge: 3", "bg-s2"],
+      ["wartet auf Entwurf: 1", "bg-other"],
+    ];
+    const keys = want.map(([text]) => p.getByText(text));
+    keys.forEach((k, i) =>
+      expect(k.querySelector("i")).toHaveClass(want[i][1]),
+    );
+    const bar = keys[0].parentElement!.previousElementSibling!;
+    expect([...bar.children].map((s) => s.className)).toEqual(
+      want.map(([, c]) => `rounded-sm ${c}`),
+    );
+  });
+
   it("says so when nothing stands out", async () => {
     mockFetch((url) => {
       if (url.pathname === "/api/facts") return facts();

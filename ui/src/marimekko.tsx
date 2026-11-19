@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next";
 import type { OpenPRs, OpenRepo, PRWaiting } from "./api";
 import { Tip } from "./charts";
 import { num, pct } from "./format";
+import { SEP, WAIT_FILL as FILL } from "./shared";
 import { Legend, Swatch } from "./ui";
 
 const H = 170;
@@ -21,7 +22,6 @@ const GAP = 3;
 const AXIS = 42;
 // The 2px gap between segments only on segments taller than it.
 const SEG_GAP_MIN = 4;
-const SEP = `${String.fromCharCode(0x2002)}·${String.fromCharCode(0x2002)}`;
 // Narrower than this many characters a name is no longer read, only
 // guessed at.
 const MIN_CHARS = 7;
@@ -166,16 +166,6 @@ function RepoLabel({ repo, probe }: { repo: string; probe?: boolean }) {
   );
 }
 
-// A segment fades from the series' token at its top to 55 % at its foot;
-// a draft is grey, its author's, not the team's.
-const FILL: Record<PRWaiting, { bar: string; swatch: string }> = {
-  first_review: { bar: "from-s1 to-s1/55", swatch: "bg-s1" },
-  review: { bar: "from-s3 to-s3/55", swatch: "bg-s3" },
-  changes: { bar: "from-s4 to-s4/55", swatch: "bg-s4" },
-  merge: { bar: "from-s2 to-s2/55", swatch: "bg-s2" },
-  draft: { bar: "from-other to-other/55", swatch: "bg-other" },
-};
-
 export function OpenMekko({
   o,
   waits,
@@ -184,7 +174,7 @@ export function OpenMekko({
 }: {
   o: OpenPRs;
   // Bottom to top.
-  waits: PRWaiting[];
+  waits: readonly PRWaiting[];
   labels: MekkoLabels;
   // Called only when the measured labels change: the table numbers its
   // rows from them.

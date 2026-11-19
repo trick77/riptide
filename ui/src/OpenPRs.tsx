@@ -5,7 +5,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { Metrics, PRWaiting, WaitingCounts } from "./api";
+import type { Metrics, WaitingCounts } from "./api";
 import { dateTime, dur, num } from "./format";
 import {
   Breakable,
@@ -14,22 +14,9 @@ import {
   OpenMekko,
   RepoNo,
 } from "./marimekko";
+import { TABLE_CELL as CELL, TABLE_HEAD as HEAD, WAITS } from "./shared";
 import type { Tab } from "./state";
 import { Card, CardHead, Direction, Mono, Pill, Tile } from "./ui";
-
-const HEAD =
-  "border-b border-border pb-2 text-[11px] font-medium tracking-[.12em] text-muted uppercase";
-const CELL = "border-b border-border-soft py-2 text-[13.5px] tabular-nums";
-
-// The order the waits read in: the author's, then the reviewers', then
-// the merge.
-export const WAITS: PRWaiting[] = [
-  "first_review",
-  "review",
-  "changes",
-  "merge",
-  "draft",
-];
 
 // stuck: the PRs counted are long open or jammed, so waiting for a first
 // review is what is stuck (red); a fresh PR waiting for one is not.
