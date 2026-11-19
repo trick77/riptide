@@ -8,25 +8,41 @@ import { num } from "./format";
 
 export type Series = { key: string; label: string; className: string };
 
-export function Tip({
-  title,
-  rows,
-}: {
-  title: string;
-  rows: [string, ReactNode][];
-}) {
+// A tooltip above its anchor, one of two shapes:
+// - rows of label and value, centred on the anchor, one line per row;
+// - plain lines, `at.width` px wide at `at.left` px from the anchor's left
+//   edge, wrapping (the caller keeps it inside the screen).
+type TipProps = { title: string } & (
+  | { rows: [string, ReactNode][] }
+  | { lines: string[]; at: { left: number; width: number } }
+);
+
+export function Tip(p: TipProps) {
+  const placed = "at" in p;
   return (
     <div
       role="tooltip"
-      className="pointer-events-none absolute bottom-[calc(100%+8px)] left-1/2 z-10 min-w-[150px] -translate-x-1/2 rounded-ui-sm border border-elevated-border bg-elevated px-2.5 py-2 text-[12.5px] leading-normal whitespace-nowrap text-ink-dim shadow-menu"
+      className={`pointer-events-none absolute bottom-[calc(100%+8px)] z-10 rounded-ui-sm border border-elevated-border bg-elevated px-2.5 py-2 text-[12.5px] leading-normal text-ink-dim shadow-menu ${
+        placed
+          ? ""
+          : "left-1/2 min-w-[150px] -translate-x-1/2 whitespace-nowrap"
+      }`}
+      style={placed ? p.at : undefined}
     >
-      <div className="font-medium text-elevated-ink">{title}</div>
-      {rows.map(([k, v]) => (
-        <div key={k} className="flex justify-between gap-3.5">
-          <span>{k}</span>
-          <span className="tabular-nums">{v}</span>
-        </div>
-      ))}
+      <div className="font-medium text-elevated-ink">{p.title}</div>
+      {"rows" in p &&
+        p.rows.map(([k, v]) => (
+          <div key={k} className="flex justify-between gap-3.5">
+            <span>{k}</span>
+            <span className="tabular-nums">{v}</span>
+          </div>
+        ))}
+      {placed &&
+        p.lines.map((l, i) => (
+          <div key={i} className="tabular-nums">
+            {l}
+          </div>
+        ))}
     </div>
   );
 }

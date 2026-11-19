@@ -10,7 +10,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import type { HeatCell, HeatClass, Hotspots, KindHotspots, Week } from "./api";
-import { labelEvery } from "./charts";
+import { labelEvery, Tip } from "./charts";
 import { num, pct } from "./format";
 import { SEP } from "./shared";
 import { SrTable } from "./ui";
@@ -81,31 +81,6 @@ function tipLeft(e: MouseEvent<HTMLElement>): number {
   const want = r.left + r.width / 2 - TIP_W / 2;
   const left = Math.max(8, Math.min(want, window.innerWidth - 8 - TIP_W));
   return left - r.left;
-}
-
-function HeatTip({
-  title,
-  lines,
-  left,
-}: {
-  title: string;
-  lines: string[];
-  left: number;
-}) {
-  return (
-    <div
-      role="tooltip"
-      className="pointer-events-none absolute bottom-[calc(100%+8px)] z-10 rounded-ui-sm border border-elevated-border bg-elevated px-2.5 py-2 text-[12.5px] leading-normal text-ink-dim shadow-menu"
-      style={{ left, width: TIP_W }}
-    >
-      <div className="font-medium text-elevated-ink">{title}</div>
-      {lines.map((l) => (
-        <div key={l} className="tabular-nums">
-          {l}
-        </div>
-      ))}
-    </div>
-  );
 }
 
 // A legend entry, drawn exactly as the cells are, only smaller.
@@ -225,10 +200,10 @@ export function FailureHeatmap({
                     style={look.style}
                   />
                   {on && (
-                    <HeatTip
+                    <Tip
                       title={[label(r), cw(wi), kind].join(SEP)}
                       lines={lines(cell)}
-                      left={hover[2]}
+                      at={{ left: hover[2], width: TIP_W }}
                     />
                   )}
                 </div>
