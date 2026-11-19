@@ -1015,7 +1015,10 @@ export function Assessment({
   const [failure, setFailure] = useState<{ key: string; msg: string } | null>(
     null,
   );
-  const [askFailure, setAskFailure] = useState<string | null>(null);
+  const [askFailure, setAskFailure] = useState<{
+    key: string;
+    msg: string;
+  } | null>(null);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -1043,12 +1046,20 @@ export function Assessment({
     return () => clearTimeout(id);
   }, [running, st, failure]);
 
+  // The answer belongs to the view asked for: once the page shows another
+  // view, it must not replace that one's status (nothing would reload it).
   const ask = () => {
     setAskFailure(null);
     askAnalysis({ team, weeks, product })
-      .then((data) => setSt({ key, data }))
+      .then((data) =>
+        setSt((prev) => (prev && prev.key !== key ? prev : { key, data })),
+      )
       .catch((e: unknown) =>
-        setAskFailure(e instanceof Error ? e.message : String(e)),
+        setAskFailure((prev) =>
+          prev && prev.key !== key
+            ? prev
+            : { key, msg: e instanceof Error ? e.message : String(e) },
+        ),
       );
   };
 
@@ -1069,7 +1080,7 @@ export function Assessment({
       m={m}
       onAsk={ask}
       onFacts={onFacts}
-      askFailure={askFailure}
+      askFailure={askFailure?.key === key ? askFailure.msg : null}
     />
   );
 }
