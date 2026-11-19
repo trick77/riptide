@@ -59,6 +59,9 @@ func (d Deps) analysisStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st, err := d.Analysis.Status(r.Context(), analysisView(v))
+	if viewerLeft(w, r, err) {
+		return
+	}
 	if err != nil {
 		d.Log.ErrorContext(r.Context(), "analysis_status_failed", "team", v.team, logging.Err(err))
 		httpapi.WriteDetail(w, http.StatusInternalServerError, "Internal Server Error")
@@ -105,6 +108,9 @@ func (d Deps) analysisAsk(w http.ResponseWriter, r *http.Request) {
 	}
 	d.Log.InfoContext(r.Context(), "analysis_asked", "team", v.team, "weeks", av.Weeks, "product", av.Product)
 	st, err := d.Analysis.Status(r.Context(), av)
+	if viewerLeft(w, r, err) {
+		return
+	}
 	if err != nil {
 		d.Log.ErrorContext(r.Context(), "analysis_status_failed", "team", v.team, logging.Err(err))
 		httpapi.WriteDetail(w, http.StatusInternalServerError, "Internal Server Error")
