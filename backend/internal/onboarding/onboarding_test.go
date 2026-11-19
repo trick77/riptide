@@ -21,7 +21,7 @@ type fakeBitbucket struct {
 	nextID   int
 	writes   []string
 	reads    map[string]int // "PROJ[/repo]" -> webhook listings
-	deny     map[string]int // "METHOD PROJ[/repo]" -> status
+	deny     map[string]int // "METHOD PROJ[/repo]" or "METHOD PROJ[/repo] id" -> status
 	pageSize int
 }
 
@@ -58,7 +58,11 @@ func (f *fakeBitbucket) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.page(w, r, values)
 		return
 	}
-	if code := f.deny[r.Method+" "+key]; code != 0 {
+	code := f.deny[r.Method+" "+key]
+	if len(rest) == 2 && code == 0 {
+		code = f.deny[r.Method+" "+key+" "+rest[1]]
+	}
+	if code != 0 {
 		w.WriteHeader(code)
 		_, _ = io.WriteString(w, `{"errors":[{"message":"denied"}]}`)
 		return
@@ -221,7 +225,8 @@ func TestDryRunWritesNothing(t *testing.T) {
 		t.Fatalf("project: %+v", r)
 	}
 	f.hook("PLAT", "riptide", wantURL)
-	if r := o.Remove(t.Context(), proj); r.Status != "ok" || !strings.Contains(r.Detail, "would remove") {
+	if r := o.Remove(t.Context(), proj); r.Status != "ok" || !strings.Contains(r.Detail, "would remove") ||
+		!slices.Equal(r.Diff, []string{"webhook id=101 deleted"}) {
 		t.Fatalf("remove: %+v", r)
 	}
 	if len(f.writes) != 0 {
@@ -411,11 +416,31 @@ func TestFailuresAreRows(t *testing.T) {
 func TestRemove(t *testing.T) {
 	f, o := setup(t)
 	f.hook("PLAT", "riptide", oldURL)
-	if r := o.Remove(t.Context(), proj); r.Status != "ok" || len(f.hooks["PLAT"]) != 0 {
+	if r := o.Remove(t.Context(), proj); r.Status != "ok" || r.Detail != "webhook removed" ||
+		!slices.Equal(r.Diff, []string{"webhook id=100 deleted"}) || len(f.hooks["PLAT"]) != 0 {
 		t.Fatalf("remove: %+v", r)
 	}
 	if r := o.Remove(t.Context(), proj); r.Status != "skipped" {
 		t.Fatalf("again: %+v", r)
+	}
+}
+
+// A remove failing on the second of three hooks names the first as gone and
+// the other two as left.
+func TestRemoveFailureNamesTheDeleted(t *testing.T) {
+	f, o := setup(t)
+	f.hook("PLAT", "riptide", oldURL)
+	f.hook("PLAT", "riptide", wantURL)
+	f.hook("PLAT", "riptide", wantURL)
+	f.deny["DELETE PLAT 101"] = http.StatusInternalServerError
+	r := o.Remove(t.Context(), proj)
+	if r.Status != "failed" || !strings.Contains(r.Detail, "delete webhook id=101: HTTP 500") ||
+		!strings.HasSuffix(r.Detail, "; left: id=101, 102") ||
+		!slices.Equal(r.Diff, []string{"webhook id=100 deleted"}) {
+		t.Fatalf("remove: %+v", r)
+	}
+	if len(f.hooks["PLAT"]) != 2 || toInt(f.hooks["PLAT"][0]["id"]) != 101 {
+		t.Fatalf("hooks = %v", f.hooks["PLAT"])
 	}
 }
 
