@@ -770,14 +770,10 @@ function Panel({
     >
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
         <p className="m-0 text-[12.5px] text-muted">
-          <span
-            title={t("overview.assess.withoutCurrent")}
-            className="cursor-help border-b border-dotted border-faint"
-          >
-            {weeks}
-            {SEP}
-            {daysLabel(a, st.zone || undefined)}
-          </span>
+          {/* The whole page reads closed weeks: nothing to set apart. */}
+          {weeks}
+          {SEP}
+          {daysLabel(a, st.zone || undefined)}
           {shown && (
             <>
               {SEP}

@@ -239,7 +239,7 @@ func TestDeployDays(t *testing.T) {
 
 func TestCalendarCurrentPeriodOnly(t *testing.T) {
 	ds := deployData()
-	m := Compute(ds, ds, Params{Period: p4(), Previous: PreviousPeriod(4, now, zurich)})
+	m := Compute(ds, ds, nil, Params{Period: p4(), Previous: PreviousPeriod(4, now, zurich)})
 	if len(m.Delivery.Frequency.Days) != 28 {
 		t.Errorf("days = %d", len(m.Delivery.Frequency.Days))
 	}
@@ -956,13 +956,13 @@ func TestCosts(t *testing.T) {
 
 func TestCompute(t *testing.T) {
 	ds := prData()
-	m := Compute(ds, nil, Params{Period: p4(), Product: "portal"})
+	m := Compute(ds, nil, nil, Params{Period: p4(), Product: "portal"})
 	if m.Product == nil || *m.Product != "portal" || m.Review.Merged != 1 || len(m.Period.Weeks) != 4 ||
 		len(m.Review.CycleHistogram.UpperBoundsS) != len(m.Review.CycleHistogram.Human)-1 {
 		t.Errorf("portal = %+v", m)
 	}
 	// A product without data is all of them.
-	if m := Compute(ds, nil, Params{Period: p4(), Product: "nope"}); m.Product != nil || m.Review.Merged != 3 {
+	if m := Compute(ds, nil, nil, Params{Period: p4(), Product: "nope"}); m.Product != nil || m.Review.Merged != 3 {
 		t.Errorf("unknown product = %+v", m.Review)
 	}
 }

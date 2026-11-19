@@ -677,7 +677,7 @@ func TestMetricsMatchTheDocumentedQueries(t *testing.T) {
 	st, pool := migrated(t)
 	seed(t, pool)
 	period := metrics.NewPeriod(26, days(28), time.UTC)
-	m := metrics.Compute(load(t, st, period.From, period.To), nil, metrics.Params{Period: period})
+	m := metrics.Compute(load(t, st, period.From, period.To), nil, nil, metrics.Params{Period: period})
 
 	t.Run("deployment frequency", func(t *testing.T) {
 		rows := docRows(t, pool, "#### Deployment-frequency query",

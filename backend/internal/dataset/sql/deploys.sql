@@ -46,6 +46,14 @@ SELECT a.app_name AS app,
          LIMIT 1) AS project,
        a.environment,
        a.revision,
+       -- The revision's first successful sync to this environment by the
+       -- team, over all history: a release counts in the week it first
+       -- deployed, whatever window reads it.
+       (SELECT min(r.occurred_at)
+          FROM argocd_events r
+         WHERE r.team = a.team AND r.revision = a.revision
+           AND r.environment IS NOT DISTINCT FROM a.environment
+           AND r.operation_phase = 'Succeeded') AS revision_first_at,
        a.occurred_at AS at,
        a.operation_phase AS phase,
        a.duration_seconds AS duration_s,

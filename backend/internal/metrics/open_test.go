@@ -201,7 +201,7 @@ func TestComputeOpenPRsAgainstThePrevious(t *testing.T) {
 		ds.Meta.To = prevEnd
 		ds.OpenPRs = jam("kasse/kasse-old")
 	})
-	m := Compute(cur, prev, Params{Period: p4(), Previous: PreviousPeriod(4, now, zurich)})
+	m := Compute(cur, prev, nil, Params{Period: p4(), Previous: PreviousPeriod(4, now, zurich)})
 	if o := m.OpenPRs; o.Jammed != 2 || o.Long != 8 || o.Inactive != 4 {
 		t.Fatalf("jammed %d long %d inactive %d", o.Jammed, o.Long, o.Inactive)
 	}

@@ -25,7 +25,13 @@ export type Product = { key: string; repos: string[]; apps: string[] };
 
 export type Week = { start: string; end: string; kw: number };
 
-export type Period = { from: string; to: string; weeks: Week[] };
+// last_day: the last calendar day before `to`, YYYY-MM-DD, the backend's.
+export type Period = {
+  from: string;
+  to: string;
+  last_day: string;
+  weeks: Week[];
+};
 
 export type Spread = { n: number; p50: number | null; p90: number | null };
 
@@ -350,7 +356,7 @@ export type OpenRepo = {
   inactive: number;
 };
 
-// The PRs open at the period's end, whenever opened.
+// The PRs open now, whenever opened: the page's one number of now.
 export type OpenPRs = {
   at: string;
   long_days: number;
@@ -403,6 +409,7 @@ export type KindChange = {
 export type Comparison = {
   from: string;
   to: string;
+  last_day: string;
   deploy_frequency: Change;
   deploy_success: Change;
   lead_time: Change;
@@ -430,6 +437,17 @@ export type Metrics = {
   build: Build;
   costs: Costs;
   comparison: Comparison;
+  running_week: RunningWeek;
+};
+
+// The week running now so far, counted in no other number of the page.
+export type RunningWeek = {
+  week: Week;
+  // Now, where the counts end.
+  to: string;
+  releases: number;
+  merged: number;
+  runs: number;
 };
 
 // A Jira key; url is null when the config sets no jira.base_url.
@@ -457,10 +475,12 @@ export type PRFact = {
   merged_at: string | null;
   prod_at: string | null;
   to_prod_s: number | null;
-  // A PR open at the period's end: its age then, what it waits on.
+  // A PR open now: its age, what it waits on.
   age_s: number | null;
   waiting: PRFactWaiting | null;
   idle_s: number | null;
+  // Merged or closed, else opened, in the running week: counted in no number.
+  running: boolean;
 };
 
 export type DeployFact = {
@@ -471,6 +491,8 @@ export type DeployFact = {
   new_images: string[];
   class: "failed" | "release" | "first_seen" | "sync";
   phase: string;
+  // Synced in the running week: counted in no number.
+  running: boolean;
 };
 
 export type RunFact = {
@@ -492,6 +514,8 @@ export type RunFact = {
   gitops: boolean;
   // Failed, and a rerun passed on the same commit.
   flaky: boolean;
+  // Run in the running week: counted in no number.
+  running: boolean;
 };
 
 export type Table<T> = { count: number; rows: T[] };

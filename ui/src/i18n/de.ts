@@ -58,7 +58,16 @@ export const de = {
     print: "Drucken / PDF",
     title: "Engineering-Metriken",
     scope:
-      "Team {{team}}, {{product}} · KW {{from}}–{{to}} · {{start}} bis {{end}} · verglichen mit den {{weeks}} Wochen davor",
+      "Team {{team}}, {{product}} · KW {{from}}–{{to}} · {{start}} bis {{end}} · verglichen mit den {{weeks}} Wochen davor, {{prevStart}} bis {{prevEnd}}",
+    running:
+      "Laufende Woche KW {{kw}} bis jetzt: {{releases}}, {{merged}}, {{runs}}. Zählt in keiner Zahl dieser Seite mit; nur die offenen PRs sind Stand jetzt.",
+    runningReleases_one: "{{count}} Release",
+    runningReleases_other: "{{count}} Releases",
+    runningMerged_one: "{{count}} PR gemerged",
+    runningMerged_other: "{{count}} PRs gemerged",
+    runningRuns_one: "{{count}} Lauf",
+    runningRuns_other: "{{count}} Läufe",
+    runningView: "Ansehen →",
     oneProduct: "Produkt {{product}}",
     allProductsLower: "alle Produkte",
     dataAsOf: "Datenstand:",
@@ -124,7 +133,6 @@ export const de = {
       "Was die letzten {{weeks}} ganzen Wochen zeigen, und wo sich am meisten bewegt.",
     assess: {
       weeks: "KW {{from}}–{{to}}",
-      withoutCurrent: "ohne die laufende Woche",
       ask: "↻ Neu einschätzen",
       askFirst: "Jetzt einschätzen",
       running: "läuft …",
@@ -572,7 +580,7 @@ export const de = {
     colWaiting: "Wartet auf",
     colInactive: "Inaktiv",
     viewPRs: "PRs ansehen →",
-    none: "Am Ende des Zeitraums war kein PR offen.",
+    none: "Gerade ist kein PR offen.",
     mekko: {
       head: "Wer wartet worauf: Breite = offene PRs im Repo, Höhe = Anteil pro Wartegrund, inaktive nicht dabei.",
       aria: "Offene PRs pro Repo, nach dem, worauf sie warten",
@@ -589,7 +597,7 @@ export const de = {
         "mehrere lang offene PRs im selben Repo auf ein erstes Review warten: dort fehlt ein Reviewer, oder die PRs sind zu gross.",
       lever:
         "Reviewer beim Öffnen nennen, alte PRs im Daily ansprechen, PRs schliessen, die niemand mehr braucht.",
-      def: "PRs, die am Ende des Zeitraums offen waren: geöffnet davor, weder gemerged, abgelehnt noch gelöscht. Alter ab dem Erstelldatum des PRs, lang offen ab {{days}} Tagen, Stau ab {{min}} lang offenen im selben Repo. Ein Entwurf ist nie lang offen und nie vergessen: er wartet auf seinen Autor. Pro Repo das Median-Alter, nie der älteste: einer allein bestimmt ihn.",
+      def: "PRs, die jetzt offen sind, auch in der laufenden Woche geöffnete; verglichen mit den am Ende der Vorperiode offenen: geöffnet davor, weder gemerged, abgelehnt noch gelöscht. Alter ab dem Erstelldatum des PRs, lang offen ab {{days}} Tagen, Stau ab {{min}} lang offenen im selben Repo. Ein Entwurf ist nie lang offen und nie vergessen: er wartet auf seinen Autor. Pro Repo das Median-Alter, nie der älteste: einer allein bestimmt ihn.",
       basis_one: "{{count}} offener PR, Stand {{at}}.",
       basis_other: "{{count}} offene PRs, Stand {{at}}.",
       coverage:
@@ -867,6 +875,7 @@ export const de = {
       "Offene zuerst, die ältesten oben, inaktive danach; dann die neuesten",
     openFor: "{{age}} offen",
     idleFor: "{{idle}} ohne Event",
+    runningNote: " · Zeilen mit «Laufende Woche» zählen in keiner Zahl mit",
     firstOf: " · die ersten {{limit}} von {{count}}",
     noHits: "Keine Treffer für «{{q}}».",
     empty: "Keine Einträge im Zeitraum.",

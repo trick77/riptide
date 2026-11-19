@@ -241,12 +241,16 @@ type PRFact struct {
 	MergedAt *time.Time `json:"merged_at"`
 	ProdAt   *time.Time `json:"prod_at"`
 	ToProdS  *float64   `json:"to_prod_s"`
-	// AgeS and Waiting are a PR open at the period's end: its age then and
+	// AgeS and Waiting are a PR open at the dataset's end (now on the page),
+	// as the open-PR section counts it: its age then and
 	// what it waits on, inactive when idle OpenInactiveDays; IdleS the time
 	// since its last event. Null for every other PR.
 	AgeS    *float64 `json:"age_s"`
 	Waiting *string  `json:"waiting"`
 	IdleS   *float64 `json:"idle_s"`
+	// Running: merged or closed, else opened, in the week running now, so counted
+	// in no number of the page. Never an open PR: those are a snapshot.
+	Running bool `json:"running"`
 }
 
 // DeployFact is one row of the deploy table.
@@ -258,7 +262,17 @@ type DeployFact struct {
 	NewImages   []string  `json:"new_images"`
 	Class       string    `json:"class"`
 	Phase       string    `json:"phase"`
+	// Running: deployed in the week running now, counted nowhere.
+	Running bool `json:"running"`
 }
+
+// runningTerm is the mark on a row of the running week, searched in both
+// languages.
+var runningTerm = uiTerm{"Laufende Woche", "This week"}
+
+// inRunning reports whether t is set and in the week running after the
+// period's end: the facts read on to now, the numbers stop at the period.
+func inRunning(t *time.Time, p Period) bool { return t != nil && !t.Before(p.To) }
 
 // RunFact is one row of the run table.
 type RunFact struct {
@@ -282,6 +296,9 @@ type RunFact struct {
 	// Flaky: failed, and a later run of the pipeline passed on the same
 	// commit, as the build section counts it (flakyRuns).
 	Flaky bool `json:"flaky"`
+	// Running: its COMPLETED event arrived in the week running now, as the
+	// windows split runs: counted nowhere.
+	Running bool `json:"running"`
 }
 
 // flakyTerm is a flaky run's mark on screen, searched in both languages.
@@ -422,7 +439,7 @@ type factPR struct {
 	idle    *float64
 }
 
-// factPRs are the PRs open at the period's end first, oldest first, the
+// factPRs are the PRs open at the dataset's end first, oldest first, the
 // inactive ones after them: the ones waiting, and the open PRs' link lands
 // on them. Then the window's other PRs, newest first. An open PR the window
 // has its row from the window, with the review times read there.
@@ -492,12 +509,36 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 	prod := ds.Meta.ProductionStage
 
 	prs := factPRs(ds)
+	// The dataset reads on to now, the period ends with the last closed week.
+	// Each row is marked by the instant its window took it on: a PR by its
+	// merge or close (else its opening), a deploy and a run by the event's
+	// arrival.
+	prRunning := func(x factPR) bool {
+		return x.age == nil && inRunning(cmp.Or(x.pr.MergedAt, x.pr.ClosedAt, x.pr.OpenedAt), p.Period)
+	}
+	runRunning := func(r dataset.Run) bool { return inRunning(&r.OccurredAt, p.Period) }
 	deploys := newestFirst(ds.Deploys, func(d dataset.Deploy) *time.Time { return &d.At })
 	runs := newestFirst(ds.Runs, runAt)
 	gitops := gitopsRun(ds)
-	// As the build section counts them: its runs, its pairing.
-	flaky := flakyRuns(teamRuns(ds, f, gitops))
-	isFlaky := func(r dataset.Run) bool { return verdict(r) == VerdictFailure && flaky[refOf(r)] }
+	// As the build section counts them: its runs, its pairing. A run of the
+	// period pairs with the period's runs only, as the build section saw
+	// them; a rerun after the period's end does not make it flaky there.
+	closed := *ds
+	closed.Runs = slices.DeleteFunc(slices.Clone(ds.Runs), runRunning)
+	flakyClosed := flakyRuns(teamRuns(&closed, f, gitops))
+	flakyAll := flakyRuns(teamRuns(ds, f, gitops))
+	isFlaky := func(r dataset.Run) bool {
+		if verdict(r) != VerdictFailure {
+			return false
+		}
+		if runRunning(r) {
+			return flakyAll[refOf(r)]
+		}
+		return flakyClosed[refOf(r)]
+	}
+	// The mark's own word as the whole search lists exactly the marked rows:
+	// a title saying "this week" is no row of the running week.
+	onlyRunning := m != "" && (string(m) == strings.ToLower(runningTerm.De) || string(m) == strings.ToLower(runningTerm.En))
 
 	return Facts{
 		ProductionStage: prod,
@@ -510,12 +551,15 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 			if !f.inKey(pr.Project) || pr.Bot {
 				return false
 			}
-			if m == "" {
-				return true
+			if m == "" || onlyRunning {
+				return m == "" || prRunning(x)
 			}
 			term, typ := prStateTerms(pr.State), prTypeTerm(pr)
 			if x.waiting != nil {
 				term += " " + waitTerm[*x.waiting].both()
+			}
+			if prRunning(x) {
+				term += " " + runningTerm.both()
 			}
 			id := fmt.Sprintf("#%d", pr.PRID)
 			return m.match(append([]*string{&pr.Repo, pr.Title, &typ, &id}, append(strs(pr.JiraKeys), &term)...)...)
@@ -531,7 +575,7 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 				State:   pr.State,
 				ReviewS: wait(pr.ReadyAt, pr.ApprovedAt), CycleS: wait(pr.OpenedAt, pr.MergedAt),
 				MergedAt: pr.MergedAt, ProdAt: prodAt, ToProdS: wait(pr.MergedAt, prodAt),
-				AgeS: x.age, Waiting: x.waiting, IdleS: x.idle,
+				AgeS: x.age, Waiting: x.waiting, IdleS: x.idle, Running: prRunning(x),
 			}
 		}),
 		// Every image a deploy ran, not only the new ones: a search for an
@@ -540,28 +584,34 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 			if !f.in(d.Project) {
 				return false
 			}
-			if m == "" {
-				return true
+			if m == "" || onlyRunning {
+				return m == "" || inRunning(&d.At, p.Period)
 			}
 			_, term := deployClass(d)
+			if inRunning(&d.At, p.Period) {
+				term += " " + runningTerm.both()
+			}
 			return m.match(append([]*string{&d.App, d.Environment, &d.Revision}, append(strs(d.Images), &term)...)...)
 		}, func(d dataset.Deploy) DeployFact {
 			class, _ := deployClass(d)
 			return DeployFact{
 				At: d.At, App: d.App, Environment: d.Environment, Revision: d.Revision,
-				NewImages: d.NewImages, Class: class, Phase: d.Phase,
+				NewImages: d.NewImages, Class: class, Phase: d.Phase, Running: inRunning(&d.At, p.Period),
 			}
 		}),
 		Runs: table(runs, func(r dataset.Run) bool {
 			if !f.in(r.Project) {
 				return false
 			}
-			if m == "" {
-				return true
+			if m == "" || onlyRunning {
+				return m == "" || runRunning(r)
 			}
 			status, kind := runStatusTerms(r), runKindTerms(RunKind(r, ds.Meta.BuildTypeFrom))
 			if isFlaky(r) {
 				status += " " + flakyTerm.both()
+			}
+			if runRunning(r) {
+				status += " " + runningTerm.both()
 			}
 			return m.match(append([]*string{&r.PipelineName, r.Repo, r.CommitSHA, r.HeadSHA, r.BaseSHA, r.Status, &status, &kind, r.BuildType}, strs(r.ImageRefs)...)...)
 		}, func(r dataset.Run) RunFact {
@@ -569,6 +619,7 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 				PipelineName: r.PipelineName, RunID: r.RunID, Kind: RunKind(r, ds.Meta.BuildTypeFrom),
 				CommitSHA: r.CommitSHA, ShownSHA: shownSHA(r), DurationS: r.DurationS, ImageRefs: r.ImageRefs, Status: r.Status,
 				Verdict: verdict(r), Outcome: runOutcome(r), GitOps: gitops(r), Flaky: isFlaky(r),
+				Running: runRunning(r),
 			}
 		}),
 	}

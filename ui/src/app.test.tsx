@@ -18,6 +18,7 @@ import type {
 import { Build } from "./Build";
 import { DayCalendar } from "./calendar";
 import { Costs } from "./Costs";
+import { fullDate } from "./format";
 import { Flow } from "./Flow";
 import { stepLook } from "./heatmap";
 import { initialLanguage } from "./i18n";
@@ -254,6 +255,44 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
+  it("counts the running week apart and finds its rows", async () => {
+    const calls = mockFetch((url) => {
+      if (url.pathname !== "/api/facts") return metrics();
+      return facts({
+        deploys: {
+          count: 2,
+          rows: [deployFact({ running: true }), deployFact({ revision: "r2" })],
+        },
+      });
+    });
+    render(<App />);
+    await screen.findByRole("heading", { name: "Einschätzung" });
+    // The period's days end on the last closed week's Sunday, the previous
+    // period's too: a window's end is the next Monday 00:00.
+    const m = metrics();
+    const scope = screen.getByText(/verglichen mit den 4 Wochen davor/);
+    expect(scope.textContent).toContain(
+      `bis 15.11.2026 · verglichen mit den 4 Wochen davor, ${fullDate(new Date(m.comparison.from))} bis 18.10.2026`,
+    );
+    const line = screen.getByText(/^Laufende Woche KW/);
+    expect(line.textContent).toBe(
+      `Laufende Woche KW ${m.running_week.week.kw} bis jetzt: 1 Release, 2 PRs gemerged, 1 Lauf. Zählt in keiner Zahl dieser Seite mit; nur die offenen PRs sind Stand jetzt. Ansehen →`,
+    );
+    // Its link searches the facts for the mark the rows carry.
+    fireEvent.click(within(line).getByRole("button", { name: "Ansehen →" }));
+    await waitFor(() =>
+      expect(factsCalls(calls).at(-1)).toMatch(
+        /&q=Laufende\+Woche$|&q=Laufende%20Woche$/,
+      ),
+    );
+    const data = within(document.getElementById("daten")!);
+    fireEvent.click(data.getByRole("tab", { name: /Deploys/ }));
+    expect(await data.findByText("Laufende Woche")).toBeInTheDocument();
+    expect(
+      data.getByText(/Zeilen mit «Laufende Woche» zählen in keiner Zahl mit/),
+    ).toBeInTheDocument();
+  });
+
   it("words the assessment with the model's text", async () => {
     const calls = mockFetch((url) => {
       if (url.pathname === "/api/facts") return facts();
@@ -270,14 +309,13 @@ describe("App", () => {
     ).toBeInTheDocument();
     // Who worded it is nobody's business (user): no model, no LLM badge.
     expect(panel.textContent).not.toMatch(/LLM|mimo|USD/);
-    // The weeks, the stamp and the next scheduled run, in one line.
-    const weeks = p.getByTitle("ohne die laufende Woche");
-    expect(weeks.textContent).toMatch(
-      /^KW \d+–\d+ · \d\d\.\d\d\.–\d\d\.\d\d\.$/,
+    // The weeks, the stamp and the next scheduled run, in one line; no
+    // "without the running week" aside: the whole page reads closed weeks.
+    const stampLine = p.getByText(/^KW \d+–\d+ · \d\d\.\d\d\.–\d\d\.\d\d\. · /);
+    expect(stampLine.textContent).toMatch(
+      /^KW \d+–\d+ · \d\d\.\d\d\.–\d\d\.\d\d\. · Einschätzung vom .*, automatisch · nächste: /,
     );
-    expect(weeks.parentElement?.textContent).toMatch(
-      /· Einschätzung vom .*, automatisch · nächste: /,
-    );
+    expect(p.queryByTitle("ohne die laufende Woche")).toBeNull();
     expect(
       p.getByText(
         "Argo CD meldete in den letzten 6 Tagen der Periode nichts: Aussagen dazu ausgelassen.",
@@ -2218,9 +2256,7 @@ describe("open PRs", () => {
         }}
       />,
     );
-    expect(
-      screen.getByText("Am Ende des Zeitraums war kein PR offen."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Gerade ist kein PR offen.")).toBeInTheDocument();
     expect(screen.queryByText("Die lang offenen warten auf:")).toBeNull();
     expect(screen.queryByText(/inaktiv:/)).toBeNull();
   });

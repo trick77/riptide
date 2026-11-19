@@ -124,8 +124,10 @@ type KindChange struct {
 
 // Comparison is the page's numbers against the previous period.
 type Comparison struct {
-	From          time.Time    `json:"from"`
-	To            time.Time    `json:"to"`
+	From time.Time `json:"from"`
+	To   time.Time `json:"to"`
+	// LastDay is the previous period's last day, as Period's.
+	LastDay       string       `json:"last_day"`
 	DeployFreq    Change       `json:"deploy_frequency"`
 	DeploySuccess Change       `json:"deploy_success"`
 	LeadTime      Change       `json:"lead_time"`
@@ -137,8 +139,9 @@ type Comparison struct {
 	CostPerKloc   Change       `json:"cost_per_kloc"`
 	WastedShare   Change       `json:"wasted_share"`
 	Build         []KindChange `json:"build"`
-	// OpenPRs and OpenJammed are the open PRs and the jammed repos at the
-	// period's end against those at the previous one's: more open PRs may
+	// OpenPRs and OpenJammed are the open PRs and the jammed repos now (the
+	// page) or at the period's end (the assessment) against those at the
+	// previous period's end: more open PRs may
 	// be more work under way, more jammed repos are queues.
 	OpenPRs    Change `json:"open_prs"`
 	OpenJammed Change `json:"open_jammed"`
@@ -344,7 +347,7 @@ func compare(cur, prev Metrics, period Period) Comparison {
 
 	cf, pf := cur.Delivery.Frequency, prev.Delivery.Frequency
 	out := Comparison{
-		From: period.From, To: period.To,
+		From: period.From, To: period.To, LastDay: period.LastDay,
 		// A first deploy is no release. Right after Argo CD started, most
 		// revisions are first deploys and the rate reads low; one new App
 		// later on costs a single release and still compares.

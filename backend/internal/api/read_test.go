@@ -82,49 +82,32 @@ func TestUIListenerRoutes(t *testing.T) {
 	}
 }
 
-// The period is whole calendar weeks in the viewer's zone, to now: the
-// dataset is read for exactly that window.
+// The period is closed calendar weeks in the viewer's zone, ending with the
+// last one before the week running now; the metrics read the weeks before
+// to compare and the running week apart, the facts read on to now.
 func TestReadParams(t *testing.T) {
 	h := newHarness(t, nil)
 	now := fixedNow.Truncate(time.Second) // Wednesday 2030-01-02 03:04:05 UTC
 	utc := func(y int, m time.Month, d, hh int) time.Time { return time.Date(y, m, d, hh, 0, 0, 0, time.UTC) }
 	for _, c := range []struct {
 		query string
-		from  time.Time
-		weeks int
+		// from is the period's first Monday, monday the running week's.
+		from, monday time.Time
+		weeks        int
 	}{
-		{"team=checkout", utc(2029, 12, 10, 0), 4},
-		{"team=%20checkout%20", utc(2029, 12, 10, 0), 4},
-		{"team=checkout&weeks=12&tz=UTC", utc(2029, 10, 15, 0), 12},
+		{"team=checkout", utc(2029, 12, 3, 0), utc(2029, 12, 31, 0), 4},
+		{"team=%20checkout%20", utc(2029, 12, 3, 0), utc(2029, 12, 31, 0), 4},
+		{"team=checkout&weeks=12&tz=UTC", utc(2029, 10, 8, 0), utc(2029, 12, 31, 0), 12},
 		// Monday 00:00 in Zurich, CET then; twelve weeks back it was CEST.
-		{"team=checkout&tz=Europe/Zurich", utc(2029, 12, 9, 23), 4},
-		{"team=checkout&weeks=12&tz=Europe/Zurich", utc(2029, 10, 14, 22), 12},
-		{"team=checkout&weeks=26&product=nope", utc(2029, 7, 9, 0), 26},
+		{"team=checkout&tz=Europe/Zurich", utc(2029, 12, 2, 23), utc(2029, 12, 30, 23), 4},
+		{"team=checkout&weeks=12&tz=Europe/Zurich", utc(2029, 10, 7, 22), utc(2029, 12, 30, 23), 12},
+		{"team=checkout&weeks=26&product=nope", utc(2029, 7, 2, 0), utc(2029, 12, 31, 0), 26},
 	} {
-		for _, path := range []string{"/api/metrics?", "/api/facts?"} {
-			h.mem.params = nil
-			w := h.serveUI(newRequest(http.MethodGet, path+c.query, nil))
-			expectStatus(t, w, http.StatusOK)
-			// The metrics read the previous period too, side by side: the
-			// same weeks right before, in either order.
-			reads := map[bool]dataset.Params{}
-			for _, x := range h.mem.params {
-				reads[x.To.Equal(now)] = x
-			}
-			p := reads[true]
-			if path == "/api/metrics?" {
-				prev, ok := reads[false]
-				if len(h.mem.params) != 2 || !ok || !prev.To.Equal(c.from) ||
-					prev.From.Before(c.from.AddDate(0, 0, -7*c.weeks-1)) {
-					t.Errorf("%s%s: previous = %+v", path, c.query, h.mem.params)
-				}
-			} else if len(h.mem.params) != 1 {
-				t.Errorf("%s%s: reads = %d", path, c.query, len(h.mem.params))
-			}
-			// The facts read no lead times or reviews.
-			if p.Team != "checkout" || !p.From.Equal(c.from) || !p.To.Equal(now) || p.ProductionStage != "prod" ||
-				!p.Now.Equal(now) || p.FactsOnly != (path == "/api/facts?") {
-				t.Errorf("%s%s: params = %+v", path, c.query, p)
+		check := func(path string, p dataset.Params, from, to time.Time, factsOnly bool) {
+			t.Helper()
+			if p.Team != "checkout" || !p.From.Equal(from) || !p.To.Equal(to) || p.ProductionStage != "prod" ||
+				!p.Now.Equal(now) || p.FactsOnly != factsOnly {
+				t.Errorf("%s%s: params = %+v, want %v to %v", path, c.query, p, from, to)
 			}
 			// The ingest-time detector: configured authors (login or display
 			// name), the bot-shaped name heuristic; a person is not a bot.
@@ -133,20 +116,56 @@ func TestReadParams(t *testing.T) {
 				t.Errorf("%s%s: automation detection wrong", path, c.query)
 			}
 		}
+		// The metrics: the period, the weeks right before, the running week
+		// (no lead times or reviews), side by side in any order.
+		h.mem.params = nil
+		expectStatus(t, h.serveUI(newRequest(http.MethodGet, "/api/metrics?"+c.query, nil)), http.StatusOK)
+		reads := map[time.Time]dataset.Params{}
+		for _, x := range h.mem.params {
+			reads[x.To] = x
+		}
+		if len(h.mem.params) != 3 || len(reads) != 3 {
+			t.Fatalf("/api/metrics?%s: reads = %+v", c.query, h.mem.params)
+		}
+		check("/api/metrics?", reads[c.monday], c.from, c.monday, false)
+		prev := reads[c.from]
+		if !prev.To.Equal(c.from) || prev.From.Before(c.from.AddDate(0, 0, -7*c.weeks-1)) || prev.FactsOnly {
+			t.Errorf("/api/metrics?%s: previous = %+v", c.query, prev)
+		}
+		check("/api/metrics?", reads[now], c.monday, now, true)
+		// The facts: the period's weeks on to now, the running week marked.
+		h.mem.params = nil
+		expectStatus(t, h.serveUI(newRequest(http.MethodGet, "/api/facts?"+c.query, nil)), http.StatusOK)
+		if len(h.mem.params) != 1 {
+			t.Fatalf("/api/facts?%s: reads = %d", c.query, len(h.mem.params))
+		}
+		check("/api/facts?", h.mem.params[0], c.from, now, true)
+
 		w := h.serveUI(newRequest(http.MethodGet, "/api/metrics?"+c.query, nil))
 		var body struct {
 			Period struct {
+				To    time.Time `json:"to"`
 				Weeks []struct {
 					KW int `json:"kw"`
 				} `json:"weeks"`
 			} `json:"period"`
+			RunningWeek struct {
+				Week struct {
+					KW int `json:"kw"`
+				} `json:"week"`
+				To time.Time `json:"to"`
+			} `json:"running_week"`
 			Product *string `json:"product"`
 		}
 		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || len(body.Period.Weeks) != c.weeks || body.Product != nil {
 			t.Errorf("%s: body = %s", c.query, w.Body)
 		}
-		if last := body.Period.Weeks[len(body.Period.Weeks)-1].KW; last != 1 {
-			t.Errorf("%s: current week KW %d, want 1", c.query, last)
+		// The last closed week is 2029's KW 52, the running one 2030's KW 1.
+		if last := body.Period.Weeks[len(body.Period.Weeks)-1].KW; last != 52 || !body.Period.To.Equal(c.monday) {
+			t.Errorf("%s: last week KW %d to %v, want 52 to %v", c.query, last, body.Period.To, c.monday)
+		}
+		if body.RunningWeek.Week.KW != 1 || !body.RunningWeek.To.Equal(now) {
+			t.Errorf("%s: running week = %+v", c.query, body.RunningWeek)
 		}
 	}
 
@@ -240,7 +259,8 @@ func TestReadFailureIs500AndLogged(t *testing.T) {
 func TestE2ERead(t *testing.T) {
 	h, pool := dbHarness(t)
 	ctx := context.Background()
-	at := fixedNow.Add(-24 * time.Hour)
+	// In the last closed week: the page counts no week still running.
+	at := fixedNow.Add(-7 * 24 * time.Hour)
 	if _, err := pool.Exec(ctx, `INSERT INTO bitbucket_events (delivery_id, event_type, repo_full_name, pr_id, author,
 		branch_name, change_type, jira_keys, occurred_at, team, payload) VALUES
 		('o', 'pr:opened', 'kasse/kasse-api', 7, 'dev-anna', 'feature/x', 'feature', '{KAS-7}', $1, 'checkout',
@@ -280,6 +300,13 @@ func TestE2ERead(t *testing.T) {
 		Costs struct {
 			Total float64 `json:"total"`
 		} `json:"costs"`
+		OpenPRs struct {
+			At   time.Time `json:"at"`
+			Open int       `json:"open"`
+		} `json:"open_prs"`
+		RunningWeek struct {
+			Runs int `json:"runs"`
+		} `json:"running_week"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil {
 		t.Fatal(err)
@@ -287,6 +314,11 @@ func TestE2ERead(t *testing.T) {
 	if m.Delivery.Frequency.Syncs != 1 || m.Delivery.Frequency.FirstSeen != 1 || len(m.Build.Kinds) != 1 ||
 		m.Build.Kinds[0].Kind != "release" || m.Build.Kinds[0].Runs != 1 || m.Costs.Total != 1.5 {
 		t.Errorf("metrics = %s", w.Body)
+	}
+	// The PR is open now, read by the running week's own read; the week has
+	// no run of its own.
+	if !m.OpenPRs.At.Equal(fixedNow.Truncate(time.Second)) || m.OpenPRs.Open != 1 || m.RunningWeek.Runs != 0 {
+		t.Errorf("open PRs = %+v, running week = %+v", m.OpenPRs, m.RunningWeek)
 	}
 
 	w = h.serveUI(newRequest(http.MethodGet, "/api/facts?team=checkout&q=KAS-7", nil))

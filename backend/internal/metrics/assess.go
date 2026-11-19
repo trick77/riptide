@@ -249,7 +249,7 @@ func (id metricID) judgeX(cur, prev side, incomplete bool) Change {
 // p.Previous, both closed weeks (ClosedPeriod), with what earlier ones
 // raised.
 func Assess(ds, prev *dataset.Dataset, p Params, h History) Assessment {
-	m, pm := computeBoth(ds, prev, p)
+	m, pm := computeBoth(ds, prev, nil, p)
 	if prev == nil {
 		prev = &dataset.Dataset{Meta: ds.Meta}
 	}

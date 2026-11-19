@@ -26,7 +26,7 @@ type Analyst interface {
 // Dataset is a team's dataset over a period, the config as it is now: the
 // analysis' loader.
 func (d Deps) Dataset(ctx context.Context, team string, p metrics.Period) (*dataset.Dataset, error) {
-	return d.load(ctx, view{team: team, now: d.now().UTC().Truncate(time.Second), cfg: d.Runtime.Config()}, p, false)
+	return d.load(ctx, view{team: team, now: d.now().UTC().Truncate(time.Second), cfg: d.Runtime.Config()}, p.From, p.To, false)
 }
 
 // TeamNames are the configured teams, sorted: the schedule's.

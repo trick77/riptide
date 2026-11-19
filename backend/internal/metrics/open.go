@@ -8,7 +8,8 @@ import (
 	"github.com/trick77/riptide/internal/dataset"
 )
 
-// The PRs open at the period's end. Every other PR number counts a PR once
+// The PRs open at the dataset's end: now on the page, the period's end in the
+// assessment and the previous period. Every other PR number counts a PR once
 // it is merged, so a PR left open for weeks is in none of them: this is
 // where it shows, per repo, with what it waits on.
 const (
@@ -122,11 +123,12 @@ type OpenRepo struct {
 	Inactive    int     `json:"inactive"`
 }
 
-// OpenPRs are the PRs open at the period's end: GitOps promotions left out,
+// OpenPRs are the PRs open at the dataset's end: GitOps promotions left out,
 // bots left out. Open, Long, Age and the waits leave the inactive ones
 // out.
 type OpenPRs struct {
-	// At is the instant: the period's end, now for the current one.
+	// At is the instant: the dataset's end, now on the page (the running
+	// week's dataset), the period's end in the assessment.
 	At           time.Time `json:"at"`
 	LongDays     int       `json:"long_days"`
 	JamMin       int       `json:"jam_min"`

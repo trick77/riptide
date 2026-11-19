@@ -342,8 +342,11 @@ paths:
       summary: Every number of one team's page
       description: |
         Delivery, lead-time breakdown, code review, builds with their
-        hotspots, and noergler costs of the team over the period: whole
-        calendar weeks in the viewer's zone, the current one running to now.
+        hotspots, and noergler costs of the team over the period: closed
+        calendar weeks in the viewer's zone, ending at Monday 00:00 of the
+        week running now, compared with as many weeks right before. The
+        running week counts in no number and no comparison; `running_week`
+        counts it apart. One exception: `open_prs` are the PRs open now.
         The rules are the metric queries in docs/metrics.md. Product = Bitbucket
         project key, the part of a repository's name before `/`; an App's
         product is that of the GitOps repo its revision is a commit of.
@@ -372,9 +375,12 @@ paths:
       operationId: facts
       summary: The single facts behind the numbers, searched
       description: |
-        The team's PRs, deploys and CI runs of the period, newest first,
-        filtered by product (bots' PRs left out) and a case-insensitive search;
-        each table the first 300 matches and how many matched.
+        The team's PRs, deploys and CI runs of the period and of the week
+        running now, newest first, filtered by product (bots' PRs left out)
+        and a case-insensitive search; each table the first 300 matches and
+        how many matched. A row of the running week has `running` set: listed,
+        counted in no number of /api/metrics. The search finds it by the
+        words "Laufende Woche" and "This week".
 
         No authentication of its own: the UI listener is reached through the
         auth proxy only.
@@ -541,7 +547,7 @@ components:
       name: weeks
       in: query
       required: false
-      description: The period in calendar weeks, the current one running to now. Default 4.
+      description: The period in closed calendar weeks, ending before the week running now. Default 4.
       schema: { type: integer, enum: [4, 12, 26] }
     ReadTZ:
       name: tz
@@ -918,8 +924,9 @@ components:
       type: object
       additionalProperties: false
       required: [meta, period, products, product, delivery, lead_chain, review, open_prs, build, costs,
-                 comparison]
+                 comparison, running_week]
       properties:
+        running_week: { $ref: "#/components/schemas/RunningWeek" }
         meta: { $ref: "#/components/schemas/Meta" }
         period: { $ref: "#/components/schemas/Period" }
         products:
@@ -935,6 +942,31 @@ components:
         build: { $ref: "#/components/schemas/Build" }
         costs: { $ref: "#/components/schemas/Costs" }
         comparison: { $ref: "#/components/schemas/Comparison" }
+
+    RunningWeek:
+      type: object
+      description: |
+        The week running now so far, counted in no other number of the page,
+        counted as the page counts the period and filtered by its product.
+      additionalProperties: false
+      required: [week, to, releases, merged, runs]
+      properties:
+        week: { $ref: "#/components/schemas/Week" }
+        to:
+          $ref: "#/components/schemas/Instant"
+          description: Now, where the counts end.
+        releases:
+          type: integer
+          minimum: 0
+          description: Releases to production, as `delivery.frequency.releases` counts them.
+        merged:
+          type: integer
+          minimum: 0
+          description: The people's merged PRs, as `review.merged` counts them.
+        runs:
+          type: integer
+          minimum: 0
+          description: The team's finished CI runs, GitOps repos' left out, as the build section counts them.
 
     Change:
       type: object
@@ -990,11 +1022,12 @@ components:
       type: object
       description: The page's numbers against the same number of whole weeks right before the period.
       additionalProperties: false
-      required: [from, to, deploy_frequency, deploy_success, lead_time, lead_time_pre, review_time, within_day,
-                 first_touch, untracked, cost_per_kloc, wasted_share, build, open_prs, open_jammed]
+      required: [from, to, last_day, deploy_frequency, deploy_success, lead_time, lead_time_pre, review_time,
+                 within_day, first_touch, untracked, cost_per_kloc, wasted_share, build, open_prs, open_jammed]
       properties:
         from: { $ref: "#/components/schemas/Instant" }
         to: { $ref: "#/components/schemas/Instant" }
+        last_day: { $ref: "#/components/schemas/LastDay" }
         deploy_frequency: { $ref: "#/components/schemas/Change" }
         deploy_success: { $ref: "#/components/schemas/Change" }
         lead_time: { $ref: "#/components/schemas/Change" }
@@ -1031,10 +1064,10 @@ components:
                 description: Repos of the kind with enough runs in both periods to compare, every one, not only the listed.
         open_prs:
           $ref: "#/components/schemas/Change"
-          description: PRs open at the period's end against those at the previous one's end; undirected.
+          description: PRs open now against those at the previous period's end; undirected.
         open_jammed:
           $ref: "#/components/schemas/Change"
-          description: Jammed repos at the period's end against the previous one's end; fewer is better.
+          description: Jammed repos now against the previous period's end; fewer is better.
 
     PRWaiting:
       type: string
@@ -1077,9 +1110,9 @@ components:
     OpenPRs:
       type: object
       description: |
-        The PRs open at the period's end, whenever opened (every other PR
-        number counts a PR once merged), GitOps promotions and bots left
-        out. Read from the events before `at` only: the
+        The PRs open now (`at`), whenever opened: the page's one number of
+        now, not of the period's end (every other PR number counts a PR once
+        merged), GitOps promotions and bots left out. Read from the events before `at` only: the
         previous period's end reads what was open then, plus the PRs open
         all along that riptide heard of only later. Age from the PR's
         creation date as Bitbucket sends it. A PR with no event for
@@ -1124,21 +1157,31 @@ components:
     Period:
       type: object
       additionalProperties: false
-      required: [from, to, weeks]
+      required: [from, to, last_day, weeks]
       properties:
         from: { $ref: "#/components/schemas/Instant" }
         to: { $ref: "#/components/schemas/Instant" }
+        last_day: { $ref: "#/components/schemas/LastDay" }
         weeks:
           type: array
           description: The calendar weeks, oldest first; every weekly series has one value per week.
-          items:
-            type: object
-            additionalProperties: false
-            required: [start, end, kw]
-            properties:
-              start: { $ref: "#/components/schemas/Instant" }
-              end: { $ref: "#/components/schemas/Instant" }
-              kw: { type: integer, minimum: 1, maximum: 53, description: ISO 8601 week number. }
+          items: { $ref: "#/components/schemas/Week" }
+
+    LastDay:
+      type: string
+      description: |
+        The last calendar day `to` ends (exclusive), in the viewer's zone,
+        YYYY-MM-DD: a closed period's Sunday. Empty in an assessment stored
+        before the field.
+
+    Week:
+      type: object
+      additionalProperties: false
+      required: [start, end, kw]
+      properties:
+        start: { $ref: "#/components/schemas/Instant" }
+        end: { $ref: "#/components/schemas/Instant" }
+        kw: { type: integer, minimum: 1, maximum: 53, description: ISO 8601 week number. }
 
     Delivery:
       type: object
@@ -1908,13 +1951,16 @@ components:
     PRFact:
       type: object
       description: |
-        A PR open at the period's end, whenever opened, oldest first, the
-        inactive ones after them; then a PR opened or merged in the period,
-        newest merge or opening first.
+        A PR open now, whenever opened, oldest first, the inactive ones
+        after them; then a PR opened or merged in the period or the running
+        week, newest merge or opening first.
       additionalProperties: false
       required: [repo, pr_id, url, title, title_parts, jira_prefix, jira_more, gitops, change_type, state, review_s,
-                 cycle_s, merged_at, prod_at, to_prod_s, age_s, waiting, idle_s]
+                 cycle_s, merged_at, prod_at, to_prod_s, age_s, waiting, idle_s, running]
       properties:
+        running:
+          type: boolean
+          description: Merged or closed, else opened, in the week running now. Never set on a PR open now.
         repo: { type: string }
         pr_id: { type: integer }
         url:
@@ -1946,22 +1992,23 @@ components:
         to_prod_s: { $ref: "#/components/schemas/NullableSeconds" }
         age_s:
           $ref: "#/components/schemas/NullableSeconds"
-          description: A PR open at the period's end, its age then; null for every other PR.
+          description: A PR open now, its age; null for every other PR.
         waiting:
           oneOf:
             - { $ref: "#/components/schemas/PRWaiting" }
             - { type: "null" }
-          description: A PR open at the period's end, what it waits on; null for every other PR.
+          description: A PR open now, what it waits on; null for every other PR.
         idle_s:
           $ref: "#/components/schemas/NullableSeconds"
-          description: A PR open at the period's end, the time since its last event; null for every other PR.
+          description: A PR open now, the time since its last event; null for every other PR.
 
     DeployFact:
       type: object
-      description: A finished Argo CD sync in the period, newest first.
+      description: A finished Argo CD sync in the period or the running week, newest first.
       additionalProperties: false
-      required: [at, app, environment, revision, new_images, class, phase]
+      required: [at, app, environment, revision, new_images, class, phase, running]
       properties:
+        running: { type: boolean, description: Synced in the week running now. }
         at: { $ref: "#/components/schemas/Instant" }
         app: { type: string }
         environment: { type: [string, "null"] }
@@ -1975,11 +2022,12 @@ components:
 
     RunFact:
       type: object
-      description: A finished CI run in the period, newest first.
+      description: A finished CI run in the period or the running week, newest first.
       additionalProperties: false
       required: [pipeline_name, run_id, kind, commit_sha, shown_sha, duration_s, image_refs, status, verdict, outcome,
-                 gitops, flaky]
+                 gitops, flaky, running]
       properties:
+        running: { type: boolean, description: Run in the week running now. }
         pipeline_name: { type: string }
         run_id: { type: string }
         kind: { $ref: "#/components/schemas/RunKind" }
@@ -2037,6 +2085,8 @@ components:
           description: |
             The team's latest event per source, how fresh it is: over all
             history for a window ending now, before `to` for a past one.
+            /api/metrics answers now's, whatever its closed period: the page
+            shows how fresh the data is today.
         build_data_from:
           $ref: "#/components/schemas/NullableInstant"
           description: When riptide first received a pipeline event for the team.

@@ -16,8 +16,11 @@ const lowSample = 10
 // Params selects what the page shows of a dataset.
 type Params struct {
 	Period Period
-	// Previous is the period Period is compared with (PreviousPeriod).
+	// Previous is the period Period is compared with: the same number of
+	// weeks right before it (ClosedPrevious).
 	Previous Period
+	// Running is the week running now (RunningPeriod), counted apart.
+	Running Period
 	// Product is a Bitbucket project key; empty, or one the dataset does
 	// not know, is all products.
 	Product string
@@ -66,18 +69,57 @@ type Metrics struct {
 	Costs     Costs    `json:"costs"`
 	// Comparison is the numbers against the previous period.
 	Comparison Comparison `json:"comparison"`
+	// RunningWeek is the week running now, counted in no number above.
+	RunningWeek RunningWeek `json:"running_week"`
+}
+
+// RunningWeek is the week running now so far, counted as the page counts
+// the period: the product's releases to production, the people's merged
+// PRs, the team's finished runs.
+type RunningWeek struct {
+	Week Week `json:"week"`
+	// To is now, where the counts end.
+	To       time.Time `json:"to"`
+	Releases int       `json:"releases"`
+	Merged   int       `json:"merged"`
+	Runs     int       `json:"runs"`
+}
+
+// runningWeek counts ds over p, the week running now. A release counts
+// once, in the week of its first deploy: a revision that reached production
+// before Monday 00:00 and reaches another App after it is an earlier week's
+// release, however many weeks back, whatever period the page reads.
+func runningWeek(ds *dataset.Dataset, p Period, f filter) RunningWeek {
+	runs := 0
+	for _, rs := range teamRuns(ds, f, gitopsRun(ds)) {
+		runs += len(rs)
+	}
+	prod := ds.Meta.ProductionStage
+	fresh := *ds
+	fresh.Deploys = slices.DeleteFunc(slices.Clone(ds.Deploys), func(d dataset.Deploy) bool {
+		return d.RevisionFirstAt != nil && d.RevisionFirstAt.Before(p.From)
+	})
+	return RunningWeek{
+		Week: p.Weeks[0], To: p.To,
+		Releases: deployFrequency(&fresh, p, f, prod).Releases,
+		Merged:   len(mergedPRs(ds, p, f)),
+		Runs:     runs,
+	}
 }
 
 // Compute is every metric of the page, ds over p.Period, prev the dataset
-// over p.Previous it is compared with.
-func Compute(ds, prev *dataset.Dataset, p Params) Metrics {
-	m, _ := computeBoth(ds, prev, p)
+// over p.Previous it is compared with, running the dataset over p.Running:
+// the open PRs as they are now and the running week's counts. nil, or no
+// p.Running, keeps the open PRs at the period's end and counts no running
+// week.
+func Compute(ds, prev, running *dataset.Dataset, p Params) Metrics {
+	m, _ := computeBoth(ds, prev, running, p)
 	return m
 }
 
 // computeBoth is Compute and the previous period's sections it compared
 // with, for the assessment.
-func computeBoth(ds, prev *dataset.Dataset, p Params) (m, pm Metrics) {
+func computeBoth(ds, prev, running *dataset.Dataset, p Params) (m, pm Metrics) {
 	// The product as this period's data resolves it, for both periods: a
 	// product the previous one lacks is that product without data, not all.
 	f := newFilter(ds, p)
@@ -91,6 +133,16 @@ func computeBoth(ds, prev *dataset.Dataset, p Params) (m, pm Metrics) {
 	base := &baseline{repos: names, kinds: pm.Build.repos, incomplete: buildsIncomplete(ds.Meta, p.Previous.From)}
 	m = compute(ds, p.Period, f, base)
 	m.Delivery.Frequency.fillCalendar(p.Period, ds.Meta.DataStart.ArgoCD)
+	// The open PRs are the one number of now, not of the period's end: what
+	// waits is worth knowing today. Before the comparison, which judges them
+	// against the previous period's end.
+	if running != nil && len(p.Running.Weeks) == 1 {
+		m.OpenPRs = openSection(running, f)
+		m.RunningWeek = runningWeek(running, p.Running, f)
+		// How fresh each source is, now: the closed period's read ends its
+		// sources at Monday 00:00, the running week's reads them all.
+		m.Meta.DataEnd = running.Meta.DataEnd
+	}
 	m.Comparison = compare(m, pm, p.Previous)
 	return m, pm
 }
@@ -170,8 +222,8 @@ type DeployFrequency struct {
 	// ArgoReporting: Argo CD reported for the team before the period's end.
 	ArgoReporting bool `json:"argo_reporting"`
 	// MedianWeek is the median of the releases per week over the whole weeks
-	// Argo CD reported all of: the running week and one Argo CD started in
-	// would read low. Null without such a week.
+	// Argo CD reported all of: a week Argo CD started in, or one still
+	// running, would read low. Null without such a week.
 	MedianWeek *float64 `json:"median_week"`
 	// Days are the releases per day, the period's weeks Monday first, 7 per
 	// week: a release train or a gap shows where the weekly bars stay even.

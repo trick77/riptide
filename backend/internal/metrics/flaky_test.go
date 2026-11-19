@@ -186,7 +186,7 @@ func TestFlakyComparedOnJudgedRuns(t *testing.T) {
 			}
 		})
 	}
-	c := Compute(period(0), period(month), params).Comparison
+	c := Compute(period(0), period(month), nil, params).Comparison
 	if len(c.Build) != 1 || c.Build[0].Flaky.Reason == nil || *c.Build[0].Flaky.Reason != ReasonLowSample {
 		t.Errorf("flaky = %+v", c.Build)
 	}
@@ -214,7 +214,7 @@ func TestFlakyCompared(t *testing.T) {
 			}
 		})
 	}
-	c := Compute(period(0, 10), period(month, 0), params).Comparison
+	c := Compute(period(0, 10), period(month, 0), nil, params).Comparison
 	if len(c.Build) != 1 || c.Build[0].Flaky.Verdict != ChangeWorse {
 		t.Errorf("flaky = %+v", c.Build)
 	}

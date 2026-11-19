@@ -34,6 +34,7 @@
       "failed": "Failed"
     },
     "flaky": "Flaky",
+    "running": "This week",
     "runKind": {
       "release": "Releases",
       "main": "Default branch builds",
@@ -77,6 +78,7 @@
       "failed": "Fehlgeschlagen"
     },
     "flaky": "Flaky",
+    "running": "Laufende Woche",
     "runKind": {
       "release": "Releases",
       "main": "Default-Branch-Builds",

@@ -133,17 +133,20 @@ func (d Deps) readView(w http.ResponseWriter, r *http.Request) (view, bool) {
 		loc = l
 	}
 	now := d.now().UTC().Truncate(time.Second)
+	// Closed weeks only, as the assessment reads them: a week still running
+	// is counted apart (Running), never in a number or a comparison.
 	return view{team: team, now: now, cfg: cfg, params: metrics.Params{
-		Period: metrics.NewPeriod(weeks, now, loc), Previous: metrics.PreviousPeriod(weeks, now, loc),
+		Period: metrics.ClosedPeriod(weeks, now, loc), Previous: metrics.ClosedPrevious(weeks, now, loc),
+		Running: metrics.RunningPeriod(now, loc),
 		Product: strings.TrimSpace(q.Get("product")), JiraURL: cfg.JiraBaseURL, BitbucketURL: d.Onboarding.BitbucketURL,
 	}}, true
 }
 
-// load reads the team's dataset over the period.
-func (d Deps) load(ctx context.Context, v view, p metrics.Period, factsOnly bool) (*dataset.Dataset, error) {
+// load reads the team's dataset from from to to.
+func (d Deps) load(ctx context.Context, v view, from, to time.Time, factsOnly bool) (*dataset.Dataset, error) {
 	cfg := v.cfg
 	return d.Reader.Dataset(ctx, dataset.Params{
-		Team: v.team, From: p.From, To: p.To, ProductionStage: cfg.Environments.ProductionStage,
+		Team: v.team, From: from, To: to, ProductionStage: cfg.Environments.ProductionStage,
 		// The detection a webhook's author gets at ingest, so a commit and a
 		// PR by the same bot agree. A commit on master has no branch to
 		// match a prefix against, and the SERVICE flag is the view's.
@@ -169,22 +172,26 @@ func (d Deps) metrics(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// The period and the previous one, to compare with: two reads of the
-	// same size, side by side; the first to fail cancels the other.
+	// The period, the previous one to compare with, and the week running
+	// now (open PRs as they are, its counts): three reads side by side; the
+	// first to fail cancels the others. Not one longer read: lead times and
+	// costs take the dataset's bounds as their window.
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	var ds, prev *dataset.Dataset
-	var errs [2]error
+	var ds, prev, running *dataset.Dataset
+	var errs [3]error
 	var wg sync.WaitGroup
-	read := func(p metrics.Period, out **dataset.Dataset, err *error) func() {
+	read := func(p metrics.Period, factsOnly bool, out **dataset.Dataset, err *error) func() {
 		return func() {
-			if *out, *err = d.load(ctx, v, p, false); *err != nil {
+			if *out, *err = d.load(ctx, v, p.From, p.To, factsOnly); *err != nil {
 				cancel()
 			}
 		}
 	}
-	wg.Go(read(v.params.Period, &ds, &errs[0]))
-	wg.Go(read(v.params.Previous, &prev, &errs[1]))
+	wg.Go(read(v.params.Period, false, &ds, &errs[0]))
+	wg.Go(read(v.params.Previous, false, &prev, &errs[1]))
+	// Open PRs, releases, merges and runs: no lead times or reviews.
+	wg.Go(read(v.params.Running, true, &running, &errs[2]))
 	wg.Wait()
 	for _, err := range errs {
 		if err != nil {
@@ -192,7 +199,7 @@ func (d Deps) metrics(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	m := metrics.Compute(ds, prev, v.params)
+	m := metrics.Compute(ds, prev, running, v.params)
 	d.Log.InfoContext(r.Context(), "metrics_served", "team", v.team, "from", v.params.Period.From,
 		"to", v.params.Period.To, "duration_ms", time.Since(started).Milliseconds())
 	httpapi.WriteJSON(w, http.StatusOK, m)
@@ -205,14 +212,16 @@ func (d Deps) facts(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	ds, err := d.load(r.Context(), v, v.params.Period, true)
+	// The period's closed weeks and on to now: the running week's rows are
+	// listed, marked, counted nowhere.
+	ds, err := d.load(r.Context(), v, v.params.Period.From, v.now, true)
 	if err != nil {
 		d.failed(w, r, v.team, err)
 		return
 	}
 	f := metrics.ComputeFacts(ds, v.params, r.URL.Query().Get("q"))
 	d.Log.InfoContext(r.Context(), "facts_served", "team", v.team, "from", v.params.Period.From,
-		"to", v.params.Period.To, "prs", f.PRs.Count, "deploys", f.Deploys.Count, "runs", f.Runs.Count,
+		"to", v.now, "prs", f.PRs.Count, "deploys", f.Deploys.Count, "runs", f.Runs.Count,
 		"duration_ms", time.Since(started).Milliseconds())
 	httpapi.WriteJSON(w, http.StatusOK, f)
 }

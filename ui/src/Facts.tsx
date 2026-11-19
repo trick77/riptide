@@ -238,6 +238,16 @@ function FactsTables({
           : p.change_type
         : "–";
 
+  // Rows of the running week are listed, counted in no number: say so
+  // where they show.
+  const anyRunning = (
+    tab === "prs"
+      ? facts.prs.rows
+      : tab === "deploys"
+        ? facts.deploys.rows
+        : facts.runs.rows
+  ).some((r) => r.running);
+
   let table: ReactNode;
   if (tab === "prs") {
     table = (
@@ -290,6 +300,7 @@ function FactsTables({
             <Pill tone={PR_STATE_TONE[p.state]}>
               {t(`facts.prState.${p.state}`)}
             </Pill>
+            {p.running && <Pill tone="none">{t("facts.running")}</Pill>}
             {p.waiting && (
               <span className="text-[12.5px] whitespace-nowrap text-muted">
                 {t(`facts.prWaiting.${p.waiting}`)} ·{" "}
@@ -327,12 +338,17 @@ function FactsTables({
               ? d.new_images.map(shortImage).join(", ")
               : "–"}
           </Mono>,
-          <Pill
-            tone={DEPLOY_TONE[d.class]}
-            dot={d.class === "first_seen" ? "texture-unknown" : undefined}
-          >
-            {d.class === "failed" ? d.phase : t(`facts.deployClass.${d.class}`)}
-          </Pill>,
+          <span className="inline-flex gap-1">
+            <Pill
+              tone={DEPLOY_TONE[d.class]}
+              dot={d.class === "first_seen" ? "texture-unknown" : undefined}
+            >
+              {d.class === "failed"
+                ? d.phase
+                : t(`facts.deployClass.${d.class}`)}
+            </Pill>
+            {d.running && <Pill tone="none">{t("facts.running")}</Pill>}
+          </span>,
         ])}
       />
     );
@@ -370,7 +386,10 @@ function FactsTables({
               {/* red, then green on the same commit: red time, as in
                   the CI flow */}
               {r.flaky && <Pill tone="fail">{t("facts.flaky")}</Pill>}
+              {r.running && <Pill tone="none">{t("facts.running")}</Pill>}
             </span>
+          ) : r.running ? (
+            <Pill tone="none">{t("facts.running")}</Pill>
           ) : (
             "–"
           ),
@@ -412,6 +431,7 @@ function FactsTables({
           {counts[tab] > facts.limit
             ? t("facts.firstOf", { limit: facts.limit, count: counts[tab] })
             : ""}
+          {anyRunning ? t("facts.runningNote") : ""}
         </span>
       </div>
       <div className="mt-2.5 overflow-x-auto">

@@ -13,7 +13,7 @@ import { Costs } from "./Costs";
 import { Deploys, Mix } from "./Deploys";
 import { Facts } from "./Facts";
 import { Flow } from "./Flow";
-import { dateTime, fullDate } from "./format";
+import { dateTime, fullDate, fullDay } from "./format";
 import { FrameworkMap } from "./FrameworkMap";
 import { Overview } from "./Overview";
 import {
@@ -271,9 +271,30 @@ export default function App() {
                 from: weeks[0].kw,
                 to: weeks[weeks.length - 1].kw,
                 start: fullDate(new Date(m.period.from)),
-                end: fullDate(new Date(m.period.to)),
+                end: fullDay(m.period.last_day),
                 weeks: weeks.length,
+                prevStart: fullDate(new Date(m.comparison.from)),
+                prevEnd: fullDay(m.comparison.last_day),
               })}
+            </p>
+            <p className="mt-1 mb-0 text-[13px] text-muted">
+              {t("page.running", {
+                kw: m.running_week.week.kw,
+                releases: t("page.runningReleases", {
+                  count: m.running_week.releases,
+                }),
+                merged: t("page.runningMerged", {
+                  count: m.running_week.merged,
+                }),
+                runs: t("page.runningRuns", { count: m.running_week.runs }),
+              })}{" "}
+              <button
+                type="button"
+                onClick={() => onFacts(state.tab, t("facts.running"))}
+                className="no-print border-0 bg-transparent p-0 text-[13px] text-accent-strong hover:underline"
+              >
+                {t("page.runningView")}
+              </button>
             </p>
             <p className="mt-1 mb-0 text-[12.5px] text-faint">
               {t("page.dataAsOf")}{" "}

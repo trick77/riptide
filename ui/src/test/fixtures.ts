@@ -246,7 +246,12 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       build_data_from: ago(60),
       build_type_from: ago(10),
     },
-    period: { from: w[0].start, to: NOW.toISOString(), weeks: w },
+    period: {
+      from: w[0].start,
+      to: NOW.toISOString(),
+      last_day: "2026-11-15",
+      weeks: w,
+    },
     products: [
       {
         key: "kasse",
@@ -495,6 +500,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
     comparison: {
       from: weeks(2 * n)[0].start,
       to: w[0].start,
+      last_day: "2026-10-18",
       deploy_frequency: change("better", 0.1, null, 1),
       deploy_success: change("same", 0.75),
       lead_time: change("worse", 86400, null, -0.6),
@@ -533,6 +539,13 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
           compared: 0,
         },
       ],
+    },
+    running_week: {
+      week: { start: w[n - 1].end, end: w[n - 1].end, kw: w[n - 1].kw + 1 },
+      to: w[n - 1].end,
+      releases: 1,
+      merged: 2,
+      runs: 1,
     },
     ...o,
   };
@@ -573,6 +586,7 @@ export function prFact(o: Partial<PRFact> = {}): PRFact {
     age_s: null,
     waiting: null,
     idle_s: null,
+    running: false,
     ...o,
   };
 }
@@ -586,6 +600,7 @@ export function deployFact(o: Partial<DeployFact> = {}): DeployFact {
     new_images: ["reg/kasse-api:1.1"],
     class: "release",
     phase: "Succeeded",
+    running: false,
     ...o,
   };
 }
@@ -604,6 +619,7 @@ export function runFact(o: Partial<RunFact> = {}): RunFact {
     outcome: "succeeded",
     gitops: false,
     flaky: false,
+    running: false,
     ...o,
   };
 }
@@ -782,8 +798,8 @@ export function assessment(): Assessment {
     ],
   });
   return {
-    period: { from: w[0].start, to: w[3].end, weeks: w },
-    previous: { from: w[0].start, to: w[0].start, weeks: [] },
+    period: { from: w[0].start, to: w[3].end, last_day: "", weeks: w },
+    previous: { from: w[0].start, to: w[0].start, last_day: "", weeks: [] },
     gaps: ["argocd"],
     signals: [
       signal({

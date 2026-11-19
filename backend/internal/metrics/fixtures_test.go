@@ -79,7 +79,7 @@ func run(mod ...func(*dataset.Run)) dataset.Run {
 	r := dataset.Run{
 		Source: "jenkins", PipelineName: "kasse-api/master", Branch: "master", BranchKind: dataset.BranchMain,
 		BuildType: s("build"), RunID: "1", CommitSHA: s(strings.Repeat("c", 40)), Status: s("SUCCESS"),
-		StartedAt: agoP(1), FinishedAt: agoP(0.99), DurationS: n(600), Repo: s("kasse/kasse-api"), Project: s("kasse"),
+		StartedAt: agoP(1), FinishedAt: agoP(0.99), OccurredAt: ago(0.99), DurationS: n(600), Repo: s("kasse/kasse-api"), Project: s("kasse"),
 		ImageRefs: []string{},
 	}
 	for _, m := range mod {

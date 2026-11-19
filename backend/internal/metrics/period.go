@@ -19,14 +19,20 @@ type Week struct {
 	KW    int       `json:"kw"`
 }
 
-// Period is the window the page shows: whole calendar weeks in the
-// viewer's zone, the current one running to now. Charts bucket per week.
+// Period is a window of whole calendar weeks in the viewer's zone. The page
+// shows closed ones (ClosedPeriod): a week still running is no week to
+// count, compare or chart; RunningPeriod is that week, counted apart.
+// Charts bucket per week.
 type Period struct {
-	From  time.Time `json:"from"`
-	To    time.Time `json:"to"`
-	Weeks []Week    `json:"weeks"`
-	// Span is the length in weeks, the current one counted as far as it has
-	// run: the divisor of a per-week rate.
+	From time.Time `json:"from"`
+	To   time.Time `json:"to"`
+	// LastDay is the last calendar day To ends, in the viewer's zone,
+	// YYYY-MM-DD: a closed period's Sunday. The page shows it, never To.
+	LastDay string `json:"last_day"`
+	Weeks   []Week `json:"weeks"`
+	// Span is the length in weeks, a week running to To counted as far as
+	// it has run: the divisor of a per-week rate. A closed period's is its
+	// number of weeks, give or take an hour across a DST switch.
 	Span float64 `json:"-"`
 	// loc is the viewer's zone the weeks were cut in; nil reads as UTC.
 	loc *time.Location
@@ -40,10 +46,18 @@ func weekStart(t time.Time, loc *time.Location) time.Time {
 	return d.AddDate(0, 0, -back)
 }
 
-// NewPeriod is the period of the given number of weeks ending now. Calendar
-// arithmetic, so a week across a DST switch is 167 or 169 hours.
+// NewPeriod is the period of the given number of weeks ending now, the
+// running one included. Calendar arithmetic, so a week across a DST switch
+// is 167 or 169 hours. The page reads ClosedPeriod; tests build their
+// fixtures around now with this one.
 func NewPeriod(weeks int, now time.Time, loc *time.Location) Period {
 	return periodFrom(weekStart(now, loc).AddDate(0, 0, -7*(weeks-1)), weeks, now)
+}
+
+// RunningPeriod is the week now falls in, Monday 00:00 to now: the page's
+// "this week so far", counted in no number of the period.
+func RunningPeriod(now time.Time, loc *time.Location) Period {
+	return periodFrom(weekStart(now, loc), 1, now)
 }
 
 // PreviousPeriod is the period the one NewPeriod gives is compared with:
@@ -63,11 +77,12 @@ func periodFrom(first time.Time, weeks int, to time.Time) Period {
 		list[i] = Week{Start: start.UTC(), End: start.AddDate(0, 0, 7).UTC(), KW: kw}
 	}
 	return Period{
-		From:  first.UTC(),
-		To:    to.UTC(),
-		Weeks: list,
-		Span:  float64(to.Sub(first)) / float64(7*24*time.Hour),
-		loc:   first.Location(),
+		From:    first.UTC(),
+		To:      to.UTC(),
+		LastDay: to.Add(-time.Nanosecond).In(first.Location()).Format(time.DateOnly),
+		Weeks:   list,
+		Span:    float64(to.Sub(first)) / float64(7*24*time.Hour),
+		loc:     first.Location(),
 	}
 }
 

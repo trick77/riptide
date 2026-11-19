@@ -170,6 +170,14 @@ SELECT c.repo_full_name AS repo,
               AND c.declined_at >= coalesce(c.last_opened_at, '-infinity') THEN 'declined'
          ELSE 'open'
        END AS state,
+       -- when a declined or deleted PR closed, as its state says; NULL for
+       -- an open or merged one
+       CASE
+         WHEN c.merged_at IS NOT NULL THEN NULL
+         WHEN c.deleted_at IS NOT NULL THEN c.deleted_at
+         WHEN c.declined_at IS NOT NULL
+              AND c.declined_at >= coalesce(c.last_opened_at, '-infinity') THEN c.declined_at
+       END AS closed_at,
        c.opened_at,
        c.ready_at,
        c.touches,

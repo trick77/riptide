@@ -157,7 +157,7 @@ func TestDirected(t *testing.T) {
 		}
 	}
 	params := Params{Period: p4(), Previous: PreviousPeriod(4, now, zurich)}
-	cmp := Compute(leadData(12, 2), leadData(12, 3), params).Comparison
+	cmp := Compute(leadData(12, 2), leadData(12, 3), nil, params).Comparison
 	for name, c := range map[string]Change{
 		"first touch": cmp.FirstTouch, "untracked": cmp.Untracked, "open PRs": cmp.OpenPRs,
 		"cost per KLOC": cmp.CostPerKloc, "wasted share": cmp.WastedShare,
@@ -177,7 +177,7 @@ func TestDirected(t *testing.T) {
 
 	// Argo CD silent for the team: nothing measured, not too few.
 	silent := func(ds *dataset.Dataset) { ds.Meta.DataStart.ArgoCD = nil }
-	cmp = Compute(leadData(12, 2, silent), leadData(12, 3, silent), params).Comparison
+	cmp = Compute(leadData(12, 2, silent), leadData(12, 3, silent), nil, params).Comparison
 	for name, c := range map[string]Change{"frequency": cmp.DeployFreq, "success": cmp.DeploySuccess} {
 		if c.Reason == nil || *c.Reason != ReasonNotReporting || !c.Directed || c.Score != nil {
 			t.Errorf("silent argo %s: %+v", name, c)
@@ -198,7 +198,7 @@ func leadData(count int, days float64, mod ...func(*dataset.Dataset)) *dataset.D
 
 func TestCompareWithThePreviousPeriod(t *testing.T) {
 	params := Params{Period: p4(), Previous: PreviousPeriod(4, now, zurich)}
-	m := Compute(leadData(12, 2), leadData(12, 3), params)
+	m := Compute(leadData(12, 2), leadData(12, 3), nil, params)
 	c := m.Comparison
 	if !c.From.Equal(params.Previous.From) || !c.To.Equal(params.Previous.To) {
 		t.Errorf("period = %v..%v", c.From, c.To)
@@ -217,7 +217,7 @@ func TestCompareWithThePreviousPeriod(t *testing.T) {
 
 	// Argo CD started inside the previous period: it reads low, no verdict.
 	late := func(ds *dataset.Dataset) { ds.Meta.DataStart.ArgoCD = agoP(30) }
-	c = Compute(leadData(12, 2, late), leadData(12, 3, late), params).Comparison
+	c = Compute(leadData(12, 2, late), leadData(12, 3, late), nil, params).Comparison
 	if c.LeadTime.Reason == nil || *c.LeadTime.Reason != ReasonIncomplete || c.DeployFreq.Verdict != ChangeNone {
 		t.Errorf("late argo = %+v / %+v", c.LeadTime, c.DeployFreq)
 	}
@@ -243,12 +243,12 @@ func TestCompareWithThePreviousPeriod(t *testing.T) {
 		}
 		return ds
 	}
-	c = Compute(data(releases(0)), earlier(6), params).Comparison
+	c = Compute(data(releases(0)), earlier(6), nil, params).Comparison
 	if c.DeployFreq.Reason == nil || *c.DeployFreq.Reason != ReasonIncomplete {
 		t.Errorf("first deploys = %+v", c.DeployFreq)
 	}
 	// One new App among the releases still compares.
-	if c := Compute(data(releases(0)), earlier(1), params).Comparison; c.DeployFreq.Verdict != ChangeBetter {
+	if c := Compute(data(releases(0)), earlier(1), nil, params).Comparison; c.DeployFreq.Verdict != ChangeBetter {
 		t.Errorf("one new app = %+v", c.DeployFreq)
 	}
 	if c.DeploySuccess.Verdict != ChangeSame {
@@ -269,7 +269,7 @@ func TestCompareWithThePreviousPeriod(t *testing.T) {
 		})
 	}
 	month := 28 * 24 * time.Hour
-	c = Compute(builds(nil, 0), builds(nil, month), params).Comparison
+	c = Compute(builds(nil, 0), builds(nil, month), nil, params).Comparison
 	if len(c.Build) != 1 || c.Build[0].Kind != KindMain || c.Build[0].Success.Verdict != ChangeSame ||
 		c.Build[0].Compared != 1 || c.Build[0].Slower != 0 {
 		t.Errorf("no build type = %+v", c.Build)
@@ -280,7 +280,7 @@ func TestCompareWithThePreviousPeriod(t *testing.T) {
 	for i := range slower.Runs {
 		slower.Runs[i].DurationS = n(1200)
 	}
-	sm := Compute(slower, builds(nil, month), params)
+	sm := Compute(slower, builds(nil, month), nil, params)
 	if c := sm.Comparison.Build; len(c) != 1 || c[0].Slower != 1 || c[0].Compared != 1 {
 		t.Errorf("slower = %+v", c)
 	}
@@ -288,7 +288,7 @@ func TestCompareWithThePreviousPeriod(t *testing.T) {
 	if !slices.ContainsFunc(sa.Signals, func(s Signal) bool { return s.Kind == SignalSlower && s.Tone == ToneAttention }) {
 		t.Errorf("signals = %+v", sa.Signals)
 	}
-	c = Compute(builds(agoP(30), 0), builds(agoP(30), month), params).Comparison
+	c = Compute(builds(agoP(30), 0), builds(agoP(30), month), nil, params).Comparison
 	if len(c.Build) != 1 || c.Build[0].Success.Reason == nil || *c.Build[0].Success.Reason != ReasonIncomplete {
 		t.Errorf("build type inside = %+v", c.Build)
 	}

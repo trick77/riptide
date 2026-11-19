@@ -126,14 +126,16 @@ type PR struct {
 	PRID    int64   `json:"pr_id" db:"pr_id"`
 	Title   *string `json:"title" db:"title"`
 	// URL is the PR's page from its latest event's links.self, unchecked.
-	URL        *string    `json:"url" db:"url"`
-	GitOps     bool       `json:"gitops" db:"gitops"`
-	Bot        bool       `json:"bot" db:"bot"`
-	ChangeType *string    `json:"change_type" db:"change_type"`
-	JiraKeys   []string   `json:"jira_keys" db:"jira_keys"`
-	State      string     `json:"state" db:"state"`
-	OpenedAt   *time.Time `json:"opened_at" db:"opened_at"`
-	ReadyAt    *time.Time `json:"ready_at" db:"ready_at"`
+	URL        *string  `json:"url" db:"url"`
+	GitOps     bool     `json:"gitops" db:"gitops"`
+	Bot        bool     `json:"bot" db:"bot"`
+	ChangeType *string  `json:"change_type" db:"change_type"`
+	JiraKeys   []string `json:"jira_keys" db:"jira_keys"`
+	State      string   `json:"state" db:"state"`
+	// ClosedAt is when a declined or deleted PR closed; nil otherwise.
+	ClosedAt *time.Time `json:"closed_at" db:"closed_at"`
+	OpenedAt *time.Time `json:"opened_at" db:"opened_at"`
+	ReadyAt  *time.Time `json:"ready_at" db:"ready_at"`
 	// FirstReviewAt and ApprovedAt count the same reviewers: not the opener,
 	// not automation (at ingest, declared, or detected now), after ready_at.
 	FirstReviewAt *time.Time `json:"first_review_at" db:"-"`
@@ -212,15 +214,18 @@ type EnvironmentDeploy struct {
 
 // Deploy is one finished Argo CD sync. Kind is nil on a failed sync.
 type Deploy struct {
-	App         string    `json:"app" db:"app"`
-	Project     *string   `json:"project" db:"project"`
-	Environment *string   `json:"environment" db:"environment"`
-	Revision    string    `json:"revision" db:"revision"`
-	At          time.Time `json:"at" db:"at"`
-	Phase       string    `json:"phase" db:"phase"`
-	DurationS   *int64    `json:"duration_s" db:"duration_s"`
-	Images      []string  `json:"images" db:"images"`
-	Kind        *string   `json:"kind" db:"kind"`
+	App         string  `json:"app" db:"app"`
+	Project     *string `json:"project" db:"project"`
+	Environment *string `json:"environment" db:"environment"`
+	Revision    string  `json:"revision" db:"revision"`
+	// RevisionFirstAt is the revision's first successful sync to this
+	// environment, over all history; nil when it never succeeded.
+	RevisionFirstAt *time.Time `json:"revision_first_at" db:"revision_first_at"`
+	At              time.Time  `json:"at" db:"at"`
+	Phase           string     `json:"phase" db:"phase"`
+	DurationS       *int64     `json:"duration_s" db:"duration_s"`
+	Images          []string   `json:"images" db:"images"`
+	Kind            *string    `json:"kind" db:"kind"`
 	// NewImages are the images a release brought, those the previous
 	// deploy did not run; empty for anything but a release.
 	NewImages []string `json:"new_images" db:"new_images"`
@@ -264,10 +269,13 @@ type Run struct {
 	// reported it; nil when it did not.
 	AgentStartedAt *time.Time `json:"agent_started_at" db:"agent_started_at"`
 	FinishedAt     *time.Time `json:"finished_at" db:"finished_at"`
-	DurationS      *int64     `json:"duration_s" db:"duration_s"`
-	Repo           *string    `json:"repo" db:"repo"`
-	Project        *string    `json:"project" db:"project"`
-	ImageRefs      []string   `json:"image_refs" db:"image_refs"`
+	// OccurredAt is when the COMPLETED event arrived: the instant the
+	// windows split runs on, so a run counts in one window only.
+	OccurredAt time.Time `json:"occurred_at" db:"occurred_at"`
+	DurationS  *int64    `json:"duration_s" db:"duration_s"`
+	Repo       *string   `json:"repo" db:"repo"`
+	Project    *string   `json:"project" db:"project"`
+	ImageRefs  []string  `json:"image_refs" db:"image_refs"`
 	// GitOps: a run in a GitOps repo, a stage promotion's check.
 	GitOps bool `json:"gitops" db:"gitops"`
 }
@@ -461,7 +469,7 @@ func (d *Dataset) utc() {
 	ptrs := append(append(d.Meta.DataStart.ptrs(), d.Meta.DataEnd.ptrs()...), d.Meta.BuildDataFrom, d.Meta.BuildTypeFrom)
 	for i := range d.PRs {
 		p := &d.PRs[i]
-		ptrs = append(ptrs, p.OpenedAt, p.ReadyAt, p.FirstReviewAt, p.ApprovedAt, p.MergedAt, p.FirstCommitAt)
+		ptrs = append(ptrs, p.ClosedAt, p.OpenedAt, p.ReadyAt, p.FirstReviewAt, p.ApprovedAt, p.MergedAt, p.FirstCommitAt)
 		for j := range p.Environments {
 			ptrs = append(ptrs, &p.Environments[j].FirstDeployedAt)
 		}
@@ -471,13 +479,13 @@ func (d *Dataset) utc() {
 		ptrs = append(ptrs, &o.OpenedAt, &o.LastEventAt, o.ReadyAt)
 	}
 	for i := range d.Deploys {
-		ptrs = append(ptrs, &d.Deploys[i].At)
+		ptrs = append(ptrs, &d.Deploys[i].At, d.Deploys[i].RevisionFirstAt)
 	}
 	for i := range d.LeadTimes {
 		ptrs = append(ptrs, &d.LeadTimes[i].AuthoredAt, &d.LeadTimes[i].FirstDeployedAt)
 	}
 	for i := range d.Runs {
-		ptrs = append(ptrs, d.Runs[i].StartedAt, d.Runs[i].AgentStartedAt, d.Runs[i].FinishedAt)
+		ptrs = append(ptrs, d.Runs[i].StartedAt, d.Runs[i].AgentStartedAt, d.Runs[i].FinishedAt, &d.Runs[i].OccurredAt)
 	}
 	for i := range d.Reviews {
 		ptrs = append(ptrs, &d.Reviews[i].ClosedAt)

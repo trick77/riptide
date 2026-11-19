@@ -66,7 +66,16 @@ export const en = {
     print: "Print / PDF",
     title: "Engineering metrics",
     scope:
-      "Team {{team}}, {{product}} · CW {{from}}–{{to}} · {{start}} to {{end}} · compared with the {{weeks}} weeks before",
+      "Team {{team}}, {{product}} · CW {{from}}–{{to}} · {{start}} to {{end}} · compared with the {{weeks}} weeks before, {{prevStart}} to {{prevEnd}}",
+    running:
+      "This week, CW {{kw}}, so far: {{releases}}, {{merged}}, {{runs}}. Counted in no number on this page; only the open PRs are as of now.",
+    runningReleases_one: "{{count}} release",
+    runningReleases_other: "{{count}} releases",
+    runningMerged_one: "{{count}} merged PR",
+    runningMerged_other: "{{count}} merged PRs",
+    runningRuns_one: "{{count}} run",
+    runningRuns_other: "{{count}} runs",
+    runningView: "View →",
     oneProduct: "product {{product}}",
     allProductsLower: "all products",
     dataAsOf: "Data as of:",
@@ -131,7 +140,6 @@ export const en = {
     intro: "What the last {{weeks}} whole weeks show, and where most moves.",
     assess: {
       weeks: "CW {{from}}–{{to}}",
-      withoutCurrent: "without the running week",
       ask: "↻ Assess again",
       askFirst: "Assess now",
       running: "running …",
@@ -578,7 +586,7 @@ export const en = {
     colWaiting: "Waiting on",
     colInactive: "Inactive",
     viewPRs: "View PRs →",
-    none: "No PR was open at the end of the period.",
+    none: "No PR is open right now.",
     mekko: {
       head: "Who waits on what: width = open PRs in the repo, height = share per wait, inactive ones left out.",
       aria: "Open PRs per repo, by what they wait on",
@@ -595,7 +603,7 @@ export const en = {
         "several long-open PRs in the same repo wait for a first review: a reviewer is missing there, or the PRs are too big.",
       lever:
         "name reviewers when opening, bring old PRs up in the daily, close PRs nobody needs anymore.",
-      def: "PRs open at the end of the period: opened before it, neither merged, declined nor deleted. Age from the PR's creation date, long open from {{days}} days, a jam from {{min}} long-open ones in the same repo. A draft is never long open and never forgotten: it waits on its author. Per repo the median age, never the oldest: one alone decides that.",
+      def: "PRs open now, those opened this week included; compared with those open at the previous period's end: opened before, neither merged, declined nor deleted. Age from the PR's creation date, long open from {{days}} days, a jam from {{min}} long-open ones in the same repo. A draft is never long open and never forgotten: it waits on its author. Per repo the median age, never the oldest: one alone decides that.",
       basis_one: "{{count}} open PR, as of {{at}}.",
       basis_other: "{{count}} open PRs, as of {{at}}.",
       coverage:
@@ -873,6 +881,7 @@ export const en = {
     openFor: "open for {{age}}",
     idleFor: "no event for {{idle}}",
     firstOf: " · the first {{limit}} of {{count}}",
+    runningNote: " · rows marked “This week” count in no number",
     noHits: "No hits for “{{q}}”.",
     empty: "No entries in the period.",
     colPR: "PR",

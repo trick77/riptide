@@ -1,4 +1,4 @@
-// The PRs open at the period's end: every other PR number counts a PR once
+// The PRs open now (the page's one number of now): every other PR number counts a PR once
 // merged, so a PR left open for weeks shows only here. Per repo, with what
 // the PRs wait on, the jams first; inactive ones apart. The backend counts,
 // sorts and cuts, this renders.

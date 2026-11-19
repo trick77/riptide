@@ -381,18 +381,28 @@ against `argocd_events.payload->'images'` — as described in
 
 The backend computes every number the UI shows; the UI renders and formats,
 it computes nothing. `GET /api/metrics?team=<team>&weeks=4|12|26&tz=<zone>`
-returns the page's metrics over whole calendar weeks in the viewer's time
-zone, the current one running to now: deploy frequency, lead times and their
-breakdown, code review, the PRs open at the period's end, builds per kind
+returns the page's metrics over closed calendar weeks in the viewer's time
+zone, the last one ending at Monday 00:00 of the week running now: deploy
+frequency, lead times and their breakdown, code review, builds per kind
 of run with their hotspots, and
 noergler costs; each against the same number of whole weeks right before
-(a second read of that window). What the page leads with is
+(a second read of that window). The running week counts in none of them:
+a week half over reads as a low week, and the assessment, which reads the
+same closed weeks, would show other numbers than the tiles below it (same
+zone, a fresh analysis: the same). A third read, Monday 00:00 to now,
+gives the two things of now: the PRs open now (the page's one number of
+now; compared with those open at the previous period's end) and
+`running_week`, the week's releases, merged PRs and runs so far, counted
+as the period counts them. What the page leads with is
 `/api/analysis`, below.
 `product=<key>` narrows it to one Bitbucket project,
 bots' PRs never count. `GET /api/facts` takes the same parameters
-plus `q` and returns the PRs, deploys and runs behind the numbers, newest
-first (the PRs open at the period's end ahead of them, oldest first, with
-their age and wait), searched; it reads no lead times or reviews, so it takes the product
+plus `q` and returns the PRs, deploys and runs behind the numbers, the
+period's and the running week's, newest
+first (the PRs open now ahead of them, oldest first, with
+their age and wait), searched; a row of the running week is marked
+`running` (a PR by its merge, else its opening; never one open now) and
+counts in no number. It reads no lead times or reviews, so it takes the product
 as given, the one `/api/metrics` answered. Each number follows the rules of
 the [Metrics](#metrics) queries above. `gitops`, `service_account` and
 deploy `kind` are set from the data, never from name lists; `bot` adds
@@ -438,7 +448,7 @@ that; with it go the stage signal and the wait share.
 
 Open PRs list the jammed repos first (3 PRs or more open 7 days or more),
 then by long-open PRs, then by the median age; the top 8 and every repo
-with a long-open PR. The jammed repos are compared with the previous
+with a long-open PR. The jammed repos now are compared with the previous
 period's end; more than then is a finding to look at, any at all a hint. A
 long-open PR or two in a repo is no finding: a PR left lying, or one whose
 close event never came. Inactive PRs (no event for 30 days) show as their
@@ -535,7 +545,8 @@ measured on a real import yet.
 
 `GET /api/analysis` (same query) is the overview's "what now". It covers
 the last *closed* weeks (`BACKEND_ANALYSIS_TZ`, never the running week)
-against the same number before. `metrics.Assess` raises the signals:
+against the same number before, as the page does in the viewer's zone;
+its open PRs are those at the period's end, the page's those open now. `metrics.Assess` raises the signals:
 
 - a jam (4 PRs open 7 days or more in a repo; attention when it was jammed
   at the previous end too, or notably more repos are: 2 or more);

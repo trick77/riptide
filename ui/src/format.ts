@@ -84,6 +84,17 @@ export function fullDate(d: Date): string {
   });
 }
 
+// A calendar date the backend sent as YYYY-MM-DD, formatted as it is: no
+// zone shifts it a day.
+export function fullDay(date: string): string {
+  return new Date(`${date}T00:00:00Z`).toLocaleDateString(LOCALE, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 // A CI's status word as a pill shows it: Jenkins' shouting "UNSTABLE" ->
 // "Unstable", "NOT_BUILT" -> "Not built". Any other word (Tekton's
 // "PipelineRunTimeout") stays as the CI wrote it.
