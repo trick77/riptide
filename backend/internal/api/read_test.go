@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/trick77/riptide/internal/analysis"
 	"github.com/trick77/riptide/internal/dataset"
 	"github.com/trick77/riptide/internal/metrics"
 	"github.com/trick77/riptide/internal/store"
@@ -293,6 +296,105 @@ func TestReadFailureLogsTheCauseNotTheCancelled(t *testing.T) {
 	}
 	if len(errs) != 1 || errs[0] != errPrevious.Error() {
 		t.Errorf("dataset_failed errors = %v, want [%q]", errs, errPrevious)
+	}
+}
+
+// viewerGone reads the dataset and the analysis status. With leave it is a
+// viewer leaving while the read waits: the request's context is cancelled
+// and the read answers err, or the context's error as pgx would when err is
+// nil. Without leave it answers err at once, the viewer still there.
+type viewerGone struct {
+	*memStore
+	leave context.CancelFunc
+	err   error
+}
+
+func (s viewerGone) wait(ctx context.Context) error {
+	if s.leave == nil {
+		return s.err
+	}
+	s.leave()
+	select {
+	case <-ctx.Done():
+	case <-time.After(5 * time.Second):
+		return errNotCancel
+	}
+	if s.err != nil {
+		return s.err
+	}
+	return ctx.Err()
+}
+
+func (s viewerGone) Dataset(ctx context.Context, _ dataset.Params) (*dataset.Dataset, error) {
+	return nil, s.wait(ctx)
+}
+
+func (s viewerGone) Status(ctx context.Context, _ analysis.View) (analysis.Status, error) {
+	return analysis.Status{}, s.wait(ctx)
+}
+
+// Ask starts the run; the status read after it is the one that waits.
+func (viewerGone) Ask(context.Context, analysis.View) (*time.Time, error) {
+	return nil, nil
+}
+
+// A tab closed or a filter switched mid-load (the UI aborts the request)
+// is no failure: 499 in the access log, nothing logged as an error. A real
+// error after the viewer left, or a cancellation the viewer did not cause,
+// still is one.
+func TestReadViewerGoneIsNoFailure(t *testing.T) {
+	queryCanceled := &pgconn.PgError{Code: "57014", Message: "canceling statement due to user request"}
+	for _, tc := range []struct {
+		name, method, path string
+		left               bool
+		err                error
+		status             int
+		failed             string
+	}{
+		{"metrics left", http.MethodGet, "/api/metrics", true, nil, statusViewerLeft, ""},
+		{"facts left", http.MethodGet, "/api/facts", true, nil, statusViewerLeft, ""},
+		{"analysis left", http.MethodGet, "/api/analysis", true, nil, statusViewerLeft, ""},
+		{"ask left", http.MethodPost, "/api/analysis", true, nil, statusViewerLeft, ""},
+		{"facts left, query canceled", http.MethodGet, "/api/facts", true, queryCanceled, statusViewerLeft, ""},
+		{"metrics left, real error", http.MethodGet, "/api/metrics", true, errBoom, http.StatusInternalServerError, "dataset_failed"},
+		{"facts there, canceled", http.MethodGet, "/api/facts", false, context.Canceled, http.StatusInternalServerError, "dataset_failed"},
+		{"facts there, query canceled", http.MethodGet, "/api/facts", false, queryCanceled, http.StatusInternalServerError, "dataset_failed"},
+		{"analysis there, canceled", http.MethodGet, "/api/analysis", false, context.Canceled, http.StatusInternalServerError, "analysis_status_failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			st := viewerGone{memStore: newMemStore(), err: tc.err}
+			if tc.left {
+				st.leave = cancel
+			}
+			h := newHarness(t, st)
+			r := newRequest(tc.method, tc.path+"?team=checkout", nil).WithContext(ctx)
+			r.Header.Set(AskHeader, "1")
+			w := h.serveUI(r)
+			expectStatus(t, w, tc.status)
+			validateResponse(t, specRouter(t), tc.method, tc.path, w)
+			failed, access := 0, 0.0
+			for _, l := range h.lines(t) {
+				switch {
+				case tc.failed != "" && l["msg"] == tc.failed:
+					failed++
+				case l["msg"] == "http_request":
+					access, _ = l["status"].(float64)
+				case l["log_level"] == "error":
+					t.Errorf("logged %v", l)
+				}
+			}
+			if tc.failed != "" && failed != 1 {
+				t.Errorf("%s lines = %d: %s", tc.failed, failed, h.logs)
+			}
+			if int(access) != tc.status {
+				t.Errorf("http_request status = %v, want %d", access, tc.status)
+			}
+			if tc.status == statusViewerLeft && w.Body.Len() != 0 {
+				t.Errorf("body = %q, want none", w.Body)
+			}
+		})
 	}
 }
 

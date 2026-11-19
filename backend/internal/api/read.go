@@ -11,6 +11,7 @@ import (
 	"time"
 	_ "time/tzdata" // the viewer's zone, whatever the image ships
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/trick77/ship/kit/logging"
 
 	"github.com/trick77/riptide/internal/config"
@@ -160,8 +161,37 @@ func (d Deps) load(ctx context.Context, v view, from, to time.Time, factsOnly bo
 	})
 }
 
-// failed logs a dataset that would not load and answers 500.
+// statusViewerLeft is nginx's 499 "client closed request".
+const statusViewerLeft = 499
+
+// viewerLeft reports a read cut short by its viewer (tab closed, team or
+// period switched: the UI aborts) and answers it 499, no body: no failure,
+// nothing to log, nobody to read it. The request's context is done and the
+// read ended in a cancellation: context.Canceled, or Postgres' 57014
+// query_canceled should pgx ever cancel by a cancel request instead of its
+// default deadline (that one returns context.Canceled). A shutdown that
+// cuts the request's context lands here too: accepted.
+func viewerLeft(w http.ResponseWriter, r *http.Request, err error) bool {
+	if r.Context().Err() == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if !errors.Is(err, context.Canceled) && (!errors.As(err, &pgErr) || pgErr.Code != pgerrQueryCanceled) {
+		return false
+	}
+	w.WriteHeader(statusViewerLeft)
+	return true
+}
+
+// pgerrQueryCanceled is Postgres' query_canceled.
+const pgerrQueryCanceled = "57014"
+
+// failed logs a dataset that would not load and answers 500, unless the
+// viewer left.
 func (d Deps) failed(w http.ResponseWriter, r *http.Request, team string, err error) {
+	if viewerLeft(w, r, err) {
+		return
+	}
 	d.Log.ErrorContext(r.Context(), "dataset_failed", "team", team, logging.Err(err))
 	httpapi.WriteDetail(w, http.StatusInternalServerError, "Internal Server Error")
 }

@@ -180,6 +180,10 @@ func newHarness(t *testing.T, st Store) *harness {
 		t.Fatalf("%T has no Dataset", st)
 	}
 	deps := Deps{Store: st, Reader: reader, Runtime: rt, Log: log, Now: func() time.Time { return fixedNow }}
+	// A fake store that is its own analyst serves the analysis endpoints.
+	if a, ok := st.(Analyst); ok {
+		deps.Analysis = a
+	}
 	// Over the real store the analysis is the real service, its model a
 	// fake: the store's SQL and the endpoint's shape under one test.
 	if db, ok := st.(*store.Store); ok {

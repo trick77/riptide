@@ -367,6 +367,7 @@ paths:
               schema: { $ref: "#/components/schemas/Metrics" }
         "404": { $ref: "#/components/responses/ReadUnknownTeam" }
         "422": { $ref: "#/components/responses/ReadBadQuery" }
+        "499": { $ref: "#/components/responses/ReadViewerLeft" }
         "500": { $ref: "#/components/responses/ReadFailed" }
 
   /api/facts:
@@ -410,6 +411,7 @@ paths:
               schema: { $ref: "#/components/schemas/Facts" }
         "404": { $ref: "#/components/responses/ReadUnknownTeam" }
         "422": { $ref: "#/components/responses/ReadBadQuery" }
+        "499": { $ref: "#/components/responses/ReadViewerLeft" }
         "500": { $ref: "#/components/responses/ReadFailed" }
 
   /api/analysis:
@@ -443,6 +445,7 @@ paths:
               schema: { $ref: "#/components/schemas/AnalysisStatus" }
         "404": { $ref: "#/components/responses/ReadUnknownTeam" }
         "422": { $ref: "#/components/responses/ReadBadQuery" }
+        "499": { $ref: "#/components/responses/ReadViewerLeft" }
         "500": { $ref: "#/components/responses/ReadFailed" }
     post:
       tags: [read]
@@ -485,6 +488,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "499": { $ref: "#/components/responses/ReadViewerLeft" }
         "500": { $ref: "#/components/responses/ReadFailed" }
 
 components:
@@ -535,6 +539,10 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    ReadViewerLeft:
+      description: |
+        Client closed request (nginx's 499): the caller left before the read
+        ended. No body; for the access log, nobody receives it.
 
   parameters:
     ReadTeam:
