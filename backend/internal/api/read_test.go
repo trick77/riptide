@@ -305,14 +305,16 @@ func TestReadFailureLogsTheCauseNotTheCancelled(t *testing.T) {
 	}
 }
 
-// viewerGone reads the dataset and the analysis status. With leave it is a
-// viewer leaving while the read waits: the request's context is cancelled
-// and the read answers err, or the context's error as pgx would when err is
-// nil. Without leave it answers err at once, the viewer still there.
+// viewerGone reads the dataset and the analysis status, or asks. With leave
+// it is a viewer leaving while the read waits: the request's context is
+// cancelled and the read answers err, or the context's error as pgx would
+// when err is nil. Without leave it answers err at once, the viewer still
+// there. With inAsk the ask itself is the read that waits.
 type viewerGone struct {
 	*memStore
 	leave context.CancelFunc
 	err   error
+	inAsk bool
 }
 
 func (s viewerGone) wait(ctx context.Context) error {
@@ -339,8 +341,12 @@ func (s viewerGone) Status(ctx context.Context, _ analysis.View) (analysis.Statu
 	return analysis.Status{}, s.wait(ctx)
 }
 
-// Ask starts the run; the status read after it is the one that waits.
-func (viewerGone) Ask(context.Context, analysis.View) error {
+// Ask starts the run; unless inAsk, the status read after it is the one
+// that waits.
+func (s viewerGone) Ask(ctx context.Context, _ analysis.View) error {
+	if s.inAsk {
+		return s.wait(ctx)
+	}
 	return nil
 }
 
@@ -397,25 +403,28 @@ func TestReadViewerGoneIsNoFailure(t *testing.T) {
 	queryCanceled := &pgconn.PgError{Code: "57014", Message: "canceling statement due to user request"}
 	for _, tc := range []struct {
 		name, method, path string
-		left               bool
+		left, inAsk        bool
 		err                error
 		status             int
 		failed             string
 	}{
-		{"metrics left", http.MethodGet, "/api/metrics", true, nil, statusViewerLeft, ""},
-		{"facts left", http.MethodGet, "/api/facts", true, nil, statusViewerLeft, ""},
-		{"analysis left", http.MethodGet, "/api/analysis", true, nil, statusViewerLeft, ""},
-		{"ask left", http.MethodPost, "/api/analysis", true, nil, statusViewerLeft, ""},
-		{"facts left, query canceled", http.MethodGet, "/api/facts", true, queryCanceled, statusViewerLeft, ""},
-		{"metrics left, real error", http.MethodGet, "/api/metrics", true, errBoom, http.StatusInternalServerError, "dataset_failed"},
-		{"facts there, canceled", http.MethodGet, "/api/facts", false, context.Canceled, http.StatusInternalServerError, "dataset_failed"},
-		{"facts there, query canceled", http.MethodGet, "/api/facts", false, queryCanceled, http.StatusInternalServerError, "dataset_failed"},
-		{"analysis there, canceled", http.MethodGet, "/api/analysis", false, context.Canceled, http.StatusInternalServerError, "analysis_status_failed"},
+		{"metrics left", http.MethodGet, "/api/metrics", true, false, nil, statusViewerLeft, ""},
+		{"facts left", http.MethodGet, "/api/facts", true, false, nil, statusViewerLeft, ""},
+		{"analysis left", http.MethodGet, "/api/analysis", true, false, nil, statusViewerLeft, ""},
+		{"ask left", http.MethodPost, "/api/analysis", true, false, nil, statusViewerLeft, ""},
+		{"ask left during Ask", http.MethodPost, "/api/analysis", true, true, nil, statusViewerLeft, ""},
+		{"facts left, query canceled", http.MethodGet, "/api/facts", true, false, queryCanceled, statusViewerLeft, ""},
+		{"metrics left, real error", http.MethodGet, "/api/metrics", true, false, errBoom, http.StatusInternalServerError, "dataset_failed"},
+		{"ask left, real error", http.MethodPost, "/api/analysis", true, true, errBoom, http.StatusInternalServerError, "analysis_ask_failed"},
+		{"facts there, canceled", http.MethodGet, "/api/facts", false, false, context.Canceled, http.StatusInternalServerError, "dataset_failed"},
+		{"facts there, query canceled", http.MethodGet, "/api/facts", false, false, queryCanceled, http.StatusInternalServerError, "dataset_failed"},
+		{"analysis there, canceled", http.MethodGet, "/api/analysis", false, false, context.Canceled, http.StatusInternalServerError, "analysis_status_failed"},
+		{"ask there, canceled", http.MethodPost, "/api/analysis", false, true, context.Canceled, http.StatusInternalServerError, "analysis_ask_failed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			st := viewerGone{memStore: newMemStore(), err: tc.err}
+			st := viewerGone{memStore: newMemStore(), err: tc.err, inAsk: tc.inAsk}
 			if tc.left {
 				st.leave = cancel
 			}

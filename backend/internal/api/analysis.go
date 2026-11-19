@@ -61,7 +61,8 @@ func (d Deps) analysisStatus(w http.ResponseWriter, r *http.Request) {
 // analysisAsk starts a manual run of the view and answers with its status;
 // 409 when one is under way, the view is within its cooldown, the hour's
 // manual runs are taken, or no model is configured; 422 for an unknown
-// product; 500 when the store or loader fails.
+// product; 500 when the store or loader fails; 499 when the viewer left
+// first.
 func (d Deps) analysisAsk(w http.ResponseWriter, r *http.Request) {
 	if d.Analysis == nil {
 		httpapi.WriteDetail(w, http.StatusNotFound, http.StatusText(http.StatusNotFound))
@@ -91,7 +92,9 @@ func (d Deps) analysisAsk(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteDetail(w, http.StatusConflict, "no analysis model configured")
 		return
 	case err != nil:
-		d.serverError(w, r, "analysis_ask_failed", err, "team", v.team)
+		if !viewerLeft(w, r, err) {
+			d.serverError(w, r, "analysis_ask_failed", err, "team", v.team)
+		}
 		return
 	}
 	d.Log.InfoContext(r.Context(), "analysis_asked", "team", v.team, "weeks", av.Weeks, "product", av.Product)
