@@ -223,8 +223,8 @@ func quiet(v View, a metrics.Assessment) bool { return v.Product != "" && a.Acti
 func IsOff(err error) bool { return errors.Is(err, errOff) }
 
 // Run assesses the view, words it and stores it. A scheduled run is one
-// per view and closed week across replicas; an unchanged input is not
-// asked again.
+// per view and closed week across replicas; a manual run on unchanged
+// input is not asked again.
 func (s *Service) Run(ctx context.Context, v View, trigger string) error {
 	if s.LLM == nil {
 		return errOff
@@ -262,12 +262,14 @@ func (s *Service) run(ctx context.Context, v View, trigger string) error {
 	hash := inputHash(s.LLM.Model(), digest)
 	// A click on unchanged data shows what is there. A scheduled run still
 	// runs: skipped, it would leave no row, and every tick would look again.
-	if done, err := s.Store.DoneAnalyses(ctx, v, 1); trigger == TriggerManual && err == nil && len(done) == 1 &&
-		done[0].PeriodTo.Equal(a.Period.To) && done[0].InputHash != nil && *done[0].InputHash == hash {
-		log.InfoContext(ctx, "analysis_skipped", "reason", "input_unchanged", "id", done[0].ID)
-		// Nothing asked: the hour's manual slot goes back.
-		s.releaseManual()
-		return nil
+	if trigger == TriggerManual {
+		if done, err := s.Store.DoneAnalyses(ctx, v, 1); err == nil && len(done) == 1 &&
+			done[0].PeriodTo.Equal(a.Period.To) && done[0].InputHash != nil && *done[0].InputHash == hash {
+			log.InfoContext(ctx, "analysis_skipped", "reason", "input_unchanged", "id", done[0].ID)
+			// Nothing asked: the hour's manual slot goes back.
+			s.releaseManual()
+			return nil
+		}
 	}
 	id, ok, err := s.Store.ClaimAnalysis(ctx, store.AnalysisClaim{
 		View: v, From: a.Period.From, To: a.Period.To, Trigger: trigger, Model: s.LLM.Model(), At: s.now(),

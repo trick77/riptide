@@ -117,7 +117,7 @@ func (s *Store) endAnalysis(ctx context.Context, id int64, status string, r Anal
 func (s *Store) DoneAnalyses(ctx context.Context, v AnalysisView, limit int) ([]Analysis, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+analysisColumns+` FROM team_analyses
 		WHERE team = $1 AND weeks = $2 AND product = $3 AND status = 'done'
-		ORDER BY period_to DESC, finished_at DESC LIMIT $4`, v.Team, v.Weeks, v.Product, limit)
+		ORDER BY period_to DESC, finished_at DESC, id DESC LIMIT $4`, v.Team, v.Weeks, v.Product, limit)
 	if err != nil {
 		return nil, err
 	}

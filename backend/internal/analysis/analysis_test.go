@@ -58,6 +58,8 @@ func jammed(_ context.Context, team string, p metrics.Period) (*dataset.Dataset,
 type memStore struct {
 	mu   sync.Mutex
 	rows []store.Analysis
+	// doneCalls counts DoneAnalyses calls.
+	doneCalls int
 }
 
 func (m *memStore) ClaimAnalysis(_ context.Context, c store.AnalysisClaim) (int64, bool, error) {
@@ -133,6 +135,7 @@ func (m *memStore) done(v store.AnalysisView, to time.Time) []store.Analysis {
 func (m *memStore) DoneAnalyses(_ context.Context, v store.AnalysisView, limit int) ([]store.Analysis, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.doneCalls++
 	out := m.done(v, time.Time{})
 	return out[:min(limit, len(out))], nil
 }
@@ -362,6 +365,10 @@ func TestRunOncePerScheduledWeek(t *testing.T) {
 	}
 	if llm.calls != 1 {
 		t.Errorf("model called %d times for one closed week", llm.calls)
+	}
+	// The unchanged-input skip is a manual run's only.
+	if st.doneCalls != 0 {
+		t.Errorf("scheduled runs looked up done analyses %d times", st.doneCalls)
 	}
 	// A click on unchanged data asks nothing.
 	if err := s.Run(ctx, view, TriggerManual); err != nil || llm.calls != 1 {
