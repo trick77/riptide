@@ -24,6 +24,7 @@ type Store interface {
 	FinishAnalysis(ctx context.Context, id int64, r store.AnalysisResult) error
 	FailAnalysis(ctx context.Context, id int64, r store.AnalysisResult) error
 	DoneAnalyses(ctx context.Context, v store.AnalysisView, limit int) ([]store.Analysis, error)
+	DoneWeeksBefore(ctx context.Context, v store.AnalysisView, to time.Time, weeks int) ([]store.Analysis, error)
 	LatestAttempt(ctx context.Context, v store.AnalysisView) (*store.Analysis, error)
 	ScheduledAttempt(ctx context.Context, v store.AnalysisView, to time.Time) (*store.Analysis, error)
 }
@@ -62,9 +63,6 @@ const (
 	StaleAfter = 30 * time.Minute
 	// historyDepth is how many earlier closed weeks tell what recurs.
 	historyDepth = 8
-	// historyRowsPerWeek bounds the rows read for them: a scheduled run
-	// and a few clicks a week.
-	historyRowsPerWeek = 6
 )
 
 // MaxAge is how many weeks older than the last closed week a window's
@@ -161,10 +159,11 @@ func (s *Service) assess(ctx context.Context, v View) (metrics.Assessment, error
 // signals, and how many in a row before to raised each.
 func (s *Service) history(ctx context.Context, v View, to time.Time) (metrics.History, error) {
 	h := metrics.History{Seen: map[string]int{}, Latest: map[string]string{}}
-	// Rows, not weeks: a week holds its scheduled run and any number of
-	// clicks, and the current week's reruns are skipped. Room for several
-	// per week; the weeks are cut to historyDepth below.
-	rows, err := s.Store.DoneAnalyses(ctx, v, historyDepth*historyRowsPerWeek)
+	// Weeks, not rows: a week holds its scheduled run and any number of
+	// clicks, counted as one in the query, else enough of them fill the
+	// limit. The current week's own reruns are no history. A week whose
+	// newest run does not parse is skipped, not read from an older run.
+	rows, err := s.Store.DoneWeeksBefore(ctx, v, to, historyDepth)
 	if err != nil {
 		return h, err
 	}
@@ -174,14 +173,6 @@ func (s *Service) history(ctx context.Context, v View, to time.Time) (metrics.Hi
 	}
 	var runs []run
 	for _, r := range rows {
-		// One per closed week, the newest of it; the current week's own
-		// reruns are no history.
-		if !r.PeriodTo.Before(to) || (len(runs) > 0 && r.PeriodTo.Equal(runs[len(runs)-1].to)) {
-			continue
-		}
-		if len(runs) == historyDepth {
-			break
-		}
 		var a metrics.Assessment
 		if err := json.Unmarshal(r.Assessment, &a); err != nil {
 			continue

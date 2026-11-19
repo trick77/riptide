@@ -75,3 +75,54 @@ func TestScheduledAnalysisClaim(t *testing.T) {
 		t.Errorf("another view's attempt: %+v, %v", none, err)
 	}
 }
+
+// A week's reruns are one week: the limit counts weeks, the newest done run
+// with an assessment of each, and the weeks ending at to are left out.
+func TestDoneWeeksBefore(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	v := AnalysisView{Team: "checkout", Weeks: 4}
+	w := time.Date(2030, 1, 7, 0, 0, 0, 0, time.UTC)
+	// kind: done, failed, or bare (done without an assessment).
+	run := func(to time.Time, end time.Time, kind string) int64 {
+		t.Helper()
+		id, ok, err := s.ClaimAnalysis(ctx, AnalysisClaim{View: v, From: to.AddDate(0, 0, -28), To: to,
+			Trigger: "manual", Model: "m", At: end.Add(-time.Minute)})
+		if err != nil || !ok {
+			t.Fatalf("claim %v %v", ok, err)
+		}
+		r := AnalysisResult{Assessment: json.RawMessage(`{}`), At: end}
+		switch kind {
+		case "failed":
+			err = s.FailAnalysis(ctx, id, r)
+		case "bare":
+			r.Assessment = nil
+			err = s.FinishAnalysis(ctx, id, r)
+		default:
+			err = s.FinishAnalysis(ctx, id, r)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	run(w.AddDate(0, 0, -21), w.AddDate(0, 0, -20), "done")
+	w2 := run(w.AddDate(0, 0, -14), w.AddDate(0, 0, -13), "done")
+	run(w.AddDate(0, 0, -14), w.AddDate(0, 0, -12), "bare")
+	// More reruns of one week than the limit.
+	for i := range 3 {
+		run(w.AddDate(0, 0, -7), w.AddDate(0, 0, -6).Add(time.Duration(i)*time.Hour), "done")
+	}
+	w1 := run(w.AddDate(0, 0, -7), w.AddDate(0, 0, -5), "done")
+	run(w.AddDate(0, 0, -7), w.AddDate(0, 0, -4), "failed")
+	run(w, w.AddDate(0, 0, 1), "done")
+	got, err := s.DoneWeeksBefore(ctx, v, w, 2)
+	if err != nil || len(got) != 2 || got[0].ID != w1 || got[1].ID != w2 {
+		t.Fatalf("weeks before = %+v, %v; want %d, %d", got, err, w1, w2)
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := s.DoneWeeksBefore(cancelled, v, w, 2); err == nil {
+		t.Error("a failed read returned no error")
+	}
+}

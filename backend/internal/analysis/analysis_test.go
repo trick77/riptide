@@ -1,11 +1,13 @@
 package analysis
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -98,12 +100,53 @@ func (m *memStore) FailAnalysis(_ context.Context, id int64, r store.AnalysisRes
 	return m.end(id, "failed", r)
 }
 
+// done is the view's done rows ending before to (zero: any), ordered as the
+// SQL does: period_to, then finished_at (NULL first), then id, newest first.
+func (m *memStore) done(v store.AnalysisView, to time.Time) []store.Analysis {
+	var out []store.Analysis
+	for _, r := range m.rows {
+		if r.Status == "done" && r.Team == v.Team && r.Weeks == v.Weeks && r.Product == v.Product &&
+			(to.IsZero() || r.PeriodTo.Before(to)) {
+			out = append(out, r)
+		}
+	}
+	slices.SortFunc(out, func(a, b store.Analysis) int {
+		if c := b.PeriodTo.Compare(a.PeriodTo); c != 0 {
+			return c
+		}
+		// DESC puts NULL first in Postgres.
+		switch {
+		case a.FinishedAt == nil && b.FinishedAt != nil:
+			return -1
+		case a.FinishedAt != nil && b.FinishedAt == nil:
+			return 1
+		case a.FinishedAt != nil:
+			if c := b.FinishedAt.Compare(*a.FinishedAt); c != 0 {
+				return c
+			}
+		}
+		return cmp.Compare(b.ID, a.ID)
+	})
+	return out
+}
+
 func (m *memStore) DoneAnalyses(_ context.Context, v store.AnalysisView, limit int) ([]store.Analysis, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	out := m.done(v, time.Time{})
+	return out[:min(limit, len(out))], nil
+}
+
+func (m *memStore) DoneWeeksBefore(_ context.Context, v store.AnalysisView, to time.Time,
+	weeks int) ([]store.Analysis, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var out []store.Analysis
-	for i := len(m.rows) - 1; i >= 0 && len(out) < limit; i-- {
-		if r := m.rows[i]; r.Status == "done" && r.Team == v.Team && r.Weeks == v.Weeks && r.Product == v.Product {
+	for _, r := range m.done(v, to) {
+		if len(out) == weeks {
+			break
+		}
+		if len(r.Assessment) > 0 && (len(out) == 0 || !r.PeriodTo.Equal(out[len(out)-1].PeriodTo)) {
 			out = append(out, r)
 		}
 	}
@@ -444,6 +487,39 @@ func TestHistory(t *testing.T) {
 	}
 	if got := h.Seen["pr_jam:kasse/kasse-api"]; got != 0 {
 		t.Errorf("jam seen %d times across a missed week, want 0", got)
+	}
+}
+
+// Reruns, however many, of a closed week or of the current one hide no
+// earlier week from the history.
+func TestHistoryPastReruns(t *testing.T) {
+	ctx := context.Background()
+	st := &memStore{}
+	s := service(&fakeLLM{answer: goodAnswer}, st)
+	for _, d := range []int{-14, -7, 0} {
+		s.Now = func() time.Time { return now.AddDate(0, 0, d) }
+		if err := s.Run(ctx, view, TriggerScheduled); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 50 clicks on week W (now's closed weeks), then 50 on W+1 while it is
+	// the current one.
+	w := st.rows[2]
+	for i := range 100 {
+		r := w
+		r.ID, r.Trigger = int64(len(st.rows)+1), TriggerManual
+		r.FinishedAt = ptr(now.Add(time.Duration(i) * Cooldown))
+		if i >= 50 {
+			r.PeriodTo = w.PeriodTo.AddDate(0, 0, 7)
+		}
+		st.rows = append(st.rows, r)
+	}
+	h, err := s.history(ctx, view, w.PeriodTo.AddDate(0, 0, 7))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Runs != 3 || h.Seen["pr_jam:kasse/kasse-api"] != 3 {
+		t.Errorf("runs %d, seen %v, want 3 weeks behind the reruns", h.Runs, h.Seen)
 	}
 }
 
