@@ -124,6 +124,22 @@ func (s *Store) DoneAnalyses(ctx context.Context, v AnalysisView, limit int) ([]
 	return pgx.CollectRows(rows, scanAnalysis)
 }
 
+// DoneWeeksBefore is the view's newest done analysis with an assessment of
+// each closed week ending before to, the latest first, at most weeks of
+// them: a week's reruns, however many, are one.
+func (s *Store) DoneWeeksBefore(ctx context.Context, v AnalysisView, to time.Time, weeks int) ([]Analysis, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+analysisColumns+` FROM (
+			SELECT DISTINCT ON (period_to) * FROM team_analyses
+			WHERE team = $1 AND weeks = $2 AND product = $3 AND status = 'done' AND period_to < $4
+			  AND assessment IS NOT NULL
+			ORDER BY period_to DESC, finished_at DESC, id DESC
+		) newest ORDER BY period_to DESC LIMIT $5`, v.Team, v.Weeks, v.Product, to, weeks)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, scanAnalysis)
+}
+
 // ScheduledAttempt is the view's scheduled attempt for the closed weeks
 // ending at to; nil without one.
 func (s *Store) ScheduledAttempt(ctx context.Context, v AnalysisView, to time.Time) (*Analysis, error) {
