@@ -542,6 +542,53 @@ func TestNoerglerEventType(t *testing.T) {
 	expectInvalid(t, err, "body", "model_attributes_type")
 }
 
+// Every SHA is a join key: a sender's stray whitespace would never match
+// Bitbucket's, and the length counts only once trimmed.
+func TestSHAsTrimmed(t *testing.T) {
+	argo := func(v string) (*string, error) {
+		b := fixture(t, "argocd_synced.json")
+		b["revision"] = v
+		d, err := ArgoCD(encode(t, b), fixedNow)
+		if err != nil {
+			return nil, err
+		}
+		if !strings.Contains(d.DeliveryID, "#"+d.Revision+"#") {
+			t.Errorf("delivery id %q lacks revision %q", d.DeliveryID, d.Revision)
+		}
+		return &d.Revision, nil
+	}
+	noergler := func(file, field string, get func(*NoerglerDraft) *string) func(string) (*string, error) {
+		return func(v string) (*string, error) {
+			b := fixture(t, file)
+			b[field] = v
+			d, err := Noergler(encode(t, b))
+			if err != nil {
+				return nil, err
+			}
+			return get(d), nil
+		}
+	}
+	for _, c := range []struct {
+		loc   string
+		parse func(string) (*string, error)
+	}{
+		{"body.revision", argo},
+		{"body.source_commit_sha", noergler("noergler_pr_completed_merged.json", "source_commit_sha", func(d *NoerglerDraft) *string { return d.CommitSHA })},
+		{"body.merge_commit_sha", noergler("noergler_pr_completed_merged.json", "merge_commit_sha", func(d *NoerglerDraft) *string { return d.MergeCommitSHA })},
+		{"body.commit_sha", noergler("noergler_feedback.json", "commit_sha", func(d *NoerglerDraft) *string { return d.CommitSHA })},
+	} {
+		t.Run(c.loc, func(t *testing.T) {
+			got, err := c.parse("  ABC1234\n")
+			if err != nil || str(got) != "abc1234" {
+				t.Errorf("sha = %q, %v", str(got), err)
+			}
+			// Long enough only with the whitespace: too short.
+			_, err = c.parse("  abc12 ")
+			expectInvalid(t, err, c.loc, "string_too_short")
+		})
+	}
+}
+
 func TestValidationErrorMessage(t *testing.T) {
 	_, err := ArgoCD([]byte(`{}`), fixedNow)
 	if !strings.Contains(err.Error(), "body.app_name: Field required") {

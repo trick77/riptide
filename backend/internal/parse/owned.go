@@ -101,6 +101,20 @@ func (o *object) optionalSHA(field string) *string {
 	return lowered(s)
 }
 
+// requiredSHA is optionalSHA for a mandatory field: absent is missing, and
+// blank is too short.
+func (o *object) requiredSHA(field string) string {
+	s := strings.TrimSpace(o.requiredString(field, 0))
+	if o.hasError(field) {
+		return ""
+	}
+	if len([]rune(s)) < 7 {
+		o.fail(field, "string_too_short", "String should have at least 7 characters")
+		return ""
+	}
+	return strings.ToLower(s)
+}
+
 // lowered lowercases an optional value.
 func lowered(s *string) *string {
 	if s == nil {
@@ -137,7 +151,7 @@ func imageRefs(o *object) []string {
 type ArgoCDDraft struct {
 	DeliveryID           string
 	AppName              string
-	Revision             string // lowercased; the GitOps-repo SHA
+	Revision             string // trimmed, lowercased; the GitOps-repo SHA
 	SyncStatus           *string
 	OperationPhase       *string
 	StartedAt            *time.Time
@@ -159,7 +173,7 @@ func ArgoCD(raw []byte, now time.Time) (*ArgoCDDraft, error) {
 	}
 	d := &ArgoCDDraft{
 		AppName:              o.requiredString("app_name", 1),
-		Revision:             strings.ToLower(o.requiredString("revision", 7)),
+		Revision:             o.requiredSHA("revision"),
 		SyncStatus:           o.optionalString("sync_status", 0),
 		OperationPhase:       o.optionalString("operation_phase", 0),
 		StartedAt:            o.optionalTime("started_at", false),
@@ -272,8 +286,8 @@ func parsePRCompleted(o *object, raw []byte) (*NoerglerDraft, error) {
 	repo := o.requiredString("repo", 1)
 	handle := o.optionalTrimmed("reviewer_handle")
 	kind := o.literal("reviewer_account_kind", "bot", accountKinds...)
-	source := o.requiredString("source_commit_sha", 7)
-	merge := o.optionalString("merge_commit_sha", 7)
+	source := o.requiredSHA("source_commit_sha")
+	merge := o.optionalSHA("merge_commit_sha")
 	int64p := func(field string, minimum int64) *int64 { v := o.integer(field, minimum); return &v }
 	d := &NoerglerDraft{
 		EventType:        NoerglerPRCompleted,
@@ -316,16 +330,14 @@ func parsePRCompleted(o *object, raw []byte) (*NoerglerDraft, error) {
 	}
 	d.PRKey = strings.ToLower(prKey)
 	d.Repo = ptr(strings.ToLower(repo))
-	d.CommitSHA = ptr(strings.ToLower(source))
+	d.CommitSHA = &source
+	d.MergeCommitSHA = merge
 	d.Outcome = &outcome
 	// The handle stays case-preserved: it is matched against the git host's
 	// own user handles, which riptide stores as delivered.
 	d.ReviewerHandle = handle
 	if handle != nil {
 		d.ReviewerAccountKind = &kind
-	}
-	if merge != nil {
-		d.MergeCommitSHA = ptr(strings.ToLower(*merge))
 	}
 	d.OccurredAt = closed
 	// One rollup per terminal outcome, redelivered on retries. The key
@@ -344,7 +356,7 @@ func parseFeedback(o *object, raw []byte) (*NoerglerDraft, error) {
 	verdict := o.literal("verdict", "", "disagreed", "acknowledged")
 	actor := o.requiredString("actor", 1)
 	repo := o.optionalString("repo", 1)
-	commit := o.optionalString("commit_sha", 7)
+	commit := o.optionalSHA("commit_sha")
 	occurred := o.requiredTime("occurred_at")
 	if err := o.err(); err != nil {
 		return nil, err
@@ -355,14 +367,12 @@ func parseFeedback(o *object, raw []byte) (*NoerglerDraft, error) {
 		FindingID:  &findingID,
 		Verdict:    &verdict,
 		Actor:      ptr(strings.ToLower(actor)),
+		CommitSHA:  commit,
 		OccurredAt: occurred,
 		Payload:    raw,
 	}
 	if repo != nil {
 		d.Repo = ptr(strings.ToLower(*repo))
-	}
-	if commit != nil {
-		d.CommitSHA = ptr(strings.ToLower(*commit))
 	}
 	// finding_id is stable per finding and never normalised; the verdict is
 	// in the key so a flip lands a second row.
