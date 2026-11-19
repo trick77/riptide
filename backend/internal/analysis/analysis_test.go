@@ -411,7 +411,7 @@ func TestStatus(t *testing.T) {
 	if l := fresh.Layout; len(l.Focus) != 1 || l.Focus[0] != want {
 		t.Errorf("layout of the analysis = %+v", l)
 	}
-	if _, err := s.Ask(ctx, view); !IsBusy(err) {
+	if err := s.Ask(ctx, view); !IsBusy(err) {
 		t.Errorf("asked again within the cooldown: %v", err)
 	}
 	// Two weeks on, a 4-week analysis is too old to show; a 26-week one
@@ -433,21 +433,34 @@ func TestManualPerHour(t *testing.T) {
 	at := now
 	s.Now = func() time.Time { return at }
 	for i := range ManualPerHour {
-		if _, ok := s.takeManual(); !ok {
+		if !s.takeManual() {
 			t.Fatalf("run %d refused", i+1)
 		}
 		at = at.Add(time.Minute)
 	}
-	until, ok := s.takeManual()
-	if ok || !until.Equal(now.Add(time.Hour)) {
-		t.Fatalf("eleventh run: ok %v until %v", ok, until)
+	if s.takeManual() {
+		t.Fatal("eleventh run allowed")
+	}
+	if err := s.Ask(context.Background(), view); !IsBusy(err) {
+		t.Errorf("asked with the hour full: %v", err)
+	}
+	if _, held := s.inflight.Load(viewKey(view)); held {
+		t.Error("a refused ask still holds the view")
+	}
+	s.inflight.Store(viewKey(view), true)
+	if err := s.Ask(context.Background(), view); !IsBusy(err) {
+		t.Errorf("asked while one is under way: %v", err)
+	}
+	s.inflight.Delete(viewKey(view))
+	if err := (&Service{}).Ask(context.Background(), view); !IsOff(err) {
+		t.Errorf("asked with no model: %v", err)
 	}
 	at = now.Add(time.Hour)
-	if _, ok := s.takeManual(); !ok {
+	if !s.takeManual() {
 		t.Error("the first run's hour is over, still refused")
 	}
 	// A product the team's data does not know spends nothing.
-	if _, err := s.Ask(context.Background(), View{Team: "team-a", Weeks: 4, Product: "made-up"}); !IsUnknownProduct(err) {
+	if err := s.Ask(context.Background(), View{Team: "team-a", Weeks: 4, Product: "made-up"}); !IsUnknownProduct(err) {
 		t.Errorf("made-up product: %v", err)
 	}
 }

@@ -20,7 +20,7 @@ const AskHeader = "X-Riptide-Ask"
 // Analyst serves a view's assessment with its analysis and starts a run.
 type Analyst interface {
 	Status(ctx context.Context, v analysis.View) (analysis.Status, error)
-	Ask(ctx context.Context, v analysis.View) (*time.Time, error)
+	Ask(ctx context.Context, v analysis.View) error
 }
 
 // Dataset is a team's dataset over a period, the config as it is now: the
@@ -71,8 +71,9 @@ func (d Deps) analysisStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // analysisAsk starts a manual run of the view and answers with its status;
-// 409 when one is under way, the view was just asked for, or no model is
-// configured.
+// 409 when one is under way, the view is within its cooldown, the hour's
+// manual runs are taken, or no model is configured; 422 for an unknown
+// product; 500 when the store or loader fails.
 func (d Deps) analysisAsk(w http.ResponseWriter, r *http.Request) {
 	if d.Analysis == nil {
 		httpapi.WriteDetail(w, http.StatusNotFound, http.StatusText(http.StatusNotFound))
@@ -90,7 +91,7 @@ func (d Deps) analysisAsk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	av := analysisView(v)
-	_, err := d.Analysis.Ask(r.Context(), av)
+	err := d.Analysis.Ask(r.Context(), av)
 	switch {
 	case analysis.IsUnknownProduct(err):
 		httpapi.WriteDetail(w, http.StatusUnprocessableEntity, "unknown product")

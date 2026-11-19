@@ -301,9 +301,7 @@ func (s *Service) Status(ctx context.Context, v View) (Status, error) {
 			return st, err
 		} else if last != nil {
 			st.Running = last.Status == "running" && s.now().Sub(last.CreatedAt) < StaleAfter
-			if until := last.CreatedAt.Add(Cooldown); last.Trigger == TriggerManual && s.now().Before(until) {
-				st.CooldownUntil = &until
-			}
+			st.CooldownUntil = cooldownUntil(last, s.now())
 			if last.Status == "failed" && last.Error != nil {
 				st.Failure = &Failure{At: last.CreatedAt, Detail: *last.Error}
 			}

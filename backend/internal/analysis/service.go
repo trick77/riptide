@@ -355,44 +355,46 @@ func viewKey(v View) string {
 	return v.Team + "|" + strconv.Itoa(v.Weeks) + "|" + v.Product
 }
 
-// Ask starts a manual run of the view in the background, unless one is
-// under way or the view's last manual attempt is within Cooldown; it then
-// returns errBusy and when the view takes one again.
-func (s *Service) Ask(ctx context.Context, v View) (*time.Time, error) {
+// Ask starts a manual run of the view in the background. It refuses with
+// errBusy when one of the view is under way, its last manual attempt is
+// within Cooldown or the hour's manual runs (ManualPerHour) are taken;
+// with errOff when no model is configured, errUnknownProduct for a product
+// the team's data lacks, and the store's or loader's error when either
+// fails.
+func (s *Service) Ask(ctx context.Context, v View) error {
 	if s.LLM == nil {
-		return nil, errOff
+		return errOff
 	}
 	// Marked now, not when the run starts: two clicks at once must not both
 	// pass. Every refusal below lets go of it; the run keeps it to its end.
 	key := viewKey(v)
 	if _, busy := s.inflight.LoadOrStore(key, true); busy {
-		return nil, errBusy
+		return errBusy
 	}
-	until, err := s.mayAsk(ctx, v)
-	if err != nil {
+	if err := s.mayAsk(ctx, v); err != nil {
 		s.inflight.Delete(key)
-		return until, err
+		return err
 	}
 	go func() {
 		defer s.inflight.Delete(key)
 		_ = s.run(s.base, v, TriggerManual)
 	}()
-	return nil, nil
+	return nil
 }
 
 // mayAsk refuses a manual run: one under way or within Cooldown, an unknown
 // product, the hour's runs taken. Allowed, it books the hour's slot.
-func (s *Service) mayAsk(ctx context.Context, v View) (*time.Time, error) {
+func (s *Service) mayAsk(ctx context.Context, v View) error {
 	last, err := s.Store.LatestAttempt(ctx, v)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if last != nil {
-		if until := last.CreatedAt.Add(Cooldown); last.Trigger == TriggerManual && s.now().Before(until) {
-			return &until, errBusy
+		if cooldownUntil(last, s.now()) != nil {
+			return errBusy
 		}
 		if last.Status == "running" && s.now().Sub(last.CreatedAt) < StaleAfter {
-			return nil, errBusy
+			return errBusy
 		}
 	}
 	// A product the team's data does not know would be a view of its own,
@@ -401,16 +403,25 @@ func (s *Service) mayAsk(ctx context.Context, v View) (*time.Time, error) {
 		cur, _ := s.periods(v.Weeks)
 		ds, err := s.Load(ctx, v.Team, cur)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if !slices.ContainsFunc(ds.Products, func(p dataset.Product) bool { return p.Key == v.Product }) {
-			return nil, errUnknownProduct
+			return errUnknownProduct
 		}
 	}
-	if until, ok := s.takeManual(); !ok {
-		return &until, errBusy
+	if !s.takeManual() {
+		return errBusy
 	}
-	return nil, nil
+	return nil
+}
+
+// cooldownUntil is when the view takes a manual run again after its last
+// attempt; nil when it does now.
+func cooldownUntil(last *store.Analysis, now time.Time) *time.Time {
+	if until := last.CreatedAt.Add(Cooldown); last.Trigger == TriggerManual && now.Before(until) {
+		return &until
+	}
+	return nil
 }
 
 // releaseManual gives back the latest booked slot: a run that asked the
@@ -428,8 +439,8 @@ func (s *Service) releaseManual() {
 // process: riptide runs one replica (infra repo); with N the cap is N×.
 const ManualPerHour = 10
 
-// takeManual books a manual run if the hour has room; else when it has.
-func (s *Service) takeManual() (time.Time, bool) {
+// takeManual books a manual run if the hour has room.
+func (s *Service) takeManual() bool {
 	s.manualMu.Lock()
 	defer s.manualMu.Unlock()
 	n := s.now()
@@ -441,10 +452,10 @@ func (s *Service) takeManual() (time.Time, bool) {
 	}
 	s.manual = kept
 	if len(s.manual) >= ManualPerHour {
-		return s.manual[0].Add(time.Hour), false
+		return false
 	}
 	s.manual = append(s.manual, n)
-	return time.Time{}, true
+	return true
 }
 
 // errUnknownProduct: Ask's view names a product the team's data lacks.

@@ -332,8 +332,8 @@ func (s viewerGone) Status(ctx context.Context, _ analysis.View) (analysis.Statu
 }
 
 // Ask starts the run; the status read after it is the one that waits.
-func (viewerGone) Ask(context.Context, analysis.View) (*time.Time, error) {
-	return nil, nil
+func (viewerGone) Ask(context.Context, analysis.View) error {
+	return nil
 }
 
 // A tab closed or a filter switched mid-load (the UI aborts the request)
