@@ -226,25 +226,6 @@ func ClosedPrevious(weeks int, now time.Time, loc *time.Location) Period {
 	return periodFrom(end.AddDate(0, 0, -7*weeks), weeks, end)
 }
 
-// extra compared numbers, the assessment's own: the page shows them
-// without a verdict.
-const (
-	mergedPerWeekMetric metricID = iota + 100
-	wipWeeksMetric
-	waitShareMetric
-	featureShareMetric
-)
-
-func (id metricID) judgeX(cur, prev side, incomplete bool) Change {
-	def := map[metricID]metric{
-		mergedPerWeekMetric: {up, relative},
-		wipWeeksMetric:      {down, relative},
-		waitShareMetric:     {down, points},
-		featureShareMetric:  {undirected, points},
-	}[id]
-	return def.judge(cur, prev, incomplete)
-}
-
 // Assess is the assessment of ds over p.Period against prev over
 // p.Previous, both closed weeks (ClosedPeriod), with what earlier ones
 // raised.
@@ -570,14 +551,14 @@ func (a *assessor) teamChanges() []teamChange {
 	merged, pmerged := a.mergedPerWeek(a.m), a.mergedPerWeek(a.pm)
 	ok, pok := a.m.Review.Merged >= lowSample, a.pm.Review.Merged >= lowSample
 	out = append(out, teamChange{"merged_per_week", "merged_per_week", UnitPerWeek, SourceBitbucket, merged,
-		mergedPerWeekMetric.judgeX(side{merged, ok}, side{pmerged, pok}, bb)})
+		mergedPerWeekMetric.judge(side{merged, ok}, side{pmerged, pok}, bb)})
 	wip, pwip := wipWeeks(a.m, merged), wipWeeks(a.pm, pmerged)
 	out = append(out, teamChange{"wip_weeks", "wip_weeks", UnitWeeks, SourceBitbucket, wip,
-		wipWeeksMetric.judgeX(side{wip, ok}, side{pwip, pok}, bb)})
+		wipWeeksMetric.judge(side{wip, ok}, side{pwip, pok}, bb)})
 	ws, wok := waitShare(a.m.LeadChain)
 	pws, pwok := waitShare(a.pm.LeadChain)
 	out = append(out, teamChange{"wait_share", "wait_share", UnitShare, SourceBitbucket, ws,
-		waitShareMetric.judgeX(side{ws, wok}, side{pws, pwok}, bb)})
+		waitShareMetric.judge(side{ws, wok}, side{pws, pwok}, bb)})
 	return out
 }
 
@@ -904,7 +885,7 @@ func (a *assessor) question() *Signal {
 	bb := before(m.Meta.DataStart.Bitbucket, a.p.Previous.From)
 	cands := []teamChange{
 		{"feature_share", "feature_share", UnitShare, SourceBitbucket, feature,
-			featureShareMetric.judgeX(side{feature, mixN(m) >= lowSample}, side{pfeature, mixN(a.pm) >= lowSample}, bb)},
+			featureShareMetric.judge(side{feature, mixN(m) >= lowSample}, side{pfeature, mixN(a.pm) >= lowSample}, bb)},
 		{"untracked", "untracked", UnitShare, SourceBitbucket, m.Review.UntrackedRate, c.Untracked},
 		{"wasted_share", "wasted_share", UnitShare, SourceNoergler, m.Costs.WastedShare, c.WastedShare},
 		{"cost_per_kloc", "cost_per_kloc", UnitUSD, SourceNoergler, m.Costs.PerKloc, c.CostPerKloc},

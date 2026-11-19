@@ -194,6 +194,11 @@ const (
 	repoDurationMetric
 	repoFailureMetric
 	buildFlakyMetric
+	// The assessment's own team numbers: flow and the PR mix.
+	mergedPerWeekMetric
+	wipWeeksMetric
+	waitShareMetric
+	featureShareMetric
 )
 
 func (id metricID) def() metric {
@@ -213,6 +218,10 @@ func (id metricID) def() metric {
 		repoDurationMetric:  {down, relative},
 		repoFailureMetric:   {down, points},
 		buildFlakyMetric:    {down, points},
+		mergedPerWeekMetric: {up, relative},
+		wipWeeksMetric:      {down, relative},
+		waitShareMetric:     {down, points},
+		featureShareMetric:  {undirected, points},
 	}[id]
 }
 
