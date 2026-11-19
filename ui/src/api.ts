@@ -383,7 +383,8 @@ export type Change = {
   // -1..1, positive better: log2(now / previous), negated where lower is
   // better, clamped at halving / doubling; null without a verdict.
   score: number | null;
-  // How far it moved: notable past 25 % (5 points for a share).
+  // How far it moved: notable past 25 % (5 points for a share; a count
+  // damped and moved by at least 2).
   magnitude: "same" | "minor" | "notable" | null;
 };
 

@@ -36,6 +36,10 @@ const (
 	NotableChange = 0.25
 	// NotableShareChange is the same for a share, in points of 0..1.
 	NotableShareChange = 0.05
+	// NotableCountStep is the least a count must move to be news, damped
+	// ratio aside: 0 to 1 or 1 to 2 clears NotableChange, but one jammed
+	// repo more is no news (user, 2026-11-19).
+	NotableCountStep = 2
 )
 
 // Magnitudes of a Change with a verdict.
@@ -94,7 +98,8 @@ type Change struct {
 	// verdict is same, null when it is none.
 	Score *float64 `json:"score"`
 	// Magnitude is how far it moved: same within the tolerance, notable past
-	// NotableChange (NotableShareChange for a share), minor between. Null
+	// NotableChange (NotableShareChange for a share, NotableCountStep on top
+	// for a count), minor between. Null
 	// when the verdict is none. Undirected numbers have one too, so a large
 	// shift can still be asked about.
 	Magnitude *string `json:"magnitude"`
@@ -273,7 +278,8 @@ func changeVerdict(cur, prev float64, d direction, s scale) string {
 }
 
 // magnitude is Change.Magnitude of cur against prev. A count moves
-// relative, damped as its score is: one jammed repo more is no news.
+// relative, damped as its score is, and is news only from NotableCountStep:
+// one jammed repo more is none.
 func magnitude(cur, prev float64, s scale) string {
 	delta := math.Abs(cur - prev)
 	var moved, notable bool
@@ -282,7 +288,8 @@ func magnitude(cur, prev float64, s scale) string {
 		moved, notable = delta > ShareTolerance+eps, delta+eps >= NotableShareChange
 	case count:
 		r := math.Abs((cur+CountDamping)/(prev+CountDamping) - 1)
-		moved, notable = prev != cur && (prev == 0 || delta/prev > Tolerance+eps), r+eps >= NotableChange
+		moved = prev != cur && (prev == 0 || delta/prev > Tolerance+eps)
+		notable = r+eps >= NotableChange && delta+eps >= NotableCountStep
 	case relative:
 		if prev == 0 {
 			// From 0 there is no ratio, but any move is news.

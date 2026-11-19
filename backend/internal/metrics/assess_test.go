@@ -24,11 +24,17 @@ func TestMagnitude(t *testing.T) {
 		{0.90, 0.88, points, MagnitudeSame},
 		{0.90, 0.86, points, MagnitudeMinor},
 		{0.90, 0.85, points, MagnitudeNotable},
-		{1, 0, count, MagnitudeNotable}, // damped: 3/2
-		{3, 2, count, MagnitudeNotable}, // damped: 5/4, exactly NotableChange
-		{11, 10, count, MagnitudeSame},  // 10 %: inside the tolerance
-		{13, 11, count, MagnitudeMinor}, // damped: 15/13, moved, no news
+		{1, 0, count, MagnitudeMinor},     // damped 3/2, but one more is no news
+		{2, 1, count, MagnitudeMinor},     // damped 4/3, one more again
+		{3, 1, count, MagnitudeNotable},   // damped 5/3, two more
+		{4, 2, count, MagnitudeNotable},   // damped 6/4
+		{11, 10, count, MagnitudeSame},    // 10 %: inside the tolerance
+		{13, 11, count, MagnitudeMinor},   // damped: 15/13, moved, no news
+		{13, 10, count, MagnitudeNotable}, // damped: 15/12, exactly NotableChange
 		{20, 10, count, MagnitudeNotable},
+		{0, 1, count, MagnitudeMinor}, // one fewer is no news either
+		{1, 2, count, MagnitudeMinor},
+		{0, 2, count, MagnitudeNotable},
 	} {
 		if got := magnitude(c.cur, c.prev, c.s); got != c.want {
 			t.Errorf("magnitude(%v, %v, %v) = %s, want %s", c.cur, c.prev, c.s, got, c.want)
@@ -164,6 +170,47 @@ func TestAssessSignals(t *testing.T) {
 	// kasse-cli built, portal-web merged: active, no signal.
 	if a.Calm < 2 || a.Active < 4 {
 		t.Errorf("active %d calm %d", a.Active, a.Calm)
+	}
+}
+
+// A jam card turns attention for more jammed repos only where that is
+// news: one more is not, two more are.
+func TestJamToneFromNotable(t *testing.T) {
+	cur, prev := ClosedPeriod(4, now, zurich), ClosedPrevious(4, now, zurich)
+	jammed := func(end time.Time, repos ...string) []dataset.OpenPR {
+		var out []dataset.OpenPR
+		for _, repo := range repos {
+			for i := range OpenJamMin {
+				at := end.Add(-time.Duration(9+i) * 24 * time.Hour).UTC()
+				out = append(out, openPR(func(o *dataset.OpenPR) {
+					o.Repo, o.PRID, o.OpenedAt, o.ReadyAt = repo, int64(len(out)+1), at, ptr(at)
+					o.LastEventAt = end.Add(-24 * time.Hour).UTC()
+				}))
+			}
+		}
+		return out
+	}
+	mk := func(p Period, open []dataset.OpenPR) *dataset.Dataset {
+		return data(func(ds *dataset.Dataset) {
+			ds.Meta.From, ds.Meta.To = p.From, p.To
+			ds.Meta.DataStart = dataset.SourceTimes{Bitbucket: agoP(200), Pipeline: agoP(200), ArgoCD: agoP(200), Noergler: agoP(200)}
+			ds.OpenPRs = open
+		})
+	}
+	for _, c := range []struct {
+		name  string
+		repos []string
+		want  string
+	}{
+		{"one more", []string{"kasse/kasse-api"}, ToneHint},
+		{"two more", []string{"kasse/kasse-api", "portal/portal-web"}, ToneAttention},
+	} {
+		a := Assess(mk(cur, jammed(cur.To, c.repos...)), mk(prev, nil), Params{Period: cur, Previous: prev}, History{})
+		for _, repo := range c.repos {
+			if s := signal(a, "pr_jam:"+repo); s == nil || s.Tone != c.want {
+				t.Errorf("%s: pr_jam:%s = %+v, want %s", c.name, repo, s, c.want)
+			}
+		}
 	}
 }
 
