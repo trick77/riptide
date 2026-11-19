@@ -32,13 +32,7 @@
 -- $1 team, $2 the instant T, $3 the GitOps repos (sql/gitops.sql).
 WITH non_human_identities AS (
   -- Accounts senders declared as non-human (docs/metrics.md, pickup-time query).
-  SELECT DISTINCT lower(reviewer_handle) AS handle
-  FROM noergler_events
-  WHERE reviewer_handle IS NOT NULL AND reviewer_account_kind IN ('bot', 'service')
-  UNION
-  SELECT DISTINCT lower(actor_handle)
-  FROM pipeline_events
-  WHERE actor_handle IS NOT NULL AND actor_account_kind IN ('bot', 'service')
+/*{{non_human_identities}}*/
 ),
 pr_events AS MATERIALIZED (
   SELECT e.id, e.repo_full_name, e.pr_id, e.event_type, e.occurred_at, e.author, e.author_display_name,
@@ -110,16 +104,9 @@ details AS (
          max(array_to_string(e.jira_keys, ' ')) FILTER (WHERE e.event_type = 'pr:opened') AS opened_jira_keys,
          -- Reviewer touches before T, bots and declared non-humans out,
          -- oldest first.
-         coalesce(jsonb_agg(jsonb_build_object(
-                     'at', e.occurred_at,
-                     'approved', e.event_type = 'pr:reviewer:approved',
-                     'author', coalesce(e.author, ''),
-                     'display_name', coalesce(e.author_display_name, ''))
-                   ORDER BY e.occurred_at, e.id)
+         coalesce(/*{{touches}}*/
                   FILTER (WHERE e.before
-                            AND e.event_type IN ('pr:comment:added', 'pr:reviewer:approved',
-                                                 'pr:reviewer:unapproved', 'pr:reviewer:needs_work',
-                                                 'pr:reviewer:updated')
+                            AND e.event_type IN (/*{{touch_events}}*/)
                             AND NOT e.is_automated AND NOT coalesce(e.declared_non_human, false)),
                   '[]'::jsonb) AS touches
   FROM open_keys o

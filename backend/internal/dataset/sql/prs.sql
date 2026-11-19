@@ -16,13 +16,7 @@ WITH non_human_identities AS (
   -- Accounts senders declared as non-human (docs/metrics.md, pickup-time query):
   -- is_automated is decided at ingest, so rows written before an identity
   -- was declared are caught here.
-  SELECT DISTINCT lower(reviewer_handle) AS handle
-  FROM noergler_events
-  WHERE reviewer_handle IS NOT NULL AND reviewer_account_kind IN ('bot', 'service')
-  UNION
-  SELECT DISTINCT lower(actor_handle)
-  FROM pipeline_events
-  WHERE actor_handle IS NOT NULL AND actor_account_kind IN ('bot', 'service')
+/*{{non_human_identities}}*/
 ),
 window_prs AS (
   SELECT DISTINCT repo_full_name, pr_id
@@ -127,17 +121,10 @@ chain AS (
          -- first. Go drops the authors riptide's automation detection
          -- recognises today and takes first_review_at and approved_at from
          -- what is left, so both count the same reviewers.
-         (SELECT coalesce(jsonb_agg(jsonb_build_object(
-                     'at', e.occurred_at,
-                     'approved', e.event_type = 'pr:reviewer:approved',
-                     'author', coalesce(e.author, ''),
-                     'display_name', coalesce(e.author_display_name, ''))
-                   ORDER BY e.occurred_at, e.id), '[]'::jsonb)
+         (SELECT coalesce(/*{{touches}}*/, '[]'::jsonb)
             FROM bitbucket_events e
            WHERE e.repo_full_name = p.repo_full_name AND e.pr_id = p.pr_id
-             AND e.event_type IN ('pr:comment:added', 'pr:reviewer:approved',
-                                  'pr:reviewer:unapproved', 'pr:reviewer:needs_work',
-                                  'pr:reviewer:updated')
+             AND e.event_type IN (/*{{touch_events}}*/)
              AND lower(e.author) IS DISTINCT FROM lower(p.pr_opener)
              AND NOT e.is_automated
              AND NOT EXISTS (SELECT 1 FROM non_human_identities n

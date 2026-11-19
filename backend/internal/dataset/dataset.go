@@ -9,8 +9,10 @@ package dataset
 import (
 	"cmp"
 	"context"
-	_ "embed"
+	"embed"
 	"fmt"
+	"io/fs"
+	"path"
 	"regexp"
 	"slices"
 	"strings"
@@ -21,26 +23,75 @@ import (
 	"github.com/trick77/riptide/internal/parse"
 )
 
+//go:embed sql/*.sql sql/fragments/*.sql
+var sqlFiles embed.FS
+
+// queries are sql/*.sql by file name, fragments written in.
+var queries = expand()
+
 var (
-	//go:embed sql/meta.sql
-	metaSQL string
-	//go:embed sql/prs.sql
-	prsSQL string
-	//go:embed sql/deploys.sql
-	deploysSQL string
-	//go:embed sql/lead_times.sql
-	leadTimesSQL string
-	//go:embed sql/environments.sql
-	environmentsSQL string
-	//go:embed sql/runs.sql
-	runsSQL string
-	//go:embed sql/reviews.sql
-	reviewsSQL string
-	//go:embed sql/open_prs.sql
-	openPRsSQL string
-	//go:embed sql/gitops.sql
-	gitopsSQL string
+	metaSQL         = query("meta.sql")
+	prsSQL          = query("prs.sql")
+	deploysSQL      = query("deploys.sql")
+	leadTimesSQL    = query("lead_times.sql")
+	environmentsSQL = query("environments.sql")
+	runsSQL         = query("runs.sql")
+	reviewsSQL      = query("reviews.sql")
+	openPRsSQL      = query("open_prs.sql")
+	gitopsSQL       = query("gitops.sql")
 )
+
+func query(name string) string {
+	q, ok := queries[name]
+	if !ok {
+		panic("dataset: no sql/" + name)
+	}
+	return q
+}
+
+// fragments are sql/fragments/*.sql by name, without .sql and the trailing
+// newline.
+func fragments() map[string]string {
+	out := map[string]string{}
+	for file, body := range readSQL("sql/fragments/*.sql") {
+		out[strings.TrimSuffix(file, ".sql")] = strings.TrimSuffix(body, "\n")
+	}
+	return out
+}
+
+func placeholder(fragment string) string { return "/*{{" + fragment + "}}*/" }
+
+// expand writes each fragment into every query where it says
+// /*{{<name>}}*/: plain text, so the query reads the same as if typed out.
+// A fragment holds no placeholder (no nesting: the order fragments are
+// written in is a map's) and no -- comment (one would swallow the rest of
+// the line it is written into); comments go at the call site.
+func expand() map[string]string {
+	out := readSQL("sql/*.sql")
+	for name, body := range fragments() {
+		for q := range out {
+			out[q] = strings.ReplaceAll(out[q], placeholder(name), body)
+		}
+	}
+	return out
+}
+
+// readSQL reads the embedded files matching pattern, by file name.
+func readSQL(pattern string) map[string]string {
+	names, err := fs.Glob(sqlFiles, pattern)
+	if err != nil {
+		panic(err)
+	}
+	out := map[string]string{}
+	for _, n := range names {
+		body, err := sqlFiles.ReadFile(n)
+		if err != nil {
+			panic(err)
+		}
+		out[path.Base(n)] = string(body)
+	}
+	return out
+}
 
 // Params selects one team's window. From is inclusive, To exclusive.
 type Params struct {
@@ -198,7 +249,7 @@ type reviewerStatus struct {
 	Status      string `json:"status"`
 }
 
-// touch is a reviewer's event on a PR, as prs.sql lists them.
+// touch is a reviewer's event on a PR, as sql/fragments/touches.sql builds it.
 type touch struct {
 	At          time.Time `json:"at"`
 	Approved    bool      `json:"approved"`
