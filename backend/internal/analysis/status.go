@@ -109,9 +109,11 @@ func tab(s metrics.Signal) string {
 }
 
 // layout is the page's choice: what the analysis words, or without one the
-// first metrics.FocusMax candidates and MaxCards team-wide signals; either
-// way the best GoodCards gains and DoneCards resolutions on top, worded or
-// not. The rest, gates and the question aside, is "also spotted".
+// first metrics.FocusMax candidates and MaxCards team-wide signals. Gains
+// and resolutions get GoodCards and DoneCards slots on top: without words
+// the best ones; with words the best gain and resolution always, the worded
+// ones beside them (past the slots if need be), unworded ones in a slot
+// left. The rest, gates and the question aside, is "also spotted".
 func layout(a metrics.Assessment, text *Text) Layout {
 	l := Layout{Focus: []LayoutFocus{}, Cards: []LayoutCard{}, Also: []LayoutCard{}, Tally: tally(a)}
 	covered := map[string]bool{}
@@ -142,55 +144,80 @@ func layout(a metrics.Assessment, text *Text) Layout {
 			covered[id] = true
 		}
 	}
-	// A worded card always shows (the validator caps them at MaxCards; a
-	// worded gain or resolution books its slot up front, below); an unworded
-	// one only in a free slot of its column.
+	// A worded card always shows (the validator caps them at MaxCards), even
+	// where a focus repo carries its signal: the model's words are never
+	// dropped. An unworded one takes a free slot of its column (take), and
+	// none a focus already covers.
 	slots := map[string]int{ColumnBad: MaxCards, ColumnGood: GoodCards, ColumnDone: DoneCards}
-	addCard := func(id, lever string, worded bool) {
+	shown := map[string]bool{}
+	addCard := func(id, lever string, worded, take bool) {
 		s, ok := byID[id]
-		if !ok || !cardSignal(s) || covered[id] {
+		if !ok || !cardSignal(s) || shown[id] || covered[id] && !worded {
 			return
 		}
 		col := column(s)
-		if !worded {
+		if take {
 			if slots[col] <= 0 {
 				return
 			}
 			slots[col]--
 		}
 		l.Cards = append(l.Cards, LayoutCard{Signal: id, Column: col, Lever: cmp.Or(lever, ruleLever(s))})
-		covered[id] = true
+		shown[id], covered[id] = true, true
 	}
 	if text != nil {
 		for _, f := range text.Focus {
 			addFocus(f.Repo, f.Lever)
 		}
-		// The worries in the model's order; what runs in the backend's rank,
-		// worded or not, so the largest gain leads whichever the model
-		// worded. Unworded, a card takes the rules' words.
+		// The worries in the model's order. What runs in the backend's rank:
+		// the best gain and the best resolution always, worded or not (the
+		// validator asks for them but cannot force them), then every worded
+		// one, its slot booked whatever its rank, then unworded ones in a
+		// slot left. Unworded, a card takes the rules' words.
 		worded := map[string]string{}
 		for _, k := range text.Cards {
-			if s, ok := byID[k.Signal]; ok && column(s) != ColumnBad && cardSignal(s) {
-				// Its slot is taken whatever its rank.
+			if s, ok := byID[k.Signal]; ok && column(s) != ColumnBad {
 				worded[k.Signal] = k.Lever
-				slots[column(s)]--
 				continue
 			}
-			addCard(k.Signal, k.Lever, true)
+			addCard(k.Signal, k.Lever, true, false)
+		}
+		// Which show first, then in the backend's rank across both columns:
+		// the page lists gains and resolutions as ranked.
+		pick, best := map[string]bool{}, map[string]bool{}
+		free := func(s metrics.Signal) bool {
+			return column(s) != ColumnBad && cardSignal(s) && !covered[s.ID] && !pick[s.ID]
 		}
 		for _, s := range a.Signals {
-			if column(s) == ColumnBad {
-				continue
+			if col := column(s); free(s) && !best[col] {
+				best[col], pick[s.ID] = true, true
+				slots[col]--
 			}
-			lever, ok := worded[s.ID]
-			addCard(s.ID, lever, ok)
+		}
+		for id := range worded {
+			if s, ok := byID[id]; ok && cardSignal(s) && !pick[id] {
+				pick[id] = true
+				slots[column(s)]--
+			}
+		}
+		for _, s := range a.Signals {
+			if col := column(s); free(s) && slots[col] > 0 {
+				pick[s.ID] = true
+				slots[col]--
+			}
+		}
+		for _, s := range a.Signals {
+			if pick[s.ID] {
+				lever, ok := worded[s.ID]
+				addCard(s.ID, lever, ok, false)
+			}
 		}
 	} else {
 		for _, f := range a.Focus[:min(len(a.Focus), metrics.FocusMax)] {
 			addFocus(f.Repo, "")
 		}
 		for _, s := range a.Signals {
-			addCard(s.ID, "", false)
+			addCard(s.ID, "", false, true)
 		}
 	}
 	for _, s := range a.Signals {
