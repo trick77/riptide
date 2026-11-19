@@ -537,11 +537,10 @@ export class ApiError extends Error {
   }
 }
 
-async function getJSON<T>(url: string, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(url, {
-    signal,
-    headers: { Accept: "application/json" },
-  });
+// readJSON reads a response's body, or throws its {"detail": ...} message.
+// A 2xx that is not JSON (a sign-in proxy's HTML page) is an ApiError too,
+// not a raw SyntaxError; an aborted read stays an AbortError.
+async function readJSON<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let detail = res.statusText || `HTTP ${res.status}`;
     try {
@@ -552,7 +551,21 @@ async function getJSON<T>(url: string, signal?: AbortSignal): Promise<T> {
     }
     throw new ApiError(res.status, detail);
   }
-  return (await res.json()) as T;
+  try {
+    return (await res.json()) as T;
+  } catch (e) {
+    if (e instanceof SyntaxError)
+      throw new ApiError(res.status, "answer is not JSON (a sign-in page?)");
+    throw e;
+  }
+}
+
+async function getJSON<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(url, {
+    signal,
+    headers: { Accept: "application/json" },
+  });
+  return readJSON<T>(res);
 }
 
 export function fetchTeams(signal?: AbortSignal): Promise<string[]> {
@@ -757,17 +770,7 @@ export async function askAnalysis(v: Query): Promise<AnalysisStatus> {
     // The backend refuses a POST without it: a cross-site form cannot set it.
     headers: { Accept: "application/json", "X-Riptide-Ask": "1" },
   });
-  if (!res.ok) {
-    let detail = res.statusText || `HTTP ${res.status}`;
-    try {
-      const body = (await res.json()) as { detail?: unknown };
-      if (typeof body.detail === "string") detail = body.detail;
-    } catch {
-      // not JSON
-    }
-    throw new ApiError(res.status, detail);
-  }
-  return (await res.json()) as AnalysisStatus;
+  return readJSON<AnalysisStatus>(res);
 }
 
 export function fetchFacts(

@@ -1913,6 +1913,20 @@ describe("App", () => {
     );
   });
 
+  it("reports a 2xx that is not JSON, a sign-in page say", async () => {
+    mockFetch(
+      () =>
+        new Response("<html>sign in</html>", {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        }),
+    );
+    render(<App />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "200: answer is not JSON (a sign-in page?)",
+    );
+  });
+
   it("reports a failed facts load", async () => {
     mockFetch((url) =>
       url.pathname === "/api/facts"
