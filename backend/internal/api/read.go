@@ -11,7 +11,6 @@ import (
 	_ "time/tzdata" // the viewer's zone, whatever the image ships
 
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/trick77/ship/kit/logging"
 
 	"github.com/trick77/riptide/internal/config"
 	"github.com/trick77/riptide/internal/dataset"
@@ -185,8 +184,7 @@ func (d Deps) failed(w http.ResponseWriter, r *http.Request, team string, err er
 	if viewerLeft(w, r, err) {
 		return
 	}
-	d.Log.ErrorContext(r.Context(), "dataset_failed", "team", team, logging.Err(err))
-	httpapi.WriteDetail(w, http.StatusInternalServerError, "Internal Server Error")
+	d.serverError(w, r, "dataset_failed", err, "team", team)
 }
 
 // metrics serves every number of the page for one team and period.

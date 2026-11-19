@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/trick77/riptide/internal/config"
@@ -64,10 +65,24 @@ func (d Deps) bitbucket(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusAccepted, statusBody{Status: "accepted"})
 }
 
-// pipeline is the CI sink: Jenkins, Tekton and any other CI, told apart by
-// the `source` field, all authenticated with the team's jenkins secret.
-func (d Deps) pipeline(w http.ResponseWriter, r *http.Request) {
-	team, ok := d.bearer(w, r, config.SourceJenkins)
+// owned is a bearer-authenticated sink whose contract riptide owns.
+type owned[D any] struct {
+	source string // webhook_source
+	secret string // the team secret that authenticates it
+	parse  func(raw []byte) (D, error)
+	// logged (required) is the draft's delivery_id and the source's own
+	// webhook_processed fields, logged between delivery_id and team.
+	logged func(draft D) (deliveryID string, fields []any)
+	// ignore, when set, names the reason a draft is acknowledged and not
+	// stored ("" stores it), with fields only its ignored line carries.
+	ignore func(draft D) (reason string, fields []any)
+	insert func(s Store, ctx context.Context, draft D, team string) (bool, error)
+}
+
+// serveOwned authenticates before it reads the body, so a bad body behind a
+// bad key is a 401, then parses, stores and logs the one webhook_processed.
+func serveOwned[D any](d Deps, w http.ResponseWriter, r *http.Request, s owned[D]) {
+	team, ok := d.bearer(w, r, s.secret)
 	if !ok {
 		return
 	}
@@ -75,86 +90,85 @@ func (d Deps) pipeline(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	draft, err := parse.Pipeline(raw)
+	draft, err := s.parse(raw)
 	if err != nil {
 		writeValidation(w, err)
 		return
 	}
-	inserted, err := d.Store.InsertPipeline(r.Context(), draft, team)
+	deliveryID, fields := s.logged(draft)
+	processed := func(outcome string, lead, tail []any) {
+		args := append([]any{"webhook_source", s.source, "outcome", outcome}, lead...)
+		args = append(append(args, "delivery_id", deliveryID), fields...)
+		args = append(append(args, tail...), "team", team)
+		d.Log.InfoContext(r.Context(), "webhook_processed", args...)
+	}
+	if s.ignore != nil {
+		if reason, extra := s.ignore(draft); reason != "" {
+			processed("ignored", []any{"reason", reason}, extra)
+			httpapi.WriteJSON(w, http.StatusAccepted, statusBody{Status: "ignored"})
+			return
+		}
+	}
+	inserted, err := s.insert(d.Store, r.Context(), draft, team)
 	if err != nil {
-		d.persistFailed(w, r, "pipeline", draft.DeliveryID, team, err)
+		d.persistFailed(w, r, s.source, deliveryID, team, err)
 		return
 	}
-	// `source` is Splunk-reserved, so the CI vendor travels as ci_system.
-	d.Log.InfoContext(r.Context(), "webhook_processed",
-		"webhook_source", "pipeline", "outcome", outcome(inserted), "delivery_id", draft.DeliveryID,
-		"ci_system", draft.Source, "pipeline", draft.PipelineName, "run_id", draft.RunID,
-		"phase", draft.Phase, "status", draft.Status, "team", team)
+	processed(outcome(inserted), nil, nil)
 	httpapi.WriteJSON(w, http.StatusAccepted, statusBody{Status: "accepted"})
+}
+
+// pipeline is the CI sink: Jenkins, Tekton and any other CI, told apart by
+// the `source` field, all authenticated with the team's jenkins secret.
+func (d Deps) pipeline(w http.ResponseWriter, r *http.Request) {
+	serveOwned(d, w, r, owned[*parse.PipelineDraft]{
+		source: "pipeline",
+		secret: config.SourceJenkins,
+		parse:  parse.Pipeline,
+		insert: Store.InsertPipeline,
+		logged: func(draft *parse.PipelineDraft) (string, []any) {
+			// `source` is Splunk-reserved, so the CI vendor travels as ci_system.
+			return draft.DeliveryID, []any{"ci_system", draft.Source, "pipeline", draft.PipelineName,
+				"run_id", draft.RunID, "phase", draft.Phase, "status", draft.Status}
+		},
+	})
 }
 
 // argocd is the Argo CD notification sink. Deploys to a stage listed in
 // environments.ignored_stages are acknowledged and dropped.
 func (d Deps) argocd(w http.ResponseWriter, r *http.Request) {
-	team, ok := d.bearer(w, r, config.SourceArgoCD)
-	if !ok {
-		return
-	}
-	raw, ok := readBody(w, r, maxOwnedBody)
-	if !ok {
-		return
-	}
-	draft, err := parse.ArgoCD(raw, d.now())
-	if err != nil {
-		writeValidation(w, err)
-		return
-	}
-	if draft.Environment != nil && d.Runtime.Config().Environments.IgnoredStages[*draft.Environment] {
-		d.Log.InfoContext(r.Context(), "webhook_processed",
-			"webhook_source", "argocd", "outcome", "ignored", "reason", "stage_in_ignored_stages",
-			"delivery_id", draft.DeliveryID, "app", draft.AppName, "revision", draft.Revision,
-			"phase", draft.OperationPhase, "environment", draft.Environment,
-			"destination_namespace", draft.DestinationNamespace, "team", team)
-		httpapi.WriteJSON(w, http.StatusAccepted, statusBody{Status: "ignored"})
-		return
-	}
-	inserted, err := d.Store.InsertArgoCD(r.Context(), draft, team)
-	if err != nil {
-		d.persistFailed(w, r, "argocd", draft.DeliveryID, team, err)
-		return
-	}
-	d.Log.InfoContext(r.Context(), "webhook_processed",
-		"webhook_source", "argocd", "outcome", outcome(inserted), "delivery_id", draft.DeliveryID,
-		"app", draft.AppName, "revision", draft.Revision, "phase", draft.OperationPhase,
-		"environment", draft.Environment, "team", team)
-	httpapi.WriteJSON(w, http.StatusAccepted, statusBody{Status: "accepted"})
+	serveOwned(d, w, r, owned[*parse.ArgoCDDraft]{
+		source: "argocd",
+		secret: config.SourceArgoCD,
+		parse: func(raw []byte) (*parse.ArgoCDDraft, error) {
+			return parse.ArgoCD(raw, d.now())
+		},
+		logged: func(draft *parse.ArgoCDDraft) (string, []any) {
+			return draft.DeliveryID, []any{"app", draft.AppName, "revision", draft.Revision,
+				"phase", draft.OperationPhase, "environment", draft.Environment}
+		},
+		ignore: func(draft *parse.ArgoCDDraft) (string, []any) {
+			if draft.Environment == nil || !d.Runtime.Config().Environments.IgnoredStages[*draft.Environment] {
+				return "", nil
+			}
+			return "stage_in_ignored_stages", []any{"destination_namespace", draft.DestinationNamespace}
+		},
+		insert: Store.InsertArgoCD,
+	})
 }
 
 // noergler is the PR-review sink: per-PR finops rollups and
 // reviewer-precision verdicts.
 func (d Deps) noergler(w http.ResponseWriter, r *http.Request) {
-	team, ok := d.bearer(w, r, config.SourceNoergler)
-	if !ok {
-		return
-	}
-	raw, ok := readBody(w, r, maxOwnedBody)
-	if !ok {
-		return
-	}
-	draft, err := parse.Noergler(raw)
-	if err != nil {
-		writeValidation(w, err)
-		return
-	}
-	inserted, err := d.Store.InsertNoergler(r.Context(), draft, team)
-	if err != nil {
-		d.persistFailed(w, r, "noergler", draft.DeliveryID, team, err)
-		return
-	}
-	d.Log.InfoContext(r.Context(), "webhook_processed",
-		"webhook_source", "noergler", "outcome", outcome(inserted), "delivery_id", draft.DeliveryID,
-		"event_type", draft.EventType, "team", team)
-	httpapi.WriteJSON(w, http.StatusAccepted, statusBody{Status: "accepted"})
+	serveOwned(d, w, r, owned[*parse.NoerglerDraft]{
+		source: "noergler",
+		secret: config.SourceNoergler,
+		parse:  parse.Noergler,
+		insert: Store.InsertNoergler,
+		logged: func(draft *parse.NoerglerDraft) (string, []any) {
+			return draft.DeliveryID, []any{"event_type", draft.EventType}
+		},
+	})
 }
 
 func deref(s *string) string {

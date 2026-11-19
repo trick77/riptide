@@ -344,6 +344,51 @@ func (viewerGone) Ask(context.Context, analysis.View) error {
 	return nil
 }
 
+// analysisFails is an analyst whose ask or status read fails.
+type analysisFails struct {
+	*memStore
+	ask, status error
+}
+
+func (s analysisFails) Status(context.Context, analysis.View) (analysis.Status, error) {
+	return analysis.Status{}, s.status
+}
+
+func (s analysisFails) Ask(context.Context, analysis.View) error { return s.ask }
+
+func TestAnalysisFailureIs500AndLogged(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		ask, status error
+		failed      string
+	}{
+		{"ask fails", errBoom, nil, "analysis_ask_failed"},
+		{"status after ask fails", nil, errBoom, "analysis_status_failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, analysisFails{memStore: newMemStore(), ask: tc.ask, status: tc.status})
+			r := newRequest(http.MethodPost, "/api/analysis?team=checkout", nil)
+			r.Header.Set(AskHeader, "1")
+			w := h.serveUI(r)
+			expectStatus(t, w, http.StatusInternalServerError)
+			expectBody(t, w, `{"detail":"Internal Server Error"}`)
+			validateResponse(t, specRouter(t), http.MethodPost, "/api/analysis", w)
+			logged := 0
+			for _, l := range h.lines(t) {
+				if l["msg"] == tc.failed {
+					logged++
+					if l["log_level"] != "error" || l["team"] != "checkout" || l["err"] != "boom" {
+						t.Errorf("line = %v", l)
+					}
+				}
+			}
+			if logged != 1 {
+				t.Errorf("%s lines = %d: %s", tc.failed, logged, h.logs)
+			}
+		})
+	}
+}
+
 // A tab closed or a filter switched mid-load (the UI aborts the request)
 // is no failure: 499 in the access log, nothing logged as an error. A real
 // error after the viewer left, or a cancellation the viewer did not cause,

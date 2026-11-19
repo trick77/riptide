@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/trick77/ship/kit/logging"
-
 	"github.com/trick77/riptide/internal/analysis"
 	"github.com/trick77/riptide/internal/dataset"
 	"github.com/trick77/riptide/internal/httpapi"
@@ -54,8 +52,7 @@ func (d Deps) analysisStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		d.Log.ErrorContext(r.Context(), "analysis_status_failed", "team", v.team, logging.Err(err))
-		httpapi.WriteDetail(w, http.StatusInternalServerError, "Internal Server Error")
+		d.serverError(w, r, "analysis_status_failed", err, "team", v.team)
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, st)
@@ -94,8 +91,7 @@ func (d Deps) analysisAsk(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteDetail(w, http.StatusConflict, "no analysis model configured")
 		return
 	case err != nil:
-		d.Log.ErrorContext(r.Context(), "analysis_ask_failed", "team", v.team, logging.Err(err))
-		httpapi.WriteDetail(w, http.StatusInternalServerError, "Internal Server Error")
+		d.serverError(w, r, "analysis_ask_failed", err, "team", v.team)
 		return
 	}
 	d.Log.InfoContext(r.Context(), "analysis_asked", "team", v.team, "weeks", av.Weeks, "product", av.Product)
@@ -104,8 +100,7 @@ func (d Deps) analysisAsk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		d.Log.ErrorContext(r.Context(), "analysis_status_failed", "team", v.team, logging.Err(err))
-		httpapi.WriteDetail(w, http.StatusInternalServerError, "Internal Server Error")
+		d.serverError(w, r, "analysis_status_failed", err, "team", v.team)
 		return
 	}
 	st.Running = true

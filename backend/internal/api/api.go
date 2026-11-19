@@ -177,8 +177,13 @@ func writeValidation(w http.ResponseWriter, err error) {
 // sender sees the failure and retries, and the retry dedupes. Bodies Postgres
 // could never store are rejected by the parser before this point.
 func (d Deps) persistFailed(w http.ResponseWriter, r *http.Request, source, deliveryID, team string, err error) {
-	d.Log.ErrorContext(r.Context(), "webhook_persist_failed",
-		"webhook_source", source, "delivery_id", deliveryID, "team", team, logging.Err(err))
+	d.serverError(w, r, "webhook_persist_failed", err,
+		"webhook_source", source, "delivery_id", deliveryID, "team", team)
+}
+
+// serverError logs msg at error level, args then err, and answers 500.
+func (d Deps) serverError(w http.ResponseWriter, r *http.Request, msg string, err error, args ...any) {
+	d.Log.ErrorContext(r.Context(), msg, append(args, logging.Err(err))...)
 	httpapi.WriteDetail(w, http.StatusInternalServerError, "Internal Server Error")
 }
 

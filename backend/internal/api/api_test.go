@@ -106,8 +106,11 @@ func TestTeamComesFromTheKey(t *testing.T) {
 // bad key is a 401, never a 422 that reveals the schema.
 func TestAuthBeforeValidation(t *testing.T) {
 	h := newHarness(t, nil)
-	w := h.bearer(t, "/webhooks/pipeline", "wrong", `{`)
-	expectStatus(t, w, http.StatusUnauthorized)
+	for _, path := range []string{"/webhooks/pipeline", "/webhooks/argocd", "/webhooks/noergler"} {
+		w := h.bearer(t, path, "wrong", `{`)
+		expectStatus(t, w, http.StatusUnauthorized)
+		expectBody(t, w, `{"detail":"Invalid credentials."}`)
+	}
 }
 
 // --- bitbucket ---------------------------------------------------------------
@@ -344,7 +347,11 @@ func TestArgoCDIgnoredStage(t *testing.T) {
 	if len(h.mem.rows) != 0 {
 		t.Error("ignored stage stored")
 	}
-	ev := h.processed(t)[0]
+	lines := h.processed(t)
+	if len(lines) != 1 {
+		t.Fatalf("webhook_processed lines = %d", len(lines))
+	}
+	ev := lines[0]
 	if ev["outcome"] != "ignored" || ev["reason"] != "stage_in_ignored_stages" || ev["delivery_id"] == nil ||
 		ev["environment"] != "syst" || ev["destination_namespace"] != "payments-api-SYST" {
 		t.Errorf("line = %v", ev)
@@ -392,7 +399,7 @@ func TestNoergler(t *testing.T) {
 func TestPersistFailureIs500AndLogged(t *testing.T) {
 	h := newHarness(t, nil)
 	h.mem.fail = errBoom
-	for _, w := range []interface{ Result() *http.Response }{
+	for _, w := range []*httptest.ResponseRecorder{
 		h.bearer(t, "/webhooks/pipeline", checkoutJenkins, fixture(t, "pipeline_jenkins_completed.json")),
 		h.bearer(t, "/webhooks/argocd", checkoutArgoCD, fixture(t, "argocd_synced.json")),
 		h.bearer(t, "/webhooks/noergler", checkoutNoergler, fixture(t, "noergler_feedback.json")),
@@ -401,11 +408,16 @@ func TestPersistFailureIs500AndLogged(t *testing.T) {
 		if code := w.Result().StatusCode; code != http.StatusInternalServerError {
 			t.Errorf("status = %d", code)
 		}
+		if body := strings.TrimSpace(w.Body.String()); body != `{"detail":"Internal Server Error"}` {
+			t.Errorf("body = %s", body)
+		}
 	}
 	n := 0
+	sources := map[any]bool{}
 	for _, l := range h.lines(t) {
 		if l["msg"] == "webhook_persist_failed" {
 			n++
+			sources[l["webhook_source"]] = true
 			if l["log_level"] != "error" || l["err"] != "boom" || l["delivery_id"] == nil || l["team"] != "checkout" {
 				t.Errorf("line = %v", l)
 			}
@@ -413,6 +425,11 @@ func TestPersistFailureIs500AndLogged(t *testing.T) {
 	}
 	if n != 4 || len(h.processed(t)) != 0 {
 		t.Errorf("persist_failed = %d, processed = %d", n, len(h.processed(t)))
+	}
+	for _, s := range []string{"pipeline", "argocd", "noergler", "bitbucket"} {
+		if !sources[s] {
+			t.Errorf("no webhook_persist_failed from %s: %v", s, sources)
+		}
 	}
 }
 
