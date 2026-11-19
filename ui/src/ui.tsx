@@ -105,9 +105,11 @@ const VERDICT_INK: Record<Change["verdict"], string> = {
   none: "text-muted",
 };
 
+// A number against the previous period, one form on every page: the
+// previous value under the number (Delta), the verdict at the foot
+// (Compare).
 export type CompareProps = {
   change: Change;
-  now: string;
   format: (v: number) => string;
 };
 
@@ -132,15 +134,10 @@ export function Delta({
   );
 }
 
-// A number against the previous period: before → now and the backend's
-// verdict, or why there is none. short: the before stands under the
-// number already (Delta), the foot keeps the verdict alone.
-export function Compare({
-  change,
-  now,
-  format,
-  short = false,
-}: CompareProps & { short?: boolean }) {
+// The foot of a number against the previous period: the backend's verdict,
+// or why there is none. The previous value stands under the number
+// (Delta), never here again.
+export function Compare({ change }: { change: Change }) {
   const { t } = useTranslation();
   if (change.prev == null)
     return (
@@ -156,14 +153,6 @@ export function Compare({
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 border-t border-border-soft pt-2 text-[12.5px] text-ink-dim">
       {v !== "none" && <Pill tone={VERDICT_TONE[v]}>{t(`compare.${v}`)}</Pill>}
-      {!short && (
-        <span>
-          {t("compare.previous")}{" "}
-          <span className="text-ink tabular-nums">{format(change.prev)}</span> →{" "}
-          {t("compare.now")}{" "}
-          <span className="text-ink tabular-nums">{now}</span>
-        </span>
-      )}
       {change.reason === "undirected" && (
         <span className="text-muted">{t("compare.undirected")}</span>
       )}
@@ -306,8 +295,8 @@ export type TileProps = {
   // Which way is better, and why; or that there is no better way.
   direction?: ReactNode;
   // The number against the previous period: its change under the number,
-  // the verdict and before → now at the foot.
-  compare?: Omit<CompareProps, "now">;
+  // the verdict at the foot.
+  compare?: CompareProps;
   // When set, the tile has a "Was heisst das?" toggle.
   open?: boolean;
   onWhy?: () => void;
@@ -362,7 +351,7 @@ export function Tile({
       {note && <div className="text-xs text-muted">{note}</div>}
       {direction && <div className="text-xs text-muted">{direction}</div>}
       {warn && <WarnLine>{warn}</WarnLine>}
-      {compare && <Compare {...compare} now="" short />}
+      {compare && <Compare change={compare.change} />}
     </div>
   );
 }

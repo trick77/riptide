@@ -197,7 +197,11 @@ describe("App", () => {
       screen.getByText("DORA · Change lead time · Throughput"),
     ).toBeInTheDocument();
     expect(screen.getByText("nicht gemessen")).toBeInTheDocument();
-    expect(screen.getByText("typisch 1.0 pro Woche")).toBeInTheDocument();
+    // The mean is said to be one; the line is the typical week.
+    expect(screen.getByText("typische Woche: 1.0")).toBeInTheDocument();
+    expect(
+      screen.getAllByText("Releases pro Woche, im Schnitt").length,
+    ).toBeGreaterThan(0);
   });
 
   it("explains a number on demand, one at a time", async () => {
@@ -236,8 +240,11 @@ describe("App", () => {
     mockFetch();
     render(<App />);
     await screen.findByRole("heading", { name: "Einschätzung" });
-    expect(screen.getByText("Besser")).toBeInTheDocument();
-    expect(screen.getByText("Schlechter")).toBeInTheDocument();
+    expect(screen.getAllByText("Besser").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Schlechter").length).toBeGreaterThan(0);
+    // One form everywhere: the previous value under the number, the
+    // verdict at the foot; never "Vorperiode X → jetzt Y" again.
+    expect(document.body.textContent).not.toMatch(/Vorperiode [^→]* → jetzt/);
     expect(screen.getAllByText("Unverändert").length).toBeGreaterThan(0);
     expect(screen.getAllByText("ohne Richtung").length).toBeGreaterThan(0);
     expect(
@@ -1853,11 +1860,22 @@ describe("App", () => {
         "2 rote Läufe flaky: danach grün auf demselben Commit (50 % der roten, 0.5 h) · 1 Lauf ohne Commit nicht beurteilt",
       ),
     ).toBeInTheDocument();
+    // The rate, the previous one under it as everywhere, the verdict below.
+    const worse = screen.getByText(
+      "Flaky-Quote 10 % der Läufe mit Commit",
+    ).parentElement!;
+    expect(within(worse).getByText("vorher 2 %")).toHaveClass(
+      "text-danger-ink",
+    );
     expect(
-      screen.getByText("Flaky-Quote 10 % der Läufe mit Commit, Vorperiode 2 %"),
+      within(worse.parentElement!).getByText("Schlechter"),
     ).toBeInTheDocument();
+    const better = screen.getByText(
+      "Flaky-Quote 0 % der Läufe mit Commit",
+    ).parentElement!;
+    expect(within(better).getByText("vorher 10 %")).toHaveClass("text-online");
     expect(
-      screen.getByText("Flaky-Quote 0 % der Läufe mit Commit, Vorperiode 10 %"),
+      within(better.parentElement!).getByText("Besser"),
     ).toBeInTheDocument();
     expect(
       screen.getByText("Kein roter Lauf, also auch kein flaky"),
@@ -2570,8 +2588,10 @@ describe("colour", () => {
     expect(
       within(document.getElementById("deploys")!).getByText("vorher 0.1"),
     ).toBeInTheDocument();
-    const worse = screen.getByText("vorher 1.0 Tage");
-    expect(worse).toHaveClass("text-danger-ink");
+    // The lead time's tile and the flow chain's PROD box, alike.
+    const worse = screen.getAllByText("vorher 1.0 Tage");
+    expect(worse).toHaveLength(2);
+    worse.forEach((el) => expect(el).toHaveClass("text-danger-ink"));
     // The verdict's pill: worse is red, no longer ochre.
     expect(screen.getAllByText("Schlechter")[0]).toHaveClass("text-danger-ink");
   });

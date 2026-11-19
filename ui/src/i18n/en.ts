@@ -358,7 +358,7 @@ export const en = {
       label: "Deployment frequency",
       dora: "DORA · Deployment frequency · Throughput",
       question: "How often does new code go to {{prod}}?",
-      unit: "releases per week",
+      unit: "releases per week, on average",
       note_one: "{{count}} release in the period",
       note_other: "{{count}} releases in the period",
       noDeploys: "no deploys in the period",
@@ -619,7 +619,7 @@ export const en = {
       "Only releases with new images; the line is the team's typical week",
     release: "Release",
     releases: "Releases",
-    typical: "typically {{n}} per week",
+    typical: "typical week: {{n}}",
     aria: "Releases to {{prod}} per week: {{parts}}",
     note: "{{resyncs}} and {{firstSeen}} do not count. The typical week is the median of the whole weeks in which Argo CD reported.",
   },
@@ -727,8 +727,6 @@ export const en = {
     unjudged_one: " · {{count}} run without a commit not judged",
     unjudged_other: " · {{count}} runs without a commit not judged",
     flakyRate: "Flaky rate {{rate}} of runs with a commit",
-    flakyRatePrev:
-      "Flaky rate {{rate}} of runs with a commit, previous period {{prev}}",
     viewFlaky: "View flaky runs →",
     flakyTitle:
       "Flaky: a run fails, a later run of the same pipeline on the same commit is green. A lower bound: retries inside a run, commits built once and reruns after the period's end are missing. Whether tests or infrastructure failed is not in the data.",

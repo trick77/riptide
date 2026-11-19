@@ -38,12 +38,12 @@ import {
   Card,
   CardHead,
   Compare,
+  Delta,
   Mono,
   Note,
   Pill,
   SectionHead,
   type Tone,
-  VERDICT_TONE,
 } from "./ui";
 
 // Line colours in the series ramp's fixed order, by kind, so a kind keeps
@@ -125,7 +125,14 @@ function KindCard({
           <div className={`${big} font-medium text-ink tabular-nums`}>
             {pct(b.success_rate)}
           </div>
+          {c && (
+            <div>
+              <Delta change={c.success} format={pct} />
+            </div>
+          )}
           {t("build.successful")}
+          {/* Its verdict under it: the flaky rate below has its own. */}
+          {c && <Compare change={c.success} />}
         </div>
         <div className="text-xs text-muted">
           <div className={`${big} font-medium text-ink tabular-nums`}>
@@ -186,12 +193,7 @@ function KindCard({
           })}
       </div>
       <Flaky b={b} c={c} onFacts={onFacts} />
-      {c && (
-        <>
-          <Compare change={c.success} now={pct(b.success_rate)} format={pct} />
-          <RepoChanges c={c} />
-        </>
-      )}
+      {c && <RepoChanges c={c} />}
     </div>
   );
 }
@@ -212,7 +214,7 @@ function Flaky({
   // Nothing red now and nothing flaky before: nothing to say. Flaky
   // before and nothing red now is the improvement the backend judged.
   if (b.failed === 0 && !c?.flaky.prev) return null;
-  const v = c?.flaky.verdict;
+  const compared = c?.flaky.prev != null ? c.flaky : null;
   return (
     <div
       className="flex flex-col gap-0.5 text-xs text-muted"
@@ -230,19 +232,10 @@ function Flaky({
             : t("build.flakyNoRed")}
         {b.unjudged > 0 && t("build.unjudged", { count: b.unjudged })}
       </span>
-      {(b.flaky_runs > 0 || c?.flaky.prev != null) && (
+      {(b.flaky_runs > 0 || compared) && (
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          {c?.flaky.prev != null && v && v !== "none" && v !== "same" && (
-            <Pill tone={VERDICT_TONE[v]}>{t(`compare.${v}`)}</Pill>
-          )}
-          <span>
-            {c?.flaky.prev != null
-              ? t("build.flakyRatePrev", {
-                  rate: pct(b.flaky_rate),
-                  prev: pct(c.flaky.prev),
-                })
-              : t("build.flakyRate", { rate: pct(b.flaky_rate) })}
-          </span>
+          <span>{t("build.flakyRate", { rate: pct(b.flaky_rate) })}</span>
+          {compared && <Delta change={compared} format={pct} />}
           {b.flaky_runs > 0 && (
             <button
               type="button"
@@ -254,6 +247,7 @@ function Flaky({
           )}
         </span>
       )}
+      {compared && <Compare change={compared} />}
     </div>
   );
 }

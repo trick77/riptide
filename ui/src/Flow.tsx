@@ -14,6 +14,7 @@ import {
   Card,
   CardHead,
   Compare,
+  Delta,
   Direction,
   SectionHead,
   Tile,
@@ -96,18 +97,21 @@ function Chain({ m }: { m: Metrics }) {
               </span>
             </div>
             {preChange && (
-              <Compare
-                change={preChange}
-                now={dur(pre.human.p50)}
-                format={dur}
-              />
+              <>
+                <Delta change={preChange} format={dur} />
+                <Compare change={preChange} />
+              </>
             )}
           </div>
-          <div className="rounded-ui border border-border-soft px-3 py-2.5 text-[13.5px] text-ink-dim">
-            {t("flow.leadTo", { env: prod })}{" "}
-            <span className="font-medium text-ink tabular-nums">
-              {dur(m.delivery.lead_time.human.p50)}
-            </span>
+          <div className="rounded-ui border border-border-soft px-3 py-2.5">
+            <div className="text-[13.5px] text-ink-dim">
+              {t("flow.leadTo", { env: prod })}{" "}
+              <span className="font-medium text-ink tabular-nums">
+                {dur(m.delivery.lead_time.human.p50)}
+              </span>
+            </div>
+            <Delta change={m.comparison.lead_time} format={dur} />
+            <Compare change={m.comparison.lead_time} />
           </div>
         </div>
       )}

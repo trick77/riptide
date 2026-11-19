@@ -353,7 +353,7 @@ export const de = {
       label: "Deploy-Frequenz",
       dora: "DORA · Deployment frequency · Throughput",
       question: "Wie oft geht neuer Code nach {{prod}}?",
-      unit: "Releases pro Woche",
+      unit: "Releases pro Woche, im Schnitt",
       note_one: "{{count}} Release im Zeitraum",
       note_other: "{{count}} Releases im Zeitraum",
       noDeploys: "keine Deploys im Zeitraum",
@@ -613,7 +613,7 @@ export const de = {
       "Nur Releases mit neuen Images; die Linie ist die typische Woche des Teams",
     release: "Release",
     releases: "Releases",
-    typical: "typisch {{n}} pro Woche",
+    typical: "typische Woche: {{n}}",
     aria: "Releases auf {{prod}} pro Woche: {{parts}}",
     note: "{{resyncs}} und {{firstSeen}} zählen nicht. Die typische Woche ist der Median der ganzen Wochen, in denen Argo CD meldete.",
   },
@@ -721,8 +721,6 @@ export const de = {
     unjudged_one: " · {{count}} Lauf ohne Commit nicht beurteilt",
     unjudged_other: " · {{count}} Läufe ohne Commit nicht beurteilt",
     flakyRate: "Flaky-Quote {{rate}} der Läufe mit Commit",
-    flakyRatePrev:
-      "Flaky-Quote {{rate}} der Läufe mit Commit, Vorperiode {{prev}}",
     viewFlaky: "Flaky-Läufe ansehen →",
     flakyTitle:
       "Flaky: Ein Lauf scheitert, ein späterer Lauf derselben Pipeline auf demselben Commit ist grün. Untergrenze: Wiederholungen innerhalb eines Laufs, nur einmal gebaute Commits und Reruns nach dem Periodenende fehlen. Ob Tests oder Infrastruktur scheiterten, steht nicht in den Daten.",

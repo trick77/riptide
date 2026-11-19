@@ -19,11 +19,11 @@ import {
   WarnLine,
 } from "./ui";
 
-// A number of the section against the previous period, in its head: the
-// section says itself whether it runs better or worse. The bars stay blue,
-// they are a count. The first deploys are in the note under the chart;
-// Argo CD reporting only since a day is said under the head, as on the
-// overview's tile.
+// A number of the section against the previous period, in its head, in the
+// tiles' form: the previous value under it, the verdict below. The bars
+// stay blue, they are a count. The first deploys are in the note under the
+// chart; Argo CD reporting only since a day is said under the head, as on
+// the overview's tile.
 function HeadNumber({
   label,
   value,
@@ -49,6 +49,7 @@ function HeadNumber({
         )}
       </div>
       <Delta change={change} format={format} />
+      <Compare change={change} />
     </div>
   );
 }
@@ -254,11 +255,8 @@ export function Mix({ m }: { m: Metrics }) {
           </span>{" "}
           {t("mix.untrackedText", { n: r.untracked, total: r.merged })}
         </div>
-        <Compare
-          change={m.comparison.untracked}
-          now={pct(r.untracked_rate)}
-          format={pct}
-        />
+        <Delta change={m.comparison.untracked} format={pct} />
+        <Compare change={m.comparison.untracked} />
       </Card>
     </section>
   );
