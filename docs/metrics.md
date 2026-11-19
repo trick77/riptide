@@ -537,8 +537,8 @@ measured on a real import yet.
 the last *closed* weeks (`BACKEND_ANALYSIS_TZ`, never the running week)
 against the same number before. `metrics.Assess` raises the signals:
 
-- a jam (3 PRs open 7 days or more in a repo; attention when it was jammed
-  at the previous end too, or more repos are);
+- a jam (4 PRs open 7 days or more in a repo; attention when it was jammed
+  at the previous end too, or notably more repos are: 2 or more);
 - the lead-time stage with the longest median (attention from half the
   time to production on 10 PRs, else a hint), and a repo slower than its
   own previous period (1.5 times its median, as the hotspots flag it);
@@ -546,7 +546,8 @@ against the same number before. `metrics.Assess` raises the signals:
   slower than the kind's median. No factor, since a kind mixes toolchains;
 - repos failing more, as the hotspots flag them;
 - a change of a directed team number: any gain past the tolerance (10 %,
-  3 points for a share), a worsening only past 25 % (5 points), the review
+  3 points for a share), a worsening only past 25 % (5 points; a count
+  damped by 2 and moved by at least 2: one jammed repo more is no news), the review
   time's worsening split by repo. A small gain is evidence of what runs; a
   small worsening would fill the stuck side with noise (user, 2026-11-18).
   That covers deploys, lead time, review, within-day, jammed repos, build

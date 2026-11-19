@@ -982,8 +982,8 @@ components:
           enum: [same, minor, notable, null]
           description: |
             How far it moved: `same` within the tolerance, `notable` past 25 %
-            (5 points for a share, counts damped as for the score), `minor`
-            between. Undirected numbers have one too. Null when the verdict is
+            (5 points for a share; a count damped as for the score and moved
+            by at least 2), `minor` between. Undirected numbers have one too. Null when the verdict is
             none for any reason but `undirected`.
 
     Comparison:

@@ -211,13 +211,14 @@ func TestComputeOpenPRsAgainstThePrevious(t *testing.T) {
 	if c := m.Comparison.OpenPRs; c.Verdict != ChangeNone || show(c.Prev) != 4.0 {
 		t.Errorf("open = %+v", c)
 	}
-	// More jammed repos than at the previous end: each jam needs attention.
+	// One jammed repo more than at the previous end is no news: each new
+	// jam stays a hint (TestJamToneFromNotable has two more).
 	a := Assess(cur, prev, Params{Period: p4(), Previous: PreviousPeriod(4, now, zurich)}, History{})
 	for _, repo := range []string{"kasse/kasse-api", "kasse/kasse-web"} {
 		if !slices.ContainsFunc(a.Signals, func(s Signal) bool {
-			return s.ID == "pr_jam:"+repo && s.Tone == ToneAttention
+			return s.ID == "pr_jam:"+repo && s.Tone == ToneHint
 		}) {
-			t.Errorf("no attention for %s: %+v", repo, a.Signals)
+			t.Errorf("no hint for %s: %+v", repo, a.Signals)
 		}
 	}
 }

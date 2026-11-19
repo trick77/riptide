@@ -390,7 +390,9 @@ func (a *assessor) jamSignals() {
 			prevJammed[r.Repo] = true
 		}
 	}
-	more := a.m.Comparison.OpenJammed.Verdict == ChangeWorse
+	// More jammed repos lift every jam only as news: one more is none.
+	oj := a.m.Comparison.OpenJammed
+	more := oj.Verdict == ChangeWorse && oj.Magnitude != nil && *oj.Magnitude == MagnitudeNotable
 	for _, r := range a.m.OpenPRs.Repos {
 		if !r.Jammed {
 			continue
