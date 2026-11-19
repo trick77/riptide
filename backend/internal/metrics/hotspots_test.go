@@ -516,7 +516,7 @@ func TestCIFlowSplitsWithoutOverlap(t *testing.T) {
 		ds.Runs = append(ds.Runs, run(func(r *dataset.Run) { r.RunID, r.DurationS, r.Status = "skew", n(-100), s("FAILURE") }))
 		// A kind with only such a run: listed, but no node and no link.
 		ds.Runs = append(ds.Runs, run(func(r *dataset.Run) {
-			r.PipelineName, r.Branch, r.BranchKind, r.DurationS = "kasse-api/release%2F1", "release/1", dataset.BranchRelease, n(-300)
+			r.PipelineName, r.Branch, r.BranchKind, r.DurationS = "kasse-api/release%2F1", "release/1", dataset.BranchOther, n(-300)
 		}))
 	})
 	b := build(ds, p4(), filter{}, nil)

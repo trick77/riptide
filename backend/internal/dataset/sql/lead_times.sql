@@ -29,9 +29,6 @@ WITH declared AS (
 SELECT l.repo_full_name AS repo,
        split_part(l.repo_full_name, '/', 1) AS project,
        l.environment,
-       l.commit_sha,
-       l.authored_at,
-       l.first_deployed_at,
        extract(epoch FROM l.lead_time)::bigint AS lead_time_s,
        l.is_merge,
        l.author_is_service_account

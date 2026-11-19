@@ -215,7 +215,7 @@ func (plainLLM) Model() string { return "fake-model" }
 func (plainLLM) Complete(context.Context, string, string) (analysis.Call, error) {
 	text := analysis.Text{Headline: "Nothing stands out.", Focus: []analysis.FocusText{}, Cards: []analysis.CardText{}}
 	b, err := json.Marshal(analysis.Output{DE: text, EN: text})
-	return analysis.Call{Model: "fake-model", Content: string(b)}, err
+	return analysis.Call{Content: string(b)}, err
 }
 
 type lockedWriter struct {

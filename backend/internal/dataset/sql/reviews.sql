@@ -10,18 +10,13 @@
 --
 -- $1 team, $2 window start (inclusive), $3 window end (exclusive), $4 the
 -- GitOps repos (sql/gitops.sql).
-SELECT r.pr_key,
-       r.repo,
+SELECT r.repo,
        split_part(r.repo, '/', 1) AS project,
        coalesce(r.repo = ANY($4::text[]), false) AS gitops,
        r.outcome,
        r.cost_usd::text AS cost_usd,
        r.lines_added,
-       r.lines_removed,
-       r.files_changed,
-       r.findings_count,
-       r.total_runs,
-       r.occurred_at AS closed_at
+       r.lines_removed
 FROM noergler_pr_rollups r
 WHERE r.team = $1 AND r.occurred_at >= $2 AND r.occurred_at < $3
 ORDER BY r.occurred_at, r.pr_key

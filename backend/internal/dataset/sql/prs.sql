@@ -62,7 +62,6 @@ prs AS (
                   min(e.occurred_at) FILTER (WHERE e.event_type = 'pr:opened'
                                                AND coalesce(e.payload->'pullRequest'->>'draft', 'false') = 'false'))
              AS ready_at,
-         min(e.occurred_at) FILTER (WHERE e.event_type = 'pr:reviewer:approved') AS approved_at,
          min(e.occurred_at) FILTER (WHERE e.event_type = 'pr:merged') AS merged_at,
          max(e.occurred_at) FILTER (WHERE e.event_type = 'pr:declined') AS declined_at,
          max(e.occurred_at) FILTER (WHERE e.event_type = 'pr:deleted') AS deleted_at,

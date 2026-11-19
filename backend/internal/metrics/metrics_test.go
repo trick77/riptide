@@ -232,8 +232,12 @@ func TestDeployDays(t *testing.T) {
 	utc := p
 	utc.loc = nil
 	d = calendarOf(ds, utc)
-	if d.Releases != 6 || d.unplaced != 1 || d.Days[6].Releases != 0 {
-		t.Errorf("releases %d, unplaced %d, sunday %+v", d.Releases, d.unplaced, d.Days[6])
+	placed := 0
+	for _, day := range d.Days {
+		placed += day.Releases
+	}
+	if d.Releases != 6 || placed != 5 || d.Days[6].Releases != 0 {
+		t.Errorf("releases %d, placed %d, sunday %+v", d.Releases, placed, d.Days[6])
 	}
 }
 
@@ -673,7 +677,7 @@ func buildData() *dataset.Dataset {
 		ds.Runs = []dataset.Run{
 			run(func(r *dataset.Run) { r.BuildType, r.DurationS = s("release"), n(300) }),
 			run(func(r *dataset.Run) {
-				r.BuildType, r.Branch, r.BranchKind, r.DurationS = s("HOTFIX"), "release/1.1", dataset.BranchRelease, n(200)
+				r.BuildType, r.Branch, r.BranchKind, r.DurationS = s("HOTFIX"), "release/1.1", dataset.BranchOther, n(200)
 			}),
 			run(func(r *dataset.Run) { r.Status, r.DurationS = s("FAILURE"), n(900) }),
 			run(func(r *dataset.Run) { r.DurationS = n(600) }),
@@ -845,6 +849,20 @@ func TestRunKind(t *testing.T) {
 	if got := RunKind(run(func(r *dataset.Run) { r.BuildType, r.FinishedAt, r.StartedAt = nil, nil, nil }), agoP(30)); got != KindMain {
 		t.Errorf("no instant = %s", got)
 	}
+	// A release branch is told by its build_type, its branch is other.
+	for bt, want := range map[string]string{"": KindOther, "build": KindOther, "release": KindRelease, "hotfix": KindRelease} {
+		got := RunKind(run(func(r *dataset.Run) {
+			r.Branch = dataset.Branch("kasse-api/release%2F1.2")
+			r.BranchKind = dataset.BranchKind(r.Branch)
+			r.BuildType = nil
+			if bt != "" {
+				r.BuildType = s(bt)
+			}
+		}), agoP(30))
+		if got != want {
+			t.Errorf("release/1.2, build_type %q = %s, want %s", bt, got, want)
+		}
+	}
 }
 
 func TestRepoDurations(t *testing.T) {
@@ -894,24 +912,20 @@ func TestCosts(t *testing.T) {
 		ds.Reviews = []dataset.Review{
 			reviewRow(func(r *dataset.Review) { r.CostUSD = s("1.250000") }),
 			reviewRow(func(r *dataset.Review) {
-				r.PRKey, r.CostUSD, r.LinesAdded, r.LinesRemoved = "kasse/kasse-api#2", s("0.750000"), n(300), n(200)
+				r.CostUSD, r.LinesAdded, r.LinesRemoved = s("0.750000"), n(300), n(200)
 			}),
+			reviewRow(func(r *dataset.Review) { r.Outcome, r.CostUSD = s("declined"), s("0.400000") }),
+			reviewRow(func(r *dataset.Review) { r.Outcome, r.CostUSD = s("deleted"), nil }),
 			reviewRow(func(r *dataset.Review) {
-				r.PRKey, r.Outcome, r.CostUSD = "kasse/kasse-api#3", s("declined"), s("0.400000")
-			}),
-			reviewRow(func(r *dataset.Review) { r.PRKey, r.Outcome, r.CostUSD = "kasse/kasse-api#4", s("deleted"), nil }),
-			reviewRow(func(r *dataset.Review) {
-				r.PRKey, r.Repo, r.Project, r.CostUSD = "portal/portal-web#1", s("portal/portal-web"), s("portal"), s("3.000000")
+				r.Repo, r.Project, r.CostUSD = s("portal/portal-web"), s("portal"), s("3.000000")
 			}),
 			// Stage promotions: in the total and the rows, on their own line,
 			// out of merged, wasted and per kloc whatever their outcome.
 			reviewRow(func(r *dataset.Review) {
-				r.PRKey, r.Repo, r.GitOps, r.CostUSD, r.LinesAdded, r.LinesRemoved =
-					"kasse/kasse-gitops#3", s("kasse/kasse-gitops"), true, s("0.200000"), n(1), n(1)
+				r.Repo, r.GitOps, r.CostUSD, r.LinesAdded, r.LinesRemoved = s("kasse/kasse-gitops"), true, s("0.200000"), n(1), n(1)
 			}),
 			reviewRow(func(r *dataset.Review) {
-				r.PRKey, r.Repo, r.GitOps, r.Outcome, r.CostUSD =
-					"kasse/kasse-gitops#4", s("kasse/kasse-gitops"), true, s("declined"), s("0.100000")
+				r.Repo, r.GitOps, r.Outcome, r.CostUSD = s("kasse/kasse-gitops"), true, s("declined"), s("0.100000")
 			}),
 		}
 	})

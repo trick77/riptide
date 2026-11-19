@@ -237,8 +237,6 @@ type DeployFrequency struct {
 
 	// releaseAt is each release's first deploy in the period, for the days.
 	releaseAt []time.Time
-	// unplaced counts releases no day took (see fillCalendar).
-	unplaced int
 }
 
 // DeployWeekday is one weekday's releases over the period's whole days with
@@ -290,7 +288,6 @@ func (d *DeployFrequency) fillCalendar(p Period, argoStart *time.Time) {
 		if i < 0 {
 			// Weeks and days cut in different zones: never in a period
 			// NewPeriod made, but no request fails over it.
-			d.unplaced++
 			continue
 		}
 		d.Days[i].Releases++

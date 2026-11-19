@@ -188,9 +188,9 @@ func TestDirected(t *testing.T) {
 // leadData is n human commits to prod, each taking days.
 func leadData(count int, days float64, mod ...func(*dataset.Dataset)) *dataset.Dataset {
 	return data(append([]func(*dataset.Dataset){func(ds *dataset.Dataset) {
-		for i := range count {
+		for range count {
 			ds.LeadTimes = append(ds.LeadTimes, leadTimeRow(func(l *dataset.LeadTime) {
-				l.CommitSHA, l.LeadTimeS = fmt.Sprint(i), int64(days*86400)
+				l.LeadTimeS = int64(days * 86400)
 			}))
 		}
 	}}, mod...)...)

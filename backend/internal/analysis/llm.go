@@ -11,7 +11,6 @@ import (
 
 // Call is what one model call cost and returned.
 type Call struct {
-	Model        string
 	Content      string
 	FinishReason string
 	InputTokens  *int64
@@ -83,12 +82,12 @@ func (w *Wire) Complete(ctx context.Context, system, user string) (Call, error) 
 		ResponseFormat:  responseFormat(),
 	})
 	if err != nil {
-		return Call{Model: w.model}, err
+		return Call{}, err
 	}
 	defer func() { _ = stream.Close() }()
 	res, err := stream.Collect(nil)
 	call := Call{
-		Model: w.model, Content: res.Content, FinishReason: res.FinishReason,
+		Content: res.Content, FinishReason: res.FinishReason,
 		InputTokens: res.Usage.Input.Total, OutputTokens: res.Usage.Output.Total,
 	}
 	if res.Usage.Cost.Provenance != llmwire.Unpriced {

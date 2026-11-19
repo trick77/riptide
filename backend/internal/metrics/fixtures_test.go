@@ -66,8 +66,7 @@ func deploy(mod ...func(*dataset.Deploy)) dataset.Deploy {
 
 func leadTimeRow(mod ...func(*dataset.LeadTime)) dataset.LeadTime {
 	l := dataset.LeadTime{
-		Repo: "kasse/kasse-api", Project: "kasse", Environment: "prod", CommitSHA: strings.Repeat("b", 40),
-		AuthoredAt: ago(3), FirstDeployedAt: ago(1), LeadTimeS: 2 * 86400,
+		Repo: "kasse/kasse-api", Project: "kasse", Environment: "prod", LeadTimeS: 2 * 86400,
 	}
 	for _, m := range mod {
 		m(&l)
@@ -90,9 +89,8 @@ func run(mod ...func(*dataset.Run)) dataset.Run {
 
 func reviewRow(mod ...func(*dataset.Review)) dataset.Review {
 	r := dataset.Review{
-		PRKey: "kasse/kasse-api#1", Repo: s("kasse/kasse-api"), Project: s("kasse"), Outcome: s("merged"),
-		CostUSD: s("0.500000"), LinesAdded: n(400), LinesRemoved: n(100), FilesChanged: n(5), FindingsCount: n(2),
-		TotalRuns: n(1), ClosedAt: ago(1),
+		Repo: s("kasse/kasse-api"), Project: s("kasse"), Outcome: s("merged"),
+		CostUSD: s("0.500000"), LinesAdded: n(400), LinesRemoved: n(100),
 	}
 	for _, m := range mod {
 		m(&r)
