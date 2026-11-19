@@ -47,7 +47,8 @@ pr_events AS MATERIALIZED (
          upper(e.payload->'pullRequest'->>'state') AS state,
          coalesce(e.payload->'pullRequest'->>'draft', 'false') = 'true' AS draft,
          e.payload->'pullRequest'->>'createdDate' AS created_ms,
-         lower(e.author) IN (SELECT handle FROM non_human_identities) AS declared_non_human
+         EXISTS (SELECT 1 FROM non_human_identities n
+                  WHERE n.handle IN (lower(e.author), lower(e.author_display_name))) AS declared_non_human
   FROM bitbucket_events e
   WHERE e.team = $1
     AND e.event_type LIKE 'pr:%'
@@ -142,7 +143,9 @@ SELECT p.repo_full_name AS repo,
        -- The PR's page as Bitbucket links it; Go keeps only an http(s) URL.
        CASE WHEN NOT p.deleted_ever THEN p.pull->'links'->'self'->0->>'href' END AS url,
        p.automated
-         OR lower(coalesce(p.opened_author, p.pull->'author'->'user'->>'name')) IN (SELECT handle FROM non_human_identities)
+         OR EXISTS (SELECT 1 FROM non_human_identities n
+                     WHERE n.handle IN (lower(coalesce(p.opened_author, p.pull->'author'->'user'->>'name')),
+                                        lower(coalesce(p.opened_display_name, p.pull->'author'->'user'->>'displayName'))))
          AS bot,
        p.change_type,
        -- The keys as opened and as the PR reads at T: its title and
@@ -175,7 +178,8 @@ SELECT p.repo_full_name AS repo,
                  CASE WHEN jsonb_typeof(p.pull->'reviewers') = 'array' THEN p.pull->'reviewers' ELSE '[]'::jsonb END ||
                  CASE WHEN jsonb_typeof(p.pull->'participants') = 'array' THEN p.pull->'participants' ELSE '[]'::jsonb END) r
          WHERE lower(r->'user'->>'name') IS DISTINCT FROM lower(coalesce(p.opened_author, p.pull->'author'->'user'->>'name'))
-           AND lower(r->'user'->>'name') NOT IN (SELECT handle FROM non_human_identities))
+           AND NOT EXISTS (SELECT 1 FROM non_human_identities n
+                            WHERE n.handle IN (lower(r->'user'->>'name'), lower(r->'user'->>'displayName'))))
        END AS reviewers,
        coalesce(p.opened_author, p.pull->'author'->'user'->>'name', '') AS opener,
        coalesce(p.opened_display_name, p.pull->'author'->'user'->>'displayName', '') AS opener_display_name

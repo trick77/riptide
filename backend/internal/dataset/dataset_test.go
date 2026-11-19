@@ -584,6 +584,90 @@ func TestDatasetOpenerTouchIgnoresCase(t *testing.T) {
 	}
 }
 
+// A sender declares its account by the name Bitbucket shows: a bot
+// provisioned as an ordinary user, its login meaningless. Rows ingested
+// before it was recognised are a bot's, as in lead times: no reviewer's
+// touch or status, no person's PR.
+func TestDatasetDeclaredBotByDisplayName(t *testing.T) {
+	st, pool := migrated(t)
+	s := &seeder{t: t, pool: pool}
+	s.exec(`INSERT INTO noergler_events (delivery_id, event_type, pr_key, repo, outcome, reviewer_handle,
+		reviewer_account_kind, occurred_at, team, payload)
+		VALUES ('declared', 'pr_completed', $1, $2, 'merged', 'ai-reviewer', 'bot', $3, $4, '{}')`,
+		kasseAPI+"#1", kasseAPI, days(-1), team)
+	// A CI declares the account it merges through a service.
+	s.run(run{pipeline: "kasse-api/master", runID: "1", status: "SUCCESS", actor: "ci-merger", started: days(-1)})
+	bot := map[string]string{"u4711": "AI-Reviewer"}
+	// Merged: the service account comments first, a person approves later.
+	s.pr(prEvent{event: "pr:opened", repo: kasseAPI, id: 37, author: "dev-anna", branch: "feature/s", at: days(1)})
+	s.pr(prEvent{event: "pr:comment:added", repo: kasseAPI, id: 37, author: "u5000", display: "CI-Merger",
+		at: days(1).Add(time.Hour)})
+	s.pr(prEvent{event: "pr:reviewer:approved", repo: kasseAPI, id: 37, author: "rita", at: days(1).Add(2 * time.Hour)})
+	s.pr(prEvent{event: "pr:merged", repo: kasseAPI, id: 37, author: "dev-anna", branch: "feature/s", at: days(1).Add(3 * time.Hour)})
+	// Merged, the bot's own PR opened before ingestion: only its merge, which
+	// names the PR author.
+	s.pr(prEvent{event: "pr:merged", repo: kasseAPI, id: 36, author: "u4711", display: "AI-Reviewer", branch: "feature/t",
+		at: days(2)})
+	// Merged: the bot comments first, a person approves later.
+	s.pr(prEvent{event: "pr:opened", repo: kasseAPI, id: 30, author: "dev-anna", branch: "feature/x", at: days(1)})
+	s.pr(prEvent{event: "pr:comment:added", repo: kasseAPI, id: 30, author: "u4711", display: "AI-Reviewer",
+		at: days(1).Add(time.Hour)})
+	s.pr(prEvent{event: "pr:reviewer:approved", repo: kasseAPI, id: 30, author: "rita", at: days(1).Add(2 * time.Hour)})
+	s.pr(prEvent{event: "pr:merged", repo: kasseAPI, id: 30, author: "dev-anna", branch: "feature/x", at: days(1).Add(3 * time.Hour)})
+	// Merged, the bot's own PR.
+	s.pr(prEvent{event: "pr:opened", repo: kasseAPI, id: 32, author: "u4711", display: "AI-Reviewer", branch: "feature/z", at: days(1)})
+	s.pr(prEvent{event: "pr:merged", repo: kasseAPI, id: 32, author: "u4711", display: "AI-Reviewer", branch: "feature/z",
+		at: days(1).Add(time.Hour)})
+	// Open: only the bot commented.
+	s.pr(prEvent{event: "pr:opened", repo: kasseAPI, id: 31, author: "dev-anna", branch: "feature/y", state: "OPEN", at: days(1)})
+	s.pr(prEvent{event: "pr:comment:added", repo: kasseAPI, id: 31, author: "u4711", display: "AI-Reviewer", state: "OPEN",
+		at: days(1).Add(time.Hour)})
+	// Open, the bot's own PR.
+	s.pr(prEvent{event: "pr:opened", repo: kasseAPI, id: 33, author: "u4711", display: "AI-Reviewer", branch: "feature/w",
+		state: "OPEN", at: days(1)})
+	// Open, the bot's own PR, opened before ingestion: its author as the
+	// PR carries it.
+	s.pr(prEvent{event: "pr:from_ref_updated", repo: kasseAPI, id: 35, author: "u4711", display: "AI-Reviewer", branch: "feature/v",
+		state: "OPEN", created: days(-5), prAuthor: "u4711", displays: bot, at: days(1)})
+	// Open: the bot approved as a reviewer.
+	s.pr(prEvent{event: "pr:opened", repo: kasseAPI, id: 34, author: "dev-anna", branch: "feature/u", state: "OPEN", at: days(1)})
+	s.pr(prEvent{event: "pr:reviewer:approved", repo: kasseAPI, id: 34, author: "u4711", display: "AI-Reviewer", state: "OPEN",
+		reviewers: map[string]string{"u4711": "APPROVED"}, displays: bot, at: days(1).Add(time.Hour)})
+	d := load(t, st, t0, days(10))
+	merged := map[int64]dataset.PR{}
+	for _, p := range d.PRs {
+		merged[p.PRID] = p
+	}
+	if p := merged[30]; !eqTime(p.FirstReviewAt, ts(days(1).Add(2*time.Hour))) {
+		t.Errorf("#30 first review = %v", p.FirstReviewAt)
+	}
+	if p := merged[37]; !eqTime(p.FirstReviewAt, ts(days(1).Add(2*time.Hour))) {
+		t.Errorf("#37 first review = %v", p.FirstReviewAt)
+	}
+	if p := merged[32]; !p.Bot {
+		t.Errorf("#32 = %+v", p)
+	}
+	if p, ok := merged[36]; !ok || !p.Bot {
+		t.Errorf("#36 = %+v", p)
+	}
+	open := map[int64]dataset.OpenPR{}
+	for _, o := range d.OpenPRs {
+		open[o.PRID] = o
+	}
+	if len(open) != 4 {
+		t.Fatalf("open prs = %+v", d.OpenPRs)
+	}
+	if o := open[31]; o.Touched || o.Bot {
+		t.Errorf("#31 = %+v", o)
+	}
+	if !open[33].Bot || !open[35].Bot {
+		t.Errorf("#33 bot %v, #35 bot %v", open[33].Bot, open[35].Bot)
+	}
+	if o := open[34]; o.Approved || o.Touched || o.Bot {
+		t.Errorf("#34 = %+v", o)
+	}
+}
+
 // The facts tables' read skips the lead times and the reviews, nothing else.
 func TestDatasetFactsOnly(t *testing.T) {
 	st, pool := migrated(t)
