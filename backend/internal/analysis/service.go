@@ -282,35 +282,36 @@ func (s *Service) run(ctx context.Context, v View, trigger string) error {
 	// a spinner and is claimed, and paid for, again.
 	res := store.AnalysisResult{InputHash: &hash}
 	if res.Assessment, err = json.Marshal(a); err != nil {
-		return s.fail(ctx, log, id, res, err, started)
+		return s.fail(ctx, log, "marshal_input", id, res, err, started)
 	}
 
-	select {
-	case s.gate <- struct{}{}:
-	case <-ctx.Done():
-		return s.fail(ctx, log, id, res, ctx.Err(), started)
+	if err := s.acquire(ctx); err != nil {
+		return s.fail(ctx, log, "queue", id, res, err, started)
 	}
 	call, err := s.LLM.Complete(ctx, promptText, string(digest))
 	<-s.gate
 	res.InputTokens, res.OutputTokens, res.CostNanoUSD = call.InputTokens, call.OutputTokens, call.NanoUSD
 	if err != nil {
-		return s.fail(ctx, log, id, res, err, started)
+		return s.fail(ctx, log, "llm", id, res, err, started)
 	}
 	out, report, err := validate(call.Content, a, al)
 	if rep, e := json.Marshal(report); e == nil {
 		res.Report = rep
 	}
 	if err != nil {
-		return s.fail(ctx, log, id, res, fmt.Errorf("finish %s: %w", call.FinishReason, err), started)
+		if call.FinishReason != "" {
+			err = fmt.Errorf("finish_reason=%s: %w", call.FinishReason, err)
+		}
+		return s.fail(ctx, log, "validate", id, res, err, started)
 	}
 	if res.Output, err = json.Marshal(out); err != nil {
-		return s.fail(ctx, log, id, res, err, started)
+		return s.fail(ctx, log, "marshal_output", id, res, err, started)
 	}
 	res.At = s.now()
 	if err := s.Store.FinishAnalysis(ctx, id, res); err != nil {
 		// Paid for: keep what it cost on the row, failed rather than running.
 		res.Output = nil
-		return s.fail(ctx, log, id, res, fmt.Errorf("store: %w", err), started)
+		return s.fail(ctx, log, "finish", id, res, fmt.Errorf("store: %w", err), started)
 	}
 	if len(report.Missed) > 0 {
 		log.WarnContext(ctx, "analysis_signal_missed", "id", id, "signals", report.Missed)
@@ -321,8 +322,25 @@ func (s *Service) run(ctx context.Context, v View, trigger string) error {
 	return nil
 }
 
-func (s *Service) fail(ctx context.Context, log *slog.Logger, id int64, res store.AnalysisResult, err error,
-	started time.Time) error {
+// acquire takes the one model slot, or returns ctx's error once ctx is
+// over. A select with both ready picks either: a slot won on a dead
+// context goes back.
+func (s *Service) acquire(ctx context.Context) error {
+	select {
+	case s.gate <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		<-s.gate
+		return err
+	}
+	return nil
+}
+
+// fail ends the claimed row as failed and logs the stage that failed.
+func (s *Service) fail(ctx context.Context, log *slog.Logger, stage string, id int64, res store.AnalysisResult,
+	err error, started time.Time) error {
 	msg := err.Error()
 	res.Error, res.At = &msg, s.now()
 	// The process's own context may be the one that ended: store the
@@ -332,7 +350,7 @@ func (s *Service) fail(ctx context.Context, log *slog.Logger, id int64, res stor
 	if e := s.Store.FailAnalysis(sctx, id, res); e != nil {
 		log.ErrorContext(ctx, "analysis_failed", "stage", "store", "id", id, logging.Err(e))
 	}
-	log.ErrorContext(ctx, "analysis_failed", "stage", "llm", "id", id, "cost_nano_usd", deref(res.CostNanoUSD),
+	log.ErrorContext(ctx, "analysis_failed", "stage", stage, "id", id, "cost_nano_usd", deref(res.CostNanoUSD),
 		"duration_ms", time.Since(started).Milliseconds(), logging.Err(err))
 	return err
 }

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"maps"
@@ -182,6 +183,7 @@ func (m *memStore) ScheduledAttempt(_ context.Context, v store.AnalysisView, to 
 // fakeLLM answers with a function of the digest it got.
 type fakeLLM struct {
 	answer func(digest string) string
+	finish string
 	calls  int
 	digest string
 }
@@ -191,7 +193,7 @@ func (f *fakeLLM) Model() string { return "fake-model" }
 func (f *fakeLLM) Complete(_ context.Context, _, user string) (Call, error) {
 	f.calls++
 	f.digest = user
-	return Call{Content: f.answer(user), InputTokens: ptr(int64(1000)),
+	return Call{Content: f.answer(user), FinishReason: f.finish, InputTokens: ptr(int64(1000)),
 		OutputTokens: ptr(int64(500)), NanoUSD: ptr(int64(7_000_000))}, nil
 }
 
@@ -377,14 +379,148 @@ func TestRunOncePerScheduledWeek(t *testing.T) {
 }
 
 func TestFailedAnswerIsStored(t *testing.T) {
-	llm := &fakeLLM{answer: func(string) string { return "no json" }}
+	llm := &fakeLLM{answer: func(string) string { return "no json" }, finish: "length"}
 	st := &memStore{}
-	if err := service(llm, st).Run(context.Background(), view, TriggerManual); err == nil {
+	s := service(llm, st)
+	var logs strings.Builder
+	s.Log = testLog(&logs)
+	if err := s.Run(context.Background(), view, TriggerManual); err == nil {
 		t.Fatal("no error")
+	}
+	if len(st.rows) != 1 {
+		t.Fatalf("rows = %+v", st.rows)
 	}
 	r := st.rows[0]
 	if r.Status != "failed" || r.Error == nil || r.CostNanoUSD == nil {
 		t.Errorf("failed row = %+v: the failure and what it cost belong in it", r)
+	}
+	// The model answered: the answer failed, not the call.
+	want := `level=ERROR msg=analysis_failed team=team-a weeks=4 product="" trigger=manual model=fake-model ` +
+		`stage=validate id=1 cost_nano_usd=7000000 err="finish_reason=length: no JSON object in the answer"` + "\n"
+	if logs.String() != want {
+		t.Errorf("log =\n%s\nwant\n%s", logs.String(), want)
+	}
+}
+
+// testLog writes text lines without what varies from run to run.
+func testLog(w io.Writer) *slog.Logger {
+	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{ReplaceAttr: func(g []string, a slog.Attr) slog.Attr {
+		if len(g) == 0 && (a.Key == slog.TimeKey || a.Key == "duration_ms") {
+			return slog.Attr{}
+		}
+		return a
+	}}))
+}
+
+type errLLM struct{}
+
+func (errLLM) Model() string { return "fake-model" }
+
+func (errLLM) Complete(context.Context, string, string) (Call, error) {
+	return Call{}, errors.New("gateway down")
+}
+
+// failingStore is a memStore that calls claimed after a claim and fails
+// ending a row where told to.
+type failingStore struct {
+	*memStore
+	claimed      func()
+	finish, fail error
+}
+
+func (f failingStore) ClaimAnalysis(ctx context.Context, c store.AnalysisClaim) (int64, bool, error) {
+	id, ok, err := f.memStore.ClaimAnalysis(ctx, c)
+	if f.claimed != nil {
+		f.claimed()
+	}
+	return id, ok, err
+}
+
+func (f failingStore) FinishAnalysis(ctx context.Context, id int64, r store.AnalysisResult) error {
+	if f.finish != nil {
+		return f.finish
+	}
+	return f.memStore.FinishAnalysis(ctx, id, r)
+}
+
+func (f failingStore) FailAnalysis(ctx context.Context, id int64, r store.AnalysisResult) error {
+	if f.fail != nil {
+		return f.fail
+	}
+	return f.memStore.FailAnalysis(ctx, id, r)
+}
+
+func TestFailureNamesItsStage(t *testing.T) {
+	const head = `level=ERROR msg=analysis_failed team=team-a weeks=4 product="" trigger=scheduled model=fake-model `
+	dbDown := errors.New("db down")
+	for _, c := range []struct {
+		name   string
+		setup  func(s *Service, st *failingStore, cancel context.CancelFunc)
+		status string
+		want   string
+	}{
+		{name: "llm", setup: func(s *Service, _ *failingStore, _ context.CancelFunc) { s.LLM = errLLM{} },
+			status: "failed", want: head + `stage=llm id=1 cost_nano_usd=0 err="gateway down"` + "\n"},
+		{name: "queue", setup: func(_ *Service, st *failingStore, cancel context.CancelFunc) {
+			// The run's context ends once the row is claimed.
+			st.claimed = cancel
+		}, status: "failed", want: head + `stage=queue id=1 cost_nano_usd=0 err="context canceled"` + "\n"},
+		{name: "queue waiting", setup: func(s *Service, st *failingStore, cancel context.CancelFunc) {
+			// Another call holds the model: with the slot taken, the ended
+			// context is the only way out of the wait, whenever it ends.
+			s.gate <- struct{}{}
+			t.Cleanup(func() { <-s.gate })
+			st.claimed = cancel
+		}, status: "failed", want: head + `stage=queue id=1 cost_nano_usd=0 err="context canceled"` + "\n"},
+		{name: "finish", setup: func(_ *Service, st *failingStore, _ context.CancelFunc) { st.finish = dbDown },
+			status: "failed", want: head + `stage=finish id=1 cost_nano_usd=7000000 err="store: db down"` + "\n"},
+		{name: "store", setup: func(_ *Service, st *failingStore, _ context.CancelFunc) {
+			st.finish, st.fail = dbDown, dbDown
+		}, status: "running", want: head + `stage=store id=1 err="db down"` + "\n" +
+			head + `stage=finish id=1 cost_nano_usd=7000000 err="store: db down"` + "\n"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			mem := &memStore{}
+			st := &failingStore{memStore: mem}
+			s := service(&fakeLLM{answer: goodAnswer}, mem)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			c.setup(s, st, cancel)
+			s.Store = st
+			var logs strings.Builder
+			s.Log = testLog(&logs)
+			if err := s.Run(ctx, view, TriggerScheduled); err == nil {
+				t.Fatal("no error")
+			}
+			if len(mem.rows) != 1 {
+				t.Fatalf("rows = %+v", mem.rows)
+			}
+			if mem.rows[0].Status != c.status {
+				t.Errorf("row = %+v", mem.rows[0])
+			}
+			if logs.String() != c.want {
+				t.Errorf("log =\n%s\nwant\n%s", logs.String(), c.want)
+			}
+		})
+	}
+}
+
+// A free slot and an ended context are both ready: select picks either,
+// and the slot never stays taken. 64 rounds take both ways but once in 2^63.
+func TestAcquireDeadContext(t *testing.T) {
+	s := service(nil, &memStore{})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for range 64 {
+		if err := s.acquire(ctx); !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v", err)
+		}
+		if len(s.gate) != 0 {
+			t.Fatal("a dead context holds the slot")
+		}
+	}
+	if err := s.acquire(context.Background()); err != nil || len(s.gate) != 1 {
+		t.Errorf("live context: %v, slot held %d", err, len(s.gate))
 	}
 }
 
