@@ -142,8 +142,9 @@ func layout(a metrics.Assessment, text *Text) Layout {
 			covered[id] = true
 		}
 	}
-	// A worded card always shows (the validator caps them at MaxCards); an
-	// unworded one only in a free slot of its column.
+	// A worded card always shows (the validator caps them at MaxCards; a
+	// worded gain or resolution books its slot up front, below); an unworded
+	// one only in a free slot of its column.
 	slots := map[string]int{ColumnBad: MaxCards, ColumnGood: GoodCards, ColumnDone: DoneCards}
 	addCard := func(id, lever string, worded bool) {
 		s, ok := byID[id]
@@ -151,10 +152,12 @@ func layout(a metrics.Assessment, text *Text) Layout {
 			return
 		}
 		col := column(s)
-		if !worded && slots[col] <= 0 {
-			return
+		if !worded {
+			if slots[col] <= 0 {
+				return
+			}
+			slots[col]--
 		}
-		slots[col]--
 		l.Cards = append(l.Cards, LayoutCard{Signal: id, Column: col, Lever: cmp.Or(lever, ruleLever(s))})
 		covered[id] = true
 	}

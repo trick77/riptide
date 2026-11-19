@@ -64,6 +64,23 @@ func TestLayoutSlots(t *testing.T) {
 		t.Errorf("tally with words = %+v", worded.Tally)
 	}
 
+	// The best gain worded takes one slot, not two: the next gain joins it.
+	// No unworded worry does; the rest are chips.
+	best := layout(a, &Text{Cards: []CardText{{Signal: "b1"}, {Signal: "g1"}}})
+	got = columns(best.Cards)
+	if !slices.Equal(got[ColumnBad], []string{"b1"}) || !slices.Equal(got[ColumnGood], []string{"g1", "g2"}) ||
+		!slices.Equal(got[ColumnDone], []string{"d1"}) {
+		t.Errorf("cards with the best gain worded = %v", got)
+	}
+	if also := columns(best.Also); !slices.Equal(also[ColumnGood], []string{"g3"}) || !slices.Equal(also[ColumnDone], []string{"d2"}) {
+		t.Errorf("also with the best gain worded = %v", also)
+	}
+	// A worded resolution books its one slot once too: d1 shows, d2 a chip.
+	got = columns(layout(a, &Text{Cards: []CardText{{Signal: "d1"}, {Signal: "g1"}}}).Cards)
+	if !slices.Equal(got[ColumnGood], []string{"g1", "g2"}) || !slices.Equal(got[ColumnDone], []string{"d1"}) {
+		t.Errorf("cards with the first resolution worded = %v", got)
+	}
+
 	// An analysis stored before small gains were signals: nothing good, no
 	// comparison, the page says "unremarkable".
 	old := metrics.Assessment{Signals: []metrics.Signal{sig("b1", metrics.ToneAttention)},
