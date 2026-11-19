@@ -419,6 +419,30 @@ func TestRemove(t *testing.T) {
 	}
 }
 
+// A project hook whose delete failed still delivers: a repo of that project
+// gets no hook next to it. A dry run plans the removal as done.
+func TestFailedRemoveKeepsTheProjectHook(t *testing.T) {
+	f, o := setup(t)
+	f.hook("PLAT", "riptide", wantURL)
+	f.deny["DELETE PLAT"] = http.StatusInternalServerError
+	if r := o.Remove(t.Context(), proj); r.Status != "failed" {
+		t.Fatalf("remove: %+v", r)
+	}
+	if r := o.Onboard(t.Context(), Target{Project: "PLAT", Repo: "x"}); r.Status != "skipped" || len(f.writes) != 0 {
+		t.Fatalf("repo after failed remove: %+v %v", r, f.writes)
+	}
+
+	f, o = setup(t)
+	o.DryRun = true
+	f.hook("PLAT", "riptide", wantURL)
+	if r := o.Remove(t.Context(), proj); r.Status != "ok" {
+		t.Fatalf("dry remove: %+v", r)
+	}
+	if r := o.Onboard(t.Context(), Target{Project: "PLAT", Repo: "x"}); r.Status != "ok" || len(f.writes) != 0 {
+		t.Fatalf("dry repo after remove: %+v %v", r, f.writes)
+	}
+}
+
 func TestRunHealthAndRender(t *testing.T) {
 	f, o := setup(t)
 	f.hook("PLAT", "riptide", wantURL)

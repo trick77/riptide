@@ -685,10 +685,11 @@ func (o *Onboarder) Remove(ctx context.Context, t Target) Row {
 	case len(own) == 0:
 		return row(t, "skipped", "only another team's riptide webhook ("+other.URL+"); left alone")
 	}
-	if t.IsProject() {
-		o.setProjectHook(t.Project, projectState{})
-	}
 	if o.DryRun {
+		// Planned like the real run: repo targets later see no project hook.
+		if t.IsProject() {
+			o.setProjectHook(t.Project, projectState{})
+		}
 		return row(t, "ok", fmt.Sprintf("dry run: would remove webhook id=%s", ids(own)))
 	}
 	for _, h := range own {
@@ -696,6 +697,11 @@ func (o *Onboarder) Remove(ctx context.Context, t Target) Row {
 			return row(t, "failed", detail(fmt.Sprintf("delete webhook id=%d", h.ID), err))
 		}
 		o.log().InfoContext(ctx, "onboard_webhook_removed", "team", o.Team, "target", t.Key())
+	}
+	// Only once every hook is gone: a project hook whose delete failed still
+	// delivers, and a repo hook created next to it would double every event.
+	if t.IsProject() {
+		o.setProjectHook(t.Project, projectState{})
 	}
 	return row(t, "ok", fmt.Sprintf("webhook removed (id=%s)", ids(own)))
 }
