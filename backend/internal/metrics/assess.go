@@ -215,15 +215,13 @@ func WeekStart(t time.Time, loc *time.Location) time.Time { return weekStart(t, 
 // ClosedPeriod is the given number of whole calendar weeks ending at the
 // start of now's week: an assessment never judges a week still running.
 func ClosedPeriod(weeks int, now time.Time, loc *time.Location) Period {
-	end := weekStart(now, loc)
-	return periodFrom(end.AddDate(0, 0, -7*weeks), weeks, end)
+	return weeksBefore(weeks, weekStart(now, loc))
 }
 
 // ClosedPrevious is the period ClosedPeriod compares with: the weeks right
 // before it.
 func ClosedPrevious(weeks int, now time.Time, loc *time.Location) Period {
-	end := weekStart(now, loc).AddDate(0, 0, -7*weeks)
-	return periodFrom(end.AddDate(0, 0, -7*weeks), weeks, end)
+	return weeksBefore(weeks, weekStart(now, loc).AddDate(0, 0, -7*weeks))
 }
 
 // Assess is the assessment of ds over p.Period against prev over

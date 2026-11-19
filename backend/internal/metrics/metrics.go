@@ -630,15 +630,19 @@ func stageHistogram(seconds []float64) []int {
 	out := make([]int, stageSteps)
 	for _, s := range seconds {
 		// The first edge above s, less one: the bucket s falls in.
-		i, _ := slices.BinarySearchFunc(stageBounds[:], s, func(b, s float64) int {
-			if b <= s {
-				return -1
-			}
-			return 1
-		})
+		i, _ := slices.BinarySearchFunc(stageBounds[:], s, edgeAbove)
 		out[min(max(i-1, 0), len(out)-1)]++
 	}
 	return out
+}
+
+// edgeAbove orders a bucket edge before s unless it lies above it: never a
+// match, so slices.BinarySearchFunc lands on the first edge above s.
+func edgeAbove(edge, s float64) int {
+	if edge <= s {
+		return -1
+	}
+	return 1
 }
 
 // Chain is where the time to production goes.
@@ -724,12 +728,7 @@ var CycleBuckets = []float64{15 * 60, 3600, 4 * 3600, 86400, 3 * 86400}
 func histogram(seconds []float64) []int {
 	out := make([]int, len(CycleBuckets)+1)
 	for _, s := range seconds {
-		i, _ := slices.BinarySearchFunc(CycleBuckets, s, func(b, s float64) int {
-			if b <= s {
-				return -1
-			}
-			return 1
-		})
+		i, _ := slices.BinarySearchFunc(CycleBuckets, s, edgeAbove)
 		out[i]++
 	}
 	return out

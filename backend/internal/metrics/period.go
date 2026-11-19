@@ -63,7 +63,12 @@ func RunningPeriod(now time.Time, loc *time.Location) Period {
 // PreviousPeriod is the period the one NewPeriod gives is compared with:
 // the same number of weeks right before it, every one of them whole.
 func PreviousPeriod(weeks int, now time.Time, loc *time.Location) Period {
-	end := weekStart(now, loc).AddDate(0, 0, -7*(weeks-1))
+	return weeksBefore(weeks, weekStart(now, loc).AddDate(0, 0, -7*(weeks-1)))
+}
+
+// weeksBefore is the given number of whole calendar weeks ending at end, a
+// Monday 00:00 in the viewer's zone.
+func weeksBefore(weeks int, end time.Time) Period {
 	return periodFrom(end.AddDate(0, 0, -7*weeks), weeks, end)
 }
 
