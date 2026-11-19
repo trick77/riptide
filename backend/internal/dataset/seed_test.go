@@ -98,6 +98,7 @@ type prEvent struct {
 	teamName, event, repo string
 	id                    int64
 	author, branch        string
+	display               string // the author's display name, none when empty
 	automation            string
 	draft                 bool
 	mergeCommit           string
@@ -112,6 +113,9 @@ type prEvent struct {
 	prAuthor     string
 	reviewers    map[string]string
 	participants map[string]string
+	// Display names of the PR author and the people above (login →
+	// display name); the login when none.
+	displays map[string]string
 }
 
 func (s *seeder) pr(e prEvent) {
@@ -146,13 +150,19 @@ func (s *seeder) pr(e prEvent) {
 	if !e.created.IsZero() {
 		pull["createdDate"] = e.created.UnixMilli()
 	}
+	displayOf := func(login string) string {
+		if d, ok := e.displays[login]; ok {
+			return d
+		}
+		return login
+	}
 	if e.prAuthor != "" {
-		pull["author"] = map[string]any{"user": map[string]any{"name": e.prAuthor, "displayName": e.prAuthor}}
+		pull["author"] = map[string]any{"user": map[string]any{"name": e.prAuthor, "displayName": displayOf(e.prAuthor)}}
 	}
 	people := func(m map[string]string) []any {
 		var rs []any
 		for _, login := range slices.Sorted(maps.Keys(m)) {
-			rs = append(rs, map[string]any{"user": map[string]any{"name": login, "displayName": login}, "status": m[login]})
+			rs = append(rs, map[string]any{"user": map[string]any{"name": login, "displayName": displayOf(login)}, "status": m[login]})
 		}
 		return rs
 	}
@@ -163,9 +173,12 @@ func (s *seeder) pr(e prEvent) {
 		pull["participants"] = people(e.participants)
 	}
 	payload := jsonString(map[string]any{"eventKey": e.event, "pullRequest": pull})
-	var automation, changeType *string
+	var automation, changeType, display *string
 	if e.automation != "" {
 		automation = &e.automation
+	}
+	if e.display != "" {
+		display = &e.display
 	}
 	if e.event == "pr:opened" || e.event == "pr:merged" {
 		ct := "other"
@@ -175,9 +188,9 @@ func (s *seeder) pr(e prEvent) {
 		changeType = &ct
 	}
 	s.exec(`INSERT INTO bitbucket_events (delivery_id, event_type, repo_full_name, pr_id, commit_sha, author,
-		branch_name, change_type, jira_keys, automation_source, occurred_at, team, payload)
-		VALUES ($1, $2, $3, $4, $5, $6, lower($7), $8, $9, $10, $11, $12, $13::jsonb)`,
-		s.id(), e.event, e.repo, e.id, head, e.author, e.branch, changeType, e.jira, automation, e.at, e.teamName, payload)
+		author_display_name, branch_name, change_type, jira_keys, automation_source, occurred_at, team, payload)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, lower($8), $9, $10, $11, $12, $13, $14::jsonb)`,
+		s.id(), e.event, e.repo, e.id, head, e.author, display, e.branch, changeType, e.jira, automation, e.at, e.teamName, payload)
 }
 
 type commit struct {

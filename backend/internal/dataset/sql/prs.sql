@@ -141,7 +141,8 @@ chain AS (
                                   'pr:reviewer:updated')
              AND lower(e.author) IS DISTINCT FROM lower(p.pr_opener)
              AND NOT e.is_automated
-             AND NOT EXISTS (SELECT 1 FROM non_human_identities n WHERE n.handle = lower(e.author))
+             AND NOT EXISTS (SELECT 1 FROM non_human_identities n
+                              WHERE n.handle IN (lower(e.author), lower(e.author_display_name)))
              AND e.occurred_at >= p.ready_at) AS touches
   FROM prs p
   LEFT JOIN first_commits fc
@@ -155,7 +156,8 @@ SELECT c.repo_full_name AS repo,
        CASE WHEN c.deleted_at IS NULL THEN c.url END AS url,
        c.repo_full_name = ANY($4::text[]) AS gitops,
        coalesce(c.automated, false)
-         OR EXISTS (SELECT 1 FROM non_human_identities n WHERE n.handle = lower(c.pr_opener)) AS bot,
+         OR EXISTS (SELECT 1 FROM non_human_identities n
+                     WHERE n.handle IN (lower(c.pr_opener), lower(c.pr_opener_display_name))) AS bot,
        c.change_type,
        ARRAY(SELECT DISTINCT k
                FROM bitbucket_events e CROSS JOIN LATERAL unnest(e.jira_keys) k
