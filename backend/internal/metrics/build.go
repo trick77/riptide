@@ -956,6 +956,8 @@ type KindHotspots struct {
 	// Heatmap is a row per repo of Repos, in its order: the failure rate per
 	// week.
 	Heatmap []HeatRow `json:"heatmap"`
+	// all are Repos before the cut: the assessment reads every repo.
+	all []RepoHotspot
 }
 
 // Outlier is a run far longer than its kind usually takes.
@@ -1308,6 +1310,8 @@ func kindHotspots(kind string, kr kindRuns, repos map[string]*repoRuns, base *ba
 	})
 	k.Slowest = k.Slowest[:min(len(k.Slowest), slowestTop)]
 	slices.SortFunc(k.Repos, compareHotspots)
+	// A clone: topOrFlagged cuts Repos in place.
+	k.all = slices.Clone(k.Repos)
 	// Every flagged repo stays: compare counts them off this list.
 	k.Repos = topOrFlagged(k.Repos, func(h RepoHotspot) bool { return h.FailingMore || h.Slow })
 	k.Unplotted = len(repos)

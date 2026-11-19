@@ -79,8 +79,9 @@ func assessFixture(t *testing.T, h History) Assessment {
 		return out
 	}
 	runs := func(end time.Time, repo string, secs int64) []dataset.Run {
+		// Enough runs to judge a repo: a resolution needs a judged number.
 		var out []dataset.Run
-		for i := range 4 {
+		for i := range HotspotMinRuns {
 			at := before(end, float64(3+i))
 			out = append(out, run(func(r *dataset.Run) {
 				r.Repo, r.PipelineName, r.RunID = s(repo), repo+"/master", fmt.Sprintf("%s-%d", repo, i)
@@ -211,6 +212,132 @@ func TestJamToneFromNotable(t *testing.T) {
 				t.Errorf("%s: pr_jam:%s = %+v, want %s", c.name, repo, s, c.want)
 			}
 		}
+	}
+}
+
+// covered is dataset meta with every source heard of long before both
+// periods.
+func covered(ds *dataset.Dataset, p Period) {
+	ds.Meta.From, ds.Meta.To = p.From, p.To
+	ds.Meta.DataStart = dataset.SourceTimes{Bitbucket: agoP(200), Pipeline: agoP(200), ArgoCD: agoP(200), Noergler: agoP(200)}
+	ds.Meta.BuildDataFrom, ds.Meta.BuildTypeFrom = agoP(200), agoP(200)
+}
+
+// The assessment reads every repo, not the page's top rows: a repo that
+// stopped failing more ranks below nine wasting more, and is resolved.
+func TestResolvedPastTheCut(t *testing.T) {
+	cur, prev := ClosedPeriod(4, now, zurich), ClosedPrevious(4, now, zurich)
+	runs := func(end time.Time, repo string, failures int) []dataset.Run {
+		var out []dataset.Run
+		for i := range HotspotMinRuns + 2 {
+			at := end.Add(-time.Duration(2+i) * 24 * time.Hour).UTC()
+			status := "SUCCESS"
+			if i < failures {
+				status = "FAILURE"
+			}
+			out = append(out, run(func(r *dataset.Run) {
+				r.Repo, r.PipelineName, r.RunID = s(repo), repo+"/master", fmt.Sprintf("%s-%d", repo, i)
+				r.StartedAt, r.FinishedAt, r.DurationS, r.Status = &at, ptr(at.Add(10*time.Minute)), n(600), s(status)
+			}))
+		}
+		return out
+	}
+	mk := func(p Period) *dataset.Dataset {
+		return data(func(ds *dataset.Dataset) {
+			covered(ds, p)
+			ds.Runs = runs(p.To, "kasse/kasse-api", 0)
+			for i := range 9 {
+				ds.Runs = append(ds.Runs, runs(p.To, fmt.Sprintf("kasse/r%d", i), 2)...)
+			}
+		})
+	}
+	h := History{Runs: 1, Seen: map[string]int{"failing_more:main:kasse/kasse-api": 1},
+		Latest: map[string]string{"failing_more:main:kasse/kasse-api": ToneAttention}}
+	a := Assess(mk(cur), mk(prev), Params{Period: cur, Previous: prev}, h)
+	if s := signal(a, "resolved:failing_more:main:kasse/kasse-api"); s == nil || len(s.Facts) != 1 {
+		t.Errorf("resolution past the cut = %+v", s)
+	}
+
+	// Too few runs to judge, or still worse: not resolved, whatever the
+	// flag says. Three runs, two red.
+	few := func(p Period, failures int) *dataset.Dataset {
+		ds := mk(p)
+		ds.Runs = slices.DeleteFunc(ds.Runs, func(r dataset.Run) bool { return *r.Repo == "kasse/kasse-api" })
+		ds.Runs = append(ds.Runs, runs(p.To, "kasse/kasse-api", failures)[:3]...)
+		return ds
+	}
+	a = Assess(few(cur, 2), mk(prev), Params{Period: cur, Previous: prev}, h)
+	if s := signal(a, "resolved:failing_more:main:kasse/kasse-api"); s != nil {
+		t.Errorf("resolved on a low sample: %+v", s)
+	}
+	// A steady slow build with too few timed runs to rank is not resolved.
+	h = History{Runs: 1, Seen: map[string]int{"steady_slow:main:kasse/kasse-api": 1},
+		Latest: map[string]string{"steady_slow:main:kasse/kasse-api": ToneAttention}}
+	a = Assess(few(cur, 0), mk(prev), Params{Period: cur, Previous: prev}, h)
+	if s := signal(a, "resolved:steady_slow:main:kasse/kasse-api"); s != nil {
+		t.Errorf("steady slow resolved without a rank: %+v", s)
+	}
+}
+
+// Every repo with an open PR is active, past the open section's top rows.
+func TestActivePastTheOpenCut(t *testing.T) {
+	cur, prev := ClosedPeriod(4, now, zurich), ClosedPrevious(4, now, zurich)
+	mk := func(p Period, open []dataset.OpenPR) *dataset.Dataset {
+		return data(func(ds *dataset.Dataset) {
+			covered(ds, p)
+			ds.OpenPRs = open
+		})
+	}
+	var open []dataset.OpenPR
+	for i := range 10 {
+		at := cur.To.Add(-48 * time.Hour).UTC()
+		open = append(open, openPR(func(o *dataset.OpenPR) {
+			o.Repo, o.PRID, o.OpenedAt, o.ReadyAt, o.LastEventAt = fmt.Sprintf("kasse/r%d", i), int64(i+1), at, ptr(at), at
+		}))
+	}
+	a := Assess(mk(cur, open), mk(prev, nil), Params{Period: cur, Previous: prev}, History{})
+	if a.Active != 10 {
+		t.Errorf("active = %d, want 10", a.Active)
+	}
+}
+
+// A repo without an open PR at the previous end had none open long: a jam
+// new since then compares against 0.
+func TestNewJamAgainstZero(t *testing.T) {
+	cur, prev := ClosedPeriod(4, now, zurich), ClosedPrevious(4, now, zurich)
+	var open []dataset.OpenPR
+	for i := range OpenJamMin {
+		at := cur.To.Add(-time.Duration(9+i) * 24 * time.Hour).UTC()
+		open = append(open, openPR(func(o *dataset.OpenPR) {
+			o.PRID, o.OpenedAt, o.ReadyAt, o.LastEventAt = int64(i+1), at, ptr(at), cur.To.Add(-24*time.Hour).UTC()
+		}))
+	}
+	mk := func(p Period, open []dataset.OpenPR) *dataset.Dataset {
+		return data(func(ds *dataset.Dataset) {
+			covered(ds, p)
+			ds.OpenPRs = open
+		})
+	}
+	a := Assess(mk(cur, open), mk(prev, nil), Params{Period: cur, Previous: prev}, History{})
+	jam := signal(a, "pr_jam:kasse/kasse-api")
+	if jam == nil {
+		t.Fatalf("no jam: %+v", a.Signals)
+	}
+	if l := jam.Facts[0]; l.Prev == nil || *l.Prev != 0 || l.Verdict != ChangeWorse {
+		t.Errorf("open_long = %+v, want against 0, worse", l)
+	}
+	// Bitbucket heard of only within the previous period: no comparison.
+	late := func(ds *dataset.Dataset) { ds.Meta.DataStart.Bitbucket = ptr(prev.From.Add(24 * time.Hour)) }
+	cd, pd := mk(cur, open), mk(prev, nil)
+	late(cd)
+	late(pd)
+	a = Assess(cd, pd, Params{Period: cur, Previous: prev}, History{})
+	jam = signal(a, "pr_jam:kasse/kasse-api")
+	if jam == nil {
+		t.Fatalf("no jam, previous period uncovered: %+v", a.Signals)
+	}
+	if l := jam.Facts[0]; l.Prev != nil || l.Verdict != ChangeNone {
+		t.Errorf("open_long, previous period uncovered = %+v", l)
 	}
 }
 
