@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"net/http"
-	"slices"
 	"time"
 
 	"github.com/trick77/ship/kit/logging"
@@ -30,15 +29,7 @@ func (d Deps) Dataset(ctx context.Context, team string, p metrics.Period) (*data
 }
 
 // TeamNames are the configured teams, sorted: the schedule's.
-func (d Deps) TeamNames() []string {
-	cfg := d.Runtime.Config()
-	names := make([]string, 0, len(cfg.Teams))
-	for name := range cfg.Teams {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	return names
-}
+func (d Deps) TeamNames() []string { return d.Runtime.Config().TeamNames() }
 
 // analysisView is the read query as the analysis takes it. Its weeks are
 // the analysis' calendar (BACKEND_ANALYSIS_TZ), not the viewer's: one

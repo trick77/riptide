@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,13 +50,7 @@ type Teams struct {
 
 // teams lists the configured teams, sorted, for the UI's team picker.
 func (d Deps) teams(w http.ResponseWriter, _ *http.Request) {
-	cfg := d.Runtime.Config()
-	names := make([]string, 0, len(cfg.Teams))
-	for name := range cfg.Teams {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	httpapi.WriteJSON(w, http.StatusOK, Teams{Teams: names})
+	httpapi.WriteJSON(w, http.StatusOK, Teams{Teams: d.Runtime.Config().TeamNames()})
 }
 
 // defaultWeeks is the period when the caller names none.

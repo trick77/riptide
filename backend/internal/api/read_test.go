@@ -57,6 +57,14 @@ func TestTeams(t *testing.T) {
 	if !slices.IsSorted(body.Teams) || !slices.Contains(body.Teams, "checkout") {
 		t.Errorf("teams = %v", body.Teams)
 	}
+	// The picker's and the schedule's teams: the harness config's, sorted.
+	want := []string{"checkout", "platform"}
+	if !slices.Equal(body.Teams, want) {
+		t.Errorf("teams = %v, want %v", body.Teams, want)
+	}
+	if got := (Deps{Runtime: h.runtime}).TeamNames(); !slices.Equal(got, want) {
+		t.Errorf("TeamNames = %v, want %v", got, want)
+	}
 	validateResponse(t, specRouter(t), http.MethodGet, "/api/teams", w)
 }
 
