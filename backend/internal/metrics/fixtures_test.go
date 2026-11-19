@@ -38,6 +38,15 @@ func p4() Period { return NewPeriod(4, now, zurich) }
 
 func all() Params { return Params{Period: p4()} }
 
+// noPrevious is a previous period without data, under ds's meta.
+func noPrevious(ds *dataset.Dataset) *dataset.Dataset { return &dataset.Dataset{Meta: ds.Meta} }
+
+// buildAlone is build with no previous period: ds names the repos, nothing
+// compared.
+func buildAlone(ds *dataset.Dataset, p Period, f filter) Build {
+	return build(ds, p, f, &baseline{repos: newRepoNamer(ds.Runs)})
+}
+
 func product(key string) Params { return Params{Period: p4(), Product: key} }
 
 func pr(mod ...func(*dataset.PR)) dataset.PR {

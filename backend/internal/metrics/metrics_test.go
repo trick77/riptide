@@ -696,7 +696,7 @@ func buildData() *dataset.Dataset {
 }
 
 func TestBuilds(t *testing.T) {
-	b := build(buildData(), p4(), filter{}, nil)
+	b := buildAlone(buildData(), p4(), filter{})
 	type row struct {
 		kind            string
 		runs, succeeded int
@@ -718,7 +718,7 @@ func TestBuilds(t *testing.T) {
 		}),
 		// its commit unseen by Bitbucket: no flag, known by its name
 		run(func(r *dataset.Run) { r.Repo, r.Project, r.PipelineName = nil, s("kasse"), "kasse-gitops/master" }))
-	pb := build(promo, p4(), filter{}, nil)
+	pb := buildAlone(promo, p4(), filter{})
 	if !reflect.DeepEqual(pb.Kinds, b.Kinds) {
 		t.Errorf("gitops run counted: %+v", pb.Kinds)
 	}
@@ -751,14 +751,14 @@ func TestBuilds(t *testing.T) {
 	}
 	expectNear(t, "main week 4", main.Weekly[3], 0.5)
 	expectNil(t, "main week 1", main.Weekly[0])
-	if got := build(buildData(), p4(), filter{product: "portal"}, nil); len(got.Kinds) != 0 {
+	if got := buildAlone(buildData(), p4(), filter{product: "portal"}); len(got.Kinds) != 0 {
 		t.Errorf("portal = %+v", got.Kinds)
 	}
 	// Run data from ten days back: the first two weeks are a gap.
 	if !b.StartsInside || b.GapWeeks != 2 {
 		t.Errorf("starts inside %v, gap %d", b.StartsInside, b.GapWeeks)
 	}
-	none := build(data(func(ds *dataset.Dataset) { ds.Meta.BuildDataFrom = nil }), p4(), filter{}, nil)
+	none := buildAlone(data(func(ds *dataset.Dataset) { ds.Meta.BuildDataFrom = nil }), p4(), filter{})
 	if none.StartsInside || none.GapWeeks != 4 || len(none.Kinds) != 0 {
 		t.Errorf("no data = %+v", none)
 	}
@@ -777,7 +777,7 @@ func otherRuns(status string, branches ...string) []dataset.Run {
 
 func hinted(rs ...[]dataset.Run) Build {
 	ds := data(func(ds *dataset.Dataset) { ds.Runs = slices.Concat(rs...) })
-	return build(ds, p4(), filter{}, nil)
+	return buildAlone(ds, p4(), filter{})
 }
 
 func TestBranchPrefixes(t *testing.T) {
@@ -866,7 +866,7 @@ func TestRunKind(t *testing.T) {
 }
 
 func TestRepoDurations(t *testing.T) {
-	h := build(buildData(), p4(), filter{}, nil).Hotspots
+	h := buildAlone(buildData(), p4(), filter{}).Hotspots
 	byKind := map[string]KindHotspots{}
 	for _, k := range h.Kinds {
 		byKind[k.Kind] = k
@@ -895,7 +895,7 @@ func TestDurationsGreenOnly(t *testing.T) {
 			}))
 		}
 	})
-	b := build(ds, p4(), filter{}, nil)
+	b := buildAlone(ds, p4(), filter{})
 	expectNear(t, "kind p50", b.Kinds[0].Duration.P50, 1500)
 	k := b.Hotspots.Kinds[0]
 	expectNear(t, "team p50", k.Duration.P50, 1500)
@@ -970,13 +970,13 @@ func TestCosts(t *testing.T) {
 
 func TestCompute(t *testing.T) {
 	ds := prData()
-	m := Compute(ds, nil, nil, Params{Period: p4(), Product: "portal"})
+	m := Compute(ds, noPrevious(ds), nil, Params{Period: p4(), Product: "portal"})
 	if m.Product == nil || *m.Product != "portal" || m.Review.Merged != 1 || len(m.Period.Weeks) != 4 ||
 		len(m.Review.CycleHistogram.UpperBoundsS) != len(m.Review.CycleHistogram.Human)-1 {
 		t.Errorf("portal = %+v", m)
 	}
 	// A product without data is all of them.
-	if m := Compute(ds, nil, nil, Params{Period: p4(), Product: "nope"}); m.Product != nil || m.Review.Merged != 3 {
+	if m := Compute(ds, noPrevious(ds), nil, Params{Period: p4(), Product: "nope"}); m.Product != nil || m.Review.Merged != 3 {
 		t.Errorf("unknown product = %+v", m.Review)
 	}
 }

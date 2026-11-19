@@ -392,7 +392,7 @@ type baseline struct {
 }
 
 // build is the CI section. base names the repos and holds the previous
-// period's runs; nil names them by ds alone and compares nothing.
+// period's runs to compare with; nil kinds compare nothing.
 func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
 	by := teamRuns(ds, f, gitopsRun(ds))
 	flaky := flakyRuns(by)
@@ -409,9 +409,6 @@ func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
 		}
 	} else {
 		out.GapWeeks = len(p.Weeks)
-	}
-	if base == nil {
-		base = &baseline{repos: newRepoNamer(ds.Runs)}
 	}
 	out.Hotspots = Hotspots{
 		MinRuns: HotspotMinRuns, SlowFactor: SlowFactor, FailingMoreFactor: FailingMoreFactor,

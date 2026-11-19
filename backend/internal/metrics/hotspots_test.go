@@ -239,7 +239,7 @@ func TestShortRunsAreNoOutliers(t *testing.T) {
 		ds.Runs = runs("kasse/lib", 40, 120, 0, "")
 		ds.Runs = append(ds.Runs, runs("kasse/mono", 4, 900, 0, "")...)
 	})
-	b := build(ds, p4(), filter{}, nil)
+	b := buildAlone(ds, p4(), filter{})
 	if k := b.Kinds[0]; k.OutlierRuns != 0 || k.CISeconds != 40*120+4*900 {
 		t.Errorf("kind = %+v", k)
 	}
@@ -247,7 +247,7 @@ func TestShortRunsAreNoOutliers(t *testing.T) {
 		ds.Runs = runs("kasse/lib", 20, 0, 0, "")
 		ds.Runs = append(ds.Runs, runs("kasse/stuck", 1, 100000, 0, "")...)
 	})
-	cb := build(cached, p4(), filter{}, nil)
+	cb := buildAlone(cached, p4(), filter{})
 	if k := cb.Kinds[0]; k.OutlierRuns != 1 || k.CISeconds != 0 {
 		t.Errorf("kind at median 0 = %+v", k)
 	}
@@ -278,7 +278,7 @@ func TestStuckRunsLeaveBuildTime(t *testing.T) {
 		// Not stuck: a run 5 times the median.
 		ds.Runs = append(ds.Runs, runs("kasse/c", 1, 500, 0, "")...)
 	})
-	b := build(ds, p4(), filter{}, nil)
+	b := buildAlone(ds, p4(), filter{})
 	k := b.Kinds[0]
 	// Each stuck repo has a single run, too few for a median of its own:
 	// measured against the team's 100 s, the aborted one too.
@@ -345,7 +345,7 @@ func TestFewLongRunsAreNoOutliers(t *testing.T) {
 		ds.Runs = runs("kasse/lib", 40, 100, 0, "")
 		ds.Runs = append(ds.Runs, runs("kasse/nightly", 4, 7200, 0, "")...)
 	})
-	if k := build(ds, p4(), filter{}, nil).Kinds[0]; k.OutlierRuns != 0 || k.CISeconds != 40*100+4*7200 {
+	if k := buildAlone(ds, p4(), filter{}).Kinds[0]; k.OutlierRuns != 0 || k.CISeconds != 40*100+4*7200 {
 		t.Errorf("kind = %+v", k)
 	}
 }
@@ -391,7 +391,7 @@ func TestHotspotsPerKind(t *testing.T) {
 			ds.Runs = append(ds.Runs, r)
 		}
 	})
-	h := build(ds, p4(), filter{}, nil).Hotspots
+	h := buildAlone(ds, p4(), filter{}).Hotspots
 	if kindOf(h, KindUnknown).Kind == "missing" || kindOf(h, KindRelease).Kind == "missing" {
 		t.Fatalf("kinds = %+v", h.Kinds)
 	}
@@ -431,7 +431,7 @@ func TestBuildsLeaveAbortedOut(t *testing.T) {
 		ds.Runs = append(ds.Runs, runs("kasse/b", 2, 3000, 2, "ABORTED")...)
 		ds.Runs = append(ds.Runs, runs("kasse/c", 1, 100, 1, "NOT_BUILT")...)
 	})
-	b := build(ds, p4(), filter{}, nil)
+	b := buildAlone(ds, p4(), filter{})
 	if len(b.Kinds) != 1 {
 		t.Fatalf("kinds = %+v", b.Kinds)
 	}
@@ -458,12 +458,12 @@ func TestBuildsLeaveAbortedOut(t *testing.T) {
 			ds.Runs = append(ds.Runs, run(func(r *dataset.Run) { r.Source, r.RunID, r.Status = "tekton", fmt.Sprint(i), s(st) }))
 		}
 	})
-	tk := build(tekton, p4(), filter{}, nil).Kinds[0]
+	tk := buildAlone(tekton, p4(), filter{}).Kinds[0]
 	if tk.Runs != 3 || tk.Succeeded != 2 || tk.Failed != 1 || tk.NoVerdict != 1 {
 		t.Errorf("tekton = %+v", tk)
 	}
 	// Only aborted runs: the kind shows, without a rate.
-	only := build(data(func(ds *dataset.Dataset) { ds.Runs = runs("kasse/b", 2, 100, 2, "ABORTED") }), p4(), filter{}, nil)
+	only := buildAlone(data(func(ds *dataset.Dataset) { ds.Runs = runs("kasse/b", 2, 100, 2, "ABORTED") }), p4(), filter{})
 	if len(only.Kinds) != 1 || only.Kinds[0].Runs != 0 || only.Kinds[0].SuccessRate != nil {
 		t.Errorf("only aborted = %+v", only.Kinds)
 	}
@@ -519,7 +519,7 @@ func TestCIFlowSplitsWithoutOverlap(t *testing.T) {
 			r.PipelineName, r.Branch, r.BranchKind, r.DurationS = "kasse-api/release%2F1", "release/1", dataset.BranchOther, n(-300)
 		}))
 	})
-	b := build(ds, p4(), filter{}, nil)
+	b := buildAlone(ds, p4(), filter{})
 	if len(b.Kinds) != 3 || b.Kinds[2].Kind != KindOther || b.Kinds[2].total != 0 {
 		t.Fatalf("kinds = %+v", b.Kinds)
 	}
@@ -611,9 +611,9 @@ func TestCIFlowSplitsWithoutOverlap(t *testing.T) {
 	}
 
 	// No runs, or none with a duration: an empty flow, never a division by 0.
-	empty := build(data(func(ds *dataset.Dataset) {
+	empty := buildAlone(data(func(ds *dataset.Dataset) {
 		ds.Runs = []dataset.Run{run(func(r *dataset.Run) { r.DurationS = nil })}
-	}), p4(), filter{}, nil).CIFlow
+	}), p4(), filter{}).CIFlow
 	if empty.TotalSeconds != 0 || len(empty.Outcomes) != 0 || len(empty.Links) != 0 {
 		t.Errorf("empty flow = %+v", empty)
 	}
@@ -647,7 +647,7 @@ func TestBuildSplitsAgentWait(t *testing.T) {
 			timed("8", 20000, -2, "SUCCESS"),    // stuck, no agent time
 		}
 	})
-	b := build(ds, p4(), filter{}, nil)
+	b := buildAlone(ds, p4(), filter{})
 	k := b.Kinds[0]
 	if k.Duration.N != 5 || k.Waiting.N != 2 || k.Building.N != 2 {
 		t.Fatalf("n: duration %d, waiting %d, building %d", k.Duration.N, k.Waiting.N, k.Building.N)
@@ -669,7 +669,7 @@ func TestBuildSplitsAgentWait(t *testing.T) {
 		}
 	}
 	// No run reports one: both empty, nulls rather than 0.
-	none := build(data(func(ds *dataset.Dataset) { ds.Runs = runs("kasse/a", 3, 100, 0, "") }), p4(), filter{}, nil)
+	none := buildAlone(data(func(ds *dataset.Dataset) { ds.Runs = runs("kasse/a", 3, 100, 0, "") }), p4(), filter{})
 	if w := none.Kinds[0].Waiting; w.N != 0 || w.P50 != nil {
 		t.Errorf("waiting without agent times = %+v", w)
 	}
@@ -718,7 +718,7 @@ func TestRepoOfUnseenCommits(t *testing.T) {
 		ds.Runs = append(ds.Runs, unseen("shared/master", 1)...)
 		ds.Runs = append(ds.Runs, unseen("nightly", 1)...)
 	})
-	k := kindOf(build(ds, p4(), filter{}, nil).Hotspots, KindMain)
+	k := kindOf(buildAlone(ds, p4(), filter{}).Hotspots, KindMain)
 	runsOf := map[string]int{}
 	for _, d := range k.Repos {
 		runsOf[d.Repo] = d.Runs
@@ -753,7 +753,7 @@ func TestSlowestRepos(t *testing.T) {
 		}
 		ds.Runs = append(ds.Runs, runs("kasse/steady", 12, 1500, 0, "")...)
 	})
-	k := kindOf(build(ds, p4(), filter{}, nil).Hotspots, KindMain)
+	k := kindOf(buildAlone(ds, p4(), filter{}).Hotspots, KindMain)
 	if r := repoOf(k, "kasse/steady"); r.Repo != "missing" {
 		t.Errorf("steady repo not cut from the hotspots: %+v", repoNames(k.Repos))
 	}
@@ -778,7 +778,7 @@ func TestSlowestRepos(t *testing.T) {
 			r.Repo, r.PipelineName, r.RunID, r.DurationS = s("kasse/two-left"), "kasse/two-left/master", "stuck", n(50000)
 		}))
 	})
-	mk := kindOf(build(mixed, p4(), filter{}, nil).Hotspots, KindMain)
+	mk := kindOf(buildAlone(mixed, p4(), filter{}).Hotspots, KindMain)
 	if got := repoNames(mk.Slowest); !slices.Equal(got, []string{"kasse/mid", "kasse/burst"}) {
 		t.Errorf("slowest with an outlier = %v", got)
 	}
@@ -794,7 +794,7 @@ func TestSlowestRepos(t *testing.T) {
 			ds.Runs = append(ds.Runs, r)
 		}
 	})
-	h := build(kinds, p4(), filter{}, nil).Hotspots
+	h := buildAlone(kinds, p4(), filter{}).Hotspots
 	if m, r := repoNames(kindOf(h, KindMain).Slowest), repoNames(kindOf(h, KindRelease).Slowest); !slices.Equal(m,
 		[]string{"kasse/a"}) || !slices.Equal(r, []string{"kasse/b"}) {
 		t.Errorf("slowest main %v, release %v", m, r)
@@ -815,7 +815,7 @@ func TestRepoSplitsAgentWait(t *testing.T) {
 		}
 		ds.Runs = append(ds.Runs, runs("kasse/plain", 3, 600, 0, "")...)
 	})
-	k := kindOf(build(ds, p4(), filter{}, nil).Hotspots, KindMain)
+	k := kindOf(buildAlone(ds, p4(), filter{}).Hotspots, KindMain)
 	a, p := repoOf(k, "kasse/agent"), repoOf(k, "kasse/plain")
 	if a.Waiting.N != 3 || a.Building.N != 3 {
 		t.Fatalf("agent = %+v", a)
@@ -843,7 +843,7 @@ func TestOutliersCapped(t *testing.T) {
 			}))
 		}
 	})
-	o := build(ds, p4(), filter{}, nil).Hotspots.Outliers
+	o := buildAlone(ds, p4(), filter{}).Hotspots.Outliers
 	if len(o) != outlierTop || o[0].DurationS != 10011 || o[9].DurationS != 10002 {
 		t.Errorf("outliers = %+v", o)
 	}

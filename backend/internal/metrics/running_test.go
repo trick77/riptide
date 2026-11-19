@@ -173,7 +173,7 @@ func TestFactsFlakyStopsAtThePeriod(t *testing.T) {
 		}
 	}
 	period := window(p.Period.From, p.Period.To, func(ds *dataset.Dataset) { ds.Runs = []dataset.Run{red} })
-	for _, b := range Compute(period, nil, nil, p).Build.Kinds {
+	for _, b := range Compute(period, noPrevious(period), nil, p).Build.Kinds {
 		if b.FlakyRuns != 0 {
 			t.Errorf("build %s flaky runs = %d", b.Kind, b.FlakyRuns)
 		}
@@ -202,12 +202,12 @@ func TestARolloutAcrossMondayCountsOnce(t *testing.T) {
 			deploy(func(d *dataset.Deploy) { d.Revision, d.At, d.RevisionFirstAt = "r2", ago(1), agoP(1) }),
 		}
 	})
-	m := Compute(ds, nil, running, p)
+	m := Compute(ds, noPrevious(ds), running, p)
 	if m.Delivery.Frequency.Releases != 1 || m.RunningWeek.Releases != 1 {
 		t.Errorf("period %d, running week %d releases; want 1 and 1", m.Delivery.Frequency.Releases, m.RunningWeek.Releases)
 	}
 	// Without the running week's period, no running week and no panic.
-	bare := Compute(ds, nil, running, Params{Period: p.Period, Previous: p.Previous})
+	bare := Compute(ds, noPrevious(ds), running, Params{Period: p.Period, Previous: p.Previous})
 	if bare.RunningWeek.Week.KW != 0 || !bare.OpenPRs.At.Equal(p.Period.To) {
 		t.Errorf("running week without its period = %+v", bare.RunningWeek)
 	}

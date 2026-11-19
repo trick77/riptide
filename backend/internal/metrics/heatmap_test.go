@@ -75,7 +75,7 @@ func TestHeatmap(t *testing.T) {
 		// kasse/c: Monday 00:30 in Zurich, still Sunday in UTC
 		ds.Runs = append(ds.Runs, weekRuns("kasse/c", p.Weeks[3].Start.Add(30*time.Minute), 1, 0, "", 100)...)
 	})
-	b := build(ds, p, filter{}, nil)
+	b := buildAlone(ds, p, filter{})
 	h := b.Hotspots
 	if h.HeatMinRuns != HeatMinRuns || len(h.HeatSteps) != 3 {
 		t.Errorf("heat constants = %d %v", h.HeatMinRuns, h.HeatSteps)
@@ -140,7 +140,7 @@ func TestHeatmapWeeksAsWeekly(t *testing.T) {
 			r.StartedAt, r.FinishedAt = ptr(p.From.Add(-2*time.Hour)), ptr(p.From.Add(-time.Hour))
 		}))
 	})
-	b := build(ds, p, filter{}, nil)
+	b := buildAlone(ds, p, filter{})
 	k := kindOf(b.Hotspots, KindMain)
 	api := heatRowOf(k, "kasse/kasse-api")
 	expectCell(t, "straddle week", api.Weeks[2], 4, 1, ptr(3))
@@ -183,7 +183,7 @@ func TestHeatmapOtherRepos(t *testing.T) {
 		}
 		ds.Meta.BuildDataFrom = ptr(p.Weeks[2].Start)
 	})
-	b := build(ds, p, filter{}, nil)
+	b := buildAlone(ds, p, filter{})
 	k := kindOf(b.Hotspots, KindMain)
 	if len(k.Repos) != 8 || len(k.Heatmap) != 9 {
 		t.Fatalf("repos %d, rows %d", len(k.Repos), len(k.Heatmap))

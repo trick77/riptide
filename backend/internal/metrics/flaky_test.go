@@ -42,7 +42,7 @@ func flakyData() *dataset.Dataset {
 
 func TestFlakyRuns(t *testing.T) {
 	ds := flakyData()
-	b := build(ds, p4(), filter{}, nil)
+	b := buildAlone(ds, p4(), filter{})
 	if len(b.Kinds) != 1 {
 		t.Fatalf("kinds = %+v", b.Kinds)
 	}
@@ -112,7 +112,7 @@ func TestFlakyAcrossKindsAndOrder(t *testing.T) {
 			flakyRun("6", "c", "SUCCESS", 2, func(r *dataset.Run) { r.BuildType = s("release") }),
 		}
 	})
-	b := build(ds, p4(), filter{}, nil)
+	b := buildAlone(ds, p4(), filter{})
 	got := map[string][2]int{}
 	for _, k := range b.Kinds {
 		got[k.Kind] = [2]int{k.Failed, k.FlakyRuns}
@@ -146,7 +146,7 @@ func TestFlakyOnHeadSHA(t *testing.T) {
 			flakyRun("6", "merge6", "SUCCESS", 2.5, merge("j", "")),
 		}
 	})
-	k := build(ds, p4(), filter{}, nil).Kinds[0]
+	k := buildAlone(ds, p4(), filter{}).Kinds[0]
 	if k.Failed != 3 || k.FlakyRuns != 1 || k.Unjudged != 0 {
 		t.Errorf("kind = %+v", k)
 	}

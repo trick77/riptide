@@ -109,9 +109,10 @@ func runningWeek(ds *dataset.Dataset, p Period, f filter) RunningWeek {
 
 // Compute is every metric of the page, ds over p.Period, prev the dataset
 // over p.Previous it is compared with, running the dataset over p.Running:
-// the open PRs as they are now and the running week's counts. nil, or no
-// p.Running, keeps the open PRs at the period's end and counts no running
-// week.
+// the open PRs as they are now and the running week's counts. prev is never
+// nil: no previous data is an empty dataset under ds's Meta. A nil running,
+// or no p.Running, keeps the open PRs at the period's end and counts no
+// running week.
 func Compute(ds, prev, running *dataset.Dataset, p Params) Metrics {
 	m, _ := computeBoth(ds, prev, running, p)
 	return m
@@ -123,9 +124,6 @@ func computeBoth(ds, prev, running *dataset.Dataset, p Params) (m, pm Metrics) {
 	// The product as this period's data resolves it, for both periods: a
 	// product the previous one lacks is that product without data, not all.
 	f := newFilter(ds, p)
-	if prev == nil {
-		prev = &dataset.Dataset{Meta: ds.Meta}
-	}
 	// The previous period first: every repo's build flags compare with it,
 	// its runs named as this period's.
 	names := newRepoNamer(slices.Concat(ds.Runs, prev.Runs))

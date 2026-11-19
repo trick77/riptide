@@ -228,12 +228,9 @@ func ClosedPrevious(weeks int, now time.Time, loc *time.Location) Period {
 
 // Assess is the assessment of ds over p.Period against prev over
 // p.Previous, both closed weeks (ClosedPeriod), with what earlier ones
-// raised.
+// raised. prev is never nil, as in Compute.
 func Assess(ds, prev *dataset.Dataset, p Params, h History) Assessment {
 	m, pm := computeBoth(ds, prev, nil, p)
-	if prev == nil {
-		prev = &dataset.Dataset{Meta: ds.Meta}
-	}
 	a := &assessor{m: m, pm: pm, ds: ds, prev: prev, p: p, f: newFilter(ds, p), h: h}
 	return a.run()
 }
