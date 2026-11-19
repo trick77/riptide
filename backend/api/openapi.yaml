@@ -1227,7 +1227,7 @@ components:
       properties:
         releases: { type: integer, description: Revisions that brought new images. }
         syncs: { type: integer, description: All revisions. }
-        first_seen: { type: integer, description: "Revisions that were some App's first deploy, no release." }
+        first_seen: { type: integer, description: "Revisions that were some App's first deploy naming images, no release." }
         resyncs: { type: integer, description: Revisions without new images. }
         per_week:
           type: number

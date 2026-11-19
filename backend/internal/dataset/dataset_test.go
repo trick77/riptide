@@ -677,6 +677,34 @@ func TestDatasetDeclaredBotByDisplayName(t *testing.T) {
 	}
 }
 
+// A sync whose payload names no images deployed none: it is no release, and
+// the next sync of the images the App already ran is none either.
+func TestDatasetDeployWithoutImages(t *testing.T) {
+	st, pool := migrated(t)
+	s := &seeder{t: t, pool: pool}
+	// The App's very first deploy names none: a sync, the first naming
+	// images is its first_seen.
+	s.deploy(team, "kasse-prod", "prod", sha("0"), "Succeeded", days(0.5))
+	s.deploy(team, "kasse-prod", "prod", sha("1"), "Succeeded", days(1), "reg/kasse-api:1.0")
+	s.deploy(team, "kasse-prod", "prod", sha("2"), "Succeeded", days(2))
+	s.deploy(team, "kasse-prod", "prod", sha("3"), "Succeeded", days(3), "reg/kasse-api:1.0")
+	d := load(t, st, t0, days(28))
+	var got []string
+	for _, dep := range d.Deploys {
+		got = append(got, str(dep.Kind)+"/"+strings.Join(dep.NewImages, ","))
+	}
+	if want := []string{"sync/", "first_seen/", "sync/", "sync/"}; !slices.Equal(got, want) {
+		t.Errorf("kinds = %v, want %v", got, want)
+	}
+	// The documented query agrees.
+	rows := docRows(t, pool, "#### Deployment-frequency query",
+		`SELECT coalesce(sum(releases), 0)::int8, coalesce(sum(first_seen), 0)::int8, coalesce(sum(syncs), 0)::int8
+		   FROM (%s) q WHERE team = 'checkout'`)
+	if len(rows) != 1 || !slices.Equal(rows[0], []any{int64(0), int64(1), int64(4)}) {
+		t.Errorf("doc releases, first seen, syncs = %v, want [0 1 4]", rows)
+	}
+}
+
 // The facts tables' read skips the lead times and the reviews, nothing else.
 func TestDatasetFactsOnly(t *testing.T) {
 	st, pool := migrated(t)

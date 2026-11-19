@@ -86,7 +86,7 @@ the data captured in v1.
 
 | Metric | How it's computed |
 |---|---|
-| **Deployment frequency** | Releases per `team` / time window in prod. A release is a successful deploy whose images differ from the same App's previous successful deploy, counted once per GitOps `revision` — see the query below. Not every sync is a release: a config change or a manual re-sync redeploys the same images (measured: a third of all intg syncs, and 7 of 8 syncs of one monitoring App), and one release reconciles every App sharing the revision (intranet + extranet), so `COUNT(*)` overcounts twice over. Report the release count next to the syncs and the first-seen deploys it was derived from, so a reader can see where the number comes from. Group by `app_name` for the per-App drill-down; drop infrastructure Apps (monitoring, bots) by name in your own report. |
+| **Deployment frequency** | Releases per `team` / time window in prod. A release is a successful deploy whose images differ from the same App's previous successful deploy naming images, counted once per GitOps `revision` — see the query below. A deploy naming no images deployed none: a sync, never compared, and never an App's first-seen deploy. Not every sync is a release: a config change or a manual re-sync redeploys the same images (measured: a third of all intg syncs, and 7 of 8 syncs of one monitoring App), and one release reconciles every App sharing the revision (intranet + extranet), so `COUNT(*)` overcounts twice over. Report the release count next to the syncs and the first-seen deploys it was derived from, so a reader can see where the number comes from. Group by `app_name` for the per-App drill-down; drop infrastructure Apps (monitoring, bots) by name in your own report. |
 | **Change lead time** | Per commit, not per release: `SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY lead_time) FROM lead_time_changes WHERE environment='prod' AND NOT is_merge AND NOT author_is_service_account`. The `lead_time_changes` view maps every commit that shipped to the **first** deploy that carried it, so a release rolled out to four Apps counts each change once. Exclude merge commits and release tooling, and report bots on their own line — see [Change lead time (DORA)](dora-lead-time.md) for why, and for the coverage limits. Group by `team` or `repo_full_name`; `change_type` is not available here, since these commits come from master pushes, which carry no branch prefix. Do **not** substitute the newest commit per release: it answers "how stale was the freshest change" and reads ~7× too fast. |
 | **Lead time breakdown** | Where the lead time is spent, per human PR in app repos, as five stages: coding (oldest commit on the branch → PR ready), review (ready → approval), merge (approval → merged), to intg (merged → the merge commit's first intg deploy), to prod (intg → prod). One stage for review, not pickup + review: measured, 95 of 115 approvals were the reviewer's first and only touch, so "first review → approval" is zero by construction; the count is reported as a review-depth signal. Stages 4–5 reach only PRs whose merge commit `lead_time_changes` resolves, so they cover fewer PRs than 1–3 — report the count per stage. See the query below. |
 | **PR cycle time** | `pr:merged.occurred_at − pr:opened.occurred_at` per PR, keyed by `(repo_full_name, pr_id)`: PR ids are numbered per repository, so `pr_id` alone joins unrelated PRs. A PR opened before ingestion started has no `pr:opened` and drops out. Exclude GitOps repos: their PRs are stage promotions (see [Reading the event tables](#reading-the-event-tables)). Merged PRs only: a PR still open is in no cycle time, however long it waits — see Open PR age. |
@@ -104,7 +104,7 @@ by side: the releases, plus the two counts they were filtered from.
 
 ```sql
 WITH deploys AS (
-  SELECT team, app_name, revision, occurred_at,
+  SELECT id, team, app_name, revision, occurred_at,
          -- Sorted: the same images in another order are not a change.
          (SELECT array_agg(i ORDER BY i)
             FROM jsonb_array_elements_text(payload->'images') i) AS images
@@ -112,9 +112,12 @@ WITH deploys AS (
   WHERE operation_phase = 'Succeeded' AND environment = 'prod'
 ),
 compared AS (
+  -- A sync naming no images deployed none: its own partition, so it is a
+  -- sync and the next deploy compares with the images before it.
   SELECT *,
-         lag(images) OVER (PARTITION BY app_name ORDER BY occurred_at) AS previous_images,
-         row_number() OVER (PARTITION BY app_name ORDER BY occurred_at) = 1 AS first_seen
+         lag(images) OVER (PARTITION BY team, app_name, images IS NULL ORDER BY occurred_at, id) AS previous_images,
+         images IS NOT NULL
+           AND row_number() OVER (PARTITION BY team, app_name, images IS NULL ORDER BY occurred_at, id) = 1 AS first_seen
   FROM deploys
 )
 SELECT team,
@@ -122,7 +125,7 @@ SELECT team,
        -- new images against the App's previous deploy: the release count
        count(DISTINCT revision) FILTER (WHERE NOT first_seen
                                           AND images IS DISTINCT FROM previous_images) AS releases,
-       -- an App's first deploy in the data has nothing to compare against:
+       -- an App's first deploy naming images has nothing to compare against:
        -- a release or a re-sync, unknown. Shown apart, never added in.
        count(DISTINCT revision) FILTER (WHERE first_seen) AS first_seen,
        -- every successful sync, releases or not

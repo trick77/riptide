@@ -278,7 +278,7 @@ type Deploy struct {
 	Images          []string   `json:"images" db:"images"`
 	Kind            *string    `json:"kind" db:"kind"`
 	// NewImages are the images a release brought, those the previous
-	// deploy did not run; empty for anything but a release.
+	// deploy naming images did not run; empty for anything but a release.
 	NewImages []string `json:"new_images" db:"new_images"`
 }
 
