@@ -776,7 +776,11 @@ components:
       required: [app_name, revision, images]
       properties:
         app_name: { type: string, minLength: 1 }
-        revision: { type: string, minLength: 7, description: The GitOps-repo SHA being deployed. }
+        revision:
+          type: string
+          # 7 characters or more once trimmed (stored trimmed, lowercased).
+          pattern: '^\s*\S.{5,}\S\s*$'
+          description: The GitOps-repo SHA being deployed.
         sync_status: { type: [string, "null"] }
         operation_phase: { type: [string, "null"], description: Succeeded / Failed / Running. }
         started_at:
@@ -833,10 +837,14 @@ components:
         reviewer_account_kind:
           $ref: "#/components/schemas/AccountKind"
           default: bot
-        source_commit_sha: { type: string, minLength: 7 }
+        source_commit_sha:
+          type: string
+          # 7 characters or more once trimmed (stored trimmed, lowercased);
+          # merge_commit_sha the same, or blank.
+          pattern: '^\s*\S.{5,}\S\s*$'
         merge_commit_sha:
           type: [string, "null"]
-          minLength: 7
+          pattern: '^\s*$|^\s*\S.{5,}\S\s*$'
           description: Required when outcome is merged, null otherwise.
         lines_added: { type: integer, minimum: 0 }
         lines_removed: { type: integer, minimum: 0 }
@@ -873,7 +881,10 @@ components:
         verdict: { type: string, enum: [disagreed, acknowledged] }
         actor: { type: string, minLength: 1 }
         repo: { type: [string, "null"], minLength: 1 }
-        commit_sha: { type: [string, "null"], minLength: 7 }
+        commit_sha:
+          type: [string, "null"]
+          # Blank, or 7 characters or more once trimmed (stored trimmed, lowercased).
+          pattern: '^\s*$|^\s*\S.{5,}\S\s*$'
         occurred_at: { $ref: "#/components/schemas/Timestamp" }
 
     Instant:
