@@ -125,10 +125,31 @@ func deployClass(d dataset.Deploy) (string, string) {
 	if d.Phase != "Succeeded" {
 		return DeployFailed, d.Phase
 	}
-	class := map[int]string{
-		classRelease: DeployRelease, classFirstSeen: DeployFirstSeen, classSync: DeploySync,
-	}[revisionClass(d)]
+	var class string
+	switch revisionClass(d) {
+	case classRelease:
+		class = DeployRelease
+	case classFirstSeen:
+		class = DeployFirstSeen
+	case classSync:
+		class = DeploySync
+	}
 	return class, deployTerm[class].both()
+}
+
+// factDeploy is a deploy table row's deploy, classified on first use.
+type factDeploy struct {
+	deploy      dataset.Deploy
+	class, term string
+	classified  bool
+}
+
+func (x *factDeploy) classify() (string, string) {
+	if !x.classified {
+		x.class, x.term = deployClass(x.deploy)
+		x.classified = true
+	}
+	return x.class, x.term
 }
 
 // JiraRef is a Jira key and its ticket's URL; null without jira.base_url.
@@ -397,28 +418,39 @@ func strs(v []string) []*string {
 	return out
 }
 
-// newestFirst sorts by an instant, newest first, rows without one last;
-// ties keep the dataset's order.
-func newestFirst[T any](rows []T, at func(T) *time.Time) []T {
-	out := slices.Clone(rows)
-	slices.SortStableFunc(out, func(a, b T) int {
-		x, y := at(a), at(b)
+// newestFirst sorts rows in place by an instant, newest first, rows without
+// one last; ties keep the dataset's order. at returns the instant by value:
+// a pointer into the compared row would move every row to the heap.
+func newestFirst[T any](rows []T, at func(T) (time.Time, bool)) {
+	slices.SortStableFunc(rows, func(a, b T) int {
+		x, xok := at(a)
+		y, yok := at(b)
 		switch {
-		case x == nil && y == nil:
+		case !xok && !yok:
 			return 0
-		case x == nil:
+		case !xok:
 			return 1
-		case y == nil:
+		case !yok:
 			return -1
 		}
-		return y.Compare(*x)
+		return y.Compare(x)
 	})
-	return out
 }
 
-func table[S, T any](rows []S, keep func(S) bool, row func(S) T) Table[T] {
+// instant is t's value, and whether there is one.
+func instant(t *time.Time) (time.Time, bool) {
+	if t == nil {
+		return time.Time{}, false
+	}
+	return *t, true
+}
+
+// table counts the rows keep takes and builds the first FactsLimit. Both get
+// the row's address, so a row can classify itself once for the two.
+func table[S, T any](rows []S, keep func(*S) bool, row func(*S) T) Table[T] {
 	t := Table[T]{Rows: []T{}}
-	for _, r := range rows {
+	for i := range rows {
+		r := &rows[i]
 		if !keep(r) {
 			continue
 		}
@@ -491,13 +523,27 @@ func factPRs(ds *dataset.Dataset) []factPR {
 		}
 		out = append(out, factPR{pr: pr, age: ptr(openAge(o, at)), waiting: &on, idle: ptr(openIdle(o, at))})
 	}
-	rest := newestFirst(ds.PRs, func(pr dataset.PR) *time.Time { return cmp.Or(pr.MergedAt, pr.OpenedAt) })
+	rest := slices.Clone(ds.PRs)
+	newestFirst(rest, func(pr dataset.PR) (time.Time, bool) { return instant(cmp.Or(pr.MergedAt, pr.OpenedAt)) })
 	for _, pr := range rest {
 		if !seen[key{pr.Repo, pr.PRID}] {
 			out = append(out, factPR{pr: pr})
 		}
 	}
 	return out
+}
+
+// factRun is a run table row's run, its kind classified on first use.
+type factRun struct {
+	run  dataset.Run
+	kind string
+}
+
+func (x *factRun) runKind(buildTypeFrom *time.Time) string {
+	if x.kind == "" {
+		x.kind = RunKind(x.run, buildTypeFrom)
+	}
+	return x.kind
 }
 
 // ComputeFacts is the facts tables for the search q. The product filters as
@@ -513,12 +559,20 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 	// Each row is marked by the instant its window took it on: a PR by its
 	// merge or close (else its opening), a deploy and a run by the event's
 	// arrival.
-	prRunning := func(x factPR) bool {
+	prRunning := func(x *factPR) bool {
 		return x.age == nil && inRunning(cmp.Or(x.pr.MergedAt, x.pr.ClosedAt, x.pr.OpenedAt), p.Period)
 	}
 	runRunning := func(r dataset.Run) bool { return inRunning(&r.OccurredAt, p.Period) }
-	deploys := newestFirst(ds.Deploys, func(d dataset.Deploy) *time.Time { return &d.At })
-	runs := newestFirst(ds.Runs, runAt)
+	deploys := make([]factDeploy, len(ds.Deploys))
+	for i, d := range ds.Deploys {
+		deploys[i].deploy = d
+	}
+	newestFirst(deploys, func(x factDeploy) (time.Time, bool) { return x.deploy.At, true })
+	runs := make([]factRun, len(ds.Runs))
+	for i, r := range ds.Runs {
+		runs[i].run = r
+	}
+	newestFirst(runs, func(x factRun) (time.Time, bool) { return instant(runAt(x.run)) })
 	gitops := gitopsRun(ds)
 	// As the build section counts them: its runs, its pairing. A run of the
 	// period pairs with the period's runs only, as the build section saw
@@ -546,7 +600,7 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 		// The search reads the words on screen, never a hidden code: a
 		// promotion's change type is not searched. The words are built only
 		// when there is a search.
-		PRs: table(prs, func(x factPR) bool {
+		PRs: table(prs, func(x *factPR) bool {
 			pr := x.pr
 			if !f.inKey(pr.Project) || pr.Bot {
 				return false
@@ -563,7 +617,7 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 			}
 			id := fmt.Sprintf("#%d", pr.PRID)
 			return m.match(append([]*string{&pr.Repo, pr.Title, &typ, &id}, append(strs(pr.JiraKeys), &term)...)...)
-		}, func(x factPR) PRFact {
+		}, func(x *factPR) PRFact {
 			pr := x.pr
 			prodAt := firstDeploy(pr, prod)
 			parts := titleParts(pr.Title, p.JiraURL)
@@ -580,33 +634,36 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 		}),
 		// Every image a deploy ran, not only the new ones: a search for an
 		// image finds its re-syncs and failed syncs too.
-		Deploys: table(deploys, func(d dataset.Deploy) bool {
+		Deploys: table(deploys, func(x *factDeploy) bool {
+			d := &x.deploy
 			if !f.in(d.Project) {
 				return false
 			}
 			if m == "" || onlyRunning {
 				return m == "" || inRunning(&d.At, p.Period)
 			}
-			_, term := deployClass(d)
+			_, term := x.classify()
 			if inRunning(&d.At, p.Period) {
 				term += " " + runningTerm.both()
 			}
 			return m.match(append([]*string{&d.App, d.Environment, &d.Revision}, append(strs(d.Images), &term)...)...)
-		}, func(d dataset.Deploy) DeployFact {
-			class, _ := deployClass(d)
+		}, func(x *factDeploy) DeployFact {
+			d := &x.deploy
+			class, _ := x.classify()
 			return DeployFact{
 				At: d.At, App: d.App, Environment: d.Environment, Revision: d.Revision,
 				NewImages: d.NewImages, Class: class, Phase: d.Phase, Running: inRunning(&d.At, p.Period),
 			}
 		}),
-		Runs: table(runs, func(r dataset.Run) bool {
+		Runs: table(runs, func(x *factRun) bool {
+			r := x.run
 			if !f.in(r.Project) {
 				return false
 			}
 			if m == "" || onlyRunning {
 				return m == "" || runRunning(r)
 			}
-			status, kind := runStatusTerms(r), runKindTerms(RunKind(r, ds.Meta.BuildTypeFrom))
+			status, kind := runStatusTerms(r), runKindTerms(x.runKind(ds.Meta.BuildTypeFrom))
 			if isFlaky(r) {
 				status += " " + flakyTerm.both()
 			}
@@ -614,9 +671,10 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 				status += " " + runningTerm.both()
 			}
 			return m.match(append([]*string{&r.PipelineName, r.Repo, r.CommitSHA, r.HeadSHA, r.BaseSHA, r.Status, &status, &kind, r.BuildType}, strs(r.ImageRefs)...)...)
-		}, func(r dataset.Run) RunFact {
+		}, func(x *factRun) RunFact {
+			r := x.run
 			return RunFact{
-				PipelineName: r.PipelineName, RunID: r.RunID, Kind: RunKind(r, ds.Meta.BuildTypeFrom),
+				PipelineName: r.PipelineName, RunID: r.RunID, Kind: x.runKind(ds.Meta.BuildTypeFrom),
 				CommitSHA: r.CommitSHA, ShownSHA: shownSHA(r), DurationS: r.DurationS, ImageRefs: r.ImageRefs, Status: r.Status,
 				Verdict: verdict(r), Outcome: runOutcome(r), GitOps: gitops(r), Flaky: isFlaky(r),
 				Running: runRunning(r),
