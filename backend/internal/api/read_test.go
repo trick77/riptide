@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/trick77/riptide/internal/dataset"
+	"github.com/trick77/riptide/internal/metrics"
 	"github.com/trick77/riptide/internal/store"
 )
 
@@ -251,6 +253,46 @@ func TestReadFailureIs500AndLogged(t *testing.T) {
 	}
 	if logged != 2 {
 		t.Errorf("dataset_failed lines = %d: %s", logged, h.logs)
+	}
+}
+
+// prevFails fails the previous period's read only; every other read waits
+// until that failure cancels it, or gives up so a regression fails, not hangs.
+type prevFails struct {
+	*memStore
+	prev metrics.Period
+}
+
+var (
+	errPrevious  = errors.New("previous period failed")
+	errNotCancel = errors.New("read never cancelled")
+)
+
+func (s prevFails) Dataset(ctx context.Context, p dataset.Params) (*dataset.Dataset, error) {
+	if p.From.Equal(s.prev.From) && p.To.Equal(s.prev.To) {
+		return nil, errPrevious
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(5 * time.Second):
+		return nil, errNotCancel
+	}
+}
+
+// The read that failed is logged, not one its failure cancelled.
+func TestReadFailureLogsTheCauseNotTheCancelled(t *testing.T) {
+	h := newHarness(t, prevFails{newMemStore(), metrics.ClosedPrevious(defaultWeeks, fixedNow, time.UTC)})
+	w := h.serveUI(newRequest(http.MethodGet, "/api/metrics?team=checkout", nil))
+	expectStatus(t, w, http.StatusInternalServerError)
+	var errs []any
+	for _, l := range h.lines(t) {
+		if l["msg"] == "dataset_failed" {
+			errs = append(errs, l["err"])
+		}
+	}
+	if len(errs) != 1 || errs[0] != errPrevious.Error() {
+		t.Errorf("dataset_failed errors = %v, want [%q]", errs, errPrevious)
 	}
 }
 
