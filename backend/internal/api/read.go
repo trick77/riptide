@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"slices"
 	"strconv"
@@ -193,11 +194,16 @@ func (d Deps) metrics(w http.ResponseWriter, r *http.Request) {
 	// Open PRs, releases, merges and runs: no lead times or reviews.
 	wg.Go(read(v.params.Running, true, &running, &errs[2]))
 	wg.Wait()
+	// The read that failed, not the one its failure cancelled.
+	var first error
 	for _, err := range errs {
-		if err != nil {
-			d.failed(w, r, v.team, err)
-			return
+		if err != nil && (first == nil || errors.Is(first, context.Canceled)) {
+			first = err
 		}
+	}
+	if first != nil {
+		d.failed(w, r, v.team, first)
+		return
 	}
 	m := metrics.Compute(ds, prev, running, v.params)
 	d.Log.InfoContext(r.Context(), "metrics_served", "team", v.team, "from", v.params.Period.From,
