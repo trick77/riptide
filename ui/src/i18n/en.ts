@@ -148,7 +148,7 @@ export const en = {
         "The assessment of {{weeks}} is running, usually under a minute.",
       failed: "The last assessment failed: {{detail}}",
       askFailed: "Could not start the assessment: {{detail}}",
-      gap: "{{source}} has been silent for {{days}} days: its numbers are left out.",
+      gap: "{{source}} was silent for the last {{days}} days of the period: its numbers are left out.",
       source: {
         bitbucket: "Bitbucket",
         pipeline: "CI",

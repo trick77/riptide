@@ -95,6 +95,8 @@ func TestDataset(t *testing.T) {
 			!eqTime(ds.Pipeline, ts(days(-5).Add(10*time.Minute))) || !eqTime(ds.Noergler, ts(days(-19))) {
 			t.Errorf("data start = %v %v %v %v", ds.Bitbucket, ds.Pipeline, ds.ArgoCD, ds.Noergler)
 		}
+		// A window ending now reads every event, the deploy on day 30 too: a
+		// sender's clock ahead must not hide its latest.
 		de := m.DataEnd
 		if !eqTime(de.Bitbucket, ts(days(6).Add(time.Hour))) || !eqTime(de.ArgoCD, ts(days(30))) ||
 			!eqTime(de.Pipeline, ts(days(9).Add(10*time.Minute))) || !eqTime(de.Noergler, ts(days(1).Add(5*time.Hour))) {
@@ -376,6 +378,12 @@ func TestDatasetWindow(t *testing.T) {
 	}
 	if len(d.LeadTimes) != 6 {
 		t.Errorf("lead times = %d", len(d.LeadTimes))
+	}
+	// A past window's source ends at its latest event before the window's
+	// end, the deploy at exactly day 4 aside, so a closed period can tell a
+	// source that went quiet within it; its start stays all history.
+	if !eqTime(d.Meta.DataEnd.ArgoCD, ts(days(3))) || !eqTime(d.Meta.DataStart.ArgoCD, ts(days(-10))) {
+		t.Errorf("argocd start %v end %v", d.Meta.DataStart.ArgoCD, d.Meta.DataEnd.ArgoCD)
 	}
 	// Nothing at all: every section is an empty list, never null.
 	empty := load(t, st, days(100), days(101))

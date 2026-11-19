@@ -141,7 +141,7 @@ export const de = {
         "Die Einschätzung für {{weeks}} läuft, meist unter einer Minute.",
       failed: "Die letzte Einschätzung ist fehlgeschlagen: {{detail}}",
       askFailed: "Einschätzung nicht gestartet: {{detail}}",
-      gap: "{{source}} meldet seit {{days}} Tagen nichts: Aussagen dazu ausgelassen.",
+      gap: "{{source}} meldete in den letzten {{days}} Tagen der Periode nichts: Aussagen dazu ausgelassen.",
       source: {
         bitbucket: "Bitbucket",
         pipeline: "Die CI",
