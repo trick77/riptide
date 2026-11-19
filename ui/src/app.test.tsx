@@ -442,6 +442,132 @@ describe("App", () => {
     ]);
   });
 
+  it("drops an ask's answer for a view left meanwhile", async () => {
+    const calls = mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis")
+        return analysisStatus({ state: "none", enabled: true });
+      return metrics();
+    });
+    // The POST answers only when the test says so: after the switch.
+    const inner = globalThis.fetch;
+    let release: (r: Response) => void = () => {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((raw: string, init?: RequestInit) =>
+        init?.method === "POST"
+          ? new Promise<Response>((r) => {
+              release = r;
+            })
+          : inner(raw, init),
+      ),
+    );
+    render(<App />);
+    const p = within(await screen.findByTestId("assessment"));
+    fireEvent.click(p.getByRole("button", { name: "Jetzt einschätzen" }));
+    fireEvent.click(screen.getByRole("button", { name: "12 W" }));
+    await waitFor(() =>
+      expect(
+        calls.some((c) => c.startsWith("/api/analysis") && /weeks=12/.test(c)),
+      ).toBe(true),
+    );
+    await screen.findByTestId("assessment");
+    await act(async () =>
+      release(
+        new Response(
+          JSON.stringify(
+            analysisStatus({ state: "none", enabled: true, running: true }),
+          ),
+        ),
+      ),
+    );
+    // The 12-week view stays: no skeleton nothing would ever replace.
+    expect(screen.queryByTestId("assessment-loading")).toBeNull();
+    expect(
+      within(screen.getByTestId("assessment")).getByRole("button", {
+        name: "Jetzt einschätzen",
+      }),
+    ).toBeEnabled();
+  });
+
+  it("says an ask failed for its view only", async () => {
+    const calls = mockFetch((url, init) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis") {
+        if (init?.method === "POST")
+          return new Response(JSON.stringify({ detail: "cooling down" }), {
+            status: 429,
+          });
+        return analysisStatus({ state: "none", enabled: true });
+      }
+      return metrics();
+    });
+    render(<App />);
+    const p = within(await screen.findByTestId("assessment"));
+    fireEvent.click(p.getByRole("button", { name: "Jetzt einschätzen" }));
+    expect(
+      await p.findByText(/Einschätzung nicht gestartet: .*cooling down/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "12 W" }));
+    await waitFor(() =>
+      expect(
+        calls.some((c) => c.startsWith("/api/analysis") && /weeks=12/.test(c)),
+      ).toBe(true),
+    );
+    // The 12-week panel itself, not the skeleton before it.
+    await screen.findByTestId("assessment");
+    expect(
+      screen.queryByText(/Einschätzung nicht gestartet/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps a view's ask failure past a late one of another view", async () => {
+    const calls = mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis")
+        return analysisStatus({ state: "none", enabled: true });
+      return metrics();
+    });
+    // The 4-week POST hangs until released; the 12-week one fails at once.
+    const inner = globalThis.fetch;
+    let release: (r: Response) => void = () => {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((raw: string, init?: RequestInit) => {
+        if (init?.method !== "POST") return inner(raw, init);
+        if (/weeks=12/.test(raw))
+          return Promise.resolve(
+            new Response(JSON.stringify({ detail: "cooling down" }), {
+              status: 429,
+            }),
+          );
+        return new Promise<Response>((r) => {
+          release = r;
+        });
+      }),
+    );
+    render(<App />);
+    let p = within(await screen.findByTestId("assessment"));
+    fireEvent.click(p.getByRole("button", { name: "Jetzt einschätzen" }));
+    fireEvent.click(screen.getByRole("button", { name: "12 W" }));
+    await waitFor(() =>
+      expect(
+        calls.some((c) => c.startsWith("/api/analysis") && /weeks=12/.test(c)),
+      ).toBe(true),
+    );
+    p = within(await screen.findByTestId("assessment"));
+    fireEvent.click(p.getByRole("button", { name: "Jetzt einschätzen" }));
+    await p.findByText(/Einschätzung nicht gestartet: .*cooling down/);
+    await act(async () =>
+      release(
+        new Response(JSON.stringify({ detail: "boom" }), { status: 500 }),
+      ),
+    );
+    expect(
+      p.getByText(/Einschätzung nicht gestartet: .*cooling down/),
+    ).toBeInTheDocument();
+  });
+
   it("keeps polling a run after a failed poll", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
