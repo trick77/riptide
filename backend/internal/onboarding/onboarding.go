@@ -689,15 +689,25 @@ func (o *Onboarder) Remove(ctx context.Context, t Target) Row {
 		o.setProjectHook(t.Project, projectState{})
 	}
 	if o.DryRun {
-		return row(t, "ok", fmt.Sprintf("dry run: would remove webhook id=%s", ids(own)))
+		r := row(t, "ok", "dry run: would remove webhook")
+		for _, h := range own {
+			r.Diff = append(r.Diff, fmt.Sprintf("webhook id=%d deleted", h.ID))
+		}
+		return r
 	}
-	for _, h := range own {
+	// Diff names each hook as it goes: a failure on a later one still tells
+	// which are gone already, and Detail which are left.
+	r := row(t, "ok", "webhook removed")
+	for i, h := range own {
 		if err := o.Client.do(ctx, http.MethodDelete, hookPath(t, h.ID), nil, nil, nil); err != nil {
-			return row(t, "failed", detail(fmt.Sprintf("delete webhook id=%d", h.ID), err))
+			r.Status = "failed"
+			r.Detail = detail(fmt.Sprintf("delete webhook id=%d", h.ID), err) + "; left: id=" + ids(own[i:])
+			return r
 		}
 		o.log().InfoContext(ctx, "onboard_webhook_removed", "team", o.Team, "target", t.Key())
+		r.Diff = append(r.Diff, fmt.Sprintf("webhook id=%d deleted", h.ID))
 	}
-	return row(t, "ok", fmt.Sprintf("webhook removed (id=%s)", ids(own)))
+	return r
 }
 
 // Run applies action to every target in order, one failure never stopping

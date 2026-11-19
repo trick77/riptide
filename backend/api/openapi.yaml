@@ -652,7 +652,7 @@ components:
               diff:
                 type: array
                 items: { type: string }
-                description: What onboard changes or changed; `create` for a new webhook.
+                description: "onboard: what changes or changed, `create` for a new webhook. remove: one `webhook id=N deleted` per webhook deleted, also on a failed remove."
               repo_hooks:
                 type: array
                 items: { type: string }
