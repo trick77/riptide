@@ -242,3 +242,53 @@ func TestDatasetOpenPRs(t *testing.T) {
 		t.Errorf("products = %+v", prev.Products)
 	}
 }
+
+// The open PR's age runs from its last turn ready: time as a draft is its
+// author's, not the team's (user, 2026-11-20). A draft has none.
+func TestDatasetOpenPRReadySince(t *testing.T) {
+	st, pool := migrated(t)
+	s := &seeder{t: t, pool: pool}
+	opened := func(id int64, draft bool) {
+		s.pr(prEvent{event: "pr:opened", repo: kasseAPI, id: id, author: "dev-anna", branch: "feature/kas-" + strconv.FormatInt(id, 10),
+			state: "OPEN", created: days(-20), draft: draft, at: days(-20)})
+	}
+	flip := func(id int64, event string, at time.Time) {
+		s.pr(prEvent{event: event, repo: kasseAPI, id: id, author: "dev-anna", state: "OPEN", draft: event == "pr:back_to_draft", at: at})
+	}
+	// #50: a draft for weeks, ready only now.
+	opened(50, true)
+	flip(50, "pr:ready_for_review", days(8))
+	// #51: ready, back to draft, ready again: the last turn counts.
+	opened(51, false)
+	flip(51, "pr:back_to_draft", days(-10))
+	flip(51, "pr:ready_for_review", days(5))
+	// #55: ready, back to draft, ready again without the flip the parser
+	// recognises: from the first event that saw it ready again.
+	opened(55, false)
+	flip(55, "pr:back_to_draft", days(-18))
+	flip(55, "pr:modified", days(3))
+	flip(55, "pr:comment:added", days(6))
+	// #52: still a draft. #53: opened ready. #54: back to draft since.
+	opened(52, true)
+	opened(53, false)
+	opened(54, false)
+	flip(54, "pr:back_to_draft", days(2))
+
+	d := load(t, st, t0, days(10))
+	byID := map[int64]dataset.OpenPR{}
+	for _, o := range d.OpenPRs {
+		byID[o.PRID] = o
+	}
+	for id, want := range map[int64]*time.Time{50: ptrTime(days(8)), 51: ptrTime(days(5)), 55: ptrTime(days(3)), 52: nil, 53: ptrTime(days(-20)), 54: nil} {
+		o, ok := byID[id]
+		if !ok || !o.OpenedAt.Equal(days(-20)) {
+			t.Errorf("#%d = %+v", id, o)
+			continue
+		}
+		if got := o.ReadySince; (got == nil) != (want == nil) || got != nil && (!got.Equal(*want) || got.Location() != time.UTC) {
+			t.Errorf("#%d ready since %v, want %v", id, got, want)
+		}
+	}
+}
+
+func ptrTime(t time.Time) *time.Time { return &t }

@@ -74,6 +74,7 @@ func assessFixture(t *testing.T, h History) Assessment {
 		for i, d := range []float64{9, 10, 12, 14} {
 			out = append(out, openPR(func(o *dataset.OpenPR) {
 				o.PRID, o.OpenedAt, o.ReadyAt, o.LastEventAt = int64(30+i), before(end, d), ptr(before(end, d)), before(end, 1)
+				o.ReadySince = o.ReadyAt
 			}))
 		}
 		return out
@@ -184,7 +185,7 @@ func TestJamToneFromNotable(t *testing.T) {
 			for i := range OpenJamMin {
 				at := end.Add(-time.Duration(9+i) * 24 * time.Hour).UTC()
 				out = append(out, openPR(func(o *dataset.OpenPR) {
-					o.Repo, o.PRID, o.OpenedAt, o.ReadyAt = repo, int64(len(out)+1), at, ptr(at)
+					o.Repo, o.PRID, o.OpenedAt, o.ReadyAt, o.ReadySince = repo, int64(len(out)+1), at, ptr(at), ptr(at)
 					o.LastEventAt = end.Add(-24 * time.Hour).UTC()
 				}))
 			}
@@ -293,6 +294,7 @@ func TestActivePastTheOpenCut(t *testing.T) {
 		at := cur.To.Add(-48 * time.Hour).UTC()
 		open = append(open, openPR(func(o *dataset.OpenPR) {
 			o.Repo, o.PRID, o.OpenedAt, o.ReadyAt, o.LastEventAt = fmt.Sprintf("kasse/r%d", i), int64(i+1), at, ptr(at), at
+			o.ReadySince = o.ReadyAt
 		}))
 	}
 	a := Assess(mk(cur, open), mk(prev, nil), Params{Period: cur, Previous: prev}, History{})
@@ -322,7 +324,7 @@ func TestMergedPerWeekCountsEveryMerge(t *testing.T) {
 			for i := range 3 {
 				at := p.To.Add(-48 * time.Hour).UTC()
 				ds.OpenPRs = append(ds.OpenPRs, openPR(func(o *dataset.OpenPR) {
-					o.PRID, o.OpenedAt, o.ReadyAt, o.LastEventAt = int64(50+i), at, ptr(at), at
+					o.PRID, o.OpenedAt, o.ReadyAt, o.ReadySince, o.LastEventAt = int64(50+i), at, ptr(at), ptr(at), at
 				}))
 			}
 		})
@@ -357,7 +359,7 @@ func TestNewJamAgainstZero(t *testing.T) {
 	for i := range OpenJamMin {
 		at := cur.To.Add(-time.Duration(9+i) * 24 * time.Hour).UTC()
 		open = append(open, openPR(func(o *dataset.OpenPR) {
-			o.PRID, o.OpenedAt, o.ReadyAt, o.LastEventAt = int64(i+1), at, ptr(at), cur.To.Add(-24*time.Hour).UTC()
+			o.PRID, o.OpenedAt, o.ReadyAt, o.ReadySince, o.LastEventAt = int64(i+1), at, ptr(at), ptr(at), cur.To.Add(-24*time.Hour).UTC()
 		}))
 	}
 	mk := func(p Period, open []dataset.OpenPR) *dataset.Dataset {

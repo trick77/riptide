@@ -11,10 +11,14 @@ import (
 func openPR(mod ...func(*dataset.OpenPR)) dataset.OpenPR {
 	o := dataset.OpenPR{
 		Repo: "kasse/kasse-api", Project: "kasse", PRID: 20, Title: s("Refund by card"), ChangeType: s("feature"),
-		JiraKeys: []string{"KAS-20"}, OpenedAt: ago(2), ReadyAt: agoP(2), LastEventAt: ago(0),
+		JiraKeys: []string{"KAS-20"}, OpenedAt: ago(2), ReadyAt: agoP(2), ReadySince: agoP(2), LastEventAt: ago(0),
 	}
 	for _, m := range mod {
 		m(&o)
+	}
+	// As the dataset reads it: a draft has no age clock.
+	if o.Draft {
+		o.ReadySince = nil
 	}
 	return o
 }
@@ -43,7 +47,7 @@ func TestOpenPRs(t *testing.T) {
 	at := func(repo string, days float64, mod ...func(*dataset.OpenPR)) dataset.OpenPR {
 		id++
 		return openPR(append([]func(*dataset.OpenPR){func(o *dataset.OpenPR) {
-			o.Repo, o.PRID, o.OpenedAt = repo, id, ago(days)
+			o.Repo, o.PRID, o.OpenedAt, o.ReadySince = repo, id, ago(days), agoP(days)
 		}}, mod...)...)
 	}
 	idle := func(days float64) func(*dataset.OpenPR) {
@@ -94,16 +98,17 @@ func TestOpenPRs(t *testing.T) {
 	if w := o.JammedWaiting; w.FirstReview != 3 || w.Merge != 1 || w.Draft != 0 {
 		t.Errorf("jammed waiting = %+v", w)
 	}
-	if o.Age.N != 10 {
+	// The draft is open but has no age.
+	if o.Age.N != 9 {
 		t.Errorf("age n = %d", o.Age.N)
 	}
-	// Jammed first, then by long-open PRs, then by the median age: portal's
-	// one PR of 10 days before kasse-web's median of 6.9.
+	// Jammed first, then by long-open PRs, then by the median age:
+	// kasse-web's median of 11 days before portal's one PR of 10.
 	var repos []string
 	for _, r := range o.Repos {
 		repos = append(repos, r.Repo)
 	}
-	if got := strings.Join(repos, " "); got != "kasse/kasse-api portal/portal-web kasse/kasse-web kasse/kasse-batch" {
+	if got := strings.Join(repos, " "); got != "kasse/kasse-api kasse/kasse-web portal/portal-web kasse/kasse-batch" {
 		t.Errorf("repos = %s", got)
 	}
 	api := o.Repos[0]
@@ -115,12 +120,14 @@ func TestOpenPRs(t *testing.T) {
 	if w := api.LongWaiting; w.FirstReview != 3 || w.Merge != 1 || w.Draft != 0 || w.Review != 0 || w.Changes != 0 {
 		t.Errorf("kasse-api long waiting = %+v", w)
 	}
-	// kasse-web's draft is 6.9 days old, not long open; its 20-day one is.
-	if web := o.Repos[2]; web.LongWaiting != (Waiting{FirstReview: 1}) {
+	// kasse-web's draft is never long open; its 20-day one is.
+	if web := o.Repos[1]; web.LongWaiting != (Waiting{FirstReview: 1}) {
 		t.Errorf("kasse-web long waiting = %+v", web.LongWaiting)
 	}
-	// The median, which the 300-day PR does not move.
-	if web := o.Repos[2]; web.Jammed || web.Inactive != 1 || web.Age.P50 == nil || !near(*web.Age.P50, 6.9*86400) {
+	// The median of its 2- and 20-day PRs: the inactive one and the draft
+	// do not move it.
+	if web := o.Repos[1]; web.Jammed || web.Inactive != 1 || web.Open != 3 || web.Age.N != 2 || web.Age.P50 == nil ||
+		!near(*web.Age.P50, 11*86400) {
 		t.Errorf("kasse-web = %+v", web)
 	}
 	if batch := o.Repos[3]; batch.Age.P50 == nil || *batch.Age.P50 != 0 {
@@ -168,7 +175,7 @@ func TestOpenPRsCut(t *testing.T) {
 			}
 			repo := "kasse/r" + string(rune('a'+i))
 			ds.OpenPRs = append(ds.OpenPRs, openPR(func(o *dataset.OpenPR) {
-				o.Repo, o.PRID, o.OpenedAt = repo, int64(i), ago(days)
+				o.Repo, o.PRID, o.OpenedAt, o.ReadySince = repo, int64(i), ago(days), agoP(days)
 			}))
 		}
 	})
@@ -184,7 +191,7 @@ func TestComputeOpenPRsAgainstThePrevious(t *testing.T) {
 	long := func(repo string, days float64) dataset.OpenPR {
 		id++
 		return openPR(func(o *dataset.OpenPR) {
-			o.Repo, o.PRID, o.OpenedAt, o.LastEventAt = repo, id, ago(days), ago(days)
+			o.Repo, o.PRID, o.OpenedAt, o.ReadySince, o.LastEventAt = repo, id, ago(days), agoP(days), ago(days)
 		})
 	}
 	// Opened 40 to 43 days ago, each with its last event then: four
@@ -233,14 +240,16 @@ func TestFactsOpenPRsFirst(t *testing.T) {
 			}),
 		}
 		ds.OpenPRs = []dataset.OpenPR{
-			openPR(func(o *dataset.OpenPR) { o.PRID, o.OpenedAt = 2, ago(3) }),
+			openPR(func(o *dataset.OpenPR) { o.PRID, o.OpenedAt, o.ReadySince = 2, ago(3), agoP(3) }),
 			// opened long before the window: only here
 			openPR(func(o *dataset.OpenPR) {
-				o.PRID, o.OpenedAt, o.LastEventAt, o.Title, o.Touched, o.NeedsWork =
-					3, ago(50), ago(5), s("Old one"), true, true
+				o.PRID, o.OpenedAt, o.ReadySince, o.LastEventAt, o.Title, o.Touched, o.NeedsWork =
+					3, ago(50), agoP(50), ago(5), s("Old one"), true, true
 			}),
 			// the oldest, inactive: after the open ones
-			openPR(func(o *dataset.OpenPR) { o.PRID, o.OpenedAt, o.LastEventAt = 4, ago(90), ago(60) }),
+			openPR(func(o *dataset.OpenPR) {
+				o.PRID, o.OpenedAt, o.ReadySince, o.LastEventAt = 4, ago(90), agoP(90), ago(60)
+			}),
 		}
 	})
 	f := ComputeFacts(ds, all(), "")
@@ -280,4 +289,45 @@ func str(v *string) string {
 		return "<nil>"
 	}
 	return *v
+}
+
+// An open PR's age runs from its last turn ready: a long draft just made
+// ready is no long-open PR (user, 2026-11-20). A draft has no age and
+// stays out of the medians, still open.
+func TestOpenAgeFromReady(t *testing.T) {
+	ds := data(func(ds *dataset.Dataset) {
+		ds.OpenPRs = []dataset.OpenPR{
+			openPR(func(o *dataset.OpenPR) { o.PRID, o.OpenedAt, o.ReadyAt, o.ReadySince = 1, ago(20), agoP(20), agoP(1) }),
+			openPR(func(o *dataset.OpenPR) {
+				o.Repo, o.PRID, o.OpenedAt, o.ReadyAt, o.ReadySince, o.Draft = "kasse/kasse-web", 2, ago(20), nil, nil, true
+			}),
+		}
+	})
+	o := openSection(ds, filter{})
+	if o.Open != 2 || o.Long != 0 || o.Waiting.Draft != 1 || o.Age.N != 1 || o.Age.P50 == nil || !near(*o.Age.P50, 86400) {
+		t.Errorf("open %d long %d draft %d age %+v", o.Open, o.Long, o.Waiting.Draft, o.Age)
+	}
+	if len(o.Repos) != 2 || o.Repos[0].Repo != "kasse/kasse-api" || o.Repos[1].Age.N != 0 || o.Repos[1].Age.P50 != nil {
+		t.Errorf("repos = %+v", o.Repos)
+	}
+	// The facts list them oldest first by the age they show, the draft
+	// last: a PR ready six days before the one opened 20 days ago.
+	ds.OpenPRs = append(ds.OpenPRs, openPR(func(o *dataset.OpenPR) {
+		o.PRID, o.OpenedAt, o.ReadyAt, o.ReadySince = 3, ago(6), agoP(6), agoP(6)
+	}))
+	byID := map[int64]PRFact{}
+	var order []int64
+	for _, r := range ComputeFacts(ds, all(), "").PRs.Rows {
+		byID[r.PRID] = r
+		order = append(order, r.PRID)
+	}
+	if !slices.Equal(order, []int64{3, 1, 2}) {
+		t.Errorf("facts order = %v", order)
+	}
+	if r := byID[1]; r.AgeS == nil || !near(*r.AgeS, 86400) {
+		t.Errorf("ready a day = %+v", r)
+	}
+	if r := byID[2]; r.State != "open" || r.AgeS != nil || r.Waiting == nil || *r.Waiting != WaitDraft {
+		t.Errorf("draft = %+v", r)
+	}
 }

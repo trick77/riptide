@@ -98,7 +98,7 @@ var labels = map[string]string{
 	"silent_days":     "days since the source's last event, at the period's end",
 	"open_long":       "PRs of the repo open 7 days or longer; fewer is better",
 	"open":            "open PRs of the repo",
-	"age_p50":         "median age of the repo's open PRs",
+	"age_p50":         "median age of the repo's open PRs since they turned ready for review, drafts out",
 	"failure_rate":    "share of the repo's runs of the kind that failed; lower is better",
 	"wasted":          "CI time of the failed runs",
 	"runs":            "runs with a verdict",

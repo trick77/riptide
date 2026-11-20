@@ -21,7 +21,8 @@
 -- make it inactive then and active now, a jam all along read as new.
 --
 -- Opened: the PR's createdDate, which every PR event carries, so a PR
--- opened before ingestion started has its age too; else its pr:opened.
+-- opened before ingestion started has one too; else its pr:opened. The age
+-- runs from ready_since, its last turn ready (see there), not from it.
 -- GitOps repos left out (stage promotions, docs/metrics.md). `bot` and the
 -- touches as in prs.sql: Go adds riptide's automation detection and drops
 -- the opener's own and pre-ready touches.
@@ -86,6 +87,8 @@ details AS (
          coalesce(min(e.occurred_at) FILTER (WHERE e.before AND e.event_type = 'pr:ready_for_review'),
                   min(e.occurred_at) FILTER (WHERE e.before AND e.event_type = 'pr:opened' AND NOT e.draft))
              AS ready_event_at,
+         -- The last event that saw it a draft: the age clock starts after it.
+         max(e.occurred_at) FILTER (WHERE e.before AND e.draft) AS last_draft_at,
          max(e.author) FILTER (WHERE e.event_type = 'pr:opened') AS opened_author,
          max(e.author_display_name) FILTER (WHERE e.event_type = 'pr:opened') AS opened_display_name,
          -- Ingest-time automation as prs.sql reads it, on pr:opened; a PR
@@ -114,7 +117,8 @@ details AS (
   GROUP BY o.repo_full_name, o.pr_id
 ),
 prs AS (
-  SELECT o.repo_full_name, o.pr_id, o.seen, o.created_at, o.latest_at, o.deleted_ever, d.opened_event_at, d.ready_event_at, d.opened_author,
+  SELECT o.repo_full_name, o.pr_id, o.seen, o.created_at, o.latest_at, o.deleted_ever, d.opened_event_at, d.ready_event_at,
+         d.last_draft_at, d.opened_author,
          d.opened_display_name, d.automated, d.change_type, d.touches, d.opened_jira_keys,
          l.payload->'pullRequest' AS pull, l.jira_keys AS latest_jira_keys,
          -- A PR not seen before T: what it looked like then is unknown.
@@ -151,6 +155,17 @@ SELECT p.repo_full_name AS repo,
        CASE WHEN p.seen THEN coalesce(p.ready_event_at,
                                       CASE WHEN NOT p.draft THEN coalesce(p.created_at, p.opened_event_at) END)
        END AS ready_at,
+       -- The age clock, its last turn ready: time as a draft is its
+       -- author's (user, 2026-11-20). The first event after the last one
+       -- that saw it a draft, a flip the parser recognises or not; never
+       -- a draft before T, from its creation. None for a draft.
+       CASE WHEN NOT p.draft THEN
+         CASE WHEN p.last_draft_at IS NULL THEN coalesce(p.created_at, p.opened_event_at)
+              ELSE (SELECT min(x.occurred_at) FROM pr_events x
+                     WHERE x.repo_full_name = p.repo_full_name AND x.pr_id = p.pr_id
+                       AND x.before AND NOT x.draft AND x.occurred_at > p.last_draft_at)
+         END
+       END AS ready_since,
        p.draft,
        p.touches,
        -- Reviewers and other participants with their status, as the latest

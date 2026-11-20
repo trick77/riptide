@@ -226,7 +226,10 @@ type OpenPR struct {
 	LastEventAt time.Time `json:"last_event_at" db:"last_event_at"`
 	// ReadyAt is the pickup clock start; nil for a draft never made ready.
 	ReadyAt *time.Time `json:"ready_at" db:"ready_at"`
-	Draft   bool       `json:"draft" db:"draft"`
+	// ReadySince is its last turn ready, the age clock start: time as a
+	// draft is its author's (user, 2026-11-20). Nil for a draft.
+	ReadySince *time.Time `json:"ready_since" db:"ready_since"`
+	Draft      bool       `json:"draft" db:"draft"`
 	// Touched: a reviewer touched it after ready, as FirstReviewAt counts
 	// reviewers. NeedsWork and Approved are the reviewers' and other
 	// participants' status as the PR's latest event carries it, automation
@@ -519,7 +522,7 @@ func (d *Dataset) utc() {
 	}
 	for i := range d.OpenPRs {
 		o := &d.OpenPRs[i]
-		ptrs = append(ptrs, &o.OpenedAt, &o.LastEventAt, o.ReadyAt)
+		ptrs = append(ptrs, &o.OpenedAt, &o.LastEventAt, o.ReadyAt, o.ReadySince)
 	}
 	for i := range d.Deploys {
 		ptrs = append(ptrs, &d.Deploys[i].At, d.Deploys[i].RevisionFirstAt)

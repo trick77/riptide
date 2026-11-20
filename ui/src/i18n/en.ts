@@ -601,7 +601,7 @@ export const en = {
         "several long-open PRs in the same repo wait for a first review: a reviewer is missing there, or the PRs are too big.",
       lever:
         "name reviewers when opening, bring old PRs up in the daily, close PRs nobody needs anymore.",
-      def: "PRs open now, those opened this week included; compared with those open at the previous period's end: opened before, neither merged, declined nor deleted. Age from the PR's creation date, long open from {{days}} days, a jam from {{min}} long-open ones in the same repo. A draft is never long open and never forgotten: it waits on its author. Per repo the median age, never the oldest: one alone decides that.",
+      def: "PRs open now, those opened this week included; compared with those open at the previous period's end: opened before, neither merged, declined nor deleted. Age from its last turn ready for review, else from its creation: time as a draft does not count, a draft has no age. Long open from {{days}} days, a jam from {{min}} long-open ones in the same repo. A draft is never long open and never forgotten: it waits on its author. Per repo the median age, never the oldest: one alone decides that.",
       basis_one: "{{count}} open PR, as of {{at}}.",
       basis_other: "{{count}} open PRs, as of {{at}}.",
       coverage:

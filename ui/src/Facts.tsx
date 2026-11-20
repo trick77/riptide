@@ -304,10 +304,11 @@ function FactsTables({
             {p.running && <Pill tone="none">{t("facts.running")}</Pill>}
             {p.waiting && (
               <span className="text-[12.5px] whitespace-nowrap text-muted">
-                {t(`facts.prWaiting.${p.waiting}`)} ·{" "}
+                {t(`facts.prWaiting.${p.waiting}`)}
                 {p.waiting === "inactive"
-                  ? t("facts.idleFor", { idle: dur(p.idle_s) })
-                  : t("facts.openFor", { age: dur(p.age_s) })}
+                  ? ` · ${t("facts.idleFor", { idle: dur(p.idle_s) })}`
+                  : p.age_s != null &&
+                    ` · ${t("facts.openFor", { age: dur(p.age_s) })}`}
               </span>
             )}
           </span>,

@@ -2769,6 +2769,23 @@ describe("open PRs", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows a draft without an age", async () => {
+    const rows = facts().prs.rows;
+    mockFetch((url) =>
+      url.pathname === "/api/facts"
+        ? facts({
+            prs: {
+              count: 1,
+              rows: [{ ...rows[2], waiting: "draft", age_s: null }],
+            },
+          })
+        : metrics(),
+    );
+    render(<App />);
+    expect(await screen.findByText("Entwurf")).toBeInTheDocument();
+    expect(screen.queryByText(/Entwurf ·/)).not.toBeInTheDocument();
+  });
+
   it("says the open PRs come first when they lead the table", async () => {
     const rows = facts().prs.rows;
     mockFetch((url) =>
