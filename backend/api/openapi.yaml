@@ -4,7 +4,7 @@ info:
   title: riptide API
   # The CONTRACT's version, not the binary's. The two move independently:
   # a release that changes no route leaves this alone.
-  version: 2.4.0
+  version: 2.4.1
   description: |
     DevOps delivery-metrics ingestion. Senders post raw events from Bitbucket
     Data Center, CI pipelines (Jenkins, Tekton, ...), Argo CD and noergler;
@@ -1121,7 +1121,7 @@ components:
         open: { type: integer, description: Open and not inactive. }
         long: { type: integer, description: Open `long_days` or longer. }
         jammed: { type: boolean, description: "`long` reaches `jam_min`." }
-        age: { $ref: "#/components/schemas/Spread", description: Over `open`; the median, never the oldest. }
+        age: { $ref: "#/components/schemas/Spread", description: "Over `open`, drafts out; the median, never the oldest." }
         waiting: { $ref: "#/components/schemas/WaitingCounts" }
         long_waiting: { $ref: "#/components/schemas/WaitingCounts", description: What the `long` ones wait on. }
         inactive: { type: integer, description: Open with no event for `inactive_days`; in no other count. }
@@ -1133,8 +1133,9 @@ components:
         now, not of the period's end (every other PR number counts a PR once
         merged), GitOps promotions and bots left out. Read from the events before `at` only: the
         previous period's end reads what was open then, plus the PRs open
-        all along that riptide heard of only later. Age from the PR's
-        creation date as Bitbucket sends it. A PR with no event for
+        all along that riptide heard of only later. Age from the PR's last
+        turn ready for review, else its creation date as Bitbucket sends
+        it; a draft has none. A PR with no event for
         `inactive_days` counts in `inactive` only: riptide cannot tell a PR
         nobody touches from one whose close event was lost.
       additionalProperties: false
@@ -2011,7 +2012,7 @@ components:
         to_prod_s: { $ref: "#/components/schemas/NullableSeconds" }
         age_s:
           $ref: "#/components/schemas/NullableSeconds"
-          description: A PR open now, its age; null for every other PR.
+          description: A PR open now, its age since its last turn ready; null for a draft and every other PR.
         waiting:
           oneOf:
             - { $ref: "#/components/schemas/PRWaiting" }

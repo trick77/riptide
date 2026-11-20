@@ -365,9 +365,9 @@ func TestPRLink(t *testing.T) {
 	ds.PRs[0].URL = s(ok)
 	ds.PRs[1].URL = s("https://bb.example.com/projects/NEW/repos/kasse-api/pull-requests/2")
 	ds.OpenPRs = []dataset.OpenPR{
-		{Repo: "kasse/kasse-api", Project: "kasse", PRID: 2, OpenedAt: ago(1), LastEventAt: ago(1),
+		{Repo: "kasse/kasse-api", Project: "kasse", PRID: 2, OpenedAt: ago(1), ReadySince: agoP(1), LastEventAt: ago(1),
 			URL: s("https://bb.example.com/projects/OLD/repos/kasse-api/pull-requests/2")},
-		{Repo: "kasse/kasse-api", Project: "kasse", PRID: 9, OpenedAt: ago(40), LastEventAt: ago(1),
+		{Repo: "kasse/kasse-api", Project: "kasse", PRID: 9, OpenedAt: ago(40), ReadySince: agoP(40), LastEventAt: ago(1),
 			URL: s("https://bb.example.com/projects/KASSE/repos/kasse-api/pull-requests/9")},
 	}
 	urls := map[int64]string{}

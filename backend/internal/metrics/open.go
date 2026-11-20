@@ -153,9 +153,22 @@ type OpenPRs struct {
 	all []OpenRepo
 }
 
-// openAge is an open PR's age at the instant; never negative.
-func openAge(pr dataset.OpenPR, at time.Time) float64 {
-	return max(at.Sub(pr.OpenedAt).Seconds(), 0)
+// openAge is an open PR's age at the instant, since its last turn ready:
+// time as a draft is its author's, not the team's (user, 2026-11-20). Nil
+// for a draft; never negative.
+func openAge(pr dataset.OpenPR, at time.Time) *float64 {
+	if pr.Draft || pr.ReadySince == nil {
+		return nil
+	}
+	return ptr(max(at.Sub(*pr.ReadySince).Seconds(), 0))
+}
+
+// orZero is a median's value for a sort, a repo of drafts alone at 0.
+func orZero(v *float64) float64 {
+	if v == nil {
+		return 0
+	}
+	return *v
 }
 
 // openIdle is the time since an open PR's last event; never negative.
@@ -172,7 +185,8 @@ func openInactive(pr dataset.OpenPR, at time.Time) bool {
 // openLong: open OpenLongDays or more, waiting on the team. Never a draft:
 // it waits on its author, so it is no congestion and makes no jam.
 func openLong(pr dataset.OpenPR, at time.Time) bool {
-	return !pr.Draft && openAge(pr, at) >= OpenLongDays*24*60*60
+	age := openAge(pr, at)
+	return age != nil && *age >= OpenLongDays*24*60*60
 }
 
 // openPRs is the dataset's PRs open at its end, for the page's filter.
@@ -218,8 +232,11 @@ func openSection(ds *dataset.Dataset, f filter) OpenPRs {
 			out.LongWaiting.add(on)
 			r.row.LongWaiting.add(on)
 		}
-		ages = append(ages, age)
-		r.ages = append(r.ages, age)
+		// A draft has no age: open, in no median.
+		if age != nil {
+			ages = append(ages, *age)
+			r.ages = append(r.ages, *age)
+		}
 	}
 	out.Age = spread(ages)
 	rows := make([]OpenRepo, 0, len(repos))
@@ -239,7 +256,7 @@ func openSection(ds *dataset.Dataset, f filter) OpenPRs {
 	}
 	slices.SortFunc(rows, func(a, b OpenRepo) int {
 		return cmp.Or(cmp.Compare(first(a.Jammed), first(b.Jammed)), cmp.Compare(b.Long, a.Long),
-			cmp.Compare(*b.Age.P50, *a.Age.P50), cmp.Compare(b.Inactive, a.Inactive), cmp.Compare(a.Repo, b.Repo))
+			cmp.Compare(orZero(b.Age.P50), orZero(a.Age.P50)), cmp.Compare(b.Inactive, a.Inactive), cmp.Compare(a.Repo, b.Repo))
 	})
 	out.all = rows
 	for i, r := range rows {

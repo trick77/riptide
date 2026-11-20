@@ -493,8 +493,17 @@ func factPRs(ds *dataset.Dataset) []factPR {
 	for i, o := range ds.OpenPRs {
 		open[i] = openRow{o, openInactive(o, at)}
 	}
+	// Oldest first by the age the row shows, since its last turn ready; the
+	// drafts, which have none, after the ready ones, by their opening.
+	since := func(o dataset.OpenPR) time.Time {
+		if s := o.ReadySince; s != nil && !o.Draft {
+			return *s
+		}
+		return o.OpenedAt
+	}
 	slices.SortStableFunc(open, func(a, b openRow) int {
-		return cmp.Or(cmp.Compare(first(!a.inactive), first(!b.inactive)), a.pr.OpenedAt.Compare(b.pr.OpenedAt))
+		return cmp.Or(cmp.Compare(first(!a.inactive), first(!b.inactive)),
+			cmp.Compare(first(!a.pr.Draft), first(!b.pr.Draft)), since(a.pr).Compare(since(b.pr)))
 	})
 	out := make([]factPR, 0, len(open)+len(ds.PRs))
 	seen := map[key]bool{}
@@ -521,7 +530,7 @@ func factPRs(ds *dataset.Dataset) []factPR {
 		if row.inactive {
 			on = WaitInactive
 		}
-		out = append(out, factPR{pr: pr, age: ptr(openAge(o, at)), waiting: &on, idle: ptr(openIdle(o, at))})
+		out = append(out, factPR{pr: pr, age: openAge(o, at), waiting: &on, idle: ptr(openIdle(o, at))})
 	}
 	rest := slices.Clone(ds.PRs)
 	newestFirst(rest, func(pr dataset.PR) (time.Time, bool) { return instant(cmp.Or(pr.MergedAt, pr.OpenedAt)) })
@@ -560,7 +569,7 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 	// merge or close (else its opening), a deploy and a run by the event's
 	// arrival.
 	prRunning := func(x *factPR) bool {
-		return x.age == nil && inRunning(cmp.Or(x.pr.MergedAt, x.pr.ClosedAt, x.pr.OpenedAt), p.Period)
+		return x.waiting == nil && inRunning(cmp.Or(x.pr.MergedAt, x.pr.ClosedAt, x.pr.OpenedAt), p.Period)
 	}
 	runRunning := func(r dataset.Run) bool { return inRunning(&r.OccurredAt, p.Period) }
 	deploys := make([]factDeploy, len(ds.Deploys))

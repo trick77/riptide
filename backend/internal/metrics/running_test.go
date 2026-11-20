@@ -23,7 +23,7 @@ func window(from, to time.Time, mod ...func(*dataset.Dataset)) *dataset.Dataset 
 
 func openRow(id int64, opened time.Time) dataset.OpenPR {
 	return dataset.OpenPR{Repo: "kasse/kasse-api", Project: "kasse", PRID: id, Title: s("Open"),
-		OpenedAt: opened, LastEventAt: opened, ReadyAt: &opened}
+		OpenedAt: opened, LastEventAt: opened, ReadyAt: &opened, ReadySince: &opened}
 }
 
 // A week still running is counted apart: no number of the period, no

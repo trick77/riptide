@@ -48,7 +48,7 @@ func jammed(_ context.Context, team string, p metrics.Period) (*dataset.Dataset,
 	for i, days := range []int{9, 10, 12, 14} {
 		at := p.To.AddDate(0, 0, -days)
 		ds.OpenPRs = append(ds.OpenPRs, dataset.OpenPR{
-			Repo: "kasse/kasse-api", Project: "kasse", PRID: int64(i + 1), OpenedAt: at, ReadyAt: &at,
+			Repo: "kasse/kasse-api", Project: "kasse", PRID: int64(i + 1), OpenedAt: at, ReadyAt: &at, ReadySince: &at,
 			LastEventAt: p.To.AddDate(0, 0, -1),
 		})
 	}

@@ -595,7 +595,7 @@ export const de = {
         "mehrere lang offene PRs im selben Repo auf ein erstes Review warten: dort fehlt ein Reviewer, oder die PRs sind zu gross.",
       lever:
         "Reviewer beim Öffnen nennen, alte PRs im Daily ansprechen, PRs schliessen, die niemand mehr braucht.",
-      def: "PRs, die jetzt offen sind, auch in der laufenden Woche geöffnete; verglichen mit den am Ende der Vorperiode offenen: geöffnet davor, weder gemerged, abgelehnt noch gelöscht. Alter ab dem Erstelldatum des PRs, lang offen ab {{days}} Tagen, Stau ab {{min}} lang offenen im selben Repo. Ein Entwurf ist nie lang offen und nie vergessen: er wartet auf seinen Autor. Pro Repo das Median-Alter, nie der älteste: einer allein bestimmt ihn.",
+      def: "PRs, die jetzt offen sind, auch in der laufenden Woche geöffnete; verglichen mit den am Ende der Vorperiode offenen: geöffnet davor, weder gemerged, abgelehnt noch gelöscht. Alter ab dem letzten Wechsel auf bereit für Review, sonst ab dem Erstelldatum: Zeit als Entwurf zählt nicht, ein Entwurf hat kein Alter. Lang offen ab {{days}} Tagen, Stau ab {{min}} lang offenen im selben Repo. Ein Entwurf ist nie lang offen und nie vergessen: er wartet auf seinen Autor. Pro Repo das Median-Alter, nie der älteste: einer allein bestimmt ihn.",
       basis_one: "{{count}} offener PR, Stand {{at}}.",
       basis_other: "{{count}} offene PRs, Stand {{at}}.",
       coverage:
