@@ -102,6 +102,7 @@ type prEvent struct {
 	automation            string
 	draft                 bool
 	mergeCommit           string
+	target                string // the branch it goes into, none when empty
 	title                 string
 	link                  string
 	jira                  []string
@@ -137,6 +138,9 @@ func (s *seeder) pr(e prEvent) {
 	pull := map[string]any{"id": e.id, "draft": e.draft, "fromRef": map[string]any{"displayId": e.branch, "latestCommit": head}}
 	if e.title != "" {
 		pull["title"] = e.title
+	}
+	if e.target != "" {
+		pull["toRef"] = map[string]any{"displayId": e.target}
 	}
 	if e.link != "" {
 		pull["links"] = map[string]any{"self": []any{map[string]any{"href": e.link}}}

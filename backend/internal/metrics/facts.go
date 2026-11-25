@@ -120,7 +120,9 @@ var deployTerm = map[string]uiTerm{
 }
 
 // deployClass is what a deploy counts as, with its search term: the class
-// deployFrequency counts it in, or failed.
+// deployFrequency counts it in, or failed (Failed and Error alike, the
+// phase its term). An App's first deploy counted as a release is a release
+// found by the first deploy's words too.
 func deployClass(d dataset.Deploy) (string, string) {
 	if d.Phase != "Succeeded" {
 		return DeployFailed, d.Phase
@@ -129,6 +131,8 @@ func deployClass(d dataset.Deploy) (string, string) {
 	switch revisionClass(d) {
 	case classRelease:
 		class = DeployRelease
+	case classFirstRelease:
+		return DeployRelease, deployTerm[DeployRelease].both() + " " + deployTerm[DeployFirstSeen].both()
 	case classFirstSeen:
 		class = DeployFirstSeen
 	case classSync:
@@ -254,7 +258,14 @@ type PRFact struct {
 	JiraMore   int         `json:"jira_more"`
 	GitOps     bool        `json:"gitops"`
 	ChangeType *string     `json:"change_type"`
-	State      string      `json:"state"`
+	// State is merged, open, declined or deleted, or unknown for a PR open
+	// at the dataset's end whose close may have been lost
+	// (dataset.OpenPR.Unknown): no age, no wait.
+	State string `json:"state"`
+	// NotCounted is why a merged PR is in no PR number (notCounted:
+	// off_trunk, implicit_merge, housekeeping); null when it counts, and
+	// for every other PR.
+	NotCounted *string `json:"not_counted"`
 	// ReviewS is ready to approval, CycleS opened to merged, ToProdS merged
 	// to the first production deploy; null when unknown or negative.
 	ReviewS  *float64   `json:"review_s"`
@@ -283,6 +294,13 @@ type DeployFact struct {
 	NewImages   []string  `json:"new_images"`
 	Class       string    `json:"class"`
 	Phase       string    `json:"phase"`
+	// FirstDeploy: the App's first known deploy naming images (Kind
+	// first_seen), whether Class counts it a release (more than
+	// dataset.FirstDeployGrace after Argo CD first reported) or first_seen.
+	FirstDeploy bool `json:"first_deploy"`
+	// Infra: an infrastructure App's deploy (dataset.Deploy.Infra): listed,
+	// counted nowhere.
+	Infra bool `json:"infra"`
 	// Running: deployed in the week running now, counted nowhere.
 	Running bool `json:"running"`
 }
@@ -469,7 +487,13 @@ type factPR struct {
 	age     *float64
 	waiting *string
 	idle    *float64
+	// unknown: open at the end, its state unknown (no waiting, no age).
+	unknown bool
 }
+
+// PRStateUnknown is the PR table's state of a PR open at the dataset's end
+// whose close may have been lost (dataset.OpenPR.Unknown).
+const PRStateUnknown = "unknown"
 
 // factPRs are the PRs open at the dataset's end first, oldest first, the
 // inactive ones after them: the ones waiting, and the open PRs' link lands
@@ -486,12 +510,13 @@ func factPRs(ds *dataset.Dataset) []factPR {
 		window[key{pr.Repo, pr.PRID}] = pr
 	}
 	type openRow struct {
-		pr       dataset.OpenPR
+		pr dataset.OpenPR
+		// inactive also for an unknown one: both after the PRs waiting.
 		inactive bool
 	}
 	open := make([]openRow, len(ds.OpenPRs))
 	for i, o := range ds.OpenPRs {
-		open[i] = openRow{o, openInactive(o, at)}
+		open[i] = openRow{o, o.Unknown || openInactive(o, at)}
 	}
 	// Oldest first by the age the row shows, since its last turn ready; the
 	// drafts, which have none, after the ready ones, by their opening.
@@ -526,6 +551,11 @@ func factPRs(ds *dataset.Dataset) []factPR {
 		pr.Bot, pr.Title, pr.JiraKeys = o.Bot, o.Title, o.JiraKeys
 		// The window's link is the newest of the PR's whole history.
 		pr.URL = cmp.Or(pr.URL, o.URL)
+		if o.Unknown {
+			pr.State = PRStateUnknown
+			out = append(out, factPR{pr: pr, idle: ptr(openIdle(o, at)), unknown: true})
+			continue
+		}
 		on := waitsOn(o)
 		if row.inactive {
 			on = WaitInactive
@@ -569,7 +599,7 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 	// merge or close (else its opening), a deploy and a run by the event's
 	// arrival.
 	prRunning := func(x *factPR) bool {
-		return x.waiting == nil && inRunning(cmp.Or(x.pr.MergedAt, x.pr.ClosedAt, x.pr.OpenedAt), p.Period)
+		return x.waiting == nil && !x.unknown && inRunning(cmp.Or(x.pr.MergedAt, x.pr.ClosedAt, x.pr.OpenedAt), p.Period)
 	}
 	runRunning := func(r dataset.Run) bool { return inRunning(&r.OccurredAt, p.Period) }
 	deploys := make([]factDeploy, len(ds.Deploys))
@@ -631,11 +661,15 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 			prodAt := firstDeploy(pr, prod)
 			parts := titleParts(pr.Title, p.JiraURL)
 			keys, more := jiraPrefix(pr.JiraKeys, parts, p.JiraURL)
+			var uncounted *string
+			if why := notCounted(pr); why != "" && pr.State == "merged" && !pr.GitOps {
+				uncounted = &why
+			}
 			return PRFact{
 				Repo: pr.Repo, PRID: pr.PRID, URL: prLink(pr.URL, p.BitbucketURL), Title: pr.Title, TitleParts: parts,
 				JiraPrefix: keys, JiraMore: more,
 				GitOps: pr.GitOps, ChangeType: pr.ChangeType,
-				State:   pr.State,
+				State: pr.State, NotCounted: uncounted,
 				ReviewS: wait(pr.ReadyAt, pr.ApprovedAt), CycleS: wait(pr.OpenedAt, pr.MergedAt),
 				MergedAt: pr.MergedAt, ProdAt: prodAt, ToProdS: wait(pr.MergedAt, prodAt),
 				AgeS: x.age, Waiting: x.waiting, IdleS: x.idle, Running: prRunning(x),
@@ -661,7 +695,8 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 			class, _ := x.classify()
 			return DeployFact{
 				At: d.At, App: d.App, Environment: d.Environment, Revision: d.Revision,
-				NewImages: d.NewImages, Class: class, Phase: d.Phase, Running: inRunning(&d.At, p.Period),
+				NewImages: d.NewImages, Class: class, Phase: d.Phase,
+				FirstDeploy: d.Kind != nil && *d.Kind == "first_seen", Infra: d.Infra, Running: inRunning(&d.At, p.Period),
 			}
 		}),
 		Runs: table(runs, func(x *factRun) bool {

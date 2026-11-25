@@ -417,7 +417,7 @@ func TestThroughput(t *testing.T) {
 			pr(size(9, 9, 30, 0, 1)),
 		}
 	})
-	th := throughput(mergedPRs(ds, p, filter{}), p)
+	th := throughput(ds, mergedPRs(ds, p, filter{}), p, filter{})
 	if th.Merged != 5 || th.BatchSize.N != 3 || th.BatchFiles.N != 3 {
 		t.Fatalf("throughput = %+v", th)
 	}

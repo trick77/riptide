@@ -12,8 +12,10 @@ import (
 	"net/mail"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // DefaultProductionStage is the stage suffix that means production when the
@@ -266,7 +268,9 @@ func LooksBotShaped(handle string) bool {
 //  2. a configured source whose `branch_prefixes` prefixes the branch;
 //  3. "service-account" when the git host flags the account SERVICE: a
 //     stated fact beats a guess from the name;
-//  4. "other-bot" when either name has a bot shape.
+//  4. a configured source whose name is a whole word of either name
+//     (namedAfter);
+//  5. "other-bot" when either name has a bot shape.
 //
 // Empty means human.
 func (c *Config) DetectAutomationSource(author, displayName, branch string, serviceAccount bool) string {
@@ -297,12 +301,50 @@ func (c *Config) DetectAutomationSource(author, displayName, branch string, serv
 	if serviceAccount {
 		return "service-account"
 	}
+	if name := c.namedAfter(handles); name != "" {
+		return name
+	}
 	for _, h := range handles {
 		if LooksBotShaped(h) {
 			return "other-bot"
 		}
 	}
 	return ""
+}
+
+// namedAfter is the configured source whose name is a whole word of one of
+// the handles: a dependency bot run under an ordinary user account is named
+// after its tool and the team it serves ("renovate_kasse", "Renovate
+// Kasse"), without a bot shape, and its pushes to the trunk would read as a
+// person's. Words split on every non-letter, so a person whose name merely
+// holds the tool's letters inside a longer word is none; a source name of
+// several words matches them in a row. A source named like an ordinary word
+// would catch people of that name: name it after its tool.
+func (c *Config) namedAfter(handles []string) string {
+	for _, h := range handles {
+		words := letterWords(h)
+		for _, src := range c.Automation {
+			if name := letterWords(src.Name); len(name) > 0 && containsRun(words, name) {
+				return src.Name
+			}
+		}
+	}
+	return ""
+}
+
+// letterWords splits s into its runs of letters, lowercased.
+func letterWords(s string) []string {
+	return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool { return !unicode.IsLetter(r) })
+}
+
+// containsRun reports whether run occurs in words as consecutive words.
+func containsRun(words, run []string) bool {
+	for i := 0; i+len(run) <= len(words); i++ {
+		if slices.Equal(words[i:i+len(run)], run) {
+			return true
+		}
+	}
+	return false
 }
 
 func isNull(raw json.RawMessage) bool {
