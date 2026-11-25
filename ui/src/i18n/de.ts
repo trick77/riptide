@@ -193,7 +193,7 @@ export const de = {
       kind: {
         data_gap: "Datenlücke",
         pr_jam: "PR-Stau",
-        slow_stage: "längste Etappe",
+        slow_stage: "längster Abschnitt",
         slower_build: "langsamer geworden",
         steady_slow: "Dauerläufer",
         failing_more: "scheitert öfter",
@@ -210,7 +210,7 @@ export const de = {
       title: {
         data_gap: "{{source}} meldet nichts",
         pr_jam: "{{repo}}: PRs stauen sich",
-        slow_stage: "Die meiste Zeit liegt in der Etappe «{{stage}}»",
+        slow_stage: "Die meiste Zeit liegt im Abschnitt «{{stage}}»",
         slower_build: "{{repo}}: {{kind}} langsamer als in der Vorperiode",
         steady_slow: "{{repo}}: {{kind}} wieder unter den langsamsten",
         failing_more: "{{repo}}: {{kind}} scheitern öfter",
@@ -231,7 +231,7 @@ export const de = {
           "Die Quelle meldet seit vor dem Periodenende nichts; ihre Zahlen sagen nichts über die Arbeit.",
         pr_jam:
           "Vier oder mehr PRs seit einer Woche oder länger offen, Entwürfe nicht gezählt. Warum sie liegen, steht nicht in den Daten: ein Freeze, eine Abhängigkeit, Ferien oder niemand fühlt sich zuständig.",
-        slow_stage: "Die Etappe mit dem längsten Median bis Produktion.",
+        slow_stage: "Der Abschnitt mit dem längsten Median bis Produktion.",
         slower_build:
           "Der grüne Median-Lauf dauert anderthalbmal so lang wie in der Vorperiode oder länger: langsamer als das Repo selbst, nicht als andere. Was im Build langsamer wurde, steht nicht in den Daten.",
         steady_slow:
@@ -245,7 +245,7 @@ export const de = {
         changeBad:
           "Über der Schwelle für eine wichtige Veränderung gegenüber der Vorperiode. Warum, steht nicht in den Daten.",
         bottleneck_moved:
-          "Die Etappe, die am längsten dauert, ist eine andere als in der Vorperiode.",
+          "Der Abschnitt, der am längsten dauert, ist ein anderer als in der Vorperiode.",
         throughput_instability:
           "Deploy-Frequenz und Deploy-Erfolg bewegen sich gegenläufig: mehr Throughput bei steigender Instabilität ist kein Fortschritt.",
         agent_wait:
@@ -290,7 +290,7 @@ export const de = {
         find_what_changed:
           "erst klären, was sich geändert hat, dann etwas vereinbaren",
         name_what_helped: "benennen, was geholfen hat, damit es bleibt",
-        look_at_stage: "die Etappe ansehen, die jetzt am längsten dauert",
+        look_at_stage: "den Abschnitt ansehen, der jetzt am längsten dauert",
         check_failed_deploys: "die fehlgeschlagenen Deploys ansehen",
         tidy_up: "die alten PRs schliessen oder bewusst parken",
         check_resyncs: "klären, woher die Syncs ohne neue Images kommen",
@@ -320,7 +320,7 @@ export const de = {
         wip_weeks: "Arbeit offen",
         wait_share: "der Lead Time wartend",
         stage_share: "der Lead Time",
-        stage_p50: "Median der Etappe",
+        stage_p50: "Median des Abschnitts",
         stage_p90: "langsamste 10 % ab",
         resync_share: "Syncs ohne neue Images",
         syncs: "Syncs",
@@ -391,7 +391,7 @@ export const de = {
       watch:
         "die langsamsten 10 % weit über dem typischen Wert liegen: dann bleiben einzelne Änderungen hängen, oft hinter einem Release-Termin.",
       lever:
-        "Wo die Zeit liegt, zeigt der Fluss darunter; dort liegt der Hebel, nicht in den kurzen Etappen.",
+        "Wo die Zeit liegt, zeigt der Fluss darunter; dort liegt der Hebel, nicht in den kurzen Abschnitten.",
       def: "Pro Commit vom Autorenzeitpunkt bis zum ersten Deploy auf {{prod}}, der ihn enthält. Merge-Commits und Release-Tooling ausgenommen, Bots separat.",
       basis_one:
         "{{count}} menschlicher Commit, zuerst deployt im Zeitraum{{bots}}.",
@@ -439,7 +439,8 @@ export const de = {
       mergeDesc: "Approval → gemerged",
       toPre: "Bis {{pre}}",
       toPreDesc: "gemerged → auf {{pre}}",
-      toProd: "Warten auf {{prod}}",
+      toProdPre: "Von {{pre}} bis {{prod}}",
+      toProd: "Ab Merge bis {{prod}}",
       toProdDescPre: "auf {{pre}} (ohne: gemerged) → auf {{prod}}",
       toProdDesc: "gemerged → auf {{prod}}",
     },
@@ -449,9 +450,9 @@ export const de = {
       upTo: "bis {{d}}",
       from: "ab {{d}}",
     },
-    chainTitle: "Anteil jeder Etappe an der Zeit bis {{prod}}",
+    chainTitle: "Anteil jedes Abschnitts an der Zeit bis {{prod}}",
     chainSub:
-      "Pro PR in App-Repos, typische Dauer je Etappe; die Lead Time oben zählt pro Commit.",
+      "Pro PR in App-Repos, typische Dauer je Abschnitt; die Lead Time oben zählt pro Commit.",
     leadTo: "Lead Time bis {{env}}:",
     typicalSlowest: "typischer Wert · die langsamsten 10 %: über {{p90}}",
     shareAria: "Anteil an der Zeit bis {{prod}}: {{parts}}",
@@ -461,12 +462,12 @@ export const de = {
     noProd:
       "In diesem Zeitraum wurde keine Änderung bis {{prod}} verfolgt: Anteile gibt es nur über die ganze Strecke.",
     chainNote:
-      "Die letzten zwei Etappen erreichen nur PRs, deren Merge-Commit einem Deployment zugeordnet ist.",
+      "Die letzten zwei Abschnitte erreichen nur PRs, deren Merge-Commit einem Deployment zugeordnet ist.",
     ridge: {
-      title: "Wie die Zeit in jeder Etappe verteilt ist",
+      title: "Wie die Zeit in jedem Abschnitt verteilt ist",
       sub: "Dieselben PRs wie oben, Zeitachse logarithmisch. Strich: typischer Wert, gestrichelt: ab da die langsamsten 10 %.",
-      caption: "Wartezeit je Etappe",
-      colStage: "Etappe",
+      caption: "Wartezeit je Abschnitt",
+      colStage: "Abschnitt",
       few: "unter {{min}} PRs: einzelne PRs statt Kurve",
       none: "keine PRs",
       tipN: "PRs",
@@ -483,7 +484,7 @@ export const de = {
     people: "Menschen",
     eyebrow: "Vom Commit nach {{prod}} · nur App-Repos",
     title: "Wo wartet eine Änderung?",
-    lead: "Die Zeit bis zum Nutzer, aufgeteilt in Etappen.",
+    lead: "Die Zeit bis zum Nutzer, aufgeteilt in Abschnitte.",
     fwLeadTime: "Change lead time, aufgeschlüsselt",
     reviewTitle: "Review: schnell, aber wie gründlich?",
     review: {
@@ -929,7 +930,7 @@ export const de = {
     row: {
       freq: "Deploy-Frequenz",
       lead: "Lead Time bis PROD",
-      stages: "Fluss nach Etappen",
+      stages: "Fluss nach Abschnitten",
       dsucc: "Deploy-Erfolg",
       review: "Review-Zeit, innert 24 h gemerged",
       touch: "Approval ohne Kommentar",
