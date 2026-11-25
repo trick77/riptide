@@ -137,11 +137,11 @@ func TestAssessSignals(t *testing.T) {
 	if g := signal(a, "data_gap:argocd"); g == nil || g.Tone != ToneGate || a.Signals[0].ID != g.ID {
 		t.Fatalf("argocd gap not first: %v", ids)
 	}
-	if !slices.Equal(a.Gaps, []string{SourceArgoCD}) {
-		t.Errorf("gaps = %v", a.Gaps)
+	if !slices.ContainsFunc(a.Limits, func(l Limit) bool { return l.Kind == LimitSilentEnd && l.Source == dataset.SourceArgoCD }) {
+		t.Errorf("limits = %+v", a.Limits)
 	}
 	for _, sg := range a.Signals {
-		if sg.Source == SourceArgoCD && sg.Kind != SignalDataGap {
+		if sg.Source == dataset.SourceArgoCD && sg.Kind != SignalDataGap {
 			t.Errorf("%s survived the argocd gap", sg.ID)
 		}
 	}
@@ -461,7 +461,7 @@ func TestResolvedOnlyWhenBack(t *testing.T) {
 	resolved := func(v float64, c Change) bool {
 		a := &assessor{gaps: map[string]bool{},
 			h:    History{Open: map[string]Problem{"change:lead_time": {Tone: ToneAttention, Before: ptr(100.0)}}},
-			team: []teamChange{{"lead_time", "lead_time_p50", UnitSeconds, SourceArgoCD, ptr(v), c}}}
+			team: []teamChange{{"lead_time", "lead_time_p50", UnitSeconds, dataset.SourceArgoCD, ptr(v), c}}}
 		a.changeSignals()
 		a.resolvedSignals()
 		return signal(Assessment{Signals: a.out}, "resolved:change:lead_time") != nil
@@ -534,7 +534,7 @@ func TestChangeSignalsSymmetric(t *testing.T) {
 		return Change{Verdict: verdict, Directed: true, Magnitude: ptr(mag), Score: ptr(score), Prev: ptr(1.0)}
 	}
 	team := func(metric string, c Change) teamChange {
-		return teamChange{metric, metric, UnitSeconds, SourceBitbucket, ptr(2.0), c}
+		return teamChange{metric, metric, UnitSeconds, dataset.SourceBitbucket, ptr(2.0), c}
 	}
 	a := &assessor{gaps: map[string]bool{}, team: []teamChange{
 		team("lead_time", ch(ChangeBetter, MagnitudeMinor, 0.2)),
@@ -542,8 +542,8 @@ func TestChangeSignalsSymmetric(t *testing.T) {
 		team("review_time", ch(ChangeBetter, MagnitudeNotable, 0.4)),
 		team("wip_weeks", ch(ChangeWorse, MagnitudeMinor, -0.2)),
 		team("merged_per_week", ch(ChangeBetter, MagnitudeSame, 0)),
-		{"deploy_frequency", "deploy_per_week", UnitPerWeek, SourceArgoCD, ptr(2.0), ch(ChangeBetter, MagnitudeNotable, 0.3)},
-		{"deploy_success", "deploy_success", UnitShare, SourceArgoCD, ptr(0.8), ch(ChangeWorse, MagnitudeNotable, -0.4)},
+		{"deploy_frequency", "deploy_per_week", UnitPerWeek, dataset.SourceArgoCD, ptr(2.0), ch(ChangeBetter, MagnitudeNotable, 0.3)},
+		{"deploy_success", "deploy_success", UnitShare, dataset.SourceArgoCD, ptr(0.8), ch(ChangeWorse, MagnitudeNotable, -0.4)},
 	}}
 	a.changeSignals()
 	rank(a.out)
@@ -616,7 +616,7 @@ func TestResolvedGainToldOnce(t *testing.T) {
 	c := Change{Verdict: ChangeBetter, Directed: true, Magnitude: ptr(MagnitudeNotable), Score: ptr(0.6), Prev: ptr(3.0)}
 	a := &assessor{gaps: map[string]bool{},
 		h:    History{Open: map[string]Problem{"change:lead_time": {Tone: ToneAttention, Before: ptr(2.0)}}},
-		team: []teamChange{{"lead_time", "lead_time_p50", UnitSeconds, SourceArgoCD, ptr(2.0), c}}}
+		team: []teamChange{{"lead_time", "lead_time_p50", UnitSeconds, dataset.SourceArgoCD, ptr(2.0), c}}}
 	a.changeSignals()
 	a.resolvedSignals()
 	if len(a.out) != 1 || a.out[0].ID != "resolved:change:lead_time" {
@@ -644,7 +644,7 @@ func TestStillWorseNotResolved(t *testing.T) {
 	c := Change{Verdict: ChangeWorse, Directed: true, Magnitude: ptr(MagnitudeMinor), Score: ptr(-0.2), Prev: ptr(3.0)}
 	a := &assessor{gaps: map[string]bool{},
 		h:    History{Open: map[string]Problem{"change:lead_time": {Tone: ToneAttention, Before: ptr(3.5)}}},
-		team: []teamChange{{"lead_time", "lead_time_p50", UnitSeconds, SourceArgoCD, ptr(3.5), c}}}
+		team: []teamChange{{"lead_time", "lead_time_p50", UnitSeconds, dataset.SourceArgoCD, ptr(3.5), c}}}
 	a.changeSignals()
 	a.resolvedSignals()
 	if len(a.out) != 0 {

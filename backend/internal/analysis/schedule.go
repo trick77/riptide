@@ -211,8 +211,10 @@ func (s *Service) productsFor(ctx context.Context, team string, weeks int, w, n 
 	if until, ok := s.backoff.Load("products|" + key); ok && n.Before(until.(time.Time)) {
 		return nil
 	}
-	cur, _ := s.periods(weeks)
-	ds, err := s.load(ctx, team, cur)
+	// Both periods, as every view's assessment reads them: the tick's cache
+	// then serves them all.
+	cur, prev := s.periods(weeks)
+	dss, err := s.load(ctx, team, cur, prev)
 	if err != nil {
 		if sched {
 			s.Log.ErrorContext(ctx, "analysis_failed", "stage", "products", "team", team, "weeks", weeks,
@@ -221,6 +223,7 @@ func (s *Service) productsFor(ctx context.Context, team string, weeks int, w, n 
 		}
 		return nil
 	}
+	ds := dss[0]
 	out := make([]string, 0, len(ds.Products))
 	for _, p := range ds.Products {
 		out = append(out, p.Key)
@@ -266,25 +269,34 @@ func withLoads(ctx context.Context) context.Context {
 }
 
 // load is Load, kept for the rest of the tick when the context holds a
-// cache: a window's product views read the same two periods.
-func (s *Service) load(ctx context.Context, team string, p metrics.Period) (*dataset.Dataset, error) {
+// cache: a window's product views read the same two periods. Each dataset
+// is kept by its period and the end classing it, ps[0]'s.
+func (s *Service) load(ctx context.Context, team string, ps ...metrics.Period) ([]*dataset.Dataset, error) {
 	c, ok := ctx.Value(loadsKey{}).(*loads)
 	if !ok {
-		return s.Load(ctx, team, p)
+		return s.Load(ctx, team, ps...)
 	}
-	key := team + "|" + p.From.String() + "|" + p.To.String()
+	key := func(p metrics.Period) string {
+		return team + "|" + p.From.String() + "|" + p.To.String() + "|" + ps[0].To.String()
+	}
+	out := make([]*dataset.Dataset, len(ps))
 	c.mu.Lock()
-	ds, ok := c.m[key]
-	c.mu.Unlock()
-	if ok {
-		return ds, nil
+	hit := true
+	for i, p := range ps {
+		out[i] = c.m[key(p)]
+		hit = hit && out[i] != nil
 	}
-	// Unlocked: assess reads both periods at once.
-	ds, err := s.Load(ctx, team, p)
+	c.mu.Unlock()
+	if hit {
+		return out, nil
+	}
+	out, err := s.Load(ctx, team, ps...)
 	if err == nil {
 		c.mu.Lock()
-		c.m[key] = ds
+		for i, p := range ps {
+			c.m[key(p)] = out[i]
+		}
 		c.mu.Unlock()
 	}
-	return ds, err
+	return out, err
 }

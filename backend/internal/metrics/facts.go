@@ -83,6 +83,31 @@ func prTypeTerm(pr dataset.PR) string {
 	return *pr.ChangeType
 }
 
+// notCountedTerm is why a merged PR counts in no number, its label in the
+// PR table; viaUmbrellaTerm, libraryTerm and infraTerm the rows' other
+// marks.
+var (
+	notCountedTerm = map[string]uiTerm{
+		NotCountedUmbrella:     {"Nicht gezählt: Merge eines Sammel-Branches", "Not counted: umbrella-branch merge"},
+		NotCountedHousekeeping: {"Nicht gezählt: Aufräum-PR", "Not counted: housekeeping PR"},
+		NotCountedTwice:        {"Nicht gezählt: Branch schon mit einem anderen PR gezählt", "Not counted: branch already counted with another PR"},
+	}
+	viaUmbrellaTerm = uiTerm{"über Sammel-Branch gemerged", "merged via an umbrella branch"}
+	libraryTerm     = uiTerm{"Bibliothek, wird nicht ausgerollt", "Library, never rolled out"}
+	infraTerm       = uiTerm{"Infrastruktur, nicht gezählt", "Infrastructure, not counted"}
+)
+
+// prMarks are a PR row's marks: why a merged PR is no merged work, whether
+// one counted came in through an umbrella branch, whether it is a
+// library's.
+func prMarks(pr dataset.PR) (uncounted *string, via, library bool) {
+	merged := pr.State == "merged" && !pr.GitOps
+	if why := notCounted(pr); why != "" && merged {
+		uncounted = &why
+	}
+	return uncounted, merged && uncounted == nil && (pr.OffTrunk || pr.ImplicitMerge), merged && pr.Library
+}
+
 // runKindTerm is a run kind's words in the runs table's Art column.
 var runKindTerm = map[string]uiTerm{
 	KindRelease: {"Releases", "Releases"},
@@ -265,9 +290,15 @@ type PRFact struct {
 	// (dataset.OpenPR.Unknown): no age, no wait.
 	State string `json:"state"`
 	// NotCounted is why a merged PR is in no PR number (notCounted:
-	// off_trunk, implicit_merge, housekeeping); null when it counts, and
-	// for every other PR.
+	// umbrella, housekeeping); null when it counts, and for every other PR.
 	NotCounted *string `json:"not_counted"`
+	// ViaUmbrella: a merged PR that went into a feature or umbrella branch,
+	// or that an umbrella's merge brought in (dataset.PR.OffTrunk,
+	// ImplicitMerge). Counted all the same; the row says how it was merged.
+	ViaUmbrella bool `json:"via_umbrella"`
+	// Library: a merged PR of a repo never rolled out (dataset.PR.Library):
+	// no production deploy is no gap.
+	Library bool `json:"library"`
 	// ReviewS is ready to approval, CycleS opened to merged, ToProdS merged
 	// to the first production deploy; null when unknown or negative.
 	ReviewS  *float64   `json:"review_s"`
@@ -620,8 +651,8 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 	// them; a rerun after the period's end does not make it flaky there.
 	closed := *ds
 	closed.Runs = slices.DeleteFunc(slices.Clone(ds.Runs), runRunning)
-	flakyClosed := flakyRuns(teamRuns(&closed, f, gitops))
-	flakyAll := flakyRuns(teamRuns(ds, f, gitops))
+	flakyClosed := flakyRuns(teamRuns(&closed, f, gitops, nil))
+	flakyAll := flakyRuns(teamRuns(ds, f, gitops, nil))
 	isFlaky := func(r dataset.Run) bool {
 		if verdict(r) != VerdictFailure {
 			return false
@@ -653,6 +684,16 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 			if x.waiting != nil {
 				term += " " + waitTerm[*x.waiting].both()
 			}
+			uncounted, via, library := prMarks(pr)
+			if uncounted != nil {
+				term += " " + notCountedTerm[*uncounted].both()
+			}
+			if via {
+				term += " " + viaUmbrellaTerm.both()
+			}
+			if library {
+				term += " " + libraryTerm.both()
+			}
 			if prRunning(x) {
 				term += " " + runningTerm.both()
 			}
@@ -663,16 +704,15 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 			prodAt := firstDeploy(pr, prod)
 			parts := titleParts(pr.Title, p.JiraURL)
 			keys, more := jiraPrefix(pr.JiraKeys, parts, p.JiraURL)
-			var uncounted *string
-			if why := notCounted(pr); why != "" && pr.State == "merged" && !pr.GitOps {
-				uncounted = &why
-			}
+			uncounted, via, library := prMarks(pr)
 			return PRFact{
 				Repo: pr.Repo, PRID: pr.PRID, URL: prLink(pr.URL, p.BitbucketURL), Title: pr.Title, TitleParts: parts,
 				JiraPrefix: keys, JiraMore: more,
 				GitOps: pr.GitOps, ChangeType: pr.ChangeType,
 				State: pr.State, NotCounted: uncounted,
-				ReviewS: wait(pr.ReadyAt, pr.ApprovedAt), CycleS: wait(pr.OpenedAt, pr.MergedAt),
+				ViaUmbrella: via,
+				Library:     library,
+				ReviewS:     wait(pr.ReadyAt, pr.ApprovedAt), CycleS: wait(pr.OpenedAt, pr.MergedAt),
 				MergedAt: pr.MergedAt, ProdAt: prodAt, ToProdS: wait(pr.MergedAt, prodAt),
 				AgeS: x.age, Waiting: x.waiting, IdleS: x.idle, Running: prRunning(x),
 			}
@@ -690,6 +730,9 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 			_, term := x.classify()
 			if inRunning(&d.At, p.Period) {
 				term += " " + runningTerm.both()
+			}
+			if d.Infra {
+				term += " " + infraTerm.both()
 			}
 			return m.match(append([]*string{&d.App, d.Environment, &d.Revision}, append(strs(d.Images), &term)...)...)
 		}, func(x *factDeploy) DeployFact {

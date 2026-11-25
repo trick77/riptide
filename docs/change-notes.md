@@ -9,6 +9,32 @@ Real account handles, hostnames and tokens belong in the mounted
 
 ## 2026-11-25 — counting as it happened, and saying what is missing
 
+**Migrations 0012 to 0016** build five indexes, one per migration, so a
+build holds only its own table: `(team, created_at)` on pipeline, Argo CD
+and noergler events (silences are read off when an event was stored),
+then on `bitbucket_events` the lowercased merge commit of `pr:merged`
+events (the deploy's product, the GitOps repos and the silences probe it
+per SHA instead of reading every payload) and its `(team, created_at)`,
+last. Plain `CREATE INDEX` in the migration's transaction, as 0005: each
+blocks INSERTs into its table while it builds. A webhook waits for the
+build; Bitbucket gives up after its timeout and never retries, so a
+webhook held longer is lost. The build time on a full table is not
+measured: deploy outside the busiest hour, and look at the data line for a
+Bitbucket silence across the deploy afterwards.
+
+**Infrastructure Apps are derived, not configured.** An App is
+infrastructure when none of its deploys over 26 weeks names a product.
+Symptom of a misclass: Apps of a real product listed under "Deploys von
+Infrastruktur-Apps nicht gezählt" on the deploy tile (its title lists them).
+Cause: a GitOps repo of the team that sends Bitbucket no webhook. Remedy:
+add the webhook to that GitOps repo (`POST /onboard/{team}`); from its next
+commit on, its Apps have a product again.
+
+**Library repos need no builds any more.** A repo that no compare link
+names, that built no image and after which no deployed image is named is a
+library; its PRs leave the base of the PRs traced to production. A product
+of libraries only says so instead of "nothing went to PROD".
+
 **Migration 0011** adds `team_analyses.rules_version`. Every analysis
 stored before it is of older rules: the page no longer shows its text or
 cards, shows the current rules' view with a note instead, and offers to
@@ -20,20 +46,24 @@ next scheduled run.
 read: an App's first production deploy counts as a release once Argo CD has
 reported for the team over 14 days; Argo CD's `Error` phase counts as a
 failed deploy; infrastructure Apps (none of their deploys names a product)
-count nowhere; merged PRs into another branch than the trunk, implicit
-merges of an umbrella branch and housekeeping PRs across many repos are no
-merged work; open PRs whose close was lost in a Bitbucket outage are of
-unknown state, not open; a dependency bot provisioned as an ordinary user is
-recognised by its name. Both periods of a comparison are counted alike; see
+count nowhere, and a deploy without a product of its own is its App's
+product's; the umbrella PR that carried other merged PRs and housekeeping
+PRs across many repos are no merged work, while PRs into a feature branch
+or merged along with an umbrella now count; library repos' PRs leave the
+base of the PRs traced to production; the builds of bot branches
+(`branch_prefixes`) count in no build number; open PRs whose close was
+lost in a Bitbucket outage are of unknown state, not open; a dependency
+bot provisioned as an ordinary user is recognised by its name. Both
+periods of a comparison are counted alike, an App classed by the Apps as
+of the period's end, as the stored assessment classes it; see
 [metrics.md](metrics.md).
 
 **Name automation sources by their tool** in `riptide.json`: an account
 whose login or display name holds a source's name as whole words now counts
-as that bot. A source named with an ordinary word would catch people.
-
-The `deploys` and `gitops` reads now look up PR merge commits in the
-payload without an index; watch `metrics_served` durations after the
-deploy.
+as that bot, at read time only (ingest writes what it wrote before). A
+source named with an ordinary word would catch people; one under 4
+letters is logged at load as `automation_source_name_short`. Every source's
+`branch_prefixes` now also mark that bot's CI runs.
 
 ## 2026-11-18 — Bitbucket webhooks self-service, `onboard-bitbucket` gone
 

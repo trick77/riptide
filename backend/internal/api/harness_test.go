@@ -116,6 +116,16 @@ func (m *memStore) InsertNoergler(_ context.Context, d *parse.NoerglerDraft, tea
 	return m.add(d.DeliveryID, team, d)
 }
 
+// Shared answers nothing to share, or fail.
+func (m *memStore) Shared(context.Context, dataset.SharedParams) (*dataset.Shared, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.fail != nil {
+		return nil, m.fail
+	}
+	return &dataset.Shared{}, nil
+}
+
 // Dataset records the parameters and answers an empty dataset, or fail.
 func (m *memStore) Dataset(_ context.Context, p dataset.Params) (*dataset.Dataset, error) {
 	m.mu.Lock()
@@ -187,7 +197,7 @@ func newHarness(t *testing.T, st Store) *harness {
 	// Over the real store the analysis is the real service, its model a
 	// fake: the store's SQL and the endpoint's shape under one test.
 	if db, ok := st.(*store.Store); ok {
-		svc := &analysis.Service{Store: db, Load: deps.Dataset, LLM: plainLLM{}, Loc: time.UTC, Log: log,
+		svc := &analysis.Service{Store: db, Load: deps.Datasets, LLM: plainLLM{}, Loc: time.UTC, Log: log,
 			Now: func() time.Time { return fixedNow }}
 		svc.Start(t.Context())
 		deps.Analysis = svc

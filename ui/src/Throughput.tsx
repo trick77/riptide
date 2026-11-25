@@ -10,19 +10,20 @@ import { Card, CardHead, Direction, Legend, Swatch, Tile } from "./ui";
 
 // The people's merged PRs the backend left out of every PR number, each
 // under its first reason, with what the reason means on hover.
-const LEFT_OUT = [
-  ["housekeeping", "housekeeping"],
-  ["off_trunk", "offTrunk"],
-  ["implicit_merges", "implicit"],
-] as const;
+const LEFT_OUT = ["housekeeping", "umbrella", "twice"] as const;
 
 export function MergedTile({ m }: { m: Metrics }) {
   const { t } = useTranslation();
   const th = m.throughput;
-  const leftOut = LEFT_OUT.filter(([k]) => th[k] > 0).map(([k, key]) => (
-    <span key={k} title={t(`throughput.merged.${key}Title`)}>
+  // The housekeeping rule's numbers are the backend's.
+  const rule = {
+    repos: num(th.housekeeping_repos),
+    minutes: num(th.housekeeping_window_s / 60),
+  };
+  const leftOut = LEFT_OUT.filter((k) => th[k] > 0).map((k) => (
+    <span key={k} title={t(`throughput.merged.${k}Title`, rule)}>
       {" · "}
-      {t(`throughput.merged.${key}`, { count: th[k] })}
+      {t(`throughput.merged.${k}`, { count: th[k] })}
     </span>
   ));
   return (

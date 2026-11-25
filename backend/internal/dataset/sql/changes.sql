@@ -1,10 +1,14 @@
--- Every change of the team first deployed to an environment in the window:
--- lead_time_changes (docs/dora-lead-time.md), per commit. The PRs' stage
--- times come from sql/environments.sql, which has no window end.
+-- Every change of the team first deployed to an environment, over all
+-- history: lead_time_changes (docs/dora-lead-time.md), per commit. Read once
+-- per page request (dataset.LoadShared), whatever its windows: the view's
+-- per-commit aggregation costs the same for one window as for all history,
+-- and Go takes from it each window's lead times (first deployed in the
+-- window) and its merged PRs' stage times (their merge commits, no window
+-- end: a PR merged in the window that reached production after it still
+-- has a production stage).
 --
 -- The team filter is on a grouping column of the view, so Postgres applies
--- it to commit_sightings before the per-commit aggregation; the window
--- bounds are on min(), so they can only filter its result.
+-- it to commit_sightings before the per-commit aggregation.
 --
 -- Bots and service accounts are flagged, never dropped (DORA doc: report
 -- bots on their own line, leave release tooling out):
@@ -16,7 +20,7 @@
 --                    is_automated), so a commit and a PR by the same bot
 --                    agree
 --
--- $1 team, $2 window start (inclusive), $3 window end (exclusive).
+-- $1 team.
 WITH declared AS (
   SELECT lower(reviewer_handle) AS handle, reviewer_account_kind AS kind
   FROM noergler_events
@@ -29,6 +33,9 @@ WITH declared AS (
 SELECT l.repo_full_name AS repo,
        split_part(l.repo_full_name, '/', 1) AS project,
        l.environment,
+       -- lowercased like every SHA column riptide stores
+       lower(l.commit_sha) AS commit_sha,
+       l.first_deployed_at,
        extract(epoch FROM l.lead_time)::bigint AS lead_time_s,
        l.is_merge,
        l.author_is_service_account
@@ -42,7 +49,6 @@ SELECT l.repo_full_name AS repo,
        coalesce(l.author_display_name, '') AS author_display_name
 FROM lead_time_changes l
 WHERE l.team = $1
-  AND l.first_deployed_at >= $2 AND l.first_deployed_at < $3
   -- Deploys stored before argocd_events.environment existed name no stage.
   AND l.environment IS NOT NULL
 ORDER BY l.first_deployed_at, l.environment, l.commit_sha

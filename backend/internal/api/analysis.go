@@ -20,10 +20,12 @@ type Analyst interface {
 	Ask(ctx context.Context, v analysis.View) error
 }
 
-// Dataset is a team's dataset over a period, the config as it is now: the
-// analysis' loader.
-func (d Deps) Dataset(ctx context.Context, team string, p metrics.Period) (*dataset.Dataset, error) {
-	return d.load(ctx, view{team: team, now: d.now().UTC().Truncate(time.Second), cfg: d.Runtime.Config()}, p.From, p.To, false)
+// Datasets are a team's datasets over ps, the config as it is now, the
+// first period's end classing them all, the reads they share done once:
+// the analysis' loader.
+func (d Deps) Datasets(ctx context.Context, team string, ps ...metrics.Period) ([]*dataset.Dataset, error) {
+	ds, _, err := d.periods(ctx, view{team: team, now: d.now().UTC().Truncate(time.Second), cfg: d.Runtime.Config()}, ps, nil)
+	return ds, err
 }
 
 // TeamNames are the configured teams, sorted: the schedule's.

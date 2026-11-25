@@ -294,10 +294,13 @@ function FactsTables({
           <span className="text-muted">{prType(p)}</span>,
           dur(p.review_s),
           dur(p.cycle_s),
+          // A library's PR is never rolled out: no "no".
           p.merged_at
             ? p.prod_at
               ? dur(p.to_prod_s)
-              : t("facts.notOnProd")
+              : p.library
+                ? t("facts.library")
+                : t("facts.notOnProd")
             : "–",
           <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5">
             <Pill tone={PR_STATE_TONE[p.state]}>
@@ -305,6 +308,9 @@ function FactsTables({
             </Pill>
             {p.not_counted && (
               <Pill tone="none">{t(`facts.notCounted.${p.not_counted}`)}</Pill>
+            )}
+            {p.via_umbrella && (
+              <Pill tone="none">{t("facts.viaUmbrella")}</Pill>
             )}
             {p.running && <Pill tone="none">{t("facts.running")}</Pill>}
             {p.state === "unknown" && p.idle_s != null && (

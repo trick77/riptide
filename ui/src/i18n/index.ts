@@ -59,6 +59,15 @@ void i18n.use(initReactI18next).init({
   initAsync: false,
 });
 
+// {{count, num}}: a count in Swiss format in both languages (1’234), as
+// format.ts' num writes it; count itself stays a number for the plural.
+// Here, not from format.ts: that one imports this module.
+i18n.services.formatter?.add("num", (value: unknown) =>
+  typeof value === "number"
+    ? value.toLocaleString("de-CH", { maximumFractionDigits: 0 })
+    : String(value),
+);
+
 const syncLang = (lng: string) => {
   if (typeof document !== "undefined") document.documentElement.lang = lng;
 };

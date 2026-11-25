@@ -19,10 +19,13 @@ export type Meta = {
   data_end: SourceTimes;
   build_data_from: string | null;
   build_type_from: string | null;
-  // Spans of two working days or more in which one source stored nothing
-  // while another did, oldest first. Only Bitbucket's unseen_runs tells
-  // lost events from a pause.
+  // Spans of two working days or more overlapping the window in which one
+  // source stored nothing while another did, oldest first. Only `lost`
+  // tells lost events from a pause.
   silences: Silence[];
+  // The silences whose events were lost, the ones the page names: the
+  // backend's choice.
+  lost: Silence[];
   // The AI reviewer's first event per repository; empty for the facts read.
   repo_starts: { repo: string; noergler: string | null }[];
 };
@@ -34,6 +37,10 @@ export type Silence = {
   from: string;
   to: string;
   unseen_runs: number;
+  // Bitbucket's events were lost: the backend's word, the page names it.
+  lost: boolean;
+  // Still silent at the read: `to` is the read's now, no end.
+  ongoing: boolean;
 };
 
 export type Product = { key: string; repos: string[]; apps: string[] };
@@ -66,6 +73,8 @@ export type DeployFrequency = {
   syncs: number;
   // First deploys within the onboarding's grace: release or re-sync unknown.
   first_seen: number;
+  // The onboarding's grace in days, for the words.
+  grace_days: number;
   resyncs: number;
   per_week: number;
   low_sample: boolean;
@@ -82,9 +91,12 @@ export type DeployFrequency = {
   no_data_days: number;
   // Releases per weekday over the days with data, Monday first.
   weekdays: DeployWeekday[];
-  // Team-wide in every view: successful deploys without a product,
-  // infrastructure Apps aside; and those of infrastructure Apps.
+  // Team-wide in every view: successful deploys of Apps without a known
+  // product, infrastructure Apps aside; and those of infrastructure Apps.
   unattributed: number;
+  // A product view without deploys of its own beside unattributed ones:
+  // the page says they may be its, not "no deploys".
+  maybe_unattributed: boolean;
   infra: number;
   infra_apps: string[];
 };
@@ -135,7 +147,6 @@ export type Stage = Spread & {
 export type LeadChain = {
   stages: Stage[];
   pre_environment: string | null;
-  attention_share: number;
   min_prs: number;
   before_prod: number;
   // Some PR has a production wait; false: no shares, no hot stage.
@@ -347,6 +358,13 @@ export type Build = {
   gap_weeks: number;
   // Team-wide: runs with a status and no repository, in no product's numbers.
   unattributed: number;
+  // Runs of bots' branches: in no other build number, their count and CI
+  // time apart.
+  bot_runs: { runs: number; ci_seconds: number };
+  // The agent-wait hint's rule: the share of the typical build spent
+  // waiting, and the least wait in seconds.
+  agent_wait_share: number;
+  agent_wait_min_s: number;
   kinds: BuildStats[];
   ci_flow: CIFlow;
   // Set when feature builds look unrecognised: other runs on branches that
@@ -461,6 +479,9 @@ export type Comparison = {
   build: KindChange[];
   open_prs: Change;
   open_jammed: Change;
+  // Some number has a previous value; false: nothing was compared, the
+  // page names no comparison.
+  any: boolean;
 };
 
 // The people's merged PRs per week and their size (changed lines, added
@@ -468,12 +489,19 @@ export type Comparison = {
 export type Throughput = {
   merged: number;
   merged_per_week: number | null;
-  // When Bitbucket's data starts inside the period; per week is since then.
+  // When Bitbucket's data starts inside the period; per week is since then,
+  // null when that is under a week.
   since: string | null;
   // People's merged PRs left out of every PR number, by first reason.
-  off_trunk: number;
-  implicit_merges: number;
+  umbrella: number;
   housekeeping: number;
+  twice: number;
+  // The housekeeping rule's numbers, for the words.
+  housekeeping_repos: number;
+  housekeeping_window_s: number;
+  // Of merged, the library repos' PRs: never rolled out, out of the base
+  // of coverage.to_prod.
+  library: number;
   coverage: PRCoverage;
   batch_size: Spread;
   batch_files: Spread;
@@ -532,7 +560,12 @@ export type PRFact = {
   // unknown: open at the end, its close maybe lost with Bitbucket's events.
   state: "open" | "merged" | "declined" | "deleted" | "unknown";
   // Why a merged PR is in no PR number; null when it counts.
-  not_counted: "off_trunk" | "implicit_merge" | "housekeeping" | null;
+  not_counted: "umbrella" | "housekeeping" | "twice" | null;
+  // A counted merged PR that went into a feature or umbrella branch, or
+  // that an umbrella's merge brought in.
+  via_umbrella: boolean;
+  // A merged PR of a library repo: never rolled out.
+  library: boolean;
   review_s: number | null;
   cycle_s: number | null;
   merged_at: string | null;
@@ -711,9 +744,6 @@ export type Signal = {
   repo: string | null;
   run_kind: RunKind | null;
   metric: string | null;
-  low_sample: boolean;
-  // The cases it rests on, where counted.
-  sample: number | null;
   weight: number;
   seen: number;
   facts: Fact[];
@@ -745,7 +775,6 @@ export type FocusRepo = {
 export type Assessment = {
   period: Period;
   previous: Period;
-  gaps: string[];
   signals: Signal[];
   focus: FocusRepo[];
   // Active repos: calm (judged, no signal), unjudged (too little data) and
@@ -765,6 +794,17 @@ export type Assessment = {
   // one case the page says so. Else the reasons, most important first.
   quiet: boolean;
   quiet_reasons: QuietReason[];
+  // Why not measurable, the backend's; null unless quiet_reasons holds
+  // not_measurable.
+  not_measurable: NotMeasurable | null;
+  // A reason other than findings: no calm word, no 0 for what is stuck.
+  limited: boolean;
+  // No number had a previous value: no comparison at all.
+  nothing_compared: boolean;
+  // Every merged PR is a library's: nothing to roll out. No limit.
+  libraries_only: boolean;
+  // The period's merged PRs in library repos, out of coverage.to_prod.
+  library: number;
   limits: Limit[];
   coverage: PRCoverage;
 };
@@ -772,9 +812,13 @@ export type Assessment = {
 export type QuietReason =
   "no_baseline" | "source_gap" | "not_measurable" | "findings";
 
+export type NotMeasurable =
+  "bitbucket" | "argocd" | "no_merged" | "no_release" | "to_prod";
+
 // A hole in a source's data the comparison crosses. from: the last event
 // before it (the first ever for starts); to: the first after a silence, the
-// period's end for silent_end, null for starts.
+// period's end for silent_end, null for starts and for a silence still
+// running at the read.
 export type Limit = {
   source: Source;
   kind: "silent_end" | "silence" | "starts";
@@ -835,7 +879,6 @@ export type AnalysisStatus = {
       done: number;
       bad: number;
       talk: number;
-      baseline: boolean;
     };
   };
   analysis: ShownAnalysis | null;

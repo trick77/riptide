@@ -251,7 +251,7 @@ func serve(s settings.Settings, log *slog.Logger) error {
 // A model named but not usable (no key, no JSON schema) refuses the start.
 func analysisService(ctx context.Context, s settings.Settings, db *store.Store, deps api.Deps, log *slog.Logger) (
 	*analysis.Service, error) {
-	svc := &analysis.Service{Store: db, Load: deps.Dataset, Loc: s.AnalysisLoc, Log: log}
+	svc := &analysis.Service{Store: db, Load: deps.Datasets, Loc: s.AnalysisLoc, Log: log}
 	if s.AnalysisModel != "" {
 		w, err := analysis.NewWire(s.AnalysisModel, s.AnalysisReasoning, s.Lookup, log, nil)
 		if err != nil {

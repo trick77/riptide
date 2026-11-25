@@ -74,7 +74,6 @@ type Digest struct {
 	Weeks       string `json:"calendar_weeks"`
 	// Mandatory are the signals the answer must cover, by ID.
 	Mandatory []string            `json:"mandatory"`
-	Gaps      []string            `json:"gaps"`
 	Team      []metrics.Fact      `json:"team"`
 	Signals   []digestSignal      `json:"signals"`
 	Focus     []metrics.FocusRepo `json:"focus_candidates"`
@@ -87,11 +86,15 @@ type Digest struct {
 	Question *metrics.Signal `json:"question"`
 	// Quiet and QuietReasons decide whether the text may say that nothing
 	// stands out: Go decides it, the model words it.
-	Quiet        bool              `json:"quiet"`
-	QuietReasons []string          `json:"quiet_reasons"`
-	Limits       []metrics.Limit   `json:"limits"`
-	Labels       map[string]string `json:"labels"`
-	Levers       map[string]string `json:"levers"`
+	Quiet        bool     `json:"quiet"`
+	QuietReasons []string `json:"quiet_reasons"`
+	// NotMeasurable says why not_measurable, as the assessment's.
+	NotMeasurable *string `json:"not_measurable"`
+	// LibrariesOnly: every merged PR is a library's, nothing to roll out.
+	LibrariesOnly bool              `json:"libraries_only"`
+	Limits        []metrics.Limit   `json:"limits"`
+	Labels        map[string]string `json:"labels"`
+	Levers        map[string]string `json:"levers"`
 }
 
 // MandatoryTop is how many of the ranked signals, gates aside, the answer
@@ -291,8 +294,9 @@ func buildDigest(a metrics.Assessment) ([]byte, *aliases, error) {
 	}
 	d := Digest{
 		WindowWeeks: len(a.Period.Weeks), Weeks: weekRange(a.Period), Mandatory: mand,
-		Gaps: a.Gaps, Team: a.Team, Focus: focus, Active: a.Active, Calm: a.Calm, Unjudged: a.Unjudged, Idle: a.Idle,
-		Question: a.Question, Quiet: a.Quiet, QuietReasons: a.QuietReasons, Limits: a.Limits,
+		Team: a.Team, Focus: focus, Active: a.Active, Calm: a.Calm, Unjudged: a.Unjudged, Idle: a.Idle,
+		Question: a.Question, Quiet: a.Quiet, QuietReasons: a.QuietReasons, NotMeasurable: a.NotMeasurable,
+		LibrariesOnly: a.LibrariesOnly, Limits: a.Limits,
 		Labels: labels, Levers: leverText,
 	}
 	for _, s := range a.Signals {

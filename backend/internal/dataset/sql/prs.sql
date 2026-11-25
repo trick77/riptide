@@ -11,7 +11,7 @@
 -- for commits. The merge commit's deploys are joined in Go.
 --
 -- $1 team, $2 window start (inclusive), $3 window end (exclusive), $4 the
--- GitOps repos (sql/gitops.sql).
+-- GitOps repos (sql/gitops.sql), $5 dataset.HousekeepingWindow in seconds.
 WITH non_human_identities AS (
   -- Accounts senders declared as non-human (docs/metrics.md, pickup-time query):
   -- is_automated is decided at ingest, so rows written before an identity
@@ -26,24 +26,40 @@ window_prs AS (
     AND event_type IN ('pr:opened', 'pr:merged')
     AND pr_id IS NOT NULL AND repo_full_name IS NOT NULL
 ),
+-- The window's PRs' events, the PR object taken out of each payload once:
+-- every field below reads it, and the whole payload, stored out of line,
+-- would be fetched and unpacked again for each.
+pr_events AS MATERIALIZED (
+  SELECT e.id, e.repo_full_name, e.pr_id, e.event_type, e.occurred_at, e.author, e.author_display_name,
+         e.is_automated, e.change_type, e.payload->'pullRequest' AS pr
+  FROM bitbucket_events e
+  JOIN window_prs w ON w.repo_full_name = e.repo_full_name AND w.pr_id = e.pr_id
+),
 prs AS (
   SELECT e.repo_full_name, e.pr_id,
          -- pr:opened carries the PR as opened; a PR opened before ingestion
          -- started has only its pr:merged, which names the same PR author.
-         coalesce(max(lower(e.payload->'pullRequest'->'fromRef'->>'displayId')) FILTER (WHERE e.event_type = 'pr:opened'),
-                  max(lower(e.payload->'pullRequest'->'fromRef'->>'displayId')) FILTER (WHERE e.event_type = 'pr:merged'))
+         coalesce(max(lower(e.pr->'fromRef'->>'displayId')) FILTER (WHERE e.event_type = 'pr:opened'),
+                  max(lower(e.pr->'fromRef'->>'displayId')) FILTER (WHERE e.event_type = 'pr:merged'))
              AS source_branch,
+         -- The same as the sender spelled it: a ticket key in it is upper
+         -- case, and lowercased it is no key (parse.JiraKeys).
+         coalesce(max(e.pr->'fromRef'->>'displayId') FILTER (WHERE e.event_type = 'pr:opened'),
+                  max(e.pr->'fromRef'->>'displayId') FILTER (WHERE e.event_type = 'pr:merged'))
+             AS source_ref,
          coalesce(max(e.author) FILTER (WHERE e.event_type = 'pr:opened'),
                   max(e.author) FILTER (WHERE e.event_type = 'pr:merged')) AS pr_opener,
          coalesce(max(e.author_display_name) FILTER (WHERE e.event_type = 'pr:opened'),
                   max(e.author_display_name) FILTER (WHERE e.event_type = 'pr:merged')) AS pr_opener_display_name,
          -- The title as last seen: every PR event carries the PR, and the
          -- author may have edited it since opening.
-         (array_agg(e.payload->'pullRequest'->>'title' ORDER BY e.occurred_at DESC, e.id DESC)
-             FILTER (WHERE e.payload->'pullRequest'->>'title' IS NOT NULL))[1] AS title,
+         (array_agg(e.pr->>'title' ORDER BY e.occurred_at DESC, e.id DESC)
+             FILTER (WHERE e.pr->>'title' IS NOT NULL))[1] AS title,
+         -- The title as opened, what a tool opens across repos at once.
+         min(e.pr->>'title') FILTER (WHERE e.event_type = 'pr:opened') AS opened_title,
          -- The PR's page as Bitbucket links it; Go keeps only an http(s) URL.
-         (array_agg(e.payload->'pullRequest'->'links'->'self'->0->>'href' ORDER BY e.occurred_at DESC, e.id DESC)
-             FILTER (WHERE e.payload->'pullRequest'->'links'->'self'->0->>'href' IS NOT NULL))[1] AS url,
+         (array_agg(e.pr->'links'->'self'->0->>'href' ORDER BY e.occurred_at DESC, e.id DESC)
+             FILTER (WHERE e.pr->'links'->'self'->0->>'href' IS NOT NULL))[1] AS url,
          bool_or(e.is_automated) FILTER (WHERE e.event_type IN ('pr:opened', 'pr:merged')) AS automated,
          -- change_type means something only on these two (docs/metrics.md).
          coalesce(max(e.change_type) FILTER (WHERE e.event_type = 'pr:opened'),
@@ -54,33 +70,50 @@ prs AS (
          -- made ready has none.
          coalesce(min(e.occurred_at) FILTER (WHERE e.event_type = 'pr:ready_for_review'),
                   min(e.occurred_at) FILTER (WHERE e.event_type = 'pr:opened'
-                                               AND coalesce(e.payload->'pullRequest'->>'draft', 'false') = 'false'))
+                                               AND coalesce(e.pr->>'draft', 'false') = 'false'))
              AS ready_at,
          min(e.occurred_at) FILTER (WHERE e.event_type = 'pr:merged') AS merged_at,
          max(e.occurred_at) FILTER (WHERE e.event_type = 'pr:declined') AS declined_at,
          max(e.occurred_at) FILTER (WHERE e.event_type = 'pr:deleted') AS deleted_at,
          max(e.occurred_at) FILTER (WHERE e.event_type IN ('pr:opened', 'pr:reopened')) AS last_opened_at,
-         max(e.payload->'pullRequest'->'properties'->'mergeCommit'->>'id')
+         max(e.pr->'properties'->'mergeCommit'->>'id')
              FILTER (WHERE e.event_type = 'pr:merged') AS merge_commit,
          -- The branch it went into, as merged: a PR may be retargeted.
-         coalesce(max(lower(e.payload->'pullRequest'->'toRef'->>'displayId')) FILTER (WHERE e.event_type = 'pr:merged'),
-                  max(lower(e.payload->'pullRequest'->'toRef'->>'displayId')) FILTER (WHERE e.event_type = 'pr:opened'))
+         coalesce(max(lower(e.pr->'toRef'->>'displayId')) FILTER (WHERE e.event_type = 'pr:merged'),
+                  max(lower(e.pr->'toRef'->>'displayId')) FILTER (WHERE e.event_type = 'pr:opened'))
              AS target_branch
-  FROM bitbucket_events e
-  JOIN window_prs w ON w.repo_full_name = e.repo_full_name AND w.pr_id = e.pr_id
+  FROM pr_events e
   GROUP BY e.repo_full_name, e.pr_id
 ),
--- The repo's trunk besides master and main: the branch most of its merged
--- PRs went into, over its whole history, so a window holding one PR into
--- an umbrella branch does not make that branch the trunk.
-trunks AS (
-  SELECT e.repo_full_name,
-         mode() WITHIN GROUP (ORDER BY lower(e.payload->'pullRequest'->'toRef'->>'displayId')) AS trunk
+-- Every merged PR's target branch in the window's repos, over their whole
+-- history (the repo index, then their pr:merged events), and who opened it:
+-- a bot's PR into a branch makes no umbrella of it, as Go tells a bot.
+targets AS MATERIALIZED (
+  SELECT e.repo_full_name, e.pr_id,
+         lower(e.payload->'pullRequest'->'toRef'->>'displayId') AS target,
+         e.author, e.author_display_name,
+         e.is_automated
+           OR EXISTS (SELECT 1 FROM non_human_identities n
+                       WHERE n.handle IN (lower(e.author), lower(e.author_display_name))) AS bot
   FROM bitbucket_events e
   WHERE e.event_type = 'pr:merged'
     AND e.repo_full_name IN (SELECT repo_full_name FROM window_prs)
     AND e.payload->'pullRequest'->'toRef'->>'displayId' IS NOT NULL
-  GROUP BY e.repo_full_name
+),
+target_counts AS (
+  SELECT repo_full_name, target, count(DISTINCT pr_id) AS n
+  FROM targets
+  GROUP BY repo_full_name, target
+),
+-- The repo's trunks besides master and main: the branch most of its merged
+-- PRs went into, over its whole history, so a window holding one PR into
+-- an umbrella branch does not make that branch the trunk. Branches tied
+-- for most are all trunk: nothing tells one of them apart, least of all
+-- its name.
+trunks AS (
+  SELECT t.repo_full_name, t.target AS trunk
+  FROM target_counts t
+  WHERE t.n = (SELECT max(u.n) FROM target_counts u WHERE u.repo_full_name = t.repo_full_name)
 ),
 -- Oldest commit pushed to the PR's branch; a rebase resets it (docs/metrics.md,
 -- lead-time breakdown query). A branch name is reused (a long-lived
@@ -154,6 +187,7 @@ SELECT c.repo_full_name AS repo,
        split_part(c.repo_full_name, '/', 1) AS project,
        c.pr_id,
        c.title,
+       c.opened_title,
        -- none for a PR deleted since: its page is gone
        CASE WHEN c.deleted_at IS NULL THEN c.url END AS url,
        c.repo_full_name = ANY($4::text[]) AS gitops,
@@ -201,14 +235,45 @@ SELECT c.repo_full_name AS repo,
        r.lines_removed,
        r.files_changed,
        c.target_branch,
+       coalesce(c.source_ref, '') AS source_ref,
        -- Merged into another branch than the trunk (a feature or umbrella
-       -- branch): its work reaches the trunk with another PR, counted there.
-       -- A target the payload does not name counts as the trunk.
+       -- branch). Merged work all the same: it was reviewed and merged. A
+       -- target the payload does not name counts as the trunk.
        c.target_branch IS NOT NULL AND c.target_branch NOT IN ('master', 'main')
-         AND c.target_branch IS DISTINCT FROM t.trunk AS off_trunk
+         AND NOT EXISTS (SELECT 1 FROM trunks t
+                          WHERE t.repo_full_name = c.repo_full_name AND t.trunk = c.target_branch) AS off_trunk,
+       -- The openers of the other merged PRs of the repo into this one's
+       -- source branch: Go makes it an umbrella when one is a person's. It
+       -- carries their work, which they count; it is none of its own.
+       (SELECT coalesce(jsonb_agg(jsonb_build_object('author', coalesce(t.author, ''),
+                                                     'display_name', coalesce(t.author_display_name, ''), 'bot', t.bot)
+                                  ORDER BY t.pr_id), '[]'::jsonb)
+          FROM targets t
+         WHERE t.repo_full_name = c.repo_full_name AND t.target = c.source_branch
+           AND t.pr_id <> c.pr_id) AS umbrella_openers,
+       -- A merged PR's title as opened (spaces folded, case aside) opened in
+       -- the team's repos within $5 seconds of its opening, itself included:
+       -- what Go counts housekeeping from (dataset.HousekeepingWindow), over
+       -- all history, so a batch opened across a period's edge is one batch
+       -- in both periods.
+       CASE WHEN c.merged_at IS NOT NULL AND c.opened_at IS NOT NULL AND c.opened_title IS NOT NULL THEN
+         (SELECT coalesce(jsonb_agg(jsonb_build_object('repo', o.repo_full_name, 'at', o.occurred_at,
+                                                       'author', coalesce(o.author, ''),
+                                                       'display_name', coalesce(o.author_display_name, ''),
+                                                       'bot', o.is_automated
+                                                              OR o.repo_full_name = ANY($4::text[])
+                                                              OR EXISTS (SELECT 1 FROM non_human_identities n
+                                                                          WHERE n.handle IN (lower(o.author), lower(o.author_display_name))))
+                                    ORDER BY o.occurred_at, o.id), '[]'::jsonb)
+            FROM bitbucket_events o
+           WHERE o.team = $1 AND o.event_type = 'pr:opened'
+             AND o.occurred_at >= c.opened_at - make_interval(secs => $5)
+             AND o.occurred_at <= c.opened_at + make_interval(secs => $5)
+             AND lower(regexp_replace(btrim(o.payload->'pullRequest'->>'title'), '\s+', ' ', 'g'))
+                 = lower(regexp_replace(btrim(c.opened_title), '\s+', ' ', 'g')))
+       ELSE '[]'::jsonb END AS siblings
 FROM chain c
 -- pr_key is '<repo_full_name>#<pr_id>', lowercased at ingest.
 LEFT JOIN noergler_pr_rollups r
   ON r.pr_key = lower(c.repo_full_name) || '#' || c.pr_id AND r.outcome = 'merged'
-LEFT JOIN trunks t ON t.repo_full_name = c.repo_full_name
 ORDER BY c.repo_full_name, c.pr_id

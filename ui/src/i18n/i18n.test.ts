@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { dur } from "../format";
+import { dur, num } from "../format";
 import { de } from "./de";
 import { en } from "./en";
 import i18n, {
@@ -75,6 +75,19 @@ describe("language", () => {
     expect(dur(8.1 * 86400)).toBe("8.1 days");
     expect(dur(2.5 * 3600)).toBe("2.5 h");
   });
+
+  it("writes a count in the text Swiss in both languages", () => {
+    const swiss = `${num(1234)} PRs `;
+    expect(swiss).not.toBe("1234 PRs ");
+    setLanguage("en");
+    expect(i18n.t("open.unknown", { count: 1234 })).toMatch(
+      new RegExp(`^${swiss}`),
+    );
+    setLanguage("de");
+    expect(i18n.t("open.unknown", { count: 1234 })).toMatch(
+      new RegExp(`^${swiss}`),
+    );
+  });
 });
 
 // leaves flattens a catalog to dotted key -> string.
@@ -88,8 +101,10 @@ function leaves(o: object, prefix = ""): Record<string, string> {
   return out;
 }
 
+// A placeholder with its format ({{count, num}}): a count formatted in one
+// language only would read 1234 in the other.
 const placeholders = (s: string) =>
-  [...s.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).sort();
+  [...s.matchAll(/\{\{(\w+(?:, *\w+)?)\}\}/g)].map((m) => m[1]).sort();
 
 describe("catalogs", () => {
   const enLeaves = leaves(en);

@@ -1047,11 +1047,17 @@ components:
       additionalProperties: false
       required: [from, to, last_day, deploy_frequency, deploy_success, lead_time, lead_time_pre, review_time,
                  within_day, first_touch, untracked, merged_per_week, batch_size, cost_per_kloc, wasted_share,
-                 build, open_prs, open_jammed]
+                 build, open_prs, open_jammed, any]
       properties:
         from: { $ref: "#/components/schemas/Instant" }
         to: { $ref: "#/components/schemas/Instant" }
         last_day: { $ref: "#/components/schemas/LastDay" }
+        any:
+          type: boolean
+          description: |
+            Some number here has the previous period's value to stand against
+            (a `prev`, verdict or not). False: nothing was compared, and the
+            page names no comparison.
         deploy_frequency: { $ref: "#/components/schemas/Change" }
         deploy_success: { $ref: "#/components/schemas/Change" }
         lead_time: { $ref: "#/components/schemas/Change" }
@@ -1196,7 +1202,10 @@ components:
       properties:
         to_prod:
           $ref: "#/components/schemas/Share"
-          description: Its merge commit's first production deploy is known (time to production).
+          description: |
+            Its merge commit's first production deploy is known (time to
+            production). Its `n` leaves out the library repos' PRs
+            (Throughput's `library`): never rolled out, so none untraced.
         sized:
           $ref: "#/components/schemas/Share"
           description: The AI reviewer's rollup gives its size (batch size).
@@ -1254,36 +1263,53 @@ components:
       description: |
         Successful production syncs in the period, counted once per GitOps
         revision. Infrastructure Apps (none of their successful deploys over
-        26 weeks named a product) are in none of the numbers but `infra` and
-        `infra_apps`.
+        26 weeks named a product, while the team has deploys with one, and
+        not gone live while Bitbucket's events were lost) are in none of the
+        numbers but `infra` and `infra_apps`. The period and the previous one
+        are classed by the Apps as of the period's end alike, as the
+        assessment classes them; the running week by its own.
       additionalProperties: false
-      required: [releases, first_releases, syncs, first_seen, resyncs, per_week, low_sample, since, weeks,
-                 succeeded, failed, finished, success_rate, argo_reporting, median_week, days, no_data_days,
-                 weekdays, unattributed, infra, infra_apps]
+      required: [releases, first_releases, syncs, first_seen, grace_days, resyncs, per_week, low_sample, since,
+                 weeks, succeeded, failed, finished, success_rate, argo_reporting, median_week, days,
+                 no_data_days, weekdays, unattributed, maybe_unattributed, infra, infra_apps]
       properties:
         releases:
           type: integer
           description: |
             Revisions that brought new images, an App's first deploy more
-            than 14 days after Argo CD first reported for the team included.
+            than `grace_days` after Argo CD first reported for the team
+            included.
         first_releases: { type: integer, description: "Of `releases`, those that were an App's first deploy." }
         syncs: { type: integer, description: All revisions. }
         first_seen:
           type: integer
           description: |
             Revisions that were some App's first deploy naming images within
-            14 days of Argo CD's first event for the team: release or re-sync
-            unknown, counted as neither.
+            `grace_days` of Argo CD's first event for the team: release or
+            re-sync unknown, counted as neither.
+        grace_days:
+          type: integer
+          description: The days after Argo CD's first event in which an App's first deploy is no release (`first_seen`).
         resyncs: { type: integer, description: Revisions without new images. }
         unattributed:
           type: integer
           description: |
-            The period's successful deploys (revisions) no Bitbucket event
-            names a product of, infrastructure Apps aside; team-wide in every
+            The period's successful deploys (revisions) of Apps with no known
+            product (neither the revision nor the App's other deploys over 26
+            weeks name one), infrastructure Apps aside; team-wide in every
             view. In the team view's numbers, in no product's.
+        maybe_unattributed:
+          type: boolean
+          description: |
+            A product view without a deploy of its own while `unattributed`
+            are there: they may be its, so the page says so instead of "no
+            deploys".
         infra:
           type: integer
-          description: The period's successful deploys (revisions) of infrastructure Apps only, team-wide.
+          description: |
+            The period's successful deploys (revisions) of infrastructure Apps
+            only, team-wide: a revision another App deployed too is that
+            App's, counted there only.
         infra_apps:
           type: array
           description: Those infrastructure Apps by name, sorted.
@@ -1375,7 +1401,7 @@ components:
       type: object
       description: The lead-time breakdown per human PR merged in the period.
       additionalProperties: false
-      required: [stages, pre_environment, attention_share, min_prs, before_prod, reaches_prod, bucket_bounds_s]
+      required: [stages, pre_environment, min_prs, before_prod, reaches_prod, bucket_bounds_s]
       properties:
         stages:
           type: array
@@ -1413,14 +1439,9 @@ components:
             from 5 min to 28 days; bucket i is [bound i, bound i+1).
           items: { type: number }
         pre_environment: { type: [string, "null"] }
-        attention_share:
-          type: number
-          description: |
-            The hot stage's share from which the page marks it strongly; no
-            assessment signal reads it (some stage always takes longest).
         min_prs:
           type: integer
-          description: The PRs a stage needs for a curve and that mark, as for `low_sample`.
+          description: The PRs a stage needs for a curve, as for `low_sample`.
         before_prod:
           type: number
           description: Sum of the medians before the last stage.
@@ -1445,7 +1466,7 @@ components:
         approved: { type: integer }
         approved_on_first_touch: { type: integer }
         first_touch_rate: { $ref: "#/components/schemas/NullableNumber" }
-        merged: { type: integer, description: "Merged PRs, people's only; off-trunk, implicit and housekeeping merges left out as in Throughput." }
+        merged: { type: integer, description: "Merged PRs, people's only; umbrella and housekeeping PRs left out as in Throughput." }
         untracked: { type: integer, description: "Of those, without a Jira key." }
         untracked_rate: { $ref: "#/components/schemas/NullableNumber" }
         cycle_histogram:
@@ -1496,35 +1517,52 @@ components:
         How much the team finishes and in what portions: the people's merged PRs per week and their
         size. Stage promotions (GitOps repos) and bots' PRs are in neither.
       additionalProperties: false
-      required: [merged, merged_per_week, since, off_trunk, implicit_merges, housekeeping, coverage, batch_size,
-                 batch_files, weeks]
+      required: [merged, merged_per_week, since, umbrella, housekeeping, twice, housekeeping_repos,
+                 housekeeping_window_s, library, coverage, batch_size, batch_files, weeks]
       properties:
         merged:
           type: integer
           description: |
-            Merged PRs, people's only; those into another branch than the
-            repo's trunk, implicit merges and housekeeping PRs left out.
+            Merged PRs, people's only, wherever they went: into a feature
+            branch, or brought in by an umbrella's merge. Umbrella and
+            housekeeping PRs left out.
         merged_per_week:
           allOf: [{ $ref: "#/components/schemas/NullableNumber" }]
-          description: Merged PRs per week over the period, or over the weeks since `since`.
+          description: |
+            Merged PRs per week over the period, or over the weeks since
+            `since`; null when that is under a week.
         since:
           $ref: "#/components/schemas/NullableInstant"
           description: When Bitbucket's data starts inside the period; null when it covers it.
-        off_trunk:
-          type: integer
-          description: People's PRs merged into a feature or umbrella branch, not the trunk; in no PR number.
-        implicit_merges:
+        umbrella:
           type: integer
           description: |
-            People's PRs Bitbucket marked merged in the same second as another
-            PR of their repo, without a merge commit of their own: one merge,
-            counted once; the others in no PR number.
+            People's PRs that carried other people's merged PRs: from a branch
+            PRs were merged into, or whose merge brought in another person's
+            PR. The work counts on those; the umbrella in no PR number.
         housekeeping:
           type: integer
           description: |
-            People's PRs opened and merged within 15 minutes without approval,
-            the same title merged in 3 repos within an hour; in no PR number.
-            Each left-out PR counts under its first reason only.
+            People's PRs of a tool's change: the same title opened in
+            `housekeeping_repos` repos within `housekeeping_window_s`, no
+            person's approval, no ticket key in title or source branch; in no
+            PR number. The openings are the team's of all history, whatever
+            the window. Each left-out PR counts under its first reason only.
+        twice:
+          type: integer
+          description: |
+            People's PRs marked merged when an umbrella went in, from a source
+            branch another merged PR, counted, came from: the same work, in no
+            PR number.
+        housekeeping_repos: { type: integer, description: "The repos the housekeeping rule needs." }
+        housekeeping_window_s: { type: number, description: "The housekeeping rule's window, in seconds." }
+        library:
+          type: integer
+          description: |
+            Of `merged`, the PRs of library repos, never rolled out, on
+            positive evidence: the team's tracing works, and of the repo no
+            compare link names it, no run of it built an image, no deployed
+            image is named after it. Out of `coverage.to_prod`'s base.
         coverage: { $ref: "#/components/schemas/PRCoverage" }
         batch_size:
           allOf: [{ $ref: "#/components/schemas/Spread" }]
@@ -1551,15 +1589,33 @@ components:
     Build:
       type: object
       additionalProperties: false
-      required: [data_from, starts_inside, gap_weeks, unattributed, kinds, ci_flow, hotspots, feature_hint]
+      required: [data_from, starts_inside, gap_weeks, unattributed, bot_runs, agent_wait_share, agent_wait_min_s,
+                 kinds, ci_flow, hotspots, feature_hint]
       properties:
+        agent_wait_share:
+          type: number
+          description: The agent-wait hint's share of the typical build spent waiting for an agent.
+        agent_wait_min_s:
+          type: number
+          description: The agent-wait hint's least typical wait, in seconds.
         unattributed:
           type: integer
           description: |
             The period's runs with a status and no repository, team-wide in
             every view: neither their commit, their pipeline's other runs nor
             their pipeline name's first segment named one. In the team view's
-            numbers, in no product's. GitOps runs aside.
+            numbers, in no product's. GitOps and bot runs aside.
+        bot_runs:
+          type: object
+          description: |
+            The product's runs of bots' branches (the config's automation
+            `branch_prefixes`, a bot PR's PR-<n>), with a status: in no other
+            build number, their count and CI time (outliers included) apart.
+          additionalProperties: false
+          required: [runs, ci_seconds]
+          properties:
+            runs: { type: integer, minimum: 0 }
+            ci_seconds: { type: number, minimum: 0 }
         data_from:
           $ref: "#/components/schemas/NullableInstant"
           description: When riptide first received a run of the team.
@@ -2102,7 +2158,7 @@ components:
         week, newest merge or opening first.
       additionalProperties: false
       required: [repo, pr_id, url, title, title_parts, jira_prefix, jira_more, gitops, change_type, state, not_counted,
-                 review_s, cycle_s, merged_at, prod_at, to_prod_s, age_s, waiting, idle_s, running]
+                 via_umbrella, library, review_s, cycle_s, merged_at, prod_at, to_prod_s, age_s, waiting, idle_s, running]
       properties:
         running:
           type: boolean
@@ -2136,12 +2192,21 @@ components:
             silence in which its close may have been lost; no age, no wait.
         not_counted:
           type: [string, "null"]
-          enum: [off_trunk, implicit_merge, housekeeping, null]
+          enum: [umbrella, housekeeping, twice, null]
           description: |
             Why a merged PR is in no PR number, the first reason that applies:
-            merged into another branch than the trunk, an implicit merge
-            (marked merged with another PR of its repo in the same second), a
-            housekeeping PR. Null when it counts, and for every other PR.
+            an umbrella (it carried other people's merged PRs, which count), a
+            housekeeping PR, the same branch's work counted with another PR
+            (`twice`). Null when it counts, and for every other PR.
+        via_umbrella:
+          type: boolean
+          description: |
+            A counted merged PR that went into a feature or umbrella branch,
+            or that an umbrella's merge brought in (Bitbucket marked it merged
+            without a merge commit of its own).
+        library:
+          type: boolean
+          description: A merged PR of a library repo, never rolled out; no production deploy is no gap.
         review_s: { $ref: "#/components/schemas/NullableSeconds" }
         cycle_s: { $ref: "#/components/schemas/NullableSeconds" }
         merged_at: { $ref: "#/components/schemas/NullableInstant" }
@@ -2178,8 +2243,9 @@ components:
           enum: [failed, release, first_seen, sync]
           description: |
             What it counts as; `failed` for any phase but Succeeded (Failed
-            and Error alike). An App's first deploy more than 14 days after
-            Argo CD first reported for the team is a `release`.
+            and Error alike). An App's first deploy more than DeployFrequency's
+            `grace_days` after Argo CD first reported for the team is a
+            `release`.
         phase: { type: string, description: "Argo CD's operation phase: Succeeded, Failed, Error." }
         first_deploy:
           type: boolean
@@ -2187,8 +2253,8 @@ components:
         infra:
           type: boolean
           description: |
-            An infrastructure App's deploy (none of its deploys over 26 weeks
-            named a product): listed, counted nowhere.
+            An infrastructure App's deploy (see DeployFrequency): listed,
+            counted nowhere.
 
     RunFact:
       type: object
@@ -2238,7 +2304,7 @@ components:
       type: object
       additionalProperties: false
       required: [team, from, to, generated_at, production_stage, data_start, data_end, build_data_from,
-                 build_type_from, silences, repo_starts]
+                 build_type_from, silences, lost, repo_starts]
       properties:
         team: { type: string }
         from: { $ref: "#/components/schemas/Instant" }
@@ -2270,26 +2336,19 @@ components:
         silences:
           type: array
           description: |
-            Spans of 2 working days or more (Monday to Friday, UTC) inside
-            the window in which one source stored nothing for the team while
-            another did, oldest first. A literal reading: a team that does
-            not deploy for two days shows an Argo CD silence too; only
-            Bitbucket's `unseen_runs` tells lost events from a pause.
-          items:
-            type: object
-            additionalProperties: false
-            required: [source, from, to, unseen_runs]
-            properties:
-              source: { type: string, enum: [bitbucket, pipeline, argocd, noergler] }
-              from: { $ref: "#/components/schemas/Instant", description: The source's event before the span. }
-              to: { $ref: "#/components/schemas/Instant", description: The source's event after it. }
-              unseen_runs:
-                type: integer
-                minimum: 0
-                description: |
-                  Bitbucket only: CI runs in the span that built a commit
-                  Bitbucket never saw, of a pipeline whose other commits it
-                  did. Above 0, Bitbucket's events were lost.
+            Spans of 2 working days or more in all (Monday to Friday, UTC)
+            overlapping the window, in which one source stored nothing for the
+            team while another did, oldest first; one closing after the
+            window's end counts up to now, one still running at the read ends
+            now (`ongoing`). Read off when riptide stored the events, so an old
+            event stored late neither splits nor fills one. A literal reading:
+            a team that does not deploy for two days shows an Argo CD silence
+            too; only `lost` tells lost events from a pause.
+          items: { $ref: "#/components/schemas/Silence" }
+        lost:
+          type: array
+          description: The `silences` whose events were lost (`lost`), the ones the page names.
+          items: { $ref: "#/components/schemas/Silence" }
         repo_starts:
           type: array
           description: |
@@ -2302,6 +2361,32 @@ components:
             properties:
               repo: { type: string }
               noergler: { $ref: "#/components/schemas/NullableInstant" }
+
+    Silence:
+      type: object
+      additionalProperties: false
+      required: [source, from, to, unseen_runs, lost, ongoing]
+      properties:
+        source: { type: string, enum: [bitbucket, pipeline, argocd, noergler] }
+        from: { $ref: "#/components/schemas/Instant", description: When riptide stored the source's event before the span. }
+        to:
+          $ref: "#/components/schemas/Instant"
+          description: When it stored the one after it; the read's now for one still running (`ongoing`).
+        unseen_runs:
+          type: integer
+          minimum: 0
+          description: |
+            Bitbucket only: CI runs in the span that built a commit
+            Bitbucket never saw (pushed, a PR's head or a UI merge's
+            merge commit), of a pipeline whose other commits it did.
+        lost:
+          type: boolean
+          description: |
+            Bitbucket's, with `unseen_runs` above 0: its events were
+            lost, its counts read low; the page names this silence.
+        ongoing:
+          type: boolean
+          description: "The source has stored nothing since `from` up to the read: still silent while another reports."
 
     SourceTimes:
       type: object
@@ -2340,9 +2425,10 @@ components:
           description: |
             The view's newest analysis, young enough to show, was assessed
             under older rules: neither its text nor its signals show,
-            `analysis` is null, `state` none (or off), and `assessment` and
-            `layout` are the current rules' view. The page offers to assess
-            again.
+            `analysis` is null, `state` none, and `assessment` and `layout`
+            are the current rules' view. The page offers to assess again.
+            Never without a model (`enabled` false): such a row simply does
+            not show.
         layout:
           type: object
           description: |
@@ -2375,15 +2461,15 @@ components:
               description: |
                 The signals by column, gates aside, worded or not, and the
                 question. Good or done above 0 lets the page say "runs";
-                whether nothing stands out is the assessment's `quiet`.
+                whether nothing stands out, or nothing could be compared, is
+                the assessment's `quiet` and `quiet_reasons`.
               additionalProperties: false
-              required: [good, done, bad, talk, baseline]
+              required: [good, done, bad, talk]
               properties:
                 good: { type: integer, minimum: 0 }
                 done: { type: integer, minimum: 0 }
                 bad: { type: integer, minimum: 0 }
                 talk: { type: integer, minimum: 0, maximum: 1, description: "1 when there is a question." }
-                baseline: { type: boolean, description: A team number has a previous period to read better against. }
         enabled: { type: boolean, description: A model is configured; the page offers to ask. }
         running: { type: boolean, description: An attempt is under way. }
         assessment: { $ref: "#/components/schemas/Assessment" }
@@ -2490,15 +2576,12 @@ components:
         first), the focus candidates by weight, the team numbers. Every
         number and verdict computed by riptide.
       additionalProperties: false
-      required: [period, previous, gaps, signals, focus, active, calm, unjudged, idle, repos, team, question, compared,
-                 quiet, quiet_reasons, limits, coverage]
+      required: [period, previous, signals, focus, active, calm, unjudged, idle, repos, team, question, compared,
+                 quiet, quiet_reasons, not_measurable, limited, nothing_compared, libraries_only, library, limits,
+                 coverage]
       properties:
         period: { $ref: "#/components/schemas/Period" }
         previous: { $ref: "#/components/schemas/Period" }
-        gaps:
-          type: array
-          description: Sources silent for 7 days or more at the period's end; their signals are left out.
-          items: { type: string, enum: [bitbucket, pipeline, argocd, noergler] }
         signals: { type: array, items: { $ref: "#/components/schemas/Signal" } }
         focus:
           type: array
@@ -2517,10 +2600,19 @@ components:
                 oneOf:
                   - $ref: "#/components/schemas/WaitingCounts"
                   - type: "null"
-        active: { type: integer, description: "Repos with a merged PR, a run or an open PR in the period." }
+        active:
+          type: integer
+          description: |
+            Repos with people's work in the period: a PR merged as merged
+            work, a build of a person's branch, an open PR. Housekeeping, an
+            umbrella's merge or a bot's build alone are none; a pipeline that
+            names no repository is no repo.
         calm:
           type: integer
-          description: Those of them without a signal that a repo rule could judge (enough data to compare).
+          description: |
+            Those of them without a signal that a repo rule could judge: a
+            build kind compared with the previous period, or 10 merged PRs in
+            both periods while Bitbucket's events are whole.
         unjudged: { type: integer, description: Those of them without a signal and too little data to judge. }
         idle: { type: integer, description: "Repos active in the previous period, not in this one." }
         repos: { type: integer, description: "`active` plus `idle`." }
@@ -2542,14 +2634,48 @@ components:
           type: array
           description: |
             Why the period is not quiet, in this order; empty when `quiet`.
-            `no_baseline` no team number has a previous period to compare
-            with, or a source started after the previous period began;
-            `source_gap` a source silent at the end, Bitbucket's events lost
-            inside the period, or a source starting inside it (`limits`);
-            `not_measurable` Bitbucket or Argo CD never reported, or no
-            merged PR could be traced to production; `findings` a signal or
-            the question stands out.
+            `no_baseline` no team number resting on enough cases has a
+            previous period to compare with (jammed repos, and releases
+            under 10 in either period, compare nothing), or a source started
+            after the previous period began; `source_gap` a source silent at
+            the end, Bitbucket's events lost in either period, or a source
+            starting inside it (`limits`); `not_measurable` see
+            `not_measurable`; `findings` a signal or the question stands out.
           items: { type: string, enum: [no_baseline, source_gap, not_measurable, findings] }
+        not_measurable:
+          type: [string, "null"]
+          enum: [bitbucket, argocd, no_merged, no_release, to_prod, null]
+          description: |
+            Why the period is not measurable, the first that applies; null
+            unless `quiet_reasons` holds not_measurable. `bitbucket`
+            Bitbucket never reported; `argocd` Argo CD did not report before
+            the period's end; `no_merged` no PR counted as merged work;
+            `no_release` none of the merged PRs reached production and
+            nothing went to production in the period; `to_prod` deploys went
+            to production, but no merged PR (libraries' aside) could be traced
+            to one. Merged PRs of libraries only are measurable
+            (`libraries_only`).
+        limited:
+          type: boolean
+          description: |
+            `quiet_reasons` hold a reason other than `findings`: the period
+            could not be measured or compared in full. The page then names no
+            calm word and shows no 0 for what is stuck.
+        nothing_compared:
+          type: boolean
+          description: |
+            No number has the previous period's value to stand against
+            (Comparison's `any` false), not merely some: the page says no
+            comparison was possible.
+        libraries_only:
+          type: boolean
+          description: |
+            Every merged PR counted as work is a library's: nothing of the
+            view is rolled out, so nothing to trace and no release missed. No
+            limit; the page says so.
+        library:
+          type: integer
+          description: The period's merged PRs in library repos, out of `coverage.to_prod`'s base.
         limits:
           type: array
           description: The holes in the data the comparison crosses, oldest first.
@@ -2563,16 +2689,21 @@ components:
                 type: string
                 enum: [silent_end, silence, starts]
                 description: |
-                  `silent_end` silent 7 days or more at the period's end;
-                  `silence` Bitbucket stored nothing while CI built commits it
-                  never saw; `starts` the source's first event lies after the
-                  previous period's start.
+                  `silent_end` silent 7 days or more at the period's end,
+                  nothing since; `silence` Bitbucket stored nothing while CI
+                  built commits it never saw (Meta's lost silences of either
+                  period, one closing after the period's end included);
+                  `starts` the source's first event lies after the previous
+                  period's start.
               from:
                 $ref: "#/components/schemas/Instant"
                 description: The source's last event before the hole, or its first event ever for `starts`.
               to:
                 $ref: "#/components/schemas/NullableInstant"
-                description: The source's first event after a silence, the period's end for `silent_end`, null for `starts`.
+                description: |
+                  The source's first event after a silence, the period's end
+                  for `silent_end`; null for `starts`, and for a silence still
+                  running at the read.
         coverage:
           $ref: "#/components/schemas/PRCoverage"
           description: Of the period's merged PRs, as the merged-PR section's.
@@ -2584,8 +2715,7 @@ components:
         `gate` silences a source, `attention` and `hint` are stuck, `good`
         runs, `talk` is a question without a verdict.
       additionalProperties: false
-      required: [id, kind, tone, source, repo, run_kind, metric, low_sample, sample, weight, seen, facts, waiting,
-                 drivers]
+      required: [id, kind, tone, source, repo, run_kind, metric, weight, seen, facts, waiting, drivers]
       properties:
         id: { type: string }
         kind:
@@ -2596,8 +2726,6 @@ components:
         repo: { type: [string, "null"] }
         run_kind: { type: [string, "null"] }
         metric: { type: [string, "null"], description: "The number of a change or question, the signal id a resolved one was." }
-        low_sample: { type: boolean, description: "Rests on fewer than 10 cases: shown, never a headline. No rule sets it now." }
-        sample: { type: [integer, "null"], description: "The cases it rests on, where counted; null otherwise." }
         weight: { type: integer }
         seen: { type: integer, description: "How many earlier assessments of the window raised it, in a row." }
         facts: { type: array, minItems: 1, items: { $ref: "#/components/schemas/Fact" }, description: The first is the hero number. }

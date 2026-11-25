@@ -263,7 +263,9 @@ export default function App() {
         {m && (
           <>
             <p className="mt-1.5 mb-0 max-w-[75ch] text-[14.5px] text-muted">
-              {t("page.scope", {
+              {/* Nothing compared (the backend's `any`): the head claims
+                  no comparison. */}
+              {t(m.comparison.any ? "page.scope" : "page.scopeAlone", {
                 team: m.meta.team,
                 product: m.product
                   ? t("page.oneProduct", { product: m.product })
@@ -298,10 +300,10 @@ export default function App() {
             </p>
             {/* Per source since when and until when it reports; the
                 reviewer's start per repo on hover (it is set up repo by
-                repo). Then the silences in which events were lost: a
-                silence without that evidence is a team that did not push,
-                build or deploy for two days, no gap in the data, so not
-                named. */}
+                repo). Then the silences in which events were lost (the
+                backend's `lost`): a silence without that evidence is a team
+                that did not push, build or deploy for two days, no gap in
+                the data, so not named. */}
             <p className="mt-1 mb-0 text-[12.5px] text-faint">
               {t("page.dataAsOf")}{" "}
               {SOURCES.map(([k, label], i) => {
@@ -343,20 +345,19 @@ export default function App() {
                 );
               })}
             </p>
-            {m.meta.silences
-              .filter((s) => s.unseen_runs > 0)
-              .map((s) => (
-                <p
-                  key={`${s.source}${s.from}`}
-                  className="mt-1 mb-0 text-[12.5px] text-ochre"
-                >
-                  {t("page.lost", {
-                    source: SOURCES.find(([k]) => k === s.source)?.[1],
-                    from: dateTime(s.from),
-                    to: dateTime(s.to),
-                  })}
-                </p>
-              ))}
+            {m.meta.lost.map((s) => (
+              <p
+                key={`${s.source}${s.from}`}
+                className="mt-1 mb-0 text-[12.5px] text-ochre"
+              >
+                {/* Still silent: no end to name. */}
+                {t(s.ongoing ? "page.lostOngoing" : "page.lost", {
+                  source: SOURCES.find(([k]) => k === s.source)?.[1],
+                  from: dateTime(s.from),
+                  to: dateTime(s.to),
+                })}
+              </p>
+            ))}
           </>
         )}
 

@@ -17,6 +17,9 @@
 -- same name never decides this team's kinds. A release reconciles every App
 -- sharing its GitOps revision: count releases as distinct revisions.
 --
+-- Whether an App is infrastructure, and the product of a deploy whose own
+-- revision names none, are the App's (sql/apps.sql), decided in Go.
+--
 -- $1 team, $2 window start (inclusive), $3 window end (exclusive).
 WITH window_apps AS (
   SELECT DISTINCT app_name, environment
@@ -40,66 +43,20 @@ history AS (
   -- sync and the next deploy compares with the images before it.
   WINDOW w AS (PARTITION BY a.team, a.app_name, a.environment, a.images IS NULL ORDER BY a.occurred_at, a.id)
 ),
--- The window Apps' successful deploys over the 26 weeks before the window's
--- end: an App none of them names a product of is infrastructure
--- (monitoring, a dependency bot): its GitOps commits are in a repo no
--- Bitbucket event names.
-app_deploys AS (
-  SELECT e.app_name, e.revision, e.occurred_at
-  FROM argocd_events e
-  WHERE e.team = $1 AND e.operation_phase = 'Succeeded'
-    AND e.occurred_at >= $3 - interval '26 weeks' AND e.occurred_at < $3
-    AND e.app_name IN (SELECT app_name FROM window_apps)
-),
 revisions AS (
-  SELECT revision FROM argocd_events
+  SELECT DISTINCT revision FROM argocd_events
    WHERE team = $1 AND occurred_at >= $2 AND occurred_at < $3
      AND operation_phase IN ('Succeeded', 'Failed', 'Error')
-  UNION
-  SELECT revision FROM app_deploys
-),
--- A GitOps commit Bitbucket saw only as a PR's merge commit (merged in the
--- UI, no push event of its own) names the repo too. The payload keeps the
--- sender's casing, revisions are lowercased; nothing indexes the payload, so
--- read once for every revision (MATERIALIZED: inlined, the lookup below
--- would scan the table per revision).
-merges AS MATERIALIZED (
-  SELECT m.sha, m.repo_full_name, m.occurred_at
-  FROM (SELECT lower(b.payload->'pullRequest'->'properties'->'mergeCommit'->>'id') AS sha,
-               b.repo_full_name, b.occurred_at
-          FROM bitbucket_events b
-         WHERE b.event_type = 'pr:merged' AND b.repo_full_name IS NOT NULL) m
-  JOIN revisions r ON r.revision = m.sha
 ),
 -- The revision's product is the project of the GitOps repo it is a commit
--- in, first sighting first.
+-- in, first sighting first: pushed, or the merge commit of a PR merged in
+-- the UI (no push event; one index probe per revision,
+-- ix_bitbucket_events_merge_commit).
 revision_projects AS (
-  SELECT r.revision,
-         (SELECT split_part(x.repo_full_name, '/', 1)
-            FROM (SELECT b.repo_full_name, b.occurred_at
-                    FROM bitbucket_events b
-                   WHERE b.commit_sha = r.revision AND b.repo_full_name IS NOT NULL
-                  UNION ALL
-                  SELECT m.repo_full_name, m.occurred_at FROM merges m WHERE m.sha = r.revision) x
-           ORDER BY x.occurred_at
-           LIMIT 1) AS project
+  SELECT r.revision, /*{{revision_project}}*/ AS project
   FROM revisions r
-),
--- Infrastructure only once Bitbucket could have seen a GitOps commit of the
--- App: a deploy after the team's first Bitbucket event. Without one (no
--- Bitbucket data yet, or none before the App's deploys) an App without a
--- product is unknown, not infrastructure.
-infra_apps AS (
-  SELECT d.app_name
-  FROM app_deploys d
-  JOIN revision_projects rp ON rp.revision = d.revision
-  GROUP BY d.app_name
-  HAVING bool_and(rp.project IS NULL)
-     AND bool_or(d.occurred_at > (SELECT min(occurred_at) FROM bitbucket_events WHERE team = $1))
 )
 SELECT a.app_name AS app,
-       -- The App's product is the project of the GitOps repo it deploys
-       -- from: its revision is a commit there.
        rp.project,
        a.environment,
        a.revision,
@@ -129,8 +86,7 @@ SELECT a.app_name AS app,
          WHEN h.id IS NOT NULL AND NOT h.first_seen THEN
            ARRAY(SELECT unnest(h.images) EXCEPT SELECT unnest(h.previous_images) ORDER BY 1)
          ELSE '{}'
-       END::text[] AS new_images,
-       a.app_name IN (SELECT app_name FROM infra_apps) AS infra
+       END::text[] AS new_images
 FROM argocd_events a
 LEFT JOIN history h ON h.id = a.id
 LEFT JOIN revision_projects rp ON rp.revision = a.revision

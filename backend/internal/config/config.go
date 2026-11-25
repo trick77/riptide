@@ -268,11 +268,11 @@ func LooksBotShaped(handle string) bool {
 //  2. a configured source whose `branch_prefixes` prefixes the branch;
 //  3. "service-account" when the git host flags the account SERVICE: a
 //     stated fact beats a guess from the name;
-//  4. a configured source whose name is a whole word of either name
-//     (namedAfter);
-//  5. "other-bot" when either name has a bot shape.
+//  4. "other-bot" when either name has a bot shape.
 //
-// Empty means human.
+// Empty means human. Written at ingest (automation_source), so it stays
+// what it was when the event came: a rule here that caught a person would
+// do so for good. The read path adds AutomatedAtRead's name rule.
 func (c *Config) DetectAutomationSource(author, displayName, branch string, serviceAccount bool) string {
 	var handles []string
 	for _, h := range []string{author, displayName} {
@@ -301,15 +301,57 @@ func (c *Config) DetectAutomationSource(author, displayName, branch string, serv
 	if serviceAccount {
 		return "service-account"
 	}
-	if name := c.namedAfter(handles); name != "" {
-		return name
-	}
 	for _, h := range handles {
 		if LooksBotShaped(h) {
 			return "other-bot"
 		}
 	}
 	return ""
+}
+
+// AutomatedAtRead reports whether a commit's or PR opener's author is
+// automation as the read path sees it: DetectAutomationSource without a
+// branch or the SERVICE flag (a commit on master has neither), plus a
+// configured source whose name is a whole word of either name (namedAfter).
+// Read time only: the name rule is a guess, and fixing a config that
+// guessed wrong corrects every number at once.
+func (c *Config) AutomatedAtRead(author, displayName string) bool {
+	if c.DetectAutomationSource(author, displayName, "", false) != "" {
+		return true
+	}
+	return c.namedAfter([]string{author, displayName}) != ""
+}
+
+// BotBranch reports whether a branch, lowercased, starts with a configured
+// source's branch_prefixes: a bot's branch, whose CI runs are no build of
+// the team's.
+func (c *Config) BotBranch(branch string) bool {
+	for _, src := range c.Automation {
+		for _, p := range src.BranchPrefixes {
+			if p != "" && strings.HasPrefix(branch, p) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// MinSourceNameLetters is the fewest letters a source name needs to name a
+// bot by its words (namedAfter): a shorter one is likely a word of a
+// person's name too.
+const MinSourceNameLetters = 4
+
+// ShortSourceNames are the configured sources whose name has fewer than
+// MinSourceNameLetters letters: their name catches every person with that
+// word in a name. A warning at load, not a refusal: the name may be meant.
+func (c *Config) ShortSourceNames() []string {
+	var out []string
+	for _, src := range c.Automation {
+		if n := len([]rune(strings.Join(letterWords(src.Name), ""))); n > 0 && n < MinSourceNameLetters {
+			out = append(out, src.Name)
+		}
+	}
+	return out
 }
 
 // namedAfter is the configured source whose name is a whole word of one of
@@ -319,9 +361,13 @@ func (c *Config) DetectAutomationSource(author, displayName, branch string, serv
 // person's. Words split on every non-letter, so a person whose name merely
 // holds the tool's letters inside a longer word is none; a source name of
 // several words matches them in a row. A source named like an ordinary word
-// would catch people of that name: name it after its tool.
+// would catch people of that name: name it after its tool
+// (ShortSourceNames warns of the likeliest).
 func (c *Config) namedAfter(handles []string) string {
 	for _, h := range handles {
+		if h == "" {
+			continue
+		}
 		words := letterWords(h)
 		for _, src := range c.Automation {
 			if name := letterWords(src.Name); len(name) > 0 && containsRun(words, name) {

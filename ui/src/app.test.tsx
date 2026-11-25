@@ -18,7 +18,7 @@ import type {
 import { Build } from "./Build";
 import { DayCalendar } from "./calendar";
 import { Costs } from "./Costs";
-import { fullDate } from "./format";
+import { fullDate, num } from "./format";
 import { Flow } from "./Flow";
 import { stepLook } from "./heatmap";
 import { initialLanguage } from "./i18n";
@@ -290,7 +290,7 @@ describe("App", () => {
     );
     const line = screen.getByText(/^Laufende Woche KW/);
     expect(line.textContent).toBe(
-      `Laufende Woche KW ${m.running_week.week.kw} bis jetzt: 1 Release, 2 PRs gemerged, 1 Lauf. Zählt in keiner Zahl dieser Seite mit; nur die offenen PRs sind Stand jetzt. Ansehen →`,
+      `Laufende Woche KW ${m.running_week.week.kw} bis jetzt: 1 Release, 2 PRs gemerged, 1 Build. Zählt in keiner Zahl dieser Seite mit; nur die offenen PRs sind Stand jetzt. Ansehen →`,
     );
     // Its link searches the facts for the mark the rows carry.
     fireEvent.click(within(line).getByRole("button", { name: "Ansehen →" }));
@@ -345,7 +345,7 @@ describe("App", () => {
       "1läuft",
       "1erledigt",
       "1zum Besprechen",
-      "8 von 12Repos ohne Befund",
+      "8 von 11aktiven Repos ohne Befund",
       "1Repo nicht beurteilbar",
     ]);
     expect(panel.textContent).not.toMatch(
@@ -360,9 +360,10 @@ describe("App", () => {
         .slice(0, 2)
         .map((h) => h.textContent),
     ).toEqual(["Hakt", "Läuft"]);
+    // The active repos, as the tally counts them; the idle one apart.
     expect(
       p.getByText(
-        "Von 12 Repos: 8 ohne Befund, 1 mit zu wenig Daten für ein Urteil, 1 ohne Aktivität.",
+        "Von 11 aktiven Repos: 8 ohne Befund, 1 mit zu wenig Daten für ein Urteil. 1 Repo ohne Aktivität, das in der Vorperiode aktiv war.",
       ),
     ).toBeInTheDocument();
     // The focus below, ranked, the placeholders filled with the backend's
@@ -983,18 +984,18 @@ describe("App", () => {
             ...base,
             assessment: {
               ...a,
-              gaps: [],
               signals: a.signals.filter(keep),
               limits: [],
               quiet_reasons: worded
                 ? ["findings"]
                 : ["no_baseline", "findings"],
+              limited: !worded,
             },
             layout: {
               ...base.layout,
               cards: base.layout.cards.filter((c) => c.column === "bad"),
               // The backend's tally: its gains it never had.
-              tally: { good: 0, done: 0, bad: 4, talk: 1, baseline: true },
+              tally: { good: 0, done: 0, bad: 4, talk: 1 },
             },
           };
         }
@@ -1005,7 +1006,7 @@ describe("App", () => {
       expect(p.queryByRole("heading", { name: "Läuft" })).toBeNull();
       expect(
         p.getByText(
-          "Von 12 Repos: 8 ohne Befund, 1 mit zu wenig Daten für ein Urteil, 1 ohne Aktivität.",
+          "Von 11 aktiven Repos: 8 ohne Befund, 1 mit zu wenig Daten für ein Urteil. 1 Repo ohne Aktivität, das in der Vorperiode aktiv war.",
         ),
       ).toBeInTheDocument();
       const noGain = p.queryByText("Keine Verbesserung, die als Beleg zählt.");
@@ -1171,19 +1172,19 @@ describe("App", () => {
           enabled: true,
           assessment: {
             ...a,
-            gaps: [],
             signals: [],
             focus: [],
             question: null,
             quiet: true,
             quiet_reasons: [],
+            limited: false,
             limits: [],
           },
           layout: {
             focus: [],
             cards: [],
             also: [],
-            tally: { good: 0, done: 0, bad: 0, talk: 0, baseline: true },
+            tally: { good: 0, done: 0, bad: 0, talk: 0 },
           },
         });
       }
@@ -1295,7 +1296,9 @@ describe("App", () => {
     expect(p.getAllByRole("img", { name: /^Pro Woche/ })).toHaveLength(2);
   });
 
-  it("says nothing is stuck beside what runs", async () => {
+  // Findings, nothing stuck: the cards say it, no calm word (only quiet
+  // has one). The tally's 0 stands where nothing limits the counts.
+  it("shows what runs without a calm word beside it", async () => {
     mockFetch((url) => {
       if (url.pathname === "/api/facts") return facts();
       if (url.pathname === "/api/analysis") {
@@ -1304,18 +1307,18 @@ describe("App", () => {
         return analysedStatus({
           assessment: {
             ...a,
-            gaps: [],
             signals: a.signals.filter((s) => s.tone === "good"),
             focus: [],
             question: null,
             quiet_reasons: ["findings"],
+            limited: false,
             limits: [],
           },
           layout: {
             focus: [],
             cards: base.layout.cards.filter((c) => c.column !== "bad"),
             also: [],
-            tally: { good: 1, done: 1, bad: 0, talk: 0, baseline: true },
+            tally: { good: 1, done: 1, bad: 0, talk: 0 },
           },
         });
       }
@@ -1325,7 +1328,8 @@ describe("App", () => {
     const p = within(await screen.findByTestId("assessment"));
     expect(p.getByRole("heading", { name: "Läuft" })).toBeInTheDocument();
     expect(p.getByText("Mehr PRs kommen durch.")).toBeInTheDocument();
-    expect(p.getByText("Nichts hakt in diesen Wochen.")).toBeInTheDocument();
+    expect(p.queryByText(/Nichts hakt/)).toBeNull();
+    expect(p.queryByText("In diesen Wochen fällt nichts auf.")).toBeNull();
     expect(
       within(p.getByRole("list", { name: "Bilanz" })).getByText("0"),
     ).toBeInTheDocument();
@@ -1344,7 +1348,7 @@ describe("App", () => {
     expect(screen.getByText("keine")).toBeInTheDocument();
     expect(screen.getByText("keine Deploys im Zeitraum")).toBeInTheDocument();
     expect(
-      screen.getByText("Keine abgeschlossenen Läufe im Zeitraum."),
+      screen.getByText("Keine abgeschlossenen Builds im Zeitraum."),
     ).toBeInTheDocument();
     expect(
       screen.getByText("Keine noergler-Reviews im Zeitraum."),
@@ -1435,7 +1439,7 @@ describe("App", () => {
     expect(screen.getByText("Erstdeploy")).toBeInTheDocument();
     expect(screen.getByText("Failed")).toBeInTheDocument();
     expect(screen.getAllByText("kasse-api:1.1").length).toBeGreaterThan(0);
-    fireEvent.click(within(tabs).getByRole("tab", { name: /Läufe/ }));
+    fireEvent.click(within(tabs).getByRole("tab", { name: /Builds/ }));
     expect(window.location.search).toBe("?q=kasse-api%3A1.1&tab=runs");
     // The UI's word where the status plainly says it, else the CI's.
     const runs = screen.getByText("Unstable").closest("table")!;
@@ -1462,14 +1466,14 @@ describe("App", () => {
     expect(screen.getByRole("tooltip")).toHaveTextContent("KW 46");
     fireEvent.mouseLeave(cols[3]);
     expect(screen.queryByRole("tooltip")).toBeNull();
-    const kinds = screen.getByRole("group", { name: "Lauf-Art" });
+    const kinds = screen.getByRole("group", { name: "Build-Art" });
     // feature builds first: kasse-api broke one run, too few to compare
     expect(
       within(kinds).getByRole("button", { name: "Feature- und Bugfix-Builds" }),
     ).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("Kein Vergleich")).toBeInTheDocument();
     expect(
-      screen.getByText(/unter 10 Läufen in einer der beiden Perioden;/),
+      screen.getByText(/unter 10 Builds in einer der beiden Perioden;/),
     ).toBeInTheDocument();
     expect(
       screen.getAllByText("Repos: kein Vergleich mit der Vorperiode"),
@@ -1632,7 +1636,7 @@ describe("App", () => {
     // Each repo against its own previous period, never the team.
     expect(screen.getByText("Fehleranfälliger geworden")).toBeInTheDocument();
     expect(
-      screen.getByText(/Vorperiode 10 % → jetzt 40 % rot/),
+      screen.getByText(/Vorperiode 10 % → jetzt 40 % fehlgeschlagen/),
     ).toBeInTheDocument();
     expect(screen.getByText("Langsamer geworden")).toBeInTheDocument();
     expect(
@@ -1641,7 +1645,7 @@ describe("App", () => {
     expect(screen.queryByText(/Team 10/)).toBeNull();
     expect(
       screen.getByText(
-        /keine vergleichbaren Läufe dieser Art in der Vorperiode;/,
+        /keine vergleichbaren Builds dieser Art in der Vorperiode;/,
       ),
     ).toBeInTheDocument();
     expect(
@@ -1653,7 +1657,7 @@ describe("App", () => {
     // The red time's flaky part, counted by the backend.
     expect(screen.getByText("3 flaky")).toHaveAttribute(
       "title",
-      "0.8 h davon in Läufen, die ein späterer Lauf auf demselben Commit grün machte",
+      "0.8 h davon in Builds, die ein späterer Build auf demselben Commit erfolgreich machte",
     );
     // Above the table: red arrows only where the backend flagged, labelled
     // with what changed; no comparison, no arrow.
@@ -1696,19 +1700,19 @@ describe("App", () => {
     fireEvent.mouseEnter(hit("kasse/slow-api"));
     expect(within(quiver).queryByRole("tooltip")).toBeNull();
     expect(screen.getByRole("tooltip")).toHaveTextContent(
-      /kasse\/slow-apiMedian10 min → 30 minFehlerquote0 % → 0 %Läufe12CI-Zeit6.0 h$/,
+      /kasse\/slow-apiTypisch10 min → 30 minFehlerquote0 % → 0 %Builds12CI-Zeit6.0 h$/,
     );
     fireEvent.mouseLeave(hit("kasse/slow-api"));
     // By keyboard too, the tooltip's content as the target's name.
     fireEvent.focus(hit("kasse/new-api"));
     expect(screen.getByRole("tooltip")).toHaveTextContent(
-      "Kein Vergleichkeine vergleichbaren Läufe dieser Art in der Vorperiode",
+      "Kein Vergleichkeine vergleichbaren Builds dieser Art in der Vorperiode",
     );
     fireEvent.blur(hit("kasse/new-api"));
     expect(screen.queryByRole("tooltip")).toBeNull();
     expect(hit("kasse/new-api")).toHaveAttribute("tabindex", "0");
     expect(
-      within(quiver).getByRole("img", { name: /^kasse\/slow-api; Median: / }),
+      within(quiver).getByRole("img", { name: /^kasse\/slow-api; Typisch: / }),
     ).toBeInTheDocument();
     // Flagged ones painted last; hover targets the largest first, so a
     // small circle is never under a big one's target.
@@ -1723,21 +1727,21 @@ describe("App", () => {
         .map((c) => c.dataset.repo),
     ).toEqual(["kasse/slow-api", "kasse/flaky-api", "kasse/new-api"]);
     fireEvent.click(
-      screen.getAllByRole("button", { name: "Läufe ansehen →" })[1],
+      screen.getAllByRole("button", { name: "Builds ansehen →" })[1],
     );
     expect(window.location.search).toBe("?q=kasse%2Fslow-api&tab=runs");
     // Stuck together across repos: the agents, said once.
     expect(
-      screen.getByText(/2 Läufe aus 2 Repos starteten am/),
+      screen.getByText(/2 Builds aus 2 Repos starteten am/),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "3 Läufe aus 2 Repos starteten zwischen 05.11. 23:50 und 06.11. 00:15",
+        "3 Builds aus 2 Repos starteten zwischen 05.11. 23:50 und 06.11. 00:15",
       ),
     ).toBeInTheDocument();
     expect(screen.getAllByText(/Repos starteten/)).toHaveLength(2);
     expect(
-      screen.getByText(/^25 Läufe hingen im Zeitraum/),
+      screen.getByText(/^25 Builds hingen im Zeitraum/),
     ).toBeInTheDocument();
     expect(screen.getByText("Die längsten 2 anzeigen")).toBeInTheDocument();
     expect(screen.getByText("160×")).toBeInTheDocument();
@@ -1750,7 +1754,7 @@ describe("App", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("#7")).toBeInTheDocument();
     // The agent wait, beside the duration, only where runs report it.
-    expect(screen.getByTitle(/^Median über 4 der /)).toHaveTextContent(
+    expect(screen.getByTitle(/^Typischer Wert über 4 der /)).toHaveTextContent(
       "davon typischerweise 7 min Warten auf einen Agent, 3 min Bauen",
     );
     // In the build section; the assessment's agent-wait card is its own.
@@ -1762,7 +1766,7 @@ describe("App", () => {
       screen.getByText("#7").parentElement?.parentElement,
     ).toHaveTextContent("20.0 h");
     expect(
-      screen.getByTitle("Der Lauf meldet nicht, wann er einen Agent bekam"),
+      screen.getByTitle("Der Build meldet nicht, wann er einen Agent bekam"),
     ).toHaveTextContent("–");
   });
 
@@ -1806,7 +1810,9 @@ describe("App", () => {
     render(<App />);
     await screen.findByText("Längste Builds");
     expect(
-      screen.getByText(/Median der grünen Läufe, ohne Ausreisser, ab 3 davon/),
+      screen.getByText(
+        /typischer Dauer der erfolgreichen Builds, ohne Ausreisser, ab 3 davon/,
+      ),
     ).toBeInTheDocument();
     // The wait beside the build, in the hotspots row too.
     expect(screen.getByText(/· 1 min Warten, 9 min Bauen/)).toBeInTheDocument();
@@ -1814,17 +1820,17 @@ describe("App", () => {
     expect(steady).toHaveTextContent(/25 min30 min2 min \/ 23 min12/);
     expect(
       screen.getByTitle(
-        "Median über 6 der 12 Läufe, die melden, wann sie einen Agent bekamen",
+        "Typischer Wert über 6 der 12 Builds, die melden, wann sie einen Agent bekamen",
       ),
     ).toBeInTheDocument();
     const mono = screen.getByText("kasse/mono").closest(".contents");
     expect(
       within(mono as HTMLElement).getByTitle(
-        "Keiner der Läufe meldet, wann er einen Agent bekam",
+        "Keiner der Builds meldet, wann er einen Agent bekam",
       ),
     ).toHaveTextContent("–");
     // In the backend's order, its link last.
-    const links = screen.getAllByRole("button", { name: "Läufe ansehen →" });
+    const links = screen.getAllByRole("button", { name: "Builds ansehen →" });
     fireEvent.click(links[links.length - 1]);
     expect(window.location.search).toBe("?q=kasse%2Fmono&tab=runs");
   });
@@ -1875,7 +1881,7 @@ describe("App", () => {
     });
     expect(
       within(table).getByRole("row", { name: /^übrige Repos/ }),
-    ).toHaveTextContent("4 von 4 Läufen fehlgeschlagen (100 %)");
+    ).toHaveTextContent("4 von 4 Builds fehlgeschlagen (100 %)");
     const map = screen.getByTestId("heat-map");
     expect(map).toHaveAttribute("aria-hidden", "true");
     expect(within(map).getAllByTestId("heat-row")).toHaveLength(2);
@@ -1893,15 +1899,15 @@ describe("App", () => {
     expect(tip.firstElementChild?.textContent).toBe(
       "kasse/kasse-api · KW 46 · Feature- und Bugfix-Builds",
     );
-    expect(tip).toHaveTextContent("2 von 5 Läufen fehlgeschlagen (40 %)");
+    expect(tip).toHaveTextContent("2 von 5 Builds fehlgeschlagen (40 %)");
     fireEvent.mouseLeave(cells[4]);
     fireEvent.mouseEnter(cells[2]);
     expect(tipNow()).toHaveTextContent(
-      "1 von 2 Läufen fehlgeschlagenunter 3 Läufen: kein Urteil",
+      "1 von 2 Builds fehlgeschlagenunter 3 Builds: kein Urteil",
     );
     fireEvent.mouseLeave(cells[2]);
     fireEvent.mouseEnter(cells[1]);
-    expect(tipNow()).toHaveTextContent("keine Läufe");
+    expect(tipNow()).toHaveTextContent("keine Builds");
     fireEvent.mouseLeave(cells[1]);
     fireEvent.mouseEnter(cells[0]);
     expect(tipNow()).toHaveTextContent("keine verlässlichen Daten");
@@ -1916,7 +1922,7 @@ describe("App", () => {
     // A hovered cell does not carry over to another kind.
     fireEvent.mouseEnter(cells[4]);
     expect(tipNow()).toBeInTheDocument();
-    const kinds = screen.getByRole("group", { name: "Lauf-Art" });
+    const kinds = screen.getByRole("group", { name: "Build-Art" });
     fireEvent.click(within(kinds).getByRole("button", { name: "Releases" }));
     expect(
       screen.getByRole("table", { name: /Releases$/ }),
@@ -2071,12 +2077,12 @@ describe("App", () => {
     });
     render(<App />);
     expect(
-      await screen.findByText("Feature- und Bugfix-Builds: kein Lauf erkannt"),
+      await screen.findByText("Feature- und Bugfix-Builds: kein Build erkannt"),
     ).toBeInTheDocument();
     // the backend's count, not the other card's 70 runs
     expect(
       screen.getByText(
-        /44 Läufe auf Branches ohne bekanntes Präfix stehen unter «Übrige Branches»/,
+        /44 Builds auf Branches ohne bekanntes Präfix stehen unter «Übrige Branches»/,
       ),
     ).toBeInTheDocument();
     // the chips in the hint only, not again on the other card
@@ -2093,7 +2099,7 @@ describe("App", () => {
     ).toBeNull();
     // the repos that slow the feedback down: where the feature builds hide,
     // never the default branch
-    const kinds = screen.getByRole("group", { name: "Lauf-Art" });
+    const kinds = screen.getByRole("group", { name: "Build-Art" });
     expect(
       within(kinds).getByRole("button", { name: "Übrige Branches" }),
     ).toHaveAttribute("aria-pressed", "true");
@@ -2112,11 +2118,11 @@ describe("App", () => {
     });
     render(<App />);
     await screen.findAllByText("Übrige Branches");
-    expect(screen.queryByText(/kein Lauf erkannt/)).toBeNull();
+    expect(screen.queryByText(/kein Build erkannt/)).toBeNull();
     // the prefixes on the other card instead
     expect(screen.getByText(/^Häufigste Präfixe:/)).toBeInTheDocument();
     // no feature builds, none hiding: the first kind
-    const kinds = screen.getByRole("group", { name: "Lauf-Art" });
+    const kinds = screen.getByRole("group", { name: "Build-Art" });
     expect(
       within(kinds).getByRole("button", { name: "Default-Branch-Builds" }),
     ).toHaveAttribute("aria-pressed", "true");
@@ -2131,7 +2137,7 @@ describe("App", () => {
       /^Erfolgsquote pro Woche, Feature- und Bugfix-Builds/,
     );
     expect(spark.closest(".md\\:col-span-2")).not.toBeNull();
-    expect(screen.queryByText(/kein Lauf erkannt/)).toBeNull();
+    expect(screen.queryByText(/kein Build erkannt/)).toBeNull();
     // the cards in the backend's order, before the hotspots' kind buttons
     const names = screen
       .getAllByText(
@@ -2323,12 +2329,14 @@ describe("App", () => {
     render(<App />);
     expect(
       await screen.findByText(
-        "1 roter Lauf flaky: danach grün auf demselben Commit (100 % der roten, < 0.1 h)",
+        "1 fehlgeschlagener Build flaky: danach erfolgreich auf demselben Commit (100 % der fehlgeschlagenen, < 0.1 h)",
       ),
     ).toBeInTheDocument();
-    const red = screen.getByText("in roten Läufen, von 15.0 h CI-Zeit");
+    const red = screen.getByText(
+      "in fehlgeschlagenen Builds, von 15.0 h CI-Zeit",
+    );
     // The big number above it: the red runs' time, under 3 min.
-    expect(red).toHaveTextContent(/^< 0\.1 hin roten Läufen/);
+    expect(red).toHaveTextContent(/^< 0\.1 hin fehlgeschlagenen Builds/);
   });
 
   it("shows a kind's flaky runs as the backend counted them, and the runs", async () => {
@@ -2368,12 +2376,12 @@ describe("App", () => {
     render(<App />);
     expect(
       await screen.findByText(
-        "2 rote Läufe flaky: danach grün auf demselben Commit (50 % der roten, 0.5 h) · 1 Lauf ohne Commit nicht beurteilt",
+        "2 fehlgeschlagene Builds flaky: danach erfolgreich auf demselben Commit (50 % der fehlgeschlagenen, 0.5 h) · 1 Build ohne Commit nicht beurteilt",
       ),
     ).toBeInTheDocument();
     // The rate, the previous one under it as everywhere, the verdict below.
     const worse = screen.getByText(
-      "Flaky-Quote 10 % der Läufe mit Commit",
+      "Flaky-Quote 10 % der Builds mit Commit",
     ).parentElement!;
     expect(within(worse).getByText("vorher 2 %")).toHaveClass(
       "text-danger-ink",
@@ -2382,23 +2390,23 @@ describe("App", () => {
       within(worse.parentElement!).getByText("Schlechter"),
     ).toBeInTheDocument();
     const better = screen.getByText(
-      "Flaky-Quote 0 % der Läufe mit Commit",
+      "Flaky-Quote 0 % der Builds mit Commit",
     ).parentElement!;
     expect(within(better).getByText("vorher 10 %")).toHaveClass("text-online");
     expect(
       within(better.parentElement!).getByText("Besser"),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Kein roter Lauf, also auch kein flaky"),
+      screen.getByText("Kein fehlgeschlagener Build, also auch kein flaky"),
     ).toBeInTheDocument();
-    // A kind with red runs but none flaky says so.
+    // A kind with failed builds but none flaky says so.
     expect(
       screen.getAllByText(
-        "Kein roter Lauf wurde auf demselben Commit danach grün",
+        "Kein fehlgeschlagener Build war danach auf demselben Commit erfolgreich",
       ).length,
     ).toBeGreaterThan(0);
     fireEvent.click(
-      screen.getByRole("button", { name: /Flaky-Läufe ansehen/ }),
+      screen.getByRole("button", { name: /Flaky-Builds ansehen/ }),
     );
     await waitFor(() => expect(factsCalls(calls).at(-1)).toMatch(/&q=flaky$/));
     const runs = (await screen.findByText("#11")).closest("tr")!;
@@ -2898,7 +2906,6 @@ describe("flow", () => {
               (key) => ({ key, ...zero, share: 0.25 }),
             ),
             pre_environment: null,
-            attention_share: 0.5,
             min_prs: 10,
             before_prod: 0,
             reaches_prod: true,
@@ -3113,9 +3120,12 @@ describe("throughput", () => {
         merged: 47,
         merged_per_week: 11.75,
         since: "2026-10-21T08:00:00Z",
-        off_trunk: 1,
-        implicit_merges: 0,
-        housekeeping: 3,
+        umbrella: 1,
+        housekeeping: 1234,
+        twice: 2,
+        housekeeping_repos: 4,
+        housekeeping_window_s: 1800,
+        library: 0,
         coverage: {
           to_prod: { count: 30, n: 47, rate: 30 / 47 },
           sized: { count: 40, n: 47, rate: 40 / 47 },
@@ -3139,16 +3149,26 @@ describe("throughput", () => {
     expect(within(merged).getByText("11.8")).toBeInTheDocument();
     expect(within(merged).getByText("PRs pro Woche")).toBeInTheDocument();
     // What the count leaves out, each reason only when it left one out,
-    // its meaning on hover.
+    // its meaning on hover, counts in Swiss format. PRs into a feature
+    // branch count: no word of them.
     expect(
       within(merged).getByText(/^47 PRs im Zeitraum gemerged/).textContent,
     ).toBe(
-      "47 PRs im Zeitraum gemerged · 3 Sammel-Änderungen nicht gezählt · 1 PR in einen Feature-Branch gemerged, nicht gezählt",
+      `47 PRs im Zeitraum gemerged · ${num(1234)} Aufräum-PRs nicht gezählt · 1 Merge eines Sammel-Branches nicht gezählt · 2 PRs doppelt, nicht gezählt`,
     );
+    // The rule's numbers are the backend's, never the page's own.
     expect(
-      within(merged).getByTitle(/^Derselbe Titel in mindestens drei Repos/),
+      within(merged).getByTitle(
+        /^Derselbe Titel in 4 oder mehr Repos innert 30 Minuten eröffnet/,
+      ),
     ).toBeInTheDocument();
-    expect(merged.textContent).not.toMatch(/mitgemerged/);
+    expect(
+      within(merged).getByTitle(/^Derselbe Branch kam schon/),
+    ).toBeInTheDocument();
+    expect(
+      within(merged).getByTitle(/^Der PR brachte nur die Arbeit anderer PRs/),
+    ).toBeInTheDocument();
+    expect(merged.textContent).not.toMatch(/Feature-Branch/);
     // Bitbucket started inside the period: the rate is since then.
     expect(
       within(merged).getByText(
@@ -3254,6 +3274,9 @@ describe("strip", () => {
     expect(within(rows[6]).getAllByText("0.8")[0]).toBeInTheDocument();
     expect(within(rows[7]).getByText("Batch Size")).toBeInTheDocument();
     expect(within(rows[7]).getByText("140")).toBeInTheDocument();
+    // A long label wraps, never cut off with an ellipsis.
+    for (const row of rows)
+      expect(row.firstElementChild!.className).not.toMatch(/truncate/);
     expect(screen.queryByText("Approval ohne Kommentar")).toBeNull();
     expect(screen.queryByText("Offene PRs")).toBeNull();
     expect(screen.getByText("◀ Schlechter")).toBeInTheDocument();
@@ -3417,21 +3440,21 @@ describe("CI hours", () => {
     // The same hours by repo, outliers in: the top three and the rest.
     const byRepo = screen.getByRole("img", { name: /^CI-Zeit nach Repo/ });
     expect(byRepo.getAttribute("aria-label")).toBe(
-      "CI-Zeit nach Repo: kasse/kasse-web: 200.0 h, davon 100.0 h rot; kasse/kasse-api: 120.0 h, davon 30.0 h rot; kasse/policy: 80.0 h; 4 weitere: 60.0 h, davon 20.0 h rot",
+      "CI-Zeit nach Repo: kasse/kasse-web: 200.0 h, davon 100.0 h fehlgeschlagen; kasse/kasse-api: 120.0 h, davon 30.0 h fehlgeschlagen; kasse/policy: 80.0 h; 4 weitere: 60.0 h, davon 20.0 h fehlgeschlagen",
     );
     // The failed part as a number, not by hatching alone.
     // Red CI time written red; the hatch in the bar stays dark, so the
     // repo's hue still tells it.
-    const red = screen.getByText("· 100.0 h rot");
+    const red = screen.getByText("· 100.0 h fehlgeschlagen");
     expect(red).toHaveClass("text-danger-ink");
     expect(red.parentElement?.textContent).toBe(
-      "kasse/kasse-web 200.0 h · 100.0 h rot",
+      "kasse/kasse-web 200.0 h · 100.0 h fehlgeschlagen",
     );
     expect(
-      screen.getByText("Nach Repo, über alle Lauf-Arten"),
+      screen.getByText("Nach Repo, über alle Build-Arten"),
     ).toBeInTheDocument();
     const chart = screen.getByRole("img", {
-      name: /^CI-Zeit von der Lauf-Art zum Ausgang/,
+      name: /^CI-Zeit von der Build-Art zum Ausgang/,
     });
     expect(document.body.textContent).not.toMatch(/NaN/);
     // Failed never by colour alone.
@@ -3446,7 +3469,9 @@ describe("CI hours", () => {
     expect(within(chart).getByText("40.0 h")).toBeInTheDocument();
     // The outlier cut as the stuck runs card words it.
     expect(
-      screen.getByText(/Ausreisser: Läufe über 6× dem Median ihrer Art/),
+      screen.getByText(
+        /Ausreisser: Builds über 6× der typischen Dauer ihrer Art/,
+      ),
     ).toBeInTheDocument();
     const links = screen.getAllByTestId("sankey-link");
     expect(links).toHaveLength(5);
@@ -3631,7 +3656,6 @@ describe("limits", () => {
     return analysisStatus({
       assessment: {
         ...a,
-        gaps: [],
         signals: [],
         focus: [],
         question: null,
@@ -3642,7 +3666,7 @@ describe("limits", () => {
         focus: [],
         cards: [],
         also: [],
-        tally: { good: 0, done: 0, bad: 0, talk: 0, baseline: false },
+        tally: { good: 0, done: 0, bad: 0, talk: 0 },
       },
     });
   };
@@ -3653,6 +3677,7 @@ describe("limits", () => {
       if (url.pathname === "/api/analysis")
         return quietless({
           quiet_reasons: ["no_baseline", "source_gap", "not_measurable"],
+          not_measurable: "to_prod",
           limits: [
             {
               source: "pipeline",
@@ -3689,52 +3714,50 @@ describe("limits", () => {
     expect(panel.textContent).not.toMatch(
       /fällt nichts auf|Nichts hakt|Keine Verbesserung|unauffällig/,
     );
+    // No big 0 "stuck" beside the limits: it would read as nothing wrong.
+    expect(
+      within(within(panel).getByRole("list", { name: "Bilanz" })).queryByText(
+        "hakt",
+      ),
+    ).toBeNull();
   });
 
-  // Why a period is not measurable, from what the page knows of the
-  // sources: the first that applies.
+  // Why a period is not measurable, as the backend says: the page words
+  // the reason, whatever its own metrics show. A missing release is no
+  // tracing gap.
   it.each([
     [
-      "Bitbucket never reported",
-      (m: Metrics): Metrics => ({
-        ...m,
-        meta: {
-          ...m.meta,
-          data_start: { ...m.meta.data_start, bitbucket: null },
-        },
-      }),
+      "bitbucket" as const,
       "Nicht messbar: Bitbucket liefert für das Team keine Daten.",
     ],
     [
-      "Argo CD does not report",
-      (m: Metrics): Metrics => ({
-        ...m,
-        delivery: {
-          ...m.delivery,
-          frequency: { ...m.delivery.frequency, argo_reporting: false },
-        },
-      }),
+      "argocd" as const,
       "Nicht messbar: Argo CD liefert für das Team keine Daten.",
     ],
     [
-      "no PR was merged",
-      (m: Metrics): Metrics => m,
-      "Nicht messbar: In diesen Wochen wurde kein PR gemerged.",
+      "no_merged" as const,
+      "Nicht messbar: In diesen Wochen wurde kein PR gemerged, der als Arbeit zählt.",
     ],
-  ])("says it is not measurable when %s", async (_, page, want) => {
+    ["no_release" as const, "In diesen Wochen ging nichts nach PROD."],
+    [
+      "to_prod" as const,
+      `Nicht messbar: ${num(1234)} PRs wurden in diesen Wochen gemerged, keiner liess sich bis PROD verfolgen.`,
+    ],
+  ])("says why it is not measurable: %s", async (reason, want) => {
     mockFetch((url) => {
       if (url.pathname === "/api/facts") return facts();
       if (url.pathname === "/api/analysis")
         return quietless({
           quiet_reasons: ["not_measurable"],
+          not_measurable: reason,
           limits: [],
           coverage: {
-            to_prod: { count: 0, n: 0, rate: null },
-            sized: { count: 0, n: 0, rate: null },
-            opened: { count: 0, n: 0, rate: null },
+            to_prod: { count: 0, n: 1234, rate: 0 },
+            sized: { count: 0, n: 1234, rate: 0 },
+            opened: { count: 0, n: 1234, rate: 0 },
           },
         });
-      return page(metrics());
+      return metrics();
     });
     render(<App />);
     const panel = await screen.findByTestId("assessment");
@@ -3743,6 +3766,165 @@ describe("limits", () => {
         name: "Was diese Einschätzung einschränkt",
       }).textContent,
     ).toBe(want);
+  });
+
+  // Nothing compared at all, as the backend says: the limit says so, and
+  // the head claims no comparison.
+  it("says when nothing could be compared, and claims no comparison", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis")
+        return quietless({
+          quiet_reasons: ["no_baseline"],
+          nothing_compared: true,
+          limits: [],
+        });
+      const m = metrics();
+      return { ...m, comparison: { ...m.comparison, any: false } };
+    });
+    render(<App />);
+    const panel = await screen.findByTestId("assessment");
+    expect(
+      within(panel).getByRole("note", {
+        name: "Was diese Einschätzung einschränkt",
+      }).textContent,
+    ).toBe(
+      "Noch kein Vergleich möglich: Für die Vorperiode gibt es keine vergleichbaren Daten.",
+    );
+    expect(
+      screen.getByText(/^Team team-a, alle Produkte/).textContent,
+    ).not.toMatch(/verglichen/);
+  });
+
+  // In a product view the lost events leave deploys and builds uncompared
+  // too, and a hole still running at the read has no end to name.
+  it("names in a product what lost events leave uncompared, and a hole still open", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis")
+        return quietless({
+          quiet_reasons: ["source_gap"],
+          limits: [
+            {
+              source: "bitbucket",
+              kind: "silence",
+              from: "2026-11-05T10:00:00Z",
+              to: "2026-11-09T18:00:00Z",
+            },
+            {
+              source: "bitbucket",
+              kind: "silence",
+              from: "2026-11-12T10:00:00Z",
+              to: null,
+            },
+          ],
+        });
+      return metrics(4, { product: "kasse" });
+    });
+    render(<App />);
+    const panel = await screen.findByTestId("assessment");
+    const note = within(panel).getByRole("note", {
+      name: "Was diese Einschätzung einschränkt",
+    });
+    expect([...note.children].map((c) => c.textContent)).toEqual([
+      "Bitbucket lieferte vom 05.11.2026 bis 09.11.2026 keine Daten, obwohl Builds liefen: Ereignisse gingen verloren. Die PR-Zahlen bleiben ohne Urteil, und mit ihnen Deploys und Builds: Sie kommen über Bitbucket zum Produkt.",
+      "Bitbucket liefert seit dem 12.11.2026 keine Daten, obwohl Builds laufen: Ereignisse gehen verloren. Die PR-Zahlen bleiben ohne Urteil, und mit ihnen Deploys und Builds: Sie kommen über Bitbucket zum Produkt.",
+    ]);
+  });
+
+  // A product of libraries only: nothing to roll out, no hole, no limit.
+  // Where libraries are left out of the PRs traced, the sentence says so.
+  it("says a product holds only libraries, and whose PRs were traced", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis")
+        return quietless({
+          quiet_reasons: [],
+          limited: false,
+          libraries_only: true,
+          library: 5,
+          limits: [],
+        });
+      return metrics(4, { product: "kasse" });
+    });
+    render(<App />);
+    const panel = await screen.findByTestId("assessment");
+    expect(
+      within(panel).getByText(
+        "Dieses Produkt enthält nur Bibliotheken; sie werden nicht ausgerollt.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(panel).queryByRole("note")).toBeNull();
+  });
+
+  it("names the PRs of repos rolled out when libraries are left out", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis")
+        return quietless({
+          quiet_reasons: ["not_measurable"],
+          not_measurable: "to_prod",
+          library: 1,
+          limits: [],
+          coverage: {
+            to_prod: { count: 0, n: 12, rate: 0 },
+            sized: { count: 0, n: 13, rate: 0 },
+            opened: { count: 0, n: 13, rate: 0 },
+          },
+        });
+      return metrics();
+    });
+    render(<App />);
+    const panel = await screen.findByTestId("assessment");
+    expect(
+      within(panel).getByRole("note", {
+        name: "Was diese Einschätzung einschränkt",
+      }).textContent,
+    ).toBe(
+      "Nicht messbar: 12 PRs aus Repos, die ausgerollt werden, wurden in diesen Wochen gemerged, keiner liess sich bis PROD verfolgen.",
+    );
+  });
+
+  // Whether the period is limited is the backend's word, not a reading of
+  // its reasons here: limited false shows the 0 stuck even beside a reason.
+  it("takes limited from the backend", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis")
+        return quietless({
+          quiet_reasons: ["no_baseline", "findings"],
+          limited: false,
+          limits: [],
+        });
+      return metrics();
+    });
+    render(<App />);
+    const panel = await screen.findByTestId("assessment");
+    expect(
+      within(within(panel).getByRole("list", { name: "Bilanz" })).getByText(
+        "hakt",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  // The agent wait's rule in the backend's numbers, never the page's own.
+  it("words the agent-wait rule with the backend's numbers", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis") return analysisStatus();
+      const m = metrics();
+      return {
+        ...m,
+        build: { ...m.build, agent_wait_min_s: 180, agent_wait_share: 0.4 },
+      };
+    });
+    render(<App />);
+    const panel = await screen.findByTestId("assessment");
+    expect(
+      within(panel).getByText(
+        "40 % der typischen Build-Zeit oder mehr, und mindestens 3 Minuten, ist Warten auf einen Agent: die Kapazität der Plattform, nicht der Build.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("shows the rules' view beside an outdated analysis, and offers to assess again", async () => {
@@ -3797,28 +3979,47 @@ describe("limits", () => {
   });
 
   it("says why a product shows no deploys, and what the team view leaves out", async () => {
+    // portal deploys nothing of its own; kasse does.
     mockFetch((url) => {
       const m = sample(url);
       if (url.pathname !== "/api/metrics") return m;
       const mm = m as Metrics;
+      const none = url.searchParams.get("product") === "portal";
       return {
         ...mm,
         delivery: {
           ...mm.delivery,
           frequency: {
             ...mm.delivery.frequency,
-            unattributed: 3,
-            infra: 15,
-            infra_apps: ["monitoring", "rollout"],
+            // The backend says when they may be the product's: the page
+            // decides nothing itself.
+            ...(none
+              ? {
+                  syncs: 0,
+                  releases: 0,
+                  resyncs: 0,
+                  first_seen: 0,
+                  maybe_unattributed: true,
+                }
+              : {}),
+            unattributed: 2,
+            infra: 4,
+            infra_apps: ["cert-sync", "log-shipper"],
+            grace_days: 21,
           },
         },
       };
     });
     render(<App />);
     const infra = await screen.findByText(
-      "15 Deploys von Infrastruktur-Apps nicht gezählt",
+      "4 Deploys von Infrastruktur-Apps nicht gezählt",
     );
-    expect(infra).toHaveAttribute("title", "monitoring, rollout");
+    expect(infra).toHaveAttribute("title", "cert-sync, log-shipper");
+    // The onboarding's grace as the backend sends it, never a number of
+    // the page's own.
+    expect(
+      screen.getAllByText(/aus den ersten 21 Tagen der Argo-CD-Daten/).length,
+    ).toBeGreaterThan(0);
     // In the team view they count: no word of them on the tile.
     expect(screen.queryByText(/keinem Produkt zuordenbar/)).toBeNull();
     fireEvent.click(
@@ -3826,26 +4027,47 @@ describe("limits", () => {
     );
     expect(
       screen.getByText(
-        /Nicht gezählt: 15 Deploys von Infrastruktur-Apps, die keinem Produkt des Teams gehören \(monitoring, rollout\)\./,
+        /Nicht gezählt: 4 Deploys von Infrastruktur-Apps, die keinem Produkt des Teams gehören \(cert-sync, log-shipper\)\./,
       ),
     ).toBeInTheDocument();
 
     const products = screen.getByRole("group", { name: "Produkt" });
     fireEvent.click(within(products).getByRole("button", { name: /portal/ }));
     expect(
-      await screen.findByText("3 Deploys keinem Produkt zuordenbar"),
+      await screen.findByText("2 Deploys keinem Produkt zuordenbar"),
     ).toBeInTheDocument();
     expect(screen.queryByText("keine Deploys im Zeitraum")).toBeNull();
     expect(screen.queryByText(/Infrastruktur-Apps nicht gezählt/)).toBeNull();
+
+    // A product with deploys of its own: they are not why it shows none.
+    fireEvent.click(within(products).getByRole("button", { name: /kasse/ }));
+    expect(
+      await screen.findByText(/Releases? im Zeitraum/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("2 Deploys keinem Produkt zuordenbar"),
+    ).toBeNull();
   });
 
-  it("counts open PRs of unknown state apart, and builds without a repo", () => {
+  it("counts open PRs of unknown state apart, builds without a repo and bots' builds", () => {
     const onFacts = vi.fn();
     const m = metrics();
     const mm: Metrics = {
       ...m,
       open_prs: { ...m.open_prs, unknown: 2 },
-      build: { ...m.build, unattributed: 5 },
+      build: {
+        ...m.build,
+        unattributed: 5,
+        bot_runs: { runs: 1500, ci_seconds: 90000 },
+      },
+      throughput: {
+        ...m.throughput,
+        library: 3,
+        coverage: {
+          ...m.throughput.coverage,
+          to_prod: { count: 4, n: 6, rate: 4 / 6 },
+        },
+      },
     };
     render(
       <>
@@ -3862,6 +4084,40 @@ describe("limits", () => {
         "5 Builds ohne Repo: Weder ihr Commit noch ihr Pipeline-Name nennt eines. In der Teamansicht gezählt, in keiner Produktansicht.",
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(`${num(1500)} Builds von Bot-Branches nicht gezählt`),
+    ).toBeInTheDocument();
+    // A library's PRs are out of the base of those traced to production,
+    // said as such: never rolled out, never "not traced".
+    expect(
+      screen.getByText(/Bis PROD verfolgt: 4 von 6 PRs, die gemerged wurden\./)
+        .textContent,
+    ).toMatch(/3 PRs in Bibliotheken \(werden nicht ausgerollt\)/);
+  });
+
+  // No merged PR to trace: no "0 of 0" under the line that says so.
+  it("says nothing of tracing without a merged PR", () => {
+    const m = metrics();
+    render(
+      <Flow
+        why={null}
+        onWhy={() => {}}
+        onFacts={() => {}}
+        m={{
+          ...m,
+          throughput: {
+            ...m.throughput,
+            merged: 0,
+            coverage: {
+              to_prod: { count: 0, n: 0, rate: null },
+              sized: { count: 0, n: 0, rate: null },
+              opened: { count: 0, n: 0, rate: null },
+            },
+          },
+        }}
+      />,
+    );
+    expect(screen.queryByText(/Bis PROD verfolgt/)).toBeNull();
   });
 
   it("marks in the facts what counts nowhere and why", async () => {
@@ -3880,6 +4136,15 @@ describe("limits", () => {
                   idle_s: 9 * 86400,
                 }),
                 prFact({ pr_id: 6, not_counted: "housekeeping" }),
+                prFact({ pr_id: 7, not_counted: "umbrella" }),
+                prFact({ pr_id: 8, via_umbrella: true }),
+                prFact({
+                  pr_id: 9,
+                  repo: "kasse/kasse-lib",
+                  library: true,
+                  prod_at: null,
+                  to_prod_s: null,
+                }),
               ],
             },
             deploys: {
@@ -3892,7 +4157,7 @@ describe("limits", () => {
                   phase: "Error",
                   new_images: [],
                 }),
-                deployFact({ app: "monitoring", revision: "r8", infra: true }),
+                deployFact({ app: "log-shipper", revision: "r8", infra: true }),
               ],
             },
           })
@@ -3903,14 +4168,27 @@ describe("limits", () => {
     const data = within(document.getElementById("daten")!);
     expect(await data.findByText("Unbekannt")).toBeInTheDocument();
     expect(data.getByText("9.0 Tage ohne Event")).toBeInTheDocument();
-    const housekeeping = data.getByText("Nicht gezählt: Sammel-Änderung");
+    const housekeeping = data.getByText("Nicht gezählt: Aufräum-PR");
     expect(housekeeping.closest("tr")).toHaveAttribute("data-dim");
+    const umbrella = data.getByText(
+      "Nicht gezählt: Merge eines Sammel-Branches",
+    );
+    expect(umbrella.closest("tr")).toHaveAttribute("data-dim");
+    // Counted, how it was merged said; not faded.
+    const via = data.getByText("über Sammel-Branch gemerged").closest("tr")!;
+    expect(via).not.toHaveAttribute("data-dim");
+    // A library's PR is never rolled out: no "no" in the column to PROD.
+    const lib = data.getByText("kasse/kasse-lib").closest("tr")!;
+    expect(
+      within(lib).getByText("Bibliothek, wird nicht ausgerollt"),
+    ).toBeInTheDocument();
+    expect(within(lib).queryByText("Nein")).toBeNull();
     fireEvent.click(data.getByRole("tab", { name: /Deploys/ }));
     const first = (await data.findByText("kasse-neu")).closest("tr")!;
     expect(within(first).getByText("Release")).toBeInTheDocument();
     expect(within(first).getByText("Erstdeploy")).toBeInTheDocument();
     expect(data.getByText("Error")).toBeInTheDocument();
-    const infra = data.getByText("monitoring").closest("tr")!;
+    const infra = data.getByText("log-shipper").closest("tr")!;
     expect(
       within(infra).getByText("Infrastruktur, nicht gezählt"),
     ).toBeInTheDocument();
@@ -3932,13 +4210,38 @@ describe("limits", () => {
               from: "2026-11-05T10:00:00Z",
               to: "2026-11-09T18:00:00Z",
               unseen_runs: 4,
+              lost: true,
+              ongoing: false,
             },
-            // A team that did not deploy for two days: no gap in the data.
+            // A team that did not deploy, or push, for two days: no gap in
+            // the data; the backend says which were lost.
             {
               source: "argocd",
               from: "2026-11-02T10:00:00Z",
               to: "2026-11-05T09:00:00Z",
               unseen_runs: 0,
+              lost: false,
+              ongoing: false,
+            },
+          ],
+          // The page names the backend's list as it is, never a filter of
+          // its own over `silences`; one still running has no end.
+          lost: [
+            {
+              source: "bitbucket",
+              from: "2026-11-05T10:00:00Z",
+              to: "2026-11-09T18:00:00Z",
+              unseen_runs: 4,
+              lost: true,
+              ongoing: false,
+            },
+            {
+              source: "bitbucket",
+              from: "2026-11-12T10:00:00Z",
+              to: "2026-11-16T10:00:00Z",
+              unseen_runs: 2,
+              lost: true,
+              ongoing: true,
             },
           ],
           repo_starts: [
@@ -3955,6 +4258,11 @@ describe("limits", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getAllByText(/lieferte vom/)).toHaveLength(1);
+    expect(
+      screen.getByText(
+        "Bitbucket liefert seit dem 12.11. 11:00 keine Daten, obwohl Builds laufen: Ereignisse gehen verloren.",
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText(/^noergler seit /)).toHaveAttribute(
       "title",
       "kasse/kasse-api: seit 01.10.2026\nportal/portal-web: keine Daten",

@@ -107,6 +107,9 @@ type prEvent struct {
 	link                  string
 	jira                  []string
 	at                    time.Time
+	// stored is when riptide stored it (created_at); at when zero. A
+	// sender's retry stores an old event late.
+	stored time.Time
 	// The PR as the event carries it, when set: its state, creation, PR
 	// author and reviewers (login → status).
 	state        string
@@ -191,10 +194,15 @@ func (s *seeder) pr(e prEvent) {
 		}
 		changeType = &ct
 	}
+	stored := e.stored
+	if stored.IsZero() {
+		stored = e.at
+	}
 	s.exec(`INSERT INTO bitbucket_events (delivery_id, event_type, repo_full_name, pr_id, commit_sha, author,
-		author_display_name, branch_name, change_type, jira_keys, automation_source, occurred_at, team, payload)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, lower($8), $9, $10, $11, $12, $13, $14::jsonb)`,
-		s.id(), e.event, e.repo, e.id, head, e.author, display, e.branch, changeType, e.jira, automation, e.at, e.teamName, payload)
+		author_display_name, branch_name, change_type, jira_keys, automation_source, occurred_at, team, payload, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, lower($8), $9, $10, $11, $12, $13, $14::jsonb, $15)`,
+		s.id(), e.event, e.repo, e.id, head, e.author, display, e.branch, changeType, e.jira, automation, e.at, e.teamName, payload,
+		stored)
 }
 
 type commit struct {
@@ -227,8 +235,8 @@ func (s *seeder) push(repo, branch string, at time.Time, commits ...commit) {
 	}
 	payload := jsonString(map[string]any{"eventKey": "repo:refs_changed", "commits": cs})
 	s.exec(`INSERT INTO bitbucket_events (delivery_id, event_type, repo_full_name, branch_name, commit_sha, author,
-		occurred_at, team, jira_keys, payload)
-		VALUES ($1, 'repo:refs_changed', $2, $3, $4, 'dev-anna', $5, $6, '{}', $7::jsonb)`,
+		occurred_at, team, jira_keys, payload, created_at)
+		VALUES ($1, 'repo:refs_changed', $2, $3, $4, 'dev-anna', $5, $6, '{}', $7::jsonb, $5)`,
 		s.id(), repo, branch, commits[len(commits)-1].sha, at, team, payload)
 }
 
@@ -239,8 +247,8 @@ func (s *seeder) deploy(teamName, app, env, rev, phase string, at time.Time, ima
 	}
 	payload := jsonString(map[string]any{"app_name": app, "images": images})
 	s.exec(`INSERT INTO argocd_events (delivery_id, app_name, revision, operation_phase, environment,
-		started_at, finished_at, occurred_at, team, payload)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9::jsonb)`,
+		started_at, finished_at, occurred_at, team, payload, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9::jsonb, $7)`,
 		s.id(), app, rev, phase, env, at.Add(-45*time.Second), at, teamName, payload)
 }
 
@@ -282,8 +290,8 @@ func (s *seeder) run(r run) {
 	}
 	s.exec(`INSERT INTO pipeline_events (delivery_id, source, pipeline_name, run_id, phase, status, commit_sha,
 		image_refs, actor_handle, actor_account_kind, build_type, started_at, agent_started_at, finished_at,
-		occurred_at, team, payload)
-		VALUES ($1, 'jenkins', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13, $14, '{}')`,
+		occurred_at, team, payload, created_at)
+		VALUES ($1, 'jenkins', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13, $14, '{}', $13)`,
 		s.id(), r.pipeline, r.runID, r.phase, status, r.commit, r.images, actor, kind, buildType,
 		r.started, agent, finished, r.teamName)
 }
@@ -292,9 +300,9 @@ func (s *seeder) rollup(teamName, prKey, outcome string, closed time.Time) {
 	s.t.Helper()
 	s.exec(`INSERT INTO noergler_events (delivery_id, event_type, pr_key, repo, outcome, reviewer_handle,
 		reviewer_account_kind, lines_added, lines_removed, files_changed, total_runs, findings_count, cost_usd,
-		occurred_at, team, payload)
+		occurred_at, team, payload, created_at)
 		VALUES ($1, 'pr_completed', $2::varchar, split_part($2::text, '#', 1), $3, 'noergler', 'bot', 10, 2, 3, 2, 4, 0.123456,
-		        $4, $5, '{}')`,
+		        $4, $5, '{}', $4)`,
 		s.id(), prKey, outcome, closed, teamName)
 }
 

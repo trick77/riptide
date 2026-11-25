@@ -329,8 +329,17 @@ type Build struct {
 	// repository, team-wide whatever product the view shows: neither their
 	// commit, nor their pipeline's other runs, nor their pipeline name's
 	// first segment named one (dataset.Run.Repo). In the team view's
-	// numbers, in no product's. GitOps runs aside, as everywhere here.
+	// numbers, in no product's. GitOps and bot runs aside, as everywhere
+	// here.
 	Unattributed int `json:"unattributed"`
+	// BotRuns are the product's runs of bots' branches (dataset.Run.Bot):
+	// in no other number here (owner, 2026-11: a bot's failed build is no
+	// quality problem of the team's), their count and CI time apart.
+	BotRuns BotRuns `json:"bot_runs"`
+	// AgentWaitShare and AgentWaitMinS are the agent-wait hint's rule
+	// (assess.go), for the page's words.
+	AgentWaitShare float64 `json:"agent_wait_share"`
+	AgentWaitMinS  float64 `json:"agent_wait_min_s"`
 	// repos are every repo's runs per kind, the next period's baseline;
 	// compared the repos per kind with a previous period to compare with.
 	// Both before the hotspots' cut to the top.
@@ -362,13 +371,30 @@ func gitopsRun(ds *dataset.Dataset) func(dataset.Run) bool {
 	}
 }
 
+// BotRuns are runs of bots' branches, with a status: their count and CI
+// time, outliers included.
+type BotRuns struct {
+	Runs      int     `json:"runs"`
+	CISeconds float64 `json:"ci_seconds"`
+}
+
 // teamRuns are the runs the build section counts: with a status, in the
 // product, GitOps repos' runs left out (stage promotions, mechanical;
-// gitops is gitopsRun(ds)).
-func teamRuns(ds *dataset.Dataset, f filter, gitops func(dataset.Run) bool) map[string][]dataset.Run {
+// gitops is gitopsRun(ds)) and the bots' (dataset.Run.Bot), which bots
+// counts where it is not nil.
+func teamRuns(ds *dataset.Dataset, f filter, gitops func(dataset.Run) bool, bots *BotRuns) map[string][]dataset.Run {
 	by := map[string][]dataset.Run{}
 	for _, r := range ds.Runs {
 		if r.Status == nil || gitops(r) || !f.in(r.Project) {
+			continue
+		}
+		if r.Bot {
+			if bots != nil {
+				bots.Runs++
+				if r.DurationS != nil && *r.DurationS > 0 {
+					bots.CISeconds += float64(*r.DurationS)
+				}
+			}
 			continue
 		}
 		// A finish before the start (clock skew) is no duration: read once
@@ -401,14 +427,15 @@ type baseline struct {
 // period's runs to compare with; nil kinds compare nothing.
 func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
 	gitops := gitopsRun(ds)
-	by := teamRuns(ds, f, gitops)
-	flaky := flakyRuns(by)
 	out := Build{
 		DataFrom: ds.Meta.BuildDataFrom, Kinds: []BuildStats{},
+		AgentWaitShare: AgentWaitShare, AgentWaitMinS: AgentWaitMinS,
 		repos: map[string]map[string]*repoRuns{}, compared: map[string]int{},
 	}
+	by := teamRuns(ds, f, gitops, &out.BotRuns)
+	flaky := flakyRuns(by)
 	for _, r := range ds.Runs {
-		if r.Status != nil && r.Repo == nil && !gitops(r) {
+		if r.Status != nil && r.Repo == nil && !r.Bot && !gitops(r) {
 			out.Unattributed++
 		}
 	}

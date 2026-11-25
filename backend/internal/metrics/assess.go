@@ -5,7 +5,6 @@ import (
 	"maps"
 	"math"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -52,11 +51,6 @@ const (
 	// count as resolved: clearly below the jam (OpenJamMin), not one PR
 	// under it, where the next week tips it back.
 	JamResolvedMax = OpenJamMin - 2
-	// StageAttention is the lead chain's Chain.AttentionShare, the page's
-	// mark on a stage taking this part of the time to production or more.
-	// No signal reads it since rules version 2: some stage always takes
-	// longest, and its share is a ratio of medians over different PRs.
-	StageAttention = 0.5
 )
 
 // Signal kinds. Dropped in rules version 2, never to be raised again from
@@ -87,28 +81,40 @@ const (
 	ToneTalk      = "talk"
 )
 
-// Sources a gap can silence.
-const (
-	SourceBitbucket = "bitbucket"
-	SourcePipeline  = "pipeline"
-	SourceArgoCD    = "argocd"
-	SourceNoergler  = "noergler"
-)
-
 // Why a period is not quiet (Assessment.QuietReasons), in this order.
 const (
-	// QuietNoBaseline: no team number has a previous period to compare
-	// with, or a source started reporting after the previous period began.
+	// QuietNoBaseline: no team number resting on enough cases has a
+	// previous period to compare with (a count of jammed repos, or releases
+	// on fewer than lowSample in either period, compares nothing), or a
+	// source started reporting after the previous period began.
 	QuietNoBaseline = "no_baseline"
 	// QuietSourceGap: a source's data has a hole touching the comparison
 	// (Limits): silent at the end, Bitbucket's events lost, or a source
 	// starting inside the period.
 	QuietSourceGap = "source_gap"
-	// QuietNotMeasurable: Bitbucket or Argo CD never reported for the team,
-	// or no merged PR could be traced to production.
+	// QuietNotMeasurable: the period's numbers do not exist; why is
+	// Assessment.NotMeasurable.
 	QuietNotMeasurable = "not_measurable"
 	// QuietFindings: a signal or the question stands out.
 	QuietFindings = "findings"
+)
+
+// Why a period is not measurable (Assessment.NotMeasurable), the first that
+// applies.
+const (
+	// NotMeasurableBitbucket: Bitbucket never reported for the team.
+	NotMeasurableBitbucket = "bitbucket"
+	// NotMeasurableArgoCD: Argo CD did not report before the period's end.
+	NotMeasurableArgoCD = "argocd"
+	// NotMeasurableNoMerged: no person's PR counted as merged work.
+	NotMeasurableNoMerged = "no_merged"
+	// NotMeasurableNoRelease: none of the merged PRs reached production,
+	// and nothing went to production in the period at all: a missing
+	// release, not a tracing gap.
+	NotMeasurableNoRelease = "no_release"
+	// NotMeasurableToProd: deploys went to production, but none of the
+	// merged PRs (libraries' aside) could be traced to one.
+	NotMeasurableToProd = "to_prod"
 )
 
 // Limit kinds.
@@ -168,12 +174,6 @@ type Signal struct {
 	RunKind *string `json:"run_kind"`
 	// Metric names the number of a change, resolved or question signal.
 	Metric *string `json:"metric"`
-	// LowSample: the signal rests on fewer than 10 cases; shown, never a
-	// headline, and a hint on so few keeps a period quiet.
-	LowSample bool `json:"low_sample"`
-	// Sample is the PRs the signal rests on, where counted: the page says
-	// how few, not only that LowSample.
-	Sample *int `json:"sample"`
 	// Weight ranks the signals and the focus.
 	Weight int `json:"weight"`
 	// Seen is how many earlier assessments of the same window raised it,
@@ -246,7 +246,8 @@ type Limit struct {
 	// silence) or its first event ever (starts).
 	From time.Time `json:"from"`
 	// To is the source's first event after a silence, the period's end for
-	// silent_end; null for starts.
+	// silent_end; null for starts, and for a silence still running at the
+	// read (dataset.Silence.Ongoing).
 	To *time.Time `json:"to"`
 }
 
@@ -254,15 +255,15 @@ type Limit struct {
 type Assessment struct {
 	Period   Period `json:"period"`
 	Previous Period `json:"previous"`
-	// Gaps are the sources silenced, their claims left out.
-	Gaps []string `json:"gaps"`
 	// Signals are ranked, the gates first, repo-less and repo ones alike.
 	Signals []Signal `json:"signals"`
 	// Focus are the candidates, ranked; the page shows FocusMax of them.
 	Focus []FocusRepo `json:"focus"`
-	// Active are the repos with a merged PR, a build or an open PR in the
-	// period. Of them Calm are those without a signal that a repo rule
-	// could judge (judgeable), Unjudged those without a signal and too
+	// Active are the repos with people's work in the period: a merged PR
+	// counted as merged work, a build of a person's branch, an open PR.
+	// Housekeeping, an umbrella's merge and a bot's build alone are none
+	// (activeRepos). Of them Calm are those without a signal that a repo
+	// rule could judge (judgeable), Unjudged those without a signal and too
 	// little data to judge; the rest carry a signal. Idle were active in the
 	// previous period and are not now; Repos is Active and Idle.
 	Active   int `json:"active"`
@@ -284,6 +285,25 @@ type Assessment struct {
 	// not, in the order of the Quiet* constants; empty when Quiet.
 	Quiet        bool     `json:"quiet"`
 	QuietReasons []string `json:"quiet_reasons"`
+	// NotMeasurable is why the period is not measurable, one of the
+	// NotMeasurable* constants; null unless QuietReasons holds
+	// not_measurable.
+	NotMeasurable *string `json:"not_measurable"`
+	// Limited: QuietReasons hold a reason other than findings, the period
+	// could not be measured or compared in full: no calm word, no 0 for
+	// what is stuck.
+	Limited bool `json:"limited"`
+	// NothingCompared: no number has the previous period's value to stand
+	// against (Comparison.Any false), not merely some: the page claims no
+	// comparison.
+	NothingCompared bool `json:"nothing_compared"`
+	// LibrariesOnly: every merged PR counted as work is a library's
+	// (Throughput.Library): nothing of the view is rolled out, so nothing
+	// to trace and no release missed. No limit; the page says so.
+	LibrariesOnly bool `json:"libraries_only"`
+	// Library are the period's merged PRs in library repos, out of
+	// Coverage.ToProd's base.
+	Library int `json:"library"`
 	// Limits are the holes in the data the comparison crosses, oldest first.
 	Limits []Limit `json:"limits"`
 	// Coverage is of the period's merged PRs, as Throughput's: how many
@@ -309,12 +329,12 @@ func ClosedPrevious(weeks int, now time.Time, loc *time.Location) Period {
 
 // Assess is the assessment of ds over p.Period against prev over
 // p.Previous, both closed weeks (ClosedPeriod), with what earlier ones
-// raised. prev is never nil, as in Compute. The dependency bots' builds are
-// left out of every number it reads (withoutBotBuilds); infrastructure Apps
-// are out of the deploy numbers already (deployFrequency).
+// raised. prev is never nil, as in Compute. Both are classified by ds's
+// Apps, as the page classes its periods by its newest; the bots' builds
+// (dataset.Run.Bot) and infrastructure Apps are out of every number it
+// reads already, as on the page.
 func Assess(ds, prev *dataset.Dataset, p Params, h History) Assessment {
-	bots := botPRBranches(ds, prev)
-	ds, prev = withoutBotBuilds(ds, bots), withoutBotBuilds(prev, bots)
+	ds, prev = classified(ds, prev)
 	m, pm := computeBoth(ds, prev, nil, p)
 	a := &assessor{m: m, pm: pm, ds: ds, prev: prev, p: p, f: newFilter(ds, p), h: h}
 	return a.run()
@@ -329,9 +349,8 @@ type assessor struct {
 	gaps     map[string]bool
 	limits   []Limit
 	// lost: Bitbucket's events were lost in one of the two periods
-	// (LimitSilence). Its counts read low there, so none of its numbers is
-	// compared: a false worsening now, a false gain once the hole lies in the
-	// previous period.
+	// (lostEvents, LimitSilence). Its counts read low there, so none of its
+	// numbers is compared (compare, unlost), nor judges a repo.
 	lost bool
 	out  []Signal
 	// team are the compared team numbers, computed once.
@@ -359,7 +378,7 @@ func (a *assessor) run() Assessment {
 	}
 	rank(a.out)
 	out := Assessment{
-		Period: a.p.Period, Previous: a.p.Previous, Gaps: append([]string{}, slices.Sorted(maps.Keys(a.gaps))...),
+		Period: a.p.Period, Previous: a.p.Previous,
 		Signals: a.out, Question: a.question(), Compared: a.h.Runs > 0, Limits: a.limits,
 		Coverage: a.m.Throughput.Coverage,
 	}
@@ -375,6 +394,14 @@ func (a *assessor) run() Assessment {
 	}
 	out.QuietReasons = a.quietReasons(out)
 	out.Quiet = len(out.QuietReasons) == 0
+	if slices.Contains(out.QuietReasons, QuietNotMeasurable) {
+		out.NotMeasurable = ptr(a.notMeasurable())
+	}
+	out.Limited = slices.ContainsFunc(out.QuietReasons, func(r string) bool { return r != QuietFindings })
+	out.NothingCompared = !a.m.Comparison.Any
+	t := a.m.Throughput
+	out.Library = t.Library
+	out.LibrariesOnly = t.Merged > 0 && t.Library == t.Merged
 	return out
 }
 
@@ -421,56 +448,6 @@ func plain(id, label, unit string, v *float64) Fact {
 
 func f64(n int) *float64 { return ptr(float64(n)) }
 
-// ---- Bots' builds ----------------------------------------------------------
-
-// botBranchStems are the dependency bots' branch schemes, as build.go's
-// notFeatureStems names them: renovate/…, dependabot-….
-var botBranchStems = map[string]bool{"renovate": true, "dependabot": true, "snyk": true}
-
-// botPRBranches are the PR-<n> branches (lowercased, by repo) of the bots'
-// PRs either dataset holds: a Jenkins PR build names its PR, not the bot's
-// branch. A bot PR neither opened, merged nor open in the windows is not
-// known, and its builds stay in.
-func botPRBranches(ds ...*dataset.Dataset) map[string]bool {
-	out := map[string]bool{}
-	add := func(repo string, id int64) { out[repo+"\x00pr-"+strconv.FormatInt(id, 10)] = true }
-	for _, d := range ds {
-		for _, pr := range d.PRs {
-			if pr.Bot {
-				add(pr.Repo, pr.PRID)
-			}
-		}
-		for _, pr := range d.OpenPRs {
-			if pr.Bot {
-				add(pr.Repo, pr.PRID)
-			}
-		}
-	}
-	return out
-}
-
-// botBuild reports whether r built a bot's branch: a dependency bot's
-// scheme, or a bot PR's PR-<n>.
-func botBuild(r dataset.Run, botPRs map[string]bool) bool {
-	p := branchPrefix(r.Branch)
-	if botBranchStems[strings.TrimSuffix(strings.TrimSuffix(p, "/"), "-…")] {
-		return true
-	}
-	return r.Repo != nil && botPRs[*r.Repo+"\x00"+strings.ToLower(r.Branch)]
-}
-
-// withoutBotBuilds is ds without the bots' builds (owner, 2026-11: a bot's
-// failed build is no quality problem of the team's, and no judged number
-// reads it). A copy: the page's dataset keeps them.
-func withoutBotBuilds(ds *dataset.Dataset, botPRs map[string]bool) *dataset.Dataset {
-	if !slices.ContainsFunc(ds.Runs, func(r dataset.Run) bool { return botBuild(r, botPRs) }) {
-		return ds
-	}
-	cp := *ds
-	cp.Runs = slices.DeleteFunc(slices.Clone(ds.Runs), func(r dataset.Run) bool { return botBuild(r, botPRs) })
-	return &cp
-}
-
 // ---- Gaps and limits -------------------------------------------------------
 
 // gapSignals silence a source that reported before and went quiet for
@@ -486,8 +463,8 @@ func (a *assessor) gapSignals() {
 		name      string
 		at, start *time.Time
 	}{
-		{SourceBitbucket, ends.Bitbucket, starts.Bitbucket}, {SourcePipeline, ends.Pipeline, starts.Pipeline},
-		{SourceArgoCD, ends.ArgoCD, starts.ArgoCD}, {SourceNoergler, ends.Noergler, starts.Noergler},
+		{dataset.SourceBitbucket, ends.Bitbucket, starts.Bitbucket}, {dataset.SourcePipeline, ends.Pipeline, starts.Pipeline},
+		{dataset.SourceArgoCD, ends.ArgoCD, starts.ArgoCD}, {dataset.SourceNoergler, ends.Noergler, starts.Noergler},
 	} {
 		// A source never heard of is not a hole: the team has none.
 		if s.start != nil && s.start.After(a.p.Previous.From) && s.start.Before(end) {
@@ -504,19 +481,70 @@ func (a *assessor) gapSignals() {
 			Facts: []Fact{plain("data_gap_"+s.name+".silent", "silent_days", UnitDays, &days)},
 		})
 	}
-	// Bitbucket's lost events, in either period: a silence at the boundary
-	// is in both datasets once.
+	// Bitbucket's lost events over both periods: a silence overlapping
+	// either (one straddling their boundary is in both datasets, said once).
+	a.lost = lostEvents(a.ds, a.prev)
 	seen := map[[2]time.Time]bool{}
 	for _, s := range slices.Concat(a.prev.Meta.Silences, a.ds.Meta.Silences) {
 		key := [2]time.Time{s.From, s.To}
-		if s.Source != dataset.SourceBitbucket || s.UnseenRuns <= 0 || seen[key] {
+		if !s.Lost || seen[key] {
 			continue
 		}
 		seen[key] = true
-		a.lost = true
-		a.limits = append(a.limits, Limit{Source: SourceBitbucket, Kind: LimitSilence, From: s.From, To: ptr(s.To)})
+		// Still silent at the read: no end to name. Silent SilentDays at the
+		// period's end already, it is that gate's limit, said once.
+		to := ptr(s.To)
+		if s.Ongoing {
+			if a.gaps[dataset.SourceBitbucket] {
+				continue
+			}
+			to = nil
+		}
+		a.limits = append(a.limits, Limit{Source: dataset.SourceBitbucket, Kind: LimitSilence, From: s.From, To: to})
 	}
 	slices.SortStableFunc(a.limits, func(x, y Limit) int { return x.From.Compare(y.From) })
+}
+
+// baselined reports whether a team number resting on enough cases has a
+// verdict against the previous period: the period was compared. Each
+// number's own sample gate holds it (compare); two need one here: the
+// jammed repos are a count of whatever is open, and the deploy rate is
+// judged on releases of any number, 0 against 0 reading "same".
+func (a *assessor) baselined() bool {
+	return slices.ContainsFunc(a.team, func(t teamChange) bool {
+		if t.c.Verdict == ChangeNone || a.gaps[t.source] {
+			return false
+		}
+		switch t.metric {
+		case "open_jammed":
+			return false
+		case "deploy_frequency":
+			return min(a.m.Delivery.Frequency.Releases, a.pm.Delivery.Frequency.Releases) >= lowSample
+		}
+		return true
+	})
+}
+
+// notMeasurable is why the period's numbers do not exist, the first of
+// NotMeasurable* that applies; "" when they do. A period whose merged PRs
+// are all libraries' had nothing to trace: measurable.
+func (a *assessor) notMeasurable() string {
+	m := a.m
+	switch {
+	case m.Meta.DataStart.Bitbucket == nil:
+		return NotMeasurableBitbucket
+	case !m.Delivery.Frequency.ArgoReporting:
+		return NotMeasurableArgoCD
+	case m.Throughput.Merged == 0:
+		return NotMeasurableNoMerged
+	case m.Throughput.Coverage.ToProd.N == 0 || m.Throughput.Coverage.ToProd.Count > 0:
+		return ""
+	// Nothing new went out: a re-sync of what ran already carries no PR, an
+	// App's first deploy right after onboarding may (FirstSeen).
+	case m.Delivery.Frequency.Releases+m.Delivery.Frequency.FirstSeen == 0:
+		return NotMeasurableNoRelease
+	}
+	return NotMeasurableToProd
 }
 
 // quietReasons are why the period is not quiet, none when it is: every
@@ -525,7 +553,7 @@ func (a *assessor) gapSignals() {
 // page must not call a period with one unremarkable).
 func (a *assessor) quietReasons(out Assessment) []string {
 	reasons := []string{}
-	baseline := slices.ContainsFunc(out.Team, func(f Fact) bool { return f.Verdict != ChangeNone })
+	baseline := a.baselined()
 	starts, hole := false, false
 	for _, l := range a.limits {
 		switch {
@@ -543,13 +571,10 @@ func (a *assessor) quietReasons(out Assessment) []string {
 	if hole {
 		reasons = append(reasons, QuietSourceGap)
 	}
-	if a.m.Meta.DataStart.Bitbucket == nil || !a.m.Delivery.Frequency.ArgoReporting || out.Coverage.ToProd.Count == 0 {
+	if a.notMeasurable() != "" {
 		reasons = append(reasons, QuietNotMeasurable)
 	}
-	findings := out.Question != nil || slices.ContainsFunc(out.Signals, func(s Signal) bool {
-		// A hint on fewer than lowSample cases is no finding.
-		return s.Tone != ToneGate && (s.Tone != ToneHint || !s.LowSample)
-	})
+	findings := out.Question != nil || slices.ContainsFunc(out.Signals, func(s Signal) bool { return s.Tone != ToneGate })
 	if findings {
 		reasons = append(reasons, QuietFindings)
 	}
@@ -603,7 +628,7 @@ func (a *assessor) jamSignals() {
 		}
 		w2 := r.LongWaiting
 		a.add(Signal{
-			ID: id, Kind: SignalPRJam, Tone: tone, Source: SourceBitbucket, Repo: ptr(r.Repo), Weight: w,
+			ID: id, Kind: SignalPRJam, Tone: tone, Source: dataset.SourceBitbucket, Repo: ptr(r.Repo), Weight: w,
 			Facts: []Fact{long, plain(id+".open", "open", UnitCount, f64(r.Open)),
 				plain(id+".age", "age_p50", UnitSeconds, r.Age.P50)},
 			Waiting: &w2,
@@ -621,7 +646,7 @@ func (a *assessor) buildSignals() {
 			if h.Slow {
 				id := "slower_build:" + kind + ":" + h.Repo
 				a.add(Signal{
-					ID: id, Kind: SignalSlower, Tone: ToneAttention, Source: SourcePipeline, Repo: ptr(h.Repo),
+					ID: id, Kind: SignalSlower, Tone: ToneAttention, Source: dataset.SourcePipeline, Repo: ptr(h.Repo),
 					RunKind: ptr(kind), Weight: 3,
 					Facts: []Fact{fact(id+".p50", "build_p50", UnitSeconds, h.Duration.P50, h.DurationChange),
 						plain(id+".wait", "build_wait_p50", UnitSeconds, h.Waiting.P50),
@@ -633,7 +658,7 @@ func (a *assessor) buildSignals() {
 			}
 			id := SignalFailingMore + ":" + kind + ":" + h.Repo
 			a.add(Signal{
-				ID: id, Kind: SignalFailingMore, Tone: ToneAttention, Source: SourcePipeline, Repo: ptr(h.Repo),
+				ID: id, Kind: SignalFailingMore, Tone: ToneAttention, Source: dataset.SourcePipeline, Repo: ptr(h.Repo),
 				RunKind: ptr(kind), Weight: 3,
 				Facts: []Fact{fact(id+".failure_rate", "failure_rate", UnitShare, h.FailureRate, h.FailureChange),
 					plain(id+".wasted", "wasted", UnitSeconds, ptr(h.WastedSeconds)),
@@ -651,7 +676,7 @@ func (a *assessor) buildSignals() {
 		}
 		id := "agent_wait:" + b.Kind
 		a.add(Signal{
-			ID: id, Kind: SignalAgentWait, Tone: ToneHint, Source: SourcePipeline, RunKind: ptr(b.Kind),
+			ID: id, Kind: SignalAgentWait, Tone: ToneHint, Source: dataset.SourcePipeline, RunKind: ptr(b.Kind),
 			Weight: 2,
 			Facts: []Fact{plain(id+".wait", "build_wait_p50", UnitSeconds, b.Waiting.P50),
 				plain(id+".p50", "build_p50", UnitSeconds, b.Duration.P50)},
@@ -694,9 +719,16 @@ var bitbucketCounted = map[string]bool{
 }
 
 // unlost is c, or no verdict for a number of Bitbucket's when its events
-// were lost (lost).
+// were lost (lost); in a product view also for the deploy and build
+// numbers, which reach a product through Bitbucket's commits. As compare
+// does for the page, and for the numbers only the assessment has.
 func (a *assessor) unlost(metric string, c Change) Change {
-	if !a.lost || !bitbucketCounted[metric] {
+	if !a.lost {
+		return c
+	}
+	product := a.f.product != "" && (metric == "deploy_frequency" || metric == "deploy_success" ||
+		strings.HasPrefix(metric, "build_success:"))
+	if !bitbucketCounted[metric] && !product {
 		return c
 	}
 	return Change{Verdict: ChangeNone, Reason: ptr(ReasonIncomplete), Directed: c.Directed}
@@ -705,17 +737,17 @@ func (a *assessor) unlost(metric string, c Change) Change {
 func (a *assessor) teamChanges() []teamChange {
 	m, c := a.m, a.m.Comparison
 	out := []teamChange{
-		{"deploy_frequency", "deploy_per_week", UnitPerWeek, SourceArgoCD, ptr(m.Delivery.Frequency.PerWeek), c.DeployFreq},
-		{"deploy_success", "deploy_success", UnitShare, SourceArgoCD, m.Delivery.Frequency.SuccessRate, c.DeploySuccess},
-		{"lead_time", "lead_time_p50", UnitSeconds, SourceArgoCD, m.Delivery.LeadTime.Human.P50, c.LeadTime},
-		{"review_time", "review_p50", UnitSeconds, SourceBitbucket, m.Review.Review.P50, c.ReviewTime},
-		{"within_day", "within_day", UnitShare, SourceBitbucket, m.Review.WithinDay.Rate, c.WithinDay},
-		{"open_jammed", "jammed_repos", UnitCount, SourceBitbucket, f64(m.OpenPRs.Jammed), c.OpenJammed},
+		{"deploy_frequency", "deploy_per_week", UnitPerWeek, dataset.SourceArgoCD, ptr(m.Delivery.Frequency.PerWeek), c.DeployFreq},
+		{"deploy_success", "deploy_success", UnitShare, dataset.SourceArgoCD, m.Delivery.Frequency.SuccessRate, c.DeploySuccess},
+		{"lead_time", "lead_time_p50", UnitSeconds, dataset.SourceArgoCD, m.Delivery.LeadTime.Human.P50, c.LeadTime},
+		{"review_time", "review_p50", UnitSeconds, dataset.SourceBitbucket, m.Review.Review.P50, c.ReviewTime},
+		{"within_day", "within_day", UnitShare, dataset.SourceBitbucket, m.Review.WithinDay.Rate, c.WithinDay},
+		{"open_jammed", "jammed_repos", UnitCount, dataset.SourceBitbucket, f64(m.OpenPRs.Jammed), c.OpenJammed},
 	}
 	for _, b := range m.Build.Kinds {
 		for _, kc := range c.Build {
 			if kc.Kind == b.Kind {
-				out = append(out, teamChange{"build_success:" + b.Kind, "build_success", UnitShare, SourcePipeline,
+				out = append(out, teamChange{"build_success:" + b.Kind, "build_success", UnitShare, dataset.SourcePipeline,
 					b.SuccessRate, kc.Success})
 			}
 		}
@@ -724,10 +756,10 @@ func (a *assessor) teamChanges() []teamChange {
 	// Flow numbers: throughput, work in progress against it.
 	merged, pmerged := a.m.Throughput.MergedPerWeek, a.pm.Throughput.MergedPerWeek
 	ok, pok := a.m.Review.Merged >= lowSample, a.pm.Review.Merged >= lowSample
-	out = append(out, teamChange{"merged_per_week", "merged_per_week", UnitPerWeek, SourceBitbucket, merged, c.MergedPerWeek})
-	out = append(out, teamChange{"batch_size", "batch_size", UnitCount, SourceNoergler, m.Throughput.BatchSize.P50, c.BatchSize})
+	out = append(out, teamChange{"merged_per_week", "merged_per_week", UnitPerWeek, dataset.SourceBitbucket, merged, c.MergedPerWeek})
+	out = append(out, teamChange{"batch_size", "batch_size", UnitCount, dataset.SourceNoergler, m.Throughput.BatchSize.P50, c.BatchSize})
 	wip, pwip := wipWeeks(a.m, merged), wipWeeks(a.pm, pmerged)
-	out = append(out, teamChange{"wip_weeks", "wip_weeks", UnitWeeks, SourceBitbucket, wip,
+	out = append(out, teamChange{"wip_weeks", "wip_weeks", UnitWeeks, dataset.SourceBitbucket, wip,
 		wipWeeksMetric.judge(side{wip, ok}, side{pwip, pok}, bb)})
 	for i := range out {
 		out[i].c = a.unlost(out[i].metric, out[i].c)
@@ -898,11 +930,11 @@ func (a *assessor) resolvedSignals() {
 			if long > JamResolvedMax {
 				continue
 			}
-			s.Source, s.Repo = SourceBitbucket, ptr(rest)
+			s.Source, s.Repo = dataset.SourceBitbucket, ptr(rest)
 			s.Facts = []Fact{plain(s.ID+".long", "open_long", UnitCount, f64(long))}
 		case SignalFailingMore, SignalSlower:
 			runKind, repo, _ := strings.Cut(rest, ":")
-			s.Source, s.Repo, s.RunKind = SourcePipeline, ptr(repo), ptr(runKind)
+			s.Source, s.Repo, s.RunKind = dataset.SourcePipeline, ptr(repo), ptr(runKind)
 			for _, k := range a.m.Build.Hotspots.Kinds {
 				if k.Kind != runKind {
 					continue
@@ -978,14 +1010,14 @@ func (a *assessor) question() *Signal {
 	}
 	bb := before(m.Meta.DataStart.Bitbucket, a.p.Previous.From)
 	cands := []teamChange{
-		{"feature_share", "feature_share", UnitShare, SourceBitbucket, feature,
+		{"feature_share", "feature_share", UnitShare, dataset.SourceBitbucket, feature,
 			caseGate(featureShareMetric.judge(side{feature, mixN(m) >= lowSample}, side{pfeature, mixN(a.pm) >= lowSample}, bb),
 				feature, pfeature, mixN(m), mixN(a.pm))},
-		{"untracked", "untracked", UnitShare, SourceBitbucket, m.Review.UntrackedRate, c.Untracked},
-		{"wasted_share", "wasted_share", UnitShare, SourceNoergler, m.Costs.WastedShare, c.WastedShare},
-		{"cost_per_kloc", "cost_per_kloc", UnitUSD, SourceNoergler, m.Costs.PerKloc, c.CostPerKloc},
-		{"open_prs", "open_prs", UnitCount, SourceBitbucket, f64(m.OpenPRs.Open), c.OpenPRs},
-		{"first_touch", "first_touch", UnitShare, SourceBitbucket, m.Review.FirstTouchRate, c.FirstTouch},
+		{"untracked", "untracked", UnitShare, dataset.SourceBitbucket, m.Review.UntrackedRate, c.Untracked},
+		{"wasted_share", "wasted_share", UnitShare, dataset.SourceNoergler, m.Costs.WastedShare, c.WastedShare},
+		{"cost_per_kloc", "cost_per_kloc", UnitUSD, dataset.SourceNoergler, m.Costs.PerKloc, c.CostPerKloc},
+		{"open_prs", "open_prs", UnitCount, dataset.SourceBitbucket, f64(m.OpenPRs.Open), c.OpenPRs},
+		{"first_touch", "first_touch", UnitShare, dataset.SourceBitbucket, m.Review.FirstTouchRate, c.FirstTouch},
 	}
 	for _, t := range cands {
 		t.c = a.unlost(t.metric, t.c)
@@ -1079,26 +1111,31 @@ func (a *assessor) focus(out *Assessment) []FocusRepo {
 
 // judgeable reports whether a repo rule had the data to raise something
 // on repo: a build kind of it compared with the previous period (the
-// hotspots' HotspotMinRuns in both), OpenJamMin open PRs or more at the
-// period's end (a jam could be there), or lowSample merged PRs in both
-// periods (a review worsening could name it a driver). A repo with less is
-// no repo without a finding, only one riptide cannot judge.
+// hotspots' HotspotMinRuns in both), or lowSample merged PRs in both
+// periods (a review worsening could name it a driver), the latter only
+// while Bitbucket's events are whole (lost). Open PRs judge nothing: a
+// repo with many open, held by a merge freeze riptide cannot see, read as
+// one without a finding beside a jam. A repo with less is no repo without
+// a finding, only one riptide cannot judge.
 func (a *assessor) judgeable(repo string, merged, pmerged int) bool {
 	for _, k := range a.m.Build.Hotspots.Kinds {
 		if slices.ContainsFunc(k.all, func(h RepoHotspot) bool { return h.Repo == repo && h.Compared }) {
 			return true
 		}
 	}
-	if slices.ContainsFunc(a.m.OpenPRs.all, func(r OpenRepo) bool { return r.Repo == repo && r.Open >= OpenJamMin }) {
-		return true
-	}
-	return merged >= lowSample && pmerged >= lowSample
+	return !a.lost && merged >= lowSample && pmerged >= lowSample
 }
 
-// activeRepos are the repos with a merged PR, a build or an open PR in
-// the period, in the product, and each one's merged PRs. An open PR
-// inactive for OpenInactiveDays makes no repo active: it counts in no
-// number but its own.
+// activeRepos are the repos with people's work in the period, in the
+// product, and each one's merged PRs: a PR merged as merged work, an open
+// PR, a build of a person's branch (bots' runs are in no build number). A
+// repo whose only merge was housekeeping or an umbrella, or whose only
+// builds were a bot's, had nothing by people: not active. It counts as
+// idle only when it was active in the previous period; else it is in no
+// count of the panel at all. An open PR inactive
+// for OpenInactiveDays makes no repo active: it counts in no number but
+// its own. A pipeline whose name named no repository is none: its runs
+// count by the pipeline's head, which is no repo.
 func activeRepos(ds *dataset.Dataset, p Period, m Metrics, f filter) (map[string]bool, map[string]int) {
 	out, merged := map[string]bool{}, map[string]int{}
 	for _, pr := range mergedPRs(ds, p, f) {
@@ -1110,7 +1147,9 @@ func activeRepos(ds *dataset.Dataset, p Period, m Metrics, f filter) (map[string
 	}
 	for _, repos := range m.Build.repos {
 		for repo := range repos {
-			out[repo] = true
+			if strings.Contains(repo, "/") {
+				out[repo] = true
+			}
 		}
 	}
 	return out, merged

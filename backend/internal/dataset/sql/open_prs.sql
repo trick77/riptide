@@ -39,12 +39,16 @@ pr_events AS MATERIALIZED (
   SELECT e.id, e.repo_full_name, e.pr_id, e.event_type, e.occurred_at, e.author, e.author_display_name,
          e.is_automated, e.change_type, e.jira_keys,
          e.occurred_at < $2 AS before,
-         upper(e.payload->'pullRequest'->>'state') AS state,
-         coalesce(e.payload->'pullRequest'->>'draft', 'false') = 'true' AS draft,
-         e.payload->'pullRequest'->>'createdDate' AS created_ms,
+         upper(x.pr->>'state') AS state,
+         coalesce(x.pr->>'draft', 'false') = 'true' AS draft,
+         x.pr->>'createdDate' AS created_ms,
          EXISTS (SELECT 1 FROM non_human_identities n
                   WHERE n.handle IN (lower(e.author), lower(e.author_display_name))) AS declared_non_human
   FROM bitbucket_events e
+  -- The PR object out of the payload once per event, not once per field:
+  -- the payload is stored out of line, each read fetches and unpacks it.
+  -- OFFSET 0 keeps the planner from folding it back into each field.
+  CROSS JOIN LATERAL (SELECT e.payload->'pullRequest' AS pr OFFSET 0) x
   WHERE e.team = $1
     AND e.event_type LIKE 'pr:%'
     AND e.pr_id IS NOT NULL AND e.repo_full_name IS NOT NULL

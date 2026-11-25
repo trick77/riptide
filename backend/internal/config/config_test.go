@@ -178,24 +178,66 @@ func TestDetectAutomationSource(t *testing.T) {
 		{"bot-shaped display name", "svc01", "release-bot", "", false, "other-bot"},
 		{"human display name", "alice", "Alice Example", "feature/x", false, ""},
 		{"nothing at all", "", "", "", false, ""},
-		// A source of two words matches them in a row only.
-		{"two-word source", "x", "Code Scan Kasse", "", false, "code-scan"},
-		{"two-word source apart", "x", "Scan Code", "", false, ""},
-		// A dependency bot run as an ordinary user, named after its tool and
-		// team: caught on a push to the trunk too, where no branch prefix is.
-		{"source named in the login", "renovate_kasse", "", "", false, "renovate"},
-		{"source named in the display name", "u4712", "Dependabot Kasse", "", false, "dependabot"},
-		{"source name between other words", "svc.renovate.kasse2", "", "master", false, "renovate"},
-		{"service flag beats a named source", "renovate_kasse", "", "", true, "service-account"},
-		// The letters inside a longer word are no name.
-		{"letters in a longer word", "renovates", "Inga Renovatebaum", "", false, ""},
-		{"letters in a person's name", "anoerglern", "Anna Dependabotsky", "", false, ""},
+		// The name rule is read's only: ingest writes what it wrote before.
+		{"source named in the login, at ingest", "renovate_kasse", "", "", false, ""},
+		{"two-word source, at ingest", "x", "Code Scan Kasse", "", false, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := c.DetectAutomationSource(tc.author, tc.display, tc.branch, tc.service); got != tc.want {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// On read, a source's name as a whole word of a login or display name is
+// automation too; the ingest rules still are.
+func TestAutomatedAtRead(t *testing.T) {
+	c := mustParse(t, validConfig)
+	c.Automation = append(c.Automation, AutomationSource{Name: "code-scan"})
+	for _, tc := range []struct {
+		name, author, display string
+		want                  bool
+	}{
+		{"configured author", "renovate-bot", "", true},
+		{"bot shape", "some-bot", "", true},
+		{"human", "alice", "Alice Example", false},
+		// A source of two words matches them in a row only.
+		{"two-word source", "x", "Code Scan Kasse", true},
+		{"two-word source apart", "x", "Scan Code", false},
+		// A dependency bot run as an ordinary user, named after its tool and
+		// team: caught on a push to the trunk too, where no branch prefix is.
+		{"source named in the login", "renovate_kasse", "", true},
+		{"source named in the display name", "u4712", "Dependabot Kasse", true},
+		{"source name between other words", "svc.renovate.kasse2", "", true},
+		// The letters inside a longer word are no name.
+		{"letters in a longer word", "renovates", "Inga Renovatebaum", false},
+		{"letters in a person's name", "anoerglern", "Anna Dependabotsky", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := c.AutomatedAtRead(tc.author, tc.display); got != tc.want {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A source name of fewer than four letters would catch every person with
+// that word in a name: named at load, kept.
+func TestShortSourceNames(t *testing.T) {
+	c := mustParse(t, `{"automation": {"renovate": {"authors": ["renovate-bot"]}, "ci": {}, "x-1": {}, "snyk": {}}}`)
+	if got := c.ShortSourceNames(); !reflect.DeepEqual(got, []string{"ci", "x-1"}) {
+		t.Errorf("short = %v", got)
+	}
+}
+
+// Bot branches by the configured prefixes, lowercased.
+func TestBotBranch(t *testing.T) {
+	c := mustParse(t, validConfig)
+	for branch, want := range map[string]bool{"renovate/lib-2": true, "feature/renovate": false, "": false} {
+		if got := c.BotBranch(branch); got != want {
+			t.Errorf("%q = %v, want %v", branch, got, want)
+		}
 	}
 }
 
@@ -377,6 +419,26 @@ func TestLoadFailures(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "team_keys_extra_entries") || !strings.Contains(logs.String(), "ghost") {
 		t.Errorf("extra keys not warned: %s", logs.String())
+	}
+}
+
+// A source name too short to tell a bot by is warned of, at load and on a
+// reload alike; the config stays live.
+func TestShortSourceNameWarned(t *testing.T) {
+	rt, cfgPath, _, logs := newRuntime(t)
+	if strings.Contains(logs.String(), "automation_source_name_short") {
+		t.Fatalf("valid config warned: %s", logs.String())
+	}
+	short := strings.Replace(validConfig, `"automation": {`, `"automation": {"ci": {"authors": ["ci-1"]},`, 1)
+	write(t, cfgPath, short)
+	rt.Reload()
+	if !strings.Contains(logs.String(), "automation_source_name_short") || len(rt.Config().Automation) != 4 {
+		t.Errorf("reload: %s", logs.String())
+	}
+	logs = &logCapture{}
+	if _, err := Load(cfgPath, filepath.Join(filepath.Dir(cfgPath), "team-keys.json"),
+		slog.New(slog.NewJSONHandler(logs, nil))); err != nil || !strings.Contains(logs.String(), `"ci"`) {
+		t.Errorf("load: %v %s", err, logs.String())
 	}
 }
 

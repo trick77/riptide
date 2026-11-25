@@ -176,9 +176,10 @@ export function Strip({ m }: { m: Metrics }) {
                 data-testid="strip-row"
                 className={`${GRID} rounded-[4px] ${stripe}`}
               >
+                {/* A long label wraps rather than being cut: "Erfolgsquote,
+                    Default-Branch, Art unbekannt" read as cut off. */}
                 <span
-                  title={row.label}
-                  className={`min-w-0 self-center px-2 pt-1.5 text-[12.5px] leading-tight sm:truncate sm:py-1 sm:pr-0 ${s == null ? "text-faint" : "text-ink-dim"}`}
+                  className={`min-w-0 self-center px-2 pt-1.5 text-[12.5px] leading-tight break-words sm:py-1 sm:pr-0 ${s == null ? "text-faint" : "text-ink-dim"}`}
                 >
                   {row.label}
                 </span>
