@@ -197,7 +197,12 @@ const lowSample = change("none", null, "low_sample");
 export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
   const w = weeks(n);
   const zeroWeeks = <T>(v: T) => w.map(() => ({ ...v }));
-  const deployWeeks = zeroWeeks({ release: 0, sync: 0, first_seen: 0 });
+  const deployWeeks = zeroWeeks({
+    release: 0,
+    first_release: 0,
+    sync: 0,
+    first_seen: 0,
+  });
   if (n >= 3) {
     deployWeeks[n - 3].first_seen = 1;
     deployWeeks[n - 2].sync = 1;
@@ -245,6 +250,8 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       },
       build_data_from: ago(60),
       build_type_from: ago(10),
+      silences: [],
+      repo_starts: [],
     },
     period: {
       from: w[0].start,
@@ -266,6 +273,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       pre_environment: "intg",
       frequency: {
         releases: 1,
+        first_releases: 0,
         syncs: 3,
         first_seen: 1,
         resyncs: 1,
@@ -282,6 +290,9 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
         days,
         no_data_days: 3,
         weekdays,
+        unattributed: 0,
+        infra: 0,
+        infra_apps: [],
       },
       lead_time: {
         environment: "prod",
@@ -332,6 +343,15 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
     throughput: {
       merged: 1,
       merged_per_week: 0.8,
+      since: null,
+      off_trunk: 0,
+      implicit_merges: 0,
+      housekeeping: 0,
+      coverage: {
+        to_prod: { count: 1, n: 1, rate: 1 },
+        sized: { count: 1, n: 1, rate: 1 },
+        opened: { count: 1, n: 1, rate: 1 },
+      },
       batch_size: spread(1, 140),
       batch_files: spread(1, 6),
       weeks: w.map((_, i) => ({
@@ -344,6 +364,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       data_from: ago(60),
       starts_inside: false,
       gap_weeks: 0,
+      unattributed: 0,
       // the backend's order: feature first
       kinds: [
         kindStats("feature", 1, 0, n),
@@ -433,6 +454,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       jammed: 1,
       jammed_long: 3,
       inactive: 1,
+      unknown: 0,
       age: { n: 3, p50: 9 * 86400, p90: 28 * 86400 },
       waiting: { draft: 0, first_review: 3, review: 0, changes: 0, merge: 1 },
       long_waiting: {
@@ -591,6 +613,7 @@ export function prFact(o: Partial<PRFact> = {}): PRFact {
     gitops: false,
     change_type: "feature",
     state: "merged",
+    not_counted: null,
     review_s: 0.1 * 86400,
     cycle_s: 0.2 * 86400,
     merged_at: ago(1.8),
@@ -613,6 +636,8 @@ export function deployFact(o: Partial<DeployFact> = {}): DeployFact {
     new_images: ["reg/kasse-api:1.1"],
     class: "release",
     phase: "Succeeded",
+    first_deploy: false,
+    infra: false,
     running: false,
     ...o,
   };
@@ -753,8 +778,6 @@ function signal(o: Partial<Signal> & Pick<Signal, "id" | "kind">): Signal {
     repo: null,
     run_kind: null,
     metric: null,
-    stage: null,
-    prev_stage: null,
     low_sample: false,
     sample: null,
     weight: 1,
@@ -767,9 +790,12 @@ function signal(o: Partial<Signal> & Pick<Signal, "id" | "kind">): Signal {
 }
 
 // The assessment of the sample team's closed weeks: a jam that was there
-// before, a steady slow feature build, a review time that doubled through
-// one repo, deploys notably more often, a build failing more resolved, forgotten
-// PRs no wording covers, and Argo CD silent.
+// before, a feature build that got slower, a review time that doubled
+// through one repo, PRs merged notably more often, a build failing more
+// resolved, feature builds waiting for agents no wording covers, a question,
+// and Argo CD silent at the end. As the backend sends it: the gate is a
+// silent_end limit and a source_gap, the question counts in the tally, a
+// resolution has no next step, repos = active + idle.
 export function assessment(): Assessment {
   const w = weeks(4);
   const jam = signal({
@@ -787,26 +813,21 @@ export function assessment(): Assessment {
     waiting: { draft: 0, first_review: 4, review: 0, changes: 1, merge: 0 },
   });
   const slow = signal({
-    id: "steady_slow:feature:kasse/kasse-web",
-    kind: "steady_slow",
+    id: "slower_build:feature:kasse/kasse-web",
+    kind: "slower_build",
+    tone: "attention",
     source: "pipeline",
     repo: "kasse/kasse-web",
     run_kind: "feature",
     weight: 3,
     facts: [
       fact(
-        "steady_slow:feature:kasse/kasse-web.p50",
+        "slower_build:feature:kasse/kasse-web.p50",
         "build_p50",
         "seconds",
         1440,
-        1380,
-        "same",
-      ),
-      fact(
-        "steady_slow:feature:kasse/kasse-web.kind_p50",
-        "kind_p50",
-        "seconds",
-        480,
+        900,
+        "worse",
       ),
     ],
   });
@@ -821,7 +842,7 @@ export function assessment(): Assessment {
         tone: "gate",
         source: "argocd",
         weight: 10,
-        facts: [fact("data_gap_argocd.silent", "silent_days", "days", 6)],
+        facts: [fact("data_gap_argocd.silent", "silent_days", "days", 9)],
       }),
       jam,
       signal({
@@ -883,9 +904,14 @@ export function assessment(): Assessment {
         ],
       }),
       signal({
-        id: "inactive_prs",
-        kind: "inactive_prs",
-        facts: [fact("inactive_prs.count", "inactive", "count", 4)],
+        id: "agent_wait:feature",
+        kind: "agent_wait",
+        source: "pipeline",
+        run_kind: "feature",
+        facts: [
+          fact("agent_wait:feature.wait", "build_wait_p50", "seconds", 300),
+          fact("agent_wait:feature.work", "build_work_p50", "seconds", 240),
+        ],
       }),
     ],
     focus: [
@@ -907,8 +933,20 @@ export function assessment(): Assessment {
       },
     ],
     active: 11,
-    calm: 9,
-    team: [],
+    calm: 8,
+    unjudged: 1,
+    idle: 1,
+    repos: 12,
+    team: [
+      fact(
+        "team.merged_per_week",
+        "merged_per_week",
+        "per_week",
+        11,
+        8.4,
+        "better",
+      ),
+    ],
     question: signal({
       id: "question:first_touch",
       kind: "question",
@@ -917,6 +955,21 @@ export function assessment(): Assessment {
       facts: [fact("question:first_touch.value", "first_touch", "share", 0.64)],
     }),
     compared: true,
+    quiet: false,
+    quiet_reasons: ["source_gap", "findings"],
+    limits: [
+      {
+        source: "argocd",
+        kind: "silent_end",
+        from: "2026-11-06T14:00:00Z",
+        to: w[3].end,
+      },
+    ],
+    coverage: {
+      to_prod: { count: 9, n: 12, rate: 0.75 },
+      sized: { count: 10, n: 12, rate: 10 / 12 },
+      opened: { count: 12, n: 12, rate: 1 },
+    },
   };
 }
 
@@ -934,7 +987,7 @@ export function analysisText(): AnalysisText {
       },
       {
         repo: "kasse/kasse-web",
-        take: "Konstant der langsamste Build mit {{steady_slow:feature:kasse/kasse-web.p50}}.",
+        take: "Der Feature-Build braucht jetzt {{slower_build:feature:kasse/kasse-web.p50}}.",
         retro: null,
         lever: "inspect_build_log",
       },
@@ -956,7 +1009,7 @@ export function analysisText(): AnalysisText {
         signal: "resolved:failing_more:feature:kasse/policy",
         take: "Die Fehlerquote ist zurück.",
         retro: null,
-        lever: "name_what_helped",
+        lever: "",
       },
     ],
     question: "Passt das zu unserer Art zu reviewen?",
@@ -972,6 +1025,7 @@ export function analysisStatus(
     state: "off",
     enabled: false,
     running: false,
+    outdated: false,
     assessment: assessment(),
     // As the backend lays out assessment() without an analysis: both focus
     // repos (their signals covered), the team-wide signals left as cards.
@@ -989,12 +1043,16 @@ export function analysisStatus(
         {
           signal: "resolved:failing_more:feature:kasse/policy",
           column: "done",
-          lever: "name_what_helped",
+          lever: "",
         },
-        { signal: "inactive_prs", column: "bad", lever: "tidy_up" },
+        {
+          signal: "agent_wait:feature",
+          column: "bad",
+          lever: "platform_agents",
+        },
       ],
       also: [],
-      tally: { good: 1, done: 1, bad: 4, baseline: true },
+      tally: { good: 1, done: 1, bad: 4, talk: 1, baseline: true },
     },
     analysis: null,
     failure: null,
@@ -1014,8 +1072,8 @@ export function analysedStatus(
     state: "fresh",
     enabled: true,
     next_run: "2026-11-16T05:00:00Z",
-    // As the backend lays out analysisText(): what it words, the forgotten
-    // PRs spotted without words.
+    // As the backend lays out analysisText(): what it words, the agent wait
+    // spotted without words.
     layout: {
       focus: [
         { repo: "kasse/kasse-api", lever: "walk_prs", tab: "prs" },
@@ -1035,11 +1093,17 @@ export function analysedStatus(
         {
           signal: "resolved:failing_more:feature:kasse/policy",
           column: "done",
-          lever: "name_what_helped",
+          lever: "",
         },
       ],
-      also: [{ signal: "inactive_prs", column: "bad", lever: "tidy_up" }],
-      tally: { good: 1, done: 1, bad: 4, baseline: true },
+      also: [
+        {
+          signal: "agent_wait:feature",
+          column: "bad",
+          lever: "platform_agents",
+        },
+      ],
+      tally: { good: 1, done: 1, bad: 4, talk: 1, baseline: true },
     },
     analysis: {
       id: 7,

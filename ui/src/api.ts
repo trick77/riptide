@@ -19,6 +19,21 @@ export type Meta = {
   data_end: SourceTimes;
   build_data_from: string | null;
   build_type_from: string | null;
+  // Spans of two working days or more in which one source stored nothing
+  // while another did, oldest first. Only Bitbucket's unseen_runs tells
+  // lost events from a pause.
+  silences: Silence[];
+  // The AI reviewer's first event per repository; empty for the facts read.
+  repo_starts: { repo: string; noergler: string | null }[];
+};
+
+export type Source = "bitbucket" | "pipeline" | "argocd" | "noergler";
+
+export type Silence = {
+  source: Source;
+  from: string;
+  to: string;
+  unseen_runs: number;
 };
 
 export type Product = { key: string; repos: string[]; apps: string[] };
@@ -35,11 +50,21 @@ export type Period = {
 
 export type Spread = { n: number; p50: number | null; p90: number | null };
 
-export type DeployWeek = { release: number; sync: number; first_seen: number };
+export type DeployWeek = {
+  release: number;
+  // Of release, an App's first deploy.
+  first_release: number;
+  sync: number;
+  first_seen: number;
+};
 
+// Infrastructure Apps are in none of the numbers but infra and infra_apps.
 export type DeployFrequency = {
   releases: number;
+  // Of releases, an App's first deploy past the onboarding's grace.
+  first_releases: number;
   syncs: number;
+  // First deploys within the onboarding's grace: release or re-sync unknown.
   first_seen: number;
   resyncs: number;
   per_week: number;
@@ -57,6 +82,11 @@ export type DeployFrequency = {
   no_data_days: number;
   // Releases per weekday over the days with data, Monday first.
   weekdays: DeployWeekday[];
+  // Team-wide in every view: successful deploys without a product,
+  // infrastructure Apps aside; and those of infrastructure Apps.
+  unattributed: number;
+  infra: number;
+  infra_apps: string[];
 };
 
 export type DeployWeekday = {
@@ -315,6 +345,8 @@ export type Build = {
   data_from: string | null;
   starts_inside: boolean;
   gap_weeks: number;
+  // Team-wide: runs with a status and no repository, in no product's numbers.
+  unattributed: number;
   kinds: BuildStats[];
   ci_flow: CIFlow;
   // Set when feature builds look unrecognised: other runs on branches that
@@ -367,6 +399,9 @@ export type OpenPRs = {
   jammed: number;
   jammed_long: number;
   inactive: number;
+  // PRs whose close may have been lost with Bitbucket's events: in no other
+  // count.
+  unknown: number;
   age: Spread;
   waiting: WaitingCounts;
   long_waiting: WaitingCounts;
@@ -389,8 +424,9 @@ export type Change = {
   // -1..1, positive better: log2(now / previous), negated where lower is
   // better, clamped at halving / doubling; null without a verdict.
   score: number | null;
-  // How far it moved: notable past 25 % (5 points for a share; a count
-  // damped and moved by at least 2).
+  // How far it moved, better and worse alike: notable past 25 % (5 points
+  // for a share; a count damped and moved by at least 2; few cases or
+  // releases gated as the backend's caseGate and releaseGate).
   magnitude: "same" | "minor" | "notable" | null;
 };
 
@@ -432,10 +468,21 @@ export type Comparison = {
 export type Throughput = {
   merged: number;
   merged_per_week: number | null;
+  // When Bitbucket's data starts inside the period; per week is since then.
+  since: string | null;
+  // People's merged PRs left out of every PR number, by first reason.
+  off_trunk: number;
+  implicit_merges: number;
+  housekeeping: number;
+  coverage: PRCoverage;
   batch_size: Spread;
   batch_files: Spread;
   weeks: { merged: number; sized: number; batch_p50: number | null }[];
 };
+
+// Of the people's merged PRs (n each), those a number can read: traced to
+// production, with a size, seen opened.
+export type PRCoverage = { to_prod: Share; sized: Share; opened: Share };
 
 export type Metrics = {
   meta: Meta;
@@ -482,7 +529,10 @@ export type PRFact = {
   jira_more: number;
   gitops: boolean;
   change_type: string | null;
-  state: "open" | "merged" | "declined" | "deleted";
+  // unknown: open at the end, its close maybe lost with Bitbucket's events.
+  state: "open" | "merged" | "declined" | "deleted" | "unknown";
+  // Why a merged PR is in no PR number; null when it counts.
+  not_counted: "off_trunk" | "implicit_merge" | "housekeeping" | null;
   review_s: number | null;
   cycle_s: number | null;
   merged_at: string | null;
@@ -504,6 +554,10 @@ export type DeployFact = {
   new_images: string[];
   class: "failed" | "release" | "first_seen" | "sync";
   phase: string;
+  // The App's first known deploy, whether a release or first_seen.
+  first_deploy: boolean;
+  // An infrastructure App's deploy: listed, counted nowhere.
+  infra: boolean;
   // Synced in the running week: counted in no number.
   running: boolean;
 };
@@ -633,17 +687,10 @@ export type Fact = {
 export type SignalKind =
   | "data_gap"
   | "pr_jam"
-  | "slow_stage"
   | "slower_build"
-  | "steady_slow"
   | "failing_more"
   | "change"
-  | "bottleneck_moved"
-  | "throughput_instability"
   | "agent_wait"
-  | "shared_stall"
-  | "inactive_prs"
-  | "resync_share"
   | "resolved"
   | "question";
 
@@ -664,10 +711,8 @@ export type Signal = {
   repo: string | null;
   run_kind: RunKind | null;
   metric: string | null;
-  stage: StageKey | null;
-  prev_stage: StageKey | null;
   low_sample: boolean;
-  // The cases it rests on, where counted (a stage's PRs).
+  // The cases it rests on, where counted.
   sample: number | null;
   weight: number;
   seen: number;
@@ -703,12 +748,38 @@ export type Assessment = {
   gaps: string[];
   signals: Signal[];
   focus: FocusRepo[];
+  // Active repos: calm (judged, no signal), unjudged (too little data) and
+  // those with a signal; idle were active in the previous period only;
+  // repos = active + idle.
   active: number;
   calm: number;
+  unjudged: number;
+  idle: number;
+  repos: number;
   team: Fact[];
+  // Null unless an undirected number moved notably.
   question: Signal | null;
   // An assessment of the view for an earlier week was there.
   compared: boolean;
+  // Nothing stands out and the period could be measured and compared: the
+  // one case the page says so. Else the reasons, most important first.
+  quiet: boolean;
+  quiet_reasons: QuietReason[];
+  limits: Limit[];
+  coverage: PRCoverage;
+};
+
+export type QuietReason =
+  "no_baseline" | "source_gap" | "not_measurable" | "findings";
+
+// A hole in a source's data the comparison crosses. from: the last event
+// before it (the first ever for starts); to: the first after a silence, the
+// period's end for silent_end, null for starts.
+export type Limit = {
+  source: Source;
+  kind: "silent_end" | "silence" | "starts";
+  from: string;
+  to: string | null;
 };
 
 export type FocusText = {
@@ -749,15 +820,23 @@ export type AnalysisStatus = {
   state: "fresh" | "older" | "none" | "off";
   enabled: boolean;
   running: boolean;
+  // The newest analysis was assessed under older rules: not shown, the
+  // assessment is the current rules' view; the page offers to assess again.
+  outdated: boolean;
   assessment: Assessment;
   // What the page shows where, chosen by the backend.
   layout: {
     focus: { repo: string; lever: string; tab: "prs" | "runs" }[];
     cards: LayoutCard[];
     also: LayoutCard[];
-    // The signals by column, gates aside: good or done above 0 lets the
-    // page say "runs", else "unremarkable".
-    tally: { good: number; done: number; bad: number; baseline: boolean };
+    // The signals by column, gates aside, and the question (talk, 0 or 1).
+    tally: {
+      good: number;
+      done: number;
+      bad: number;
+      talk: number;
+      baseline: boolean;
+    };
   };
   analysis: ShownAnalysis | null;
   failure: { at: string; detail: string } | null;

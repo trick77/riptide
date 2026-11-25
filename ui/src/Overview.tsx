@@ -37,6 +37,33 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
       (freq.low_sample ? t("overview.sinceLow") : "")
     : null;
   const lead = durParts(lt.human.p50);
+  // Team-wide counts the backend sends in every view. A product view counts
+  // no deploy without a product: when that is why it shows none, it says
+  // so. Infrastructure Apps count nowhere; the team view names how many.
+  const unattributed =
+    m.product && freq.unattributed > 0
+      ? t("overview.freq.unattributed", { count: freq.unattributed })
+      : null;
+  const infra =
+    !m.product && freq.infra > 0 ? (
+      <span title={freq.infra_apps.join(", ")}>
+        {t("overview.freq.infra", { count: freq.infra })}
+      </span>
+    ) : null;
+  const freqNote = (
+    freq.syncs
+      ? [t("overview.freq.note", { count: freq.releases }), unattributed, infra]
+      : freq.argo_reporting
+        ? [unattributed ?? t("overview.freq.noDeploys"), infra]
+        : [t("overview.freq.notReporting")]
+  )
+    .filter((x) => x != null)
+    .map((x, i) => (
+      <span key={i}>
+        {i > 0 && " · "}
+        {x}
+      </span>
+    ));
 
   const whys: Record<string, Why> = {
     freq: {
@@ -45,12 +72,16 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
       watch: t("overview.freq.watch"),
       lever: t("overview.freq.lever"),
       def: t("overview.freq.def", { prod }),
-      basis: t("overview.freq.basis", {
-        releases: t("common.releases", { count: freq.releases }),
-        resyncs: t("common.resyncs", { count: freq.resyncs }),
-        firstSeen: t("common.firstDeploys", { count: freq.first_seen }),
-        syncs: t("common.revisions", { count: freq.syncs }),
-      }),
+      basis:
+        t("overview.freq.basis", {
+          releases: t("common.releases", { count: freq.releases }),
+          resyncs: t("common.resyncs", { count: freq.resyncs }),
+          firstSeen: t("common.firstDeploys", { count: freq.first_seen }),
+          syncs: t("common.revisions", { count: freq.syncs }),
+        }) +
+        (freq.first_releases > 0
+          ? t("overview.freq.basisFirst", { count: freq.first_releases })
+          : ""),
       filters: [
         "operation_phase = Succeeded",
         `environment = ${prod}`,
@@ -61,7 +92,18 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
         (sinceNote ? `${sinceNote} ` : "") +
         (freq.first_seen > 0
           ? t("overview.freq.coverageFirst")
-          : t("overview.freq.coverageAll")),
+          : t("overview.freq.coverageAll")) +
+        (freq.infra > 0
+          ? t("overview.freq.coverageInfra", {
+              count: freq.infra,
+              apps: freq.infra_apps.join(", "),
+            })
+          : "") +
+        (freq.unattributed > 0
+          ? t("overview.freq.coverageUnattributed", {
+              count: freq.unattributed,
+            })
+          : ""),
       query: "docs/metrics.md · Deployment-frequency query",
     },
     lead: {
@@ -94,7 +136,7 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
         failed: freq.failed,
       }),
       filters: [
-        "operation_phase IN (Succeeded, Failed)",
+        "operation_phase IN (Succeeded, Failed, Error)",
         `environment = ${prod}`,
       ],
       coverage: t("overview.dsucc.coverage"),
@@ -122,13 +164,7 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
           question={t("overview.freq.question", { prod })}
           value={freq.syncs ? num(freq.per_week, 1) : "–"}
           unit={freq.syncs ? t("overview.freq.unit") : ""}
-          note={
-            freq.syncs
-              ? t("overview.freq.note", { count: freq.releases })
-              : freq.argo_reporting
-                ? t("overview.freq.noDeploys")
-                : t("overview.freq.notReporting")
-          }
+          note={freqNote}
           direction={
             <Direction
               arrow="up"

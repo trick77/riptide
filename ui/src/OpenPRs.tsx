@@ -130,6 +130,20 @@ export function OpenPRs({
           </button>
         </p>
       )}
+      {/* Last heard of before Bitbucket's events were lost: maybe merged
+          or declined since. Neither open nor inactive. */}
+      {o.unknown > 0 && (
+        <p className="mt-2 mb-0 text-[13px] text-muted">
+          {t("open.unknown", { count: o.unknown })}{" "}
+          <button
+            type="button"
+            onClick={() => onFacts("prs", t("facts.prState.unknown"))}
+            className="no-print border-0 bg-transparent p-0 text-[13px] text-accent-strong hover:underline"
+          >
+            {t("open.viewInactive")}
+          </button>
+        </p>
+      )}
       <OpenMekko o={o} waits={WAITS} labels={labels} onLabels={setLabels} />
       {o.repos.length ? (
         <div className="mt-3 overflow-x-auto">

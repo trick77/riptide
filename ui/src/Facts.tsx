@@ -25,6 +25,7 @@ const PR_STATE_TONE: Record<PRFact["state"], Tone> = {
   open: "none",
   declined: "none",
   deleted: "none",
+  unknown: "warn",
 };
 
 // A failed sync shows its phase. A first deploy is no problem, only
@@ -262,7 +263,8 @@ function FactsTables({
           { label: t("facts.colToProd", { prod }), right: true },
           { label: t("facts.colStatus") },
         ]}
-        dim={facts.prs.rows.map((p) => p.gitops)}
+        // Promotions and the merged PRs no number counts: listed, faded.
+        dim={facts.prs.rows.map((p) => p.gitops || p.not_counted != null)}
         rows={facts.prs.rows.map((p) => [
           <>
             {p.jira_prefix.map((j) => (
@@ -301,7 +303,15 @@ function FactsTables({
             <Pill tone={PR_STATE_TONE[p.state]}>
               {t(`facts.prState.${p.state}`)}
             </Pill>
+            {p.not_counted && (
+              <Pill tone="none">{t(`facts.notCounted.${p.not_counted}`)}</Pill>
+            )}
             {p.running && <Pill tone="none">{t("facts.running")}</Pill>}
+            {p.state === "unknown" && p.idle_s != null && (
+              <span className="text-[12.5px] whitespace-nowrap text-muted">
+                {t("facts.idleFor", { idle: dur(p.idle_s) })}
+              </span>
+            )}
             {p.waiting && (
               <span className="text-[12.5px] whitespace-nowrap text-muted">
                 {t(`facts.prWaiting.${p.waiting}`)}
@@ -326,6 +336,8 @@ function FactsTables({
           { label: t("facts.colNewImages") },
           { label: t("facts.colCountsAs") },
         ]}
+        // An infrastructure App's deploys count nowhere: listed, faded.
+        dim={facts.deploys.rows.map((d) => d.infra)}
         rows={facts.deploys.rows.map((d) => [
           <span className="whitespace-nowrap tabular-nums">
             {dateTime(d.at)}
@@ -340,7 +352,7 @@ function FactsTables({
               ? d.new_images.map(shortImage).join(", ")
               : "–"}
           </Mono>,
-          <span className="inline-flex gap-1">
+          <span className="inline-flex flex-wrap gap-1">
             <Pill
               tone={DEPLOY_TONE[d.class]}
               dot={d.class === "first_seen" ? "texture-unknown" : undefined}
@@ -349,6 +361,12 @@ function FactsTables({
                 ? d.phase
                 : t(`facts.deployClass.${d.class}`)}
             </Pill>
+            {/* An App's first deploy counted as a release: still its first
+                known deploy, found by that word too. */}
+            {d.first_deploy && d.class === "release" && (
+              <Pill tone="none">{t("facts.deployClass.first_seen")}</Pill>
+            )}
+            {d.infra && <Pill tone="none">{t("facts.infra")}</Pill>}
             {d.running && <Pill tone="none">{t("facts.running")}</Pill>}
           </span>,
         ])}

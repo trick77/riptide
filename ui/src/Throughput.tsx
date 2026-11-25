@@ -5,12 +5,26 @@
 import { useTranslation } from "react-i18next";
 import type { Metrics } from "./api";
 import { WeekStack } from "./charts";
-import { num } from "./format";
+import { fullDate, num } from "./format";
 import { Card, CardHead, Direction, Legend, Swatch, Tile } from "./ui";
+
+// The people's merged PRs the backend left out of every PR number, each
+// under its first reason, with what the reason means on hover.
+const LEFT_OUT = [
+  ["housekeeping", "housekeeping"],
+  ["off_trunk", "offTrunk"],
+  ["implicit_merges", "implicit"],
+] as const;
 
 export function MergedTile({ m }: { m: Metrics }) {
   const { t } = useTranslation();
   const th = m.throughput;
+  const leftOut = LEFT_OUT.filter(([k]) => th[k] > 0).map(([k, key]) => (
+    <span key={k} title={t(`throughput.merged.${key}Title`)}>
+      {" · "}
+      {t(`throughput.merged.${key}`, { count: th[k] })}
+    </span>
+  ));
   return (
     <Tile
       label={t("throughput.merged.label")}
@@ -18,7 +32,19 @@ export function MergedTile({ m }: { m: Metrics }) {
       question={t("throughput.merged.question")}
       value={th.merged_per_week == null ? "–" : num(th.merged_per_week, 1)}
       unit={th.merged_per_week == null ? "" : t("throughput.merged.unit")}
-      note={t("throughput.merged.note", { count: th.merged })}
+      note={
+        <>
+          {t("throughput.merged.note", { count: th.merged })}
+          {leftOut}
+        </>
+      }
+      warn={
+        th.since
+          ? t("throughput.merged.since", {
+              date: fullDate(new Date(th.since)),
+            })
+          : undefined
+      }
       direction={
         <Direction
           arrow="up"
@@ -51,8 +77,8 @@ export function BatchTile({ m }: { m: Metrics }) {
           : t("throughput.batch.note", {
               p90: num(b.p90),
               files: num(th.batch_files.p50 ?? 0),
-              n: num(b.n),
-              total: num(th.merged),
+              n: num(th.coverage.sized.count),
+              total: num(th.coverage.sized.n),
             })
       }
       direction={

@@ -784,6 +784,13 @@ export function Build({
           {t("build.dataFrom", { date: fullDate(new Date(b.data_from)) })}
         </Note>
       )}
+      {/* Team-wide: in the team view's numbers, in no product's. A
+          product view may lack its builds for exactly this. */}
+      {b.unattributed > 0 && (
+        <p className="mt-2 mb-0 text-[13px] text-muted">
+          {t("build.unattributed", { count: b.unattributed })}
+        </p>
+      )}
       {stats.length === 0 ? (
         <Card className="mt-3">
           <p className="m-0 text-[13.5px] text-muted">{t("build.noRuns")}</p>

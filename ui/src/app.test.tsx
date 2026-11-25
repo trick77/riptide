@@ -181,15 +181,21 @@ describe("App", () => {
     expect(
       screen.getByText(/Team team-a, alle Produkte · KW 43–46/),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Datenstand: Bitbucket 12\.11\./),
-    ).toBeInTheDocument();
+    // Per source since when and until when it reports, as data.
+    const asOf = screen.getByText(
+      (_, el) =>
+        el?.tagName === "P" && /^Datenstand: /.test(el.textContent ?? ""),
+    );
+    expect(asOf.textContent).toMatch(
+      /^Datenstand: Bitbucket seit 13\.09\.2026, zuletzt 12\.11\. \d\d:\d\d · CI seit 02\.11\.2026, zuletzt /,
+    );
+    expect(screen.queryByText(/Ereignisse gingen verloren/)).toBeNull();
     expect(screen.getByText("1 Release im Zeitraum")).toBeInTheDocument();
     expect(
-      screen.getByText("1 von 4 Syncs fehlgeschlagen"),
+      screen.getByText("1 von 4 Deploys fehlgeschlagen"),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/1 Erstdeploy ohne Vergleichswert/),
+      screen.getByText(/^1 Erstdeploy aus den ersten 14 Tagen/),
     ).toBeInTheDocument();
     expect(screen.getByText(/Lead Time bis INTG:/)).toBeInTheDocument();
     expect(screen.getAllByText(/wenig belastbar/).length).toBeGreaterThan(0);
@@ -324,20 +330,27 @@ describe("App", () => {
       /^KW \d+–\d+ · \d\d\.\d\d\.–\d\d\.\d\d\. · Einschätzung vom .*, automatisch · nächste: /,
     );
     expect(p.queryByTitle("ohne die laufende Woche")).toBeNull();
-    expect(
-      p.getByText(
-        "Argo CD meldete in den letzten 6 Tagen der Periode nichts: Aussagen dazu ausgelassen.",
-      ),
-    ).toBeInTheDocument();
+    // The gate once, as a limit with its date in the weeks' zone.
+    const limits = p.getByRole("note", {
+      name: "Was diese Einschätzung einschränkt",
+    });
+    expect(limits.textContent).toBe(
+      "Argo CD lieferte seit dem 06.11.2026 bis zum Ende des Zeitraums keine Daten mehr: Aussagen dazu ausgelassen.",
+    );
     // The tally beside the headline, the backend's counts, what is stuck
-    // first.
+    // first, the question, then the repos: none called unremarkable.
     const tally = within(p.getByRole("list", { name: "Bilanz" }));
     expect(tally.getAllByRole("listitem").map((li) => li.textContent)).toEqual([
       "4hakt",
       "1läuft",
       "1erledigt",
-      "9 von 11aktiven Repos unauffällig",
+      "1zum Besprechen",
+      "8 von 12Repos ohne Befund",
+      "1Repo nicht beurteilbar",
     ]);
+    expect(panel.textContent).not.toMatch(
+      /unauffällig|fällt nichts auf|Nichts hakt/,
+    );
     // Whose they are: the team or one product.
     expect(p.getByText("Team, alle Produkte")).toBeInTheDocument();
     // Two groups: what is stuck, then what runs with its evidence.
@@ -348,7 +361,9 @@ describe("App", () => {
         .map((h) => h.textContent),
     ).toEqual(["Hakt", "Läuft"]);
     expect(
-      p.getByText("9 von 11 aktiven Repos ohne Befund."),
+      p.getByText(
+        "Von 12 Repos: 8 ohne Befund, 1 mit zu wenig Daten für ein Urteil, 1 ohne Aktivität.",
+      ),
     ).toBeInTheDocument();
     // The focus below, ranked, the placeholders filled with the backend's
     // numbers.
@@ -363,7 +378,7 @@ describe("App", () => {
       p.getByText("5 PRs liegen, und Reviews dauern."),
     ).toBeInTheDocument();
     expect(
-      p.getByText("Konstant der langsamste Build mit 24 min."),
+      p.getByText("Der Feature-Build braucht jetzt 24 min."),
     ).toBeInTheDocument();
     expect(p.getByText("schon 2 Mal davor")).toBeInTheDocument();
     expect(p.getByText(/die PRs einzeln durchgehen/)).toBeInTheDocument();
@@ -377,8 +392,12 @@ describe("App", () => {
     expect(
       p.getByText("kasse/policy (scheitert öfter): erledigt"),
     ).toBeInTheDocument();
+    // A resolution names no next step: only the gain says what helped.
+    expect(p.getAllByText(/benennen, was geholfen hat/)).toHaveLength(1);
     // What no wording covers is still spotted.
-    expect(p.getByText("Vergessene PRs")).toBeInTheDocument();
+    expect(
+      p.getByText("Feature- und Bugfix-Builds warten auf Build-Agents"),
+    ).toBeInTheDocument();
     expect(p.getByText("Für die nächste Retro")).toBeInTheDocument();
     // On the focus block and gathered in the retro box.
     expect(p.getAllByText("Warum liegen diese PRs?")).toHaveLength(2);
@@ -905,7 +924,7 @@ describe("App", () => {
     expect((await row("d")).getByText("spike")).toBeInTheDocument();
   });
 
-  it("says how few, and what all wait on", async () => {
+  it("says what all wait on", async () => {
     mockFetch((url) => {
       if (url.pathname === "/api/facts") return facts();
       if (url.pathname === "/api/analysis") {
@@ -922,11 +941,6 @@ describe("App", () => {
           assessment: {
             ...a,
             compared: false,
-            signals: a.signals.map((s) =>
-              s.id === "change:merged_per_week"
-                ? { ...s, low_sample: true, sample: 7 }
-                : s,
-            ),
             focus: a.focus.map((f) =>
               f.waiting
                 ? {
@@ -942,7 +956,6 @@ describe("App", () => {
     });
     render(<App />);
     const p = within(await screen.findByTestId("assessment"));
-    expect(p.getByText("wenig belastbar · 7 PRs")).toBeInTheDocument();
     expect(p.getByText("alle 3 warten auf Änderungen")).toBeInTheDocument();
     // The gain alone is evidence enough: the group runs.
     expect(p.getByRole("heading", { name: "Läuft" })).toBeInTheDocument();
@@ -950,7 +963,9 @@ describe("App", () => {
   });
 
   // Without a gain or a resolution no group says "runs": "wenn nichts
-  // läuft, ist läuft gut übertrieben" (user). The foot says why. With the
+  // läuft, ist läuft gut übertrieben" (user). The foot says why: no gain
+  // that counts where one could be told; without a previous period to
+  // compare with, the limits say that instead, never "no gain". With the
   // model's words or the rules', the same.
   it.each([
     ["the rules' words", false],
@@ -966,12 +981,20 @@ describe("App", () => {
           const keep = (s: { tone: string }) => s.tone !== "good";
           return {
             ...base,
-            assessment: { ...a, signals: a.signals.filter(keep) },
+            assessment: {
+              ...a,
+              gaps: [],
+              signals: a.signals.filter(keep),
+              limits: [],
+              quiet_reasons: worded
+                ? ["findings"]
+                : ["no_baseline", "findings"],
+            },
             layout: {
               ...base.layout,
               cards: base.layout.cards.filter((c) => c.column === "bad"),
               // The backend's tally: its gains it never had.
-              tally: { good: 0, done: 0, bad: 4, baseline: worded },
+              tally: { good: 0, done: 0, bad: 4, talk: 1, baseline: true },
             },
           };
         }
@@ -980,14 +1003,16 @@ describe("App", () => {
       render(<App />);
       const p = within(await screen.findByTestId("assessment"));
       expect(p.queryByRole("heading", { name: "Läuft" })).toBeNull();
-      expect(p.getByText(/aktiven Repos ohne Befund\./)).toBeInTheDocument();
       expect(
         p.getByText(
-          worded
-            ? "Keine Verbesserung, die als Beleg zählt."
-            : "Noch kein Vergleich: Für diese Wochen gibt es keine Vorperiodenwerte.",
+          "Von 12 Repos: 8 ohne Befund, 1 mit zu wenig Daten für ein Urteil, 1 ohne Aktivität.",
         ),
       ).toBeInTheDocument();
+      const noGain = p.queryByText("Keine Verbesserung, die als Beleg zählt.");
+      const noBaseline = p.queryByText(
+        "Noch kein voller Vergleich mit der Vorperiode: Nicht jede Zahl hat dort einen vergleichbaren Wert.",
+      );
+      expect([noGain != null, noBaseline != null]).toEqual([worded, !worded]);
       expect(
         within(p.getByRole("list", { name: "Bilanz" })).queryByText("läuft"),
       ).toBeNull();
@@ -1135,6 +1160,8 @@ describe("App", () => {
     );
   });
 
+  // Only where the backend says the period is quiet: measured, compared,
+  // and nothing raised.
   it("says so when nothing stands out", async () => {
     mockFetch((url) => {
       if (url.pathname === "/api/facts") return facts();
@@ -1148,12 +1175,15 @@ describe("App", () => {
             signals: [],
             focus: [],
             question: null,
+            quiet: true,
+            quiet_reasons: [],
+            limits: [],
           },
           layout: {
             focus: [],
             cards: [],
             also: [],
-            tally: { good: 0, done: 0, bad: 0, baseline: true },
+            tally: { good: 0, done: 0, bad: 0, talk: 0, baseline: true },
           },
         });
       }
@@ -1166,7 +1196,11 @@ describe("App", () => {
     expect(
       p.getByText("Keine Verbesserung, die als Beleg zählt."),
     ).toBeInTheDocument();
-    expect(p.getByText("Nichts hakt in diesen Wochen.")).toBeInTheDocument();
+    expect(
+      p.getByText("In diesen Wochen fällt nichts auf."),
+    ).toBeInTheDocument();
+    expect(p.queryByText("Nichts hakt in diesen Wochen.")).toBeNull();
+    expect(p.queryByRole("note")).toBeNull();
     expect(p.queryByText("Im Fokus")).toBeNull();
     expect(p.queryByText("Für die nächste Retro")).toBeNull();
   });
@@ -1270,14 +1304,18 @@ describe("App", () => {
         return analysedStatus({
           assessment: {
             ...a,
+            gaps: [],
             signals: a.signals.filter((s) => s.tone === "good"),
             focus: [],
+            question: null,
+            quiet_reasons: ["findings"],
+            limits: [],
           },
           layout: {
             focus: [],
             cards: base.layout.cards.filter((c) => c.column !== "bad"),
             also: [],
-            tally: { good: 1, done: 1, bad: 0, baseline: true },
+            tally: { good: 1, done: 1, bad: 0, talk: 0, baseline: true },
           },
         });
       }
@@ -1715,7 +1753,11 @@ describe("App", () => {
     expect(screen.getByTitle(/^Median über 4 der /)).toHaveTextContent(
       "davon typischerweise 7 min Warten auf einen Agent, 3 min Bauen",
     );
-    expect(screen.getAllByText(/Warten auf einen Agent/)).toHaveLength(1);
+    // In the build section; the assessment's agent-wait card is its own.
+    const build = document.getElementById("build")!;
+    expect(within(build).getAllByText(/Warten auf einen Agent/)).toHaveLength(
+      1,
+    );
     expect(
       screen.getByText("#7").parentElement?.parentElement,
     ).toHaveTextContent("20.0 h");
@@ -3070,6 +3112,15 @@ describe("throughput", () => {
       throughput: {
         merged: 47,
         merged_per_week: 11.75,
+        since: "2026-10-21T08:00:00Z",
+        off_trunk: 1,
+        implicit_merges: 0,
+        housekeeping: 3,
+        coverage: {
+          to_prod: { count: 30, n: 47, rate: 30 / 47 },
+          sized: { count: 40, n: 47, rate: 40 / 47 },
+          opened: { count: 45, n: 47, rate: 45 / 47 },
+        },
         batch_size: { n: 40, p50: 86.5, p90: 412 },
         batch_files: { n: 40, p50: 5, p90: 14 },
         weeks: base.throughput.weeks,
@@ -3087,8 +3138,22 @@ describe("throughput", () => {
       .closest("div")!.parentElement!;
     expect(within(merged).getByText("11.8")).toBeInTheDocument();
     expect(within(merged).getByText("PRs pro Woche")).toBeInTheDocument();
+    // What the count leaves out, each reason only when it left one out,
+    // its meaning on hover.
     expect(
-      within(merged).getByText("47 PRs im Zeitraum gemerged"),
+      within(merged).getByText(/^47 PRs im Zeitraum gemerged/).textContent,
+    ).toBe(
+      "47 PRs im Zeitraum gemerged · 3 Sammel-Änderungen nicht gezählt · 1 PR in einen Feature-Branch gemerged, nicht gezählt",
+    );
+    expect(
+      within(merged).getByTitle(/^Derselbe Titel in mindestens drei Repos/),
+    ).toBeInTheDocument();
+    expect(merged.textContent).not.toMatch(/mitgemerged/);
+    // Bitbucket started inside the period: the rate is since then.
+    expect(
+      within(merged).getByText(
+        "Bitbucket liefert erst seit dem 21.10.2026 Daten: Die Wochen davor sind leer, die Rate gilt ab dann.",
+      ),
     ).toBeInTheDocument();
     expect(within(merged).getByText("vorher 0.5")).toBeInTheDocument();
     expect(within(merged).getByText("Besser")).toBeInTheDocument();
@@ -3097,7 +3162,7 @@ describe("throughput", () => {
     expect(within(batch).getByText("87")).toBeInTheDocument();
     expect(
       within(batch).getByText(
-        "grösste 10 % ab 412 Zeilen · typisch 5 Dateien · 40 von 47 PRs mit Grösse",
+        "grösste 10 % ab 412 Zeilen · typisch 5 Dateien · Grösse bekannt bei 40 von 47",
       ),
     ).toBeInTheDocument();
     expect(within(batch).getByText("vorher 80")).toBeInTheDocument();
@@ -3555,6 +3620,345 @@ describe("calendar", () => {
     expect(tip).toHaveTextContent("Releases7");
     expect(screen.getAllByTestId("weekday-bar")).toHaveLength(3);
     expect(document.body.textContent).not.toMatch(/NaN/);
+  });
+});
+
+// What the data cannot tell, said as such: never a calm word where nothing
+// could be measured or compared, never a count that hides what it leaves out.
+describe("limits", () => {
+  const quietless = (o: Partial<AnalysisStatus["assessment"]>) => {
+    const a = assessment();
+    return analysisStatus({
+      assessment: {
+        ...a,
+        gaps: [],
+        signals: [],
+        focus: [],
+        question: null,
+        quiet: false,
+        ...o,
+      },
+      layout: {
+        focus: [],
+        cards: [],
+        also: [],
+        tally: { good: 0, done: 0, bad: 0, talk: 0, baseline: false },
+      },
+    });
+  };
+
+  it("names every limit in the backend's order, and nothing calm", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis")
+        return quietless({
+          quiet_reasons: ["no_baseline", "source_gap", "not_measurable"],
+          limits: [
+            {
+              source: "pipeline",
+              kind: "starts",
+              from: "2026-10-21T09:00:00Z",
+              to: null,
+            },
+            {
+              source: "bitbucket",
+              kind: "silence",
+              from: "2026-11-05T10:00:00Z",
+              to: "2026-11-09T18:00:00Z",
+            },
+          ],
+          coverage: {
+            to_prod: { count: 0, n: 7, rate: 0 },
+            sized: { count: 7, n: 7, rate: 1 },
+            opened: { count: 7, n: 7, rate: 1 },
+          },
+        });
+      return metrics();
+    });
+    render(<App />);
+    const panel = await screen.findByTestId("assessment");
+    const note = within(panel).getByRole("note", {
+      name: "Was diese Einschätzung einschränkt",
+    });
+    expect([...note.children].map((c) => c.textContent)).toEqual([
+      "Noch kein voller Vergleich mit der Vorperiode: Nicht jede Zahl hat dort einen vergleichbaren Wert.",
+      "Die CI liefert erst seit dem 21.10.2026 Daten.",
+      "Bitbucket lieferte vom 05.11.2026 bis 09.11.2026 keine Daten, obwohl Builds liefen: Ereignisse gingen verloren. Die PR-Zahlen bleiben ohne Urteil.",
+      "Nicht messbar: 7 PRs wurden in diesen Wochen gemerged, keiner liess sich bis PROD verfolgen.",
+    ]);
+    expect(panel.textContent).not.toMatch(
+      /fällt nichts auf|Nichts hakt|Keine Verbesserung|unauffällig/,
+    );
+  });
+
+  // Why a period is not measurable, from what the page knows of the
+  // sources: the first that applies.
+  it.each([
+    [
+      "Bitbucket never reported",
+      (m: Metrics): Metrics => ({
+        ...m,
+        meta: {
+          ...m.meta,
+          data_start: { ...m.meta.data_start, bitbucket: null },
+        },
+      }),
+      "Nicht messbar: Bitbucket liefert für das Team keine Daten.",
+    ],
+    [
+      "Argo CD does not report",
+      (m: Metrics): Metrics => ({
+        ...m,
+        delivery: {
+          ...m.delivery,
+          frequency: { ...m.delivery.frequency, argo_reporting: false },
+        },
+      }),
+      "Nicht messbar: Argo CD liefert für das Team keine Daten.",
+    ],
+    [
+      "no PR was merged",
+      (m: Metrics): Metrics => m,
+      "Nicht messbar: In diesen Wochen wurde kein PR gemerged.",
+    ],
+  ])("says it is not measurable when %s", async (_, page, want) => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis")
+        return quietless({
+          quiet_reasons: ["not_measurable"],
+          limits: [],
+          coverage: {
+            to_prod: { count: 0, n: 0, rate: null },
+            sized: { count: 0, n: 0, rate: null },
+            opened: { count: 0, n: 0, rate: null },
+          },
+        });
+      return page(metrics());
+    });
+    render(<App />);
+    const panel = await screen.findByTestId("assessment");
+    expect(
+      within(panel).getByRole("note", {
+        name: "Was diese Einschätzung einschränkt",
+      }).textContent,
+    ).toBe(want);
+  });
+
+  it("shows the rules' view beside an outdated analysis, and offers to assess again", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis")
+        return analysisStatus({ state: "none", enabled: true, outdated: true });
+      return metrics();
+    });
+    render(<App />);
+    const p = within(await screen.findByTestId("assessment"));
+    expect(
+      p.getByText(
+        "Die letzte Einschätzung beruht auf älteren Regeln und wird nicht mehr gezeigt. Hier steht, was die aktuellen Regeln sehen. «Neu einschätzen» schreibt sie neu.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      p.getByRole("button", { name: "↻ Neu einschätzen" }),
+    ).toBeInTheDocument();
+    // No wording of its own: the rules' titles, no headline.
+    expect(p.queryByRole("heading", { level: 3 })).toBeNull();
+    expect(
+      p.getByText("PRs gemerged pro Woche: deutlich besser"),
+    ).toBeInTheDocument();
+  });
+
+  it("asks no question the backend did not raise, whatever a model wrote", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis") {
+        const base = analysedStatus();
+        return analysedStatus({
+          assessment: { ...assessment(), question: null },
+          layout: {
+            ...base.layout,
+            tally: { ...base.layout.tally, talk: 0 },
+          },
+        });
+      }
+      return metrics();
+    });
+    render(<App />);
+    const p = within(await screen.findByTestId("assessment"));
+    expect(p.queryByText(/Passt das zu unserer Art zu reviewen/)).toBeNull();
+    expect(
+      within(p.getByRole("list", { name: "Bilanz" })).queryByText(
+        "zum Besprechen",
+      ),
+    ).toBeNull();
+    // The model's retro questions stay.
+    expect(p.getAllByText("Warum liegen diese PRs?")).toHaveLength(2);
+  });
+
+  it("says why a product shows no deploys, and what the team view leaves out", async () => {
+    mockFetch((url) => {
+      const m = sample(url);
+      if (url.pathname !== "/api/metrics") return m;
+      const mm = m as Metrics;
+      return {
+        ...mm,
+        delivery: {
+          ...mm.delivery,
+          frequency: {
+            ...mm.delivery.frequency,
+            unattributed: 3,
+            infra: 15,
+            infra_apps: ["monitoring", "rollout"],
+          },
+        },
+      };
+    });
+    render(<App />);
+    const infra = await screen.findByText(
+      "15 Deploys von Infrastruktur-Apps nicht gezählt",
+    );
+    expect(infra).toHaveAttribute("title", "monitoring, rollout");
+    // In the team view they count: no word of them on the tile.
+    expect(screen.queryByText(/keinem Produkt zuordenbar/)).toBeNull();
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Was heisst das?" })[0],
+    );
+    expect(
+      screen.getByText(
+        /Nicht gezählt: 15 Deploys von Infrastruktur-Apps, die keinem Produkt des Teams gehören \(monitoring, rollout\)\./,
+      ),
+    ).toBeInTheDocument();
+
+    const products = screen.getByRole("group", { name: "Produkt" });
+    fireEvent.click(within(products).getByRole("button", { name: /portal/ }));
+    expect(
+      await screen.findByText("3 Deploys keinem Produkt zuordenbar"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("keine Deploys im Zeitraum")).toBeNull();
+    expect(screen.queryByText(/Infrastruktur-Apps nicht gezählt/)).toBeNull();
+  });
+
+  it("counts open PRs of unknown state apart, and builds without a repo", () => {
+    const onFacts = vi.fn();
+    const m = metrics();
+    const mm: Metrics = {
+      ...m,
+      open_prs: { ...m.open_prs, unknown: 2 },
+      build: { ...m.build, unattributed: 5 },
+    };
+    render(
+      <>
+        <Flow why={null} onWhy={() => {}} onFacts={onFacts} m={mm} />
+        <Build m={mm} onFacts={onFacts} />
+      </>,
+    );
+    const unknown = screen.getByText(/^2 PRs mit unbekanntem Zustand: /);
+    expect(unknown.textContent).toMatch(/In keiner Zahl oben\./);
+    fireEvent.click(within(unknown).getByRole("button", { name: "Ansehen →" }));
+    expect(onFacts).toHaveBeenCalledWith("prs", "Unbekannt");
+    expect(
+      screen.getByText(
+        "5 Builds ohne Repo: Weder ihr Commit noch ihr Pipeline-Name nennt eines. In der Teamansicht gezählt, in keiner Produktansicht.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("marks in the facts what counts nowhere and why", async () => {
+    mockFetch((url) =>
+      url.pathname === "/api/facts"
+        ? facts({
+            prs: {
+              count: 2,
+              rows: [
+                prFact({
+                  pr_id: 5,
+                  state: "unknown",
+                  merged_at: null,
+                  prod_at: null,
+                  to_prod_s: null,
+                  idle_s: 9 * 86400,
+                }),
+                prFact({ pr_id: 6, not_counted: "housekeeping" }),
+              ],
+            },
+            deploys: {
+              count: 3,
+              rows: [
+                deployFact({ app: "kasse-neu", first_deploy: true }),
+                deployFact({
+                  revision: "r9",
+                  class: "failed",
+                  phase: "Error",
+                  new_images: [],
+                }),
+                deployFact({ app: "monitoring", revision: "r8", infra: true }),
+              ],
+            },
+          })
+        : sample(url),
+    );
+    render(<App />);
+    await screen.findByRole("tablist", { name: "Faktentabelle" });
+    const data = within(document.getElementById("daten")!);
+    expect(await data.findByText("Unbekannt")).toBeInTheDocument();
+    expect(data.getByText("9.0 Tage ohne Event")).toBeInTheDocument();
+    const housekeeping = data.getByText("Nicht gezählt: Sammel-Änderung");
+    expect(housekeeping.closest("tr")).toHaveAttribute("data-dim");
+    fireEvent.click(data.getByRole("tab", { name: /Deploys/ }));
+    const first = (await data.findByText("kasse-neu")).closest("tr")!;
+    expect(within(first).getByText("Release")).toBeInTheDocument();
+    expect(within(first).getByText("Erstdeploy")).toBeInTheDocument();
+    expect(data.getByText("Error")).toBeInTheDocument();
+    const infra = data.getByText("monitoring").closest("tr")!;
+    expect(
+      within(infra).getByText("Infrastruktur, nicht gezählt"),
+    ).toBeInTheDocument();
+    expect(infra).toHaveAttribute("data-dim");
+  });
+
+  it("says when Bitbucket's events were lost, and when each source reports", async () => {
+    mockFetch((url) => {
+      const m = sample(url);
+      if (url.pathname !== "/api/metrics") return m;
+      const mm = m as Metrics;
+      return {
+        ...mm,
+        meta: {
+          ...mm.meta,
+          silences: [
+            {
+              source: "bitbucket",
+              from: "2026-11-05T10:00:00Z",
+              to: "2026-11-09T18:00:00Z",
+              unseen_runs: 4,
+            },
+            // A team that did not deploy for two days: no gap in the data.
+            {
+              source: "argocd",
+              from: "2026-11-02T10:00:00Z",
+              to: "2026-11-05T09:00:00Z",
+              unseen_runs: 0,
+            },
+          ],
+          repo_starts: [
+            { repo: "kasse/kasse-api", noergler: "2026-10-01T08:00:00Z" },
+            { repo: "portal/portal-web", noergler: null },
+          ],
+        },
+      };
+    });
+    render(<App />);
+    expect(
+      await screen.findByText(
+        "Bitbucket lieferte vom 05.11. 11:00 bis 09.11. 19:00 keine Daten, obwohl Builds liefen: Ereignisse gingen verloren.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText(/lieferte vom/)).toHaveLength(1);
+    expect(screen.getByText(/^noergler seit /)).toHaveAttribute(
+      "title",
+      "kasse/kasse-api: seit 01.10.2026\nportal/portal-web: keine Daten",
+    );
   });
 });
 

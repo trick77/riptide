@@ -76,11 +76,13 @@ export function dateTime(iso: string): string {
   return `${dayMonth(new Date(iso))} ${clock(iso)}`;
 }
 
-export function fullDate(d: Date): string {
+// timeZone: the zone the day is read in; the viewer's without one.
+export function fullDate(d: Date, timeZone?: string): string {
   return d.toLocaleDateString(LOCALE, {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
+    timeZone,
   });
 }
 

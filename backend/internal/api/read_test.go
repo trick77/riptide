@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -212,15 +213,29 @@ func TestReadMatchesOpenAPISpec(t *testing.T) {
 	ds := &dataset.Dataset{
 		Meta: dataset.Meta{Team: "checkout", From: at, To: at, GeneratedAt: at, ProductionStage: "prod",
 			DataStart: dataset.SourceTimes{Bitbucket: &before, Pipeline: &before, ArgoCD: &before, Noergler: &before},
-			DataEnd:   dataset.SourceTimes{Bitbucket: &at, Pipeline: &at, ArgoCD: &at, Noergler: &at}, BuildDataFrom: &before, BuildTypeFrom: &before},
+			DataEnd:   dataset.SourceTimes{Bitbucket: &at, Pipeline: &at, ArgoCD: &at, Noergler: &at}, BuildDataFrom: &before, BuildTypeFrom: &before,
+			Silences:   []dataset.Silence{{Source: dataset.SourceBitbucket, From: before, To: at, UnseenRuns: 2}},
+			RepoStarts: []dataset.RepoStart{{Repo: "kasse/kasse-api", Noergler: &before}}},
 		Products: []dataset.Product{{Key: "kasse", Repos: []string{"kasse/kasse-api"}, Apps: []string{"kasse-prod"}}},
 		PRs: []dataset.PR{{Repo: "kasse/kasse-api", Project: "kasse", PRID: 7, Title: s("Rabattregeln"), ChangeType: s("feature"),
 			JiraKeys: []string{"KAS-7"}, State: "merged", OpenedAt: &before, ReadyAt: &before, FirstReviewAt: &before, ApprovedAt: &before,
 			ApprovedOnFirstTouch: true, MergedAt: &at, FirstCommitAt: &before, MergeCommit: s("abc1234"),
-			Environments: []dataset.EnvironmentDeploy{{Environment: "intg", FirstDeployedAt: at}, {Environment: "prod", FirstDeployedAt: at}}}},
+			Environments: []dataset.EnvironmentDeploy{{Environment: "intg", FirstDeployedAt: at}, {Environment: "prod", FirstDeployedAt: at}}},
+			// Merged into a feature branch: listed, in no PR number.
+			{Repo: "kasse/kasse-api", Project: "kasse", PRID: 8, Title: s("Teilschritt"), State: "merged", OpenedAt: &before,
+				MergedAt: &at, TargetBranch: s("feature/umbau"), OffTrunk: true}},
+		// Last heard of before Bitbucket's events were lost.
+		OpenPRs: []dataset.OpenPR{{Repo: "kasse/kasse-api", Project: "kasse", PRID: 9, Title: s("Liegt"), OpenedAt: before,
+			LastEventAt: before, Unknown: true}},
 		Deploys: []dataset.Deploy{{App: "kasse-prod", Project: s("kasse"), Environment: s("prod"), Revision: "abc1234",
 			At: at, Phase: "Succeeded", DurationS: n(45), Images: []string{"reg/a:1"}, Kind: s("release"),
-			NewImages: []string{"reg/a:1"}}},
+			NewImages: []string{"reg/a:1"}},
+			{App: "kasse-neu", Project: s("kasse"), Environment: s("prod"), Revision: "def5678", At: at, Phase: "Succeeded",
+				Images: []string{"reg/b:1"}, Kind: s("first_seen"), FirstRelease: true, NewImages: []string{}},
+			{App: "kasse-prod", Project: s("kasse"), Environment: s("prod"), Revision: "abc9999", At: at, Phase: "Error",
+				NewImages: []string{}},
+			{App: "monitoring", Environment: s("prod"), Revision: "fed4321", At: at, Phase: "Succeeded",
+				Images: []string{"reg/m:1"}, Kind: s("release"), NewImages: []string{"reg/m:1"}, Infra: true}},
 		LeadTimes: []dataset.LeadTime{{Repo: "kasse/kasse-api", Project: "kasse", Environment: "prod", LeadTimeS: 3600}},
 		Reviews: []dataset.Review{{Repo: s("kasse/kasse-api"), Project: s("kasse"),
 			Outcome: s("merged"), CostUSD: s("0.123456"), LinesAdded: n(1), LinesRemoved: n(1)}},
@@ -242,6 +257,20 @@ func TestReadMatchesOpenAPISpec(t *testing.T) {
 	for _, path := range []string{"/api/metrics", "/api/facts"} {
 		for _, q := range []string{"team=checkout&tz=Europe/Zurich", "team=checkout&product=kasse", "", "team=nobody", "team=checkout&weeks=3"} {
 			validateResponse(t, router, http.MethodGet, path, h.serveUI(newRequest(http.MethodGet, path+"?"+q, nil)))
+		}
+	}
+	// The rows above reach the item schemas: an empty array validates
+	// against any. They fall in the running week: the facts list them, the
+	// closed period's numbers count none.
+	for path, want := range map[string][]string{
+		"/api/metrics": {`"unknown":1`, `"unseen_runs":2`},
+		"/api/facts":   {`"not_counted":"off_trunk"`, `"state":"unknown"`, `"phase":"Error"`, `"infra":true`, `"first_deploy":true`},
+	} {
+		body := h.serveUI(newRequest(http.MethodGet, path+"?team=checkout", nil)).Body.String()
+		for _, w := range want {
+			if !strings.Contains(body, w) {
+				t.Errorf("%s has no %s", path, w)
+			}
 		}
 	}
 }
@@ -546,12 +575,19 @@ func TestE2ERead(t *testing.T) {
 	expectStatus(t, w, http.StatusOK)
 	validateResponse(t, router, http.MethodGet, "/api/analysis", w)
 	var st struct {
-		State    string          `json:"state"`
-		Running  bool            `json:"running"`
-		Analysis json.RawMessage `json:"analysis"`
+		State      string          `json:"state"`
+		Running    bool            `json:"running"`
+		Analysis   json.RawMessage `json:"analysis"`
+		Assessment struct {
+			Limits []json.RawMessage `json:"limits"`
+		} `json:"assessment"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &st); err != nil || st.State != "none" {
 		t.Fatalf("analysis before a run = %s", w.Body)
+	}
+	// Every source started inside the window: limits the spec validated.
+	if len(st.Assessment.Limits) == 0 {
+		t.Errorf("assessment without limits = %s", w.Body)
 	}
 	ask := func(query string, header bool) *httptest.ResponseRecorder {
 		r := newRequest(http.MethodPost, "/api/analysis?"+query, nil)
