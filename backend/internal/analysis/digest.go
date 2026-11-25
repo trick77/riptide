@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/trick77/riptide/internal/metrics"
@@ -78,13 +79,19 @@ type Digest struct {
 	Signals   []digestSignal      `json:"signals"`
 	Focus     []metrics.FocusRepo `json:"focus_candidates"`
 	Active    int                 `json:"active_repos"`
-	Calm      int                 `json:"calm_repos"`
-	Question  *metrics.Signal     `json:"question"`
-	Labels    map[string]string   `json:"labels"`
-	Levers    map[string]string   `json:"levers"`
-	// Stages name the stage keys of stage and prev_stage: the text names
-	// the stage, never its key.
-	Stages map[string]string `json:"stages"`
+	// Calm, Unjudged and Idle as the assessment's: calm only where a rule
+	// could judge the repo, so the model never calls the rest fine.
+	Calm     int             `json:"calm_repos"`
+	Unjudged int             `json:"unjudged_repos"`
+	Idle     int             `json:"idle_repos"`
+	Question *metrics.Signal `json:"question"`
+	// Quiet and QuietReasons decide whether the text may say that nothing
+	// stands out: Go decides it, the model words it.
+	Quiet        bool              `json:"quiet"`
+	QuietReasons []string          `json:"quiet_reasons"`
+	Limits       []metrics.Limit   `json:"limits"`
+	Labels       map[string]string `json:"labels"`
+	Levers       map[string]string `json:"levers"`
 }
 
 // MandatoryTop is how many of the ranked signals, gates aside, the answer
@@ -284,8 +291,9 @@ func buildDigest(a metrics.Assessment) ([]byte, *aliases, error) {
 	}
 	d := Digest{
 		WindowWeeks: len(a.Period.Weeks), Weeks: weekRange(a.Period), Mandatory: mand,
-		Gaps: a.Gaps, Team: a.Team, Focus: focus, Active: a.Active, Calm: a.Calm,
-		Question: a.Question, Labels: labels, Levers: leverText, Stages: stageText,
+		Gaps: a.Gaps, Team: a.Team, Focus: focus, Active: a.Active, Calm: a.Calm, Unjudged: a.Unjudged, Idle: a.Idle,
+		Question: a.Question, Quiet: a.Quiet, QuietReasons: a.QuietReasons, Limits: a.Limits,
+		Labels: labels, Levers: leverText,
 	}
 	for _, s := range a.Signals {
 		d.Signals = append(d.Signals, digestSignal{Signal: al.hideSignal(s), Means: kinds[s.Kind].means, Levers: leversFor(s)})
@@ -294,11 +302,15 @@ func buildDigest(a metrics.Assessment) ([]byte, *aliases, error) {
 	return raw, al, err
 }
 
-// inputHash identifies a call: the same digest to the same model is the
-// same answer, and is not asked again.
+// inputHash identifies a call: the same digest to the same model under
+// the same rules is the same answer, and is not asked again. The rules
+// version too: raised without a change to the digest or the prompt, a
+// click must still word the view anew, or its outdated analysis stays.
 func inputHash(model string, digest []byte) string {
 	h := sha256.New()
 	h.Write([]byte(model))
+	h.Write([]byte{0})
+	h.Write([]byte(strconv.Itoa(metrics.RulesVersion)))
 	h.Write([]byte{0})
 	h.Write(digest)
 	h.Write([]byte{0})

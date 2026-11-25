@@ -92,6 +92,10 @@ func (m *memStore) end(id int64, status string, r store.AnalysisResult) error {
 	a.Status, a.InputHash, a.Assessment, a.Output, a.Report = status, r.InputHash, r.Assessment, r.Output, r.Report
 	a.InputTokens, a.OutputTokens, a.CostNanoUSD, a.Error = r.InputTokens, r.OutputTokens, r.CostNanoUSD, r.Error
 	a.FinishedAt = ptr(r.At)
+	// As the SQL does: only a done row names its rules.
+	if a.RulesVersion = nil; status == "done" {
+		a.RulesVersion = r.RulesVersion
+	}
 	return nil
 }
 
@@ -780,28 +784,109 @@ func TestProductsBackOff(t *testing.T) {
 	}
 }
 
-// An analysis stored before Compared existed reads it from its history.
-func TestComparedBackfilled(t *testing.T) {
+// An analysis stored under older rules shows nothing of itself: neither
+// its text nor its frozen signals and question. The page gets the rules'
+// view now, and is told the analysis is outdated, to offer assessing again.
+func TestOutdatedAnalysis(t *testing.T) {
 	ctx := context.Background()
 	st := &memStore{}
 	s := service(&fakeLLM{answer: goodAnswer}, st)
-	for _, d := range []int{-7, 0} {
-		s.Now = func() time.Time { return now.AddDate(0, 0, d) }
-		if err := s.Run(ctx, view, TriggerScheduled); err != nil {
-			t.Fatal(err)
+	if err := s.Run(ctx, view, TriggerScheduled); err != nil {
+		t.Fatal(err)
+	}
+	cur, err := s.Status(ctx, view)
+	if err != nil || cur.State != StateFresh || cur.Outdated || cur.Analysis == nil {
+		t.Fatalf("an analysis of today's rules = %s, outdated %v (%v)", cur.State, cur.Outdated, err)
+	}
+	if *st.rows[0].RulesVersion != metrics.RulesVersion {
+		t.Errorf("stored rules = %d", *st.rows[0].RulesVersion)
+	}
+	// A row as an older binary wrote it: no rules version, a card on the
+	// longest stage and the fixed question about approvals.
+	old := metrics.Assessment{
+		Signals: []metrics.Signal{{ID: "slow_stage:to_prod", Kind: "slow_stage", Tone: metrics.ToneAttention,
+			Facts: []metrics.Fact{{ID: "slow_stage.share", Label: "stage_share", Verdict: metrics.ChangeNone}}}},
+		Question: &metrics.Signal{ID: "question:first_touch", Kind: metrics.SignalQuestion, Tone: metrics.ToneTalk},
+	}
+	st.rows[0].Assessment, _ = json.Marshal(old)
+	for _, rules := range []*int{nil, ptr(metrics.RulesVersion - 1)} {
+		st.rows[0].RulesVersion = rules
+		got, err := s.Status(ctx, view)
+		if err != nil || !got.Outdated || got.Analysis != nil || got.State != StateNone {
+			t.Fatalf("rules %v: state %s, outdated %v, analysis %v (%v)", rules, got.State, got.Outdated, got.Analysis, err)
+		}
+		if got.Assessment.Question != nil || slices.ContainsFunc(got.Assessment.Signals, func(s metrics.Signal) bool {
+			return s.Kind == "slow_stage"
+		}) {
+			t.Errorf("the old row's signals shown: %+v", got.Assessment)
+		}
+		if l := got.Layout; len(l.Focus) != 1 || l.Focus[0].Repo != "kasse/kasse-api" || l.Tally.Talk != 0 {
+			t.Errorf("layout of the rules' view = %+v", l)
 		}
 	}
-	// Strip the field as an old row lacks it.
-	var raw map[string]any
-	_ = json.Unmarshal(st.rows[1].Assessment, &raw)
-	delete(raw, "compared")
-	st.rows[1].Assessment, _ = json.Marshal(raw)
-	got, err := s.Status(ctx, view)
-	if err != nil || !got.Assessment.Compared {
-		t.Errorf("compared of an old row = %v (%v)", got.Assessment.Compared, err)
+	// Without a model the same: off, outdated, the rules' view.
+	got, err := service(nil, st).Status(ctx, view)
+	if err != nil || got.State != StateOff || !got.Outdated || got.Analysis != nil {
+		t.Errorf("off = %s, outdated %v (%v)", got.State, got.Outdated, err)
+	}
+	// Too old to show anyway: not outdated, simply none.
+	s.Now = func() time.Time { return now.AddDate(0, 0, 14) }
+	if got, _ := s.Status(ctx, view); got.Outdated || got.State != StateNone {
+		t.Errorf("a stale old row = %s, outdated %v", got.State, got.Outdated)
 	}
 	if got.Zone != "Europe/Zurich" {
 		t.Errorf("zone = %q", got.Zone)
+	}
+}
+
+// The problems open since: one raised and no longer raised stays open with
+// the value from before it was first raised; one resolved later is closed.
+func TestHistoryOpen(t *testing.T) {
+	ctx := context.Background()
+	st := &memStore{}
+	s := service(&fakeLLM{answer: goodAnswer}, st)
+	to := metrics.ClosedPeriod(4, now, zurich).To
+	raised := func(prev float64) metrics.Signal {
+		return metrics.Signal{ID: "change:lead_time", Kind: metrics.SignalChange, Tone: metrics.ToneAttention,
+			Facts: []metrics.Fact{{ID: "change:lead_time.value", Prev: ptr(prev), Verdict: metrics.ChangeWorse}}}
+	}
+	week := func(weeksBack int, sigs ...metrics.Signal) {
+		a := metrics.Assessment{Signals: sigs}
+		raw, _ := json.Marshal(a)
+		at := to.AddDate(0, 0, -7*weeksBack)
+		st.rows = append(st.rows, store.Analysis{ID: int64(len(st.rows) + 1), Team: view.Team, Weeks: view.Weeks,
+			Status: "done", Trigger: TriggerScheduled, PeriodTo: at, Assessment: raw, FinishedAt: ptr(at.Add(time.Hour)),
+			RulesVersion: ptr(metrics.RulesVersion)})
+	}
+	// Raised three weeks back against 100, again against 140 (the previous
+	// period drifting up), then no longer: the lead time stayed up.
+	week(3, raised(100))
+	week(2, raised(140))
+	week(1)
+	h, err := s.history(ctx, view, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, ok := h.Open["change:lead_time"]
+	if !ok || p.Tone != metrics.ToneAttention || p.Before == nil || *p.Before != 100 {
+		t.Fatalf("open = %+v, want the lead time from before it was first raised", h.Open)
+	}
+	if _, ok := h.Latest["change:lead_time"]; ok {
+		t.Errorf("latest = %v", h.Latest)
+	}
+	// Resolved since: closed.
+	st.rows = nil
+	week(3, raised(100))
+	week(2, metrics.Signal{ID: "resolved:change:lead_time", Kind: metrics.SignalResolved, Tone: metrics.ToneGood})
+	week(1)
+	if h, _ = s.history(ctx, view, to); len(h.Open) != 0 {
+		t.Errorf("open after a resolution = %+v", h.Open)
+	}
+	// Raised again after the resolution: open from the new raise on.
+	week(0, raised(120))
+	if h, _ = s.history(ctx, view, to.AddDate(0, 0, 7)); h.Open["change:lead_time"].Before == nil ||
+		*h.Open["change:lead_time"].Before != 120 {
+		t.Errorf("open after a new raise = %+v", h.Open)
 	}
 }
 

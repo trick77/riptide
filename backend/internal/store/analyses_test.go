@@ -76,6 +76,56 @@ func TestScheduledAnalysisClaim(t *testing.T) {
 	}
 }
 
+// A done row names the rules it was assessed under; a failed one none,
+// whatever it was handed: a binary from before the column may claim and
+// finish it again without touching the column.
+func TestAnalysisRulesVersion(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	v := AnalysisView{Team: "checkout", Weeks: 4}
+	to := time.Date(2030, 1, 7, 0, 0, 0, 0, time.UTC)
+	end := func(status string, at time.Time) *Analysis {
+		t.Helper()
+		id, ok, err := s.ClaimAnalysis(ctx, AnalysisClaim{View: v, From: to.AddDate(0, 0, -28), To: to,
+			Trigger: "manual", Model: "m", At: at})
+		if err != nil || !ok {
+			t.Fatalf("claim %v %v", ok, err)
+		}
+		r := AnalysisResult{Assessment: json.RawMessage(`{}`), RulesVersion: ptr(2), At: at.Add(time.Minute)}
+		if status == "done" {
+			err = s.FinishAnalysis(ctx, id, r)
+		} else {
+			err = s.FailAnalysis(ctx, id, r)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, err := s.LatestAttempt(ctx, v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	if a := end("done", to.Add(time.Hour)); a.RulesVersion == nil || *a.RulesVersion != 2 {
+		t.Errorf("done row's rules = %v", a.RulesVersion)
+	}
+	if a := end("failed", to.Add(2*time.Hour)); a.RulesVersion != nil {
+		t.Errorf("failed row's rules = %v, want none", *a.RulesVersion)
+	}
+	// A row as a binary from before the column finishes it: none.
+	id, _, err := s.ClaimAnalysis(ctx, AnalysisClaim{View: v, From: to.AddDate(0, 0, -28), To: to,
+		Trigger: "manual", Model: "m", At: to.Add(3 * time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE team_analyses SET status = 'done', finished_at = now() WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if a, err := s.LatestAttempt(ctx, v); err != nil || a.ID != id || a.RulesVersion != nil {
+		t.Errorf("old binary's row = %+v, %v", a, err)
+	}
+}
+
 // A week's reruns are one week: the limit counts weeks, the newest done run
 // with an assessment of each, and the weeks ending at to are left out.
 func TestDoneWeeksBefore(t *testing.T) {

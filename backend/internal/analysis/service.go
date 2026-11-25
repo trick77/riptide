@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -100,8 +101,6 @@ type Service struct {
 	products sync.Map
 	// settledAt holds, per view, the week its scheduled run settled.
 	settledAt sync.Map
-	// compared holds Compared per analysis id for rows stored before it.
-	compared sync.Map
 	// manual are the start times of the recent manual runs, all views.
 	manualMu sync.Mutex
 	manual   []time.Time
@@ -147,9 +146,11 @@ func (s *Service) assess(ctx context.Context, v View) (metrics.Assessment, error
 }
 
 // history reads the view's done analyses before to: the latest one's
-// signals, and how many in a row before to raised each.
+// signals, how many in a row before to raised each, and the problems open
+// since. Rows of older rules count too: their numbers were right, and a
+// signal they raised that the rules no longer know resolves nothing.
 func (s *Service) history(ctx context.Context, v View, to time.Time) (metrics.History, error) {
-	h := metrics.History{Seen: map[string]int{}, Latest: map[string]string{}}
+	h := metrics.History{Seen: map[string]int{}, Latest: map[string]string{}, Open: map[string]metrics.Problem{}}
 	// Weeks, not rows: a week holds its scheduled run and any number of
 	// clicks, counted as one in the query, else enough of them fill the
 	// limit. The current week's own reruns are no history. A week whose
@@ -161,6 +162,8 @@ func (s *Service) history(ctx context.Context, v View, to time.Time) (metrics.Hi
 	type run struct {
 		to  time.Time
 		ids map[string]string
+		// before is each signal's hero number in the previous period.
+		before map[string]*float64
 	}
 	var runs []run
 	for _, r := range rows {
@@ -168,16 +171,42 @@ func (s *Service) history(ctx context.Context, v View, to time.Time) (metrics.Hi
 		if err := json.Unmarshal(r.Assessment, &a); err != nil {
 			continue
 		}
-		ids := map[string]string{}
+		ids, before := map[string]string{}, map[string]*float64{}
 		for _, sg := range a.Signals {
 			ids[sg.ID] = sg.Tone
+			if len(sg.Facts) > 0 {
+				before[sg.ID] = sg.Facts[0].Prev
+			}
 		}
-		runs = append(runs, run{r.PeriodTo, ids})
+		runs = append(runs, run{r.PeriodTo, ids, before})
 	}
 	if len(runs) == 0 {
 		return h, nil
 	}
 	h.Latest, h.Runs = runs[0].ids, len(runs)
+	// Open: newest first, a problem counts from the earliest run that raised
+	// it after its last resolution; that run's previous period is the value
+	// before it was raised. Runs that skipped it (no longer notable against a
+	// previous period gone bad) keep it open.
+	done := map[string]bool{}
+	for _, r := range runs {
+		for id := range r.ids {
+			if rest, ok := strings.CutPrefix(id, metrics.SignalResolved+":"); ok {
+				done[rest] = true
+			}
+		}
+		for id, tone := range r.ids {
+			if done[id] || (tone != metrics.ToneAttention && tone != metrics.ToneHint) {
+				continue
+			}
+			p, ok := h.Open[id]
+			if !ok {
+				p.Tone = tone
+			}
+			p.Before = r.before[id]
+			h.Open[id] = p
+		}
+	}
 	// In a row means on the window's schedule: a run missed (failed, the
 	// pod down) is a gap, and the streak ends there. It ends too where the
 	// tone flips: a change keeps its ID whether worse or better.
@@ -280,7 +309,7 @@ func (s *Service) run(ctx context.Context, v View, trigger string) error {
 	}
 	// From the claim on, every way out ends the row: one left running shows
 	// a spinner and is claimed, and paid for, again.
-	res := store.AnalysisResult{InputHash: &hash}
+	res := store.AnalysisResult{InputHash: &hash, RulesVersion: ptr(metrics.RulesVersion)}
 	if res.Assessment, err = json.Marshal(a); err != nil {
 		return s.fail(ctx, log, "marshal_input", id, res, err, started)
 	}

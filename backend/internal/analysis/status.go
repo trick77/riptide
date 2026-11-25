@@ -46,6 +46,9 @@ type Tally struct {
 	Good int `json:"good"`
 	Done int `json:"done"`
 	Bad  int `json:"bad"`
+	// Talk is the question, 1 when there is one: a number that moved
+	// notably stands out, though it has no better direction.
+	Talk int `json:"talk"`
 	// Baseline: a team number has a previous period to read better against;
 	// without one nothing can.
 	Baseline bool `json:"baseline"`
@@ -102,7 +105,7 @@ func ruleLever(s metrics.Signal) string {
 // otherwise.
 func tab(s metrics.Signal) string {
 	switch s.Kind {
-	case metrics.SignalSteadySlow, metrics.SignalSlower, metrics.SignalFailingMore:
+	case metrics.SignalSlower, metrics.SignalFailingMore:
 		return "runs"
 	}
 	return "prs"
@@ -244,6 +247,9 @@ func tally(a metrics.Assessment) Tally {
 			t.Bad++
 		}
 	}
+	if a.Question != nil {
+		t.Talk = 1
+	}
 	t.Baseline = slices.ContainsFunc(a.Team, func(f metrics.Fact) bool { return f.Verdict != metrics.ChangeNone })
 	return t
 }
@@ -262,6 +268,12 @@ type Status struct {
 	Enabled bool `json:"enabled"`
 	// Running: an attempt is under way.
 	Running bool `json:"running"`
+	// Outdated: the view's newest analysis, young enough to show, was
+	// assessed under older rules (metrics.RulesVersion): it may word signals
+	// riptide no longer raises, so neither its text nor its numbers show;
+	// Assessment is the rules' view now, and the page offers to assess
+	// again. State then says none (or off) as without an analysis.
+	Outdated bool `json:"outdated"`
 	// Assessment is the shown analysis' own, numbers and all, so its text
 	// and numbers agree; without one the view's closed weeks now.
 	Assessment metrics.Assessment `json:"assessment"`
@@ -320,11 +332,12 @@ func (s *Service) Status(ctx context.Context, v View) (Status, error) {
 		var out Output
 		var rep Report
 		var a metrics.Assessment
-		if old <= MaxAge(v.Weeks) && json.Unmarshal(r.Output, &out) == nil && json.Unmarshal(r.Assessment, &a) == nil {
+		// A row of older rules shows nothing of itself: its signals and
+		// question are frozen as those rules raised them.
+		st.Outdated = old <= MaxAge(v.Weeks) && outdated(r)
+		if old <= MaxAge(v.Weeks) && !st.Outdated && json.Unmarshal(r.Output, &out) == nil &&
+			json.Unmarshal(r.Assessment, &a) == nil {
 			_ = json.Unmarshal(r.Report, &rep)
-			if err := s.backfillCompared(ctx, v, r, &a); err != nil {
-				return st, err
-			}
 			st.State, st.Assessment = StateFresh, a
 			if old > 0 {
 				st.State = StateOlder
@@ -372,30 +385,11 @@ func (s *Service) nextRun(ctx context.Context, v View, st *Status) {
 	}
 }
 
-// backfillCompared reads Compared from the view's history for an analysis
-// stored before the field: unmarshalled, it would read false and claim no
-// earlier week was assessed. Once per row: the page polls. Only rows from
-// before the field, so the memo stays as small as their number.
-func (s *Service) backfillCompared(ctx context.Context, v View, r store.Analysis, a *metrics.Assessment) error {
-	var probe struct {
-		Compared *bool `json:"compared"`
-	}
-	// The row unmarshalled into a just before: it is JSON.
-	_ = json.Unmarshal(r.Assessment, &probe)
-	if probe.Compared != nil {
-		return nil
-	}
-	if c, ok := s.compared.Load(r.ID); ok {
-		a.Compared = c.(bool)
-		return nil
-	}
-	h, err := s.history(ctx, v, r.PeriodTo)
-	if err != nil {
-		return err
-	}
-	a.Compared = h.Runs > 0
-	s.compared.Store(r.ID, a.Compared)
-	return nil
+// outdated reports whether r was assessed under older rules than now's;
+// a row from before the column (nil) under the oldest. Such a row also
+// predates Assessment.Compared, which needed a backfill: none is shown.
+func outdated(r store.Analysis) bool {
+	return r.RulesVersion == nil || *r.RulesVersion < metrics.RulesVersion
 }
 
 // ianaZone is loc's IANA name for the page; empty for "Local", which no

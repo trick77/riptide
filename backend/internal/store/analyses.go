@@ -43,19 +43,21 @@ type AnalysisResult struct {
 	OutputTokens *int64
 	CostNanoUSD  *int64
 	Error        *string
+	// RulesVersion is the assessment rules it was assessed under.
+	RulesVersion *int
 	// At is the end by the caller's clock.
 	At time.Time
 }
 
 const analysisColumns = `id, team, weeks, product, period_from, period_to, trigger, status, model,
 	input_hash, assessment, output, report, input_tokens, output_tokens, cost_nano_usd, error, attempts,
-	created_at, finished_at`
+	created_at, finished_at, rules_version`
 
 func scanAnalysis(r pgx.CollectableRow) (Analysis, error) {
 	var a Analysis
 	err := r.Scan(&a.ID, &a.Team, &a.Weeks, &a.Product, &a.PeriodFrom, &a.PeriodTo, &a.Trigger,
 		&a.Status, &a.Model, &a.InputHash, &a.Assessment, &a.Output, &a.Report, &a.InputTokens, &a.OutputTokens,
-		&a.CostNanoUSD, &a.Error, &a.Attempts, &a.CreatedAt, &a.FinishedAt)
+		&a.CostNanoUSD, &a.Error, &a.Attempts, &a.CreatedAt, &a.FinishedAt, &a.RulesVersion)
 	return a, err
 }
 
@@ -104,11 +106,16 @@ func (s *Store) endAnalysis(ctx context.Context, id int64, status string, r Anal
 		}
 		return string(m)
 	}
+	// Only a done row names its rules: a failed one may be claimed again by
+	// a binary from before the column, whose finish leaves it as it is.
+	if status != "done" {
+		r.RulesVersion = nil
+	}
 	_, err := s.pool.Exec(ctx, `UPDATE team_analyses SET status = $2, input_hash = $3, assessment = $4::jsonb,
 		output = $5::jsonb, report = $6::jsonb, input_tokens = $7, output_tokens = $8, cost_nano_usd = $9,
-		error = $10, finished_at = $11 WHERE id = $1`,
+		error = $10, finished_at = $11, rules_version = $12 WHERE id = $1`,
 		id, status, r.InputHash, raw(r.Assessment), raw(r.Output), raw(r.Report), r.InputTokens, r.OutputTokens,
-		r.CostNanoUSD, r.Error, r.At)
+		r.CostNanoUSD, r.Error, r.At, r.RulesVersion)
 	return err
 }
 

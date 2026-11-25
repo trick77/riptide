@@ -177,7 +177,9 @@ func (c *checker) text(lang string, t Text) (Text, error) {
 			c.drop(lang, name, "twice")
 		case len(cards) == MaxCards:
 			c.drop(lang, name, "past the cap")
-		case !slices.Contains(levers, k.Lever):
+		// A signal without levers (a resolution) takes none: no step without
+		// a finding behind it.
+		case len(levers) == 0 && k.Lever != "", len(levers) > 0 && !slices.Contains(levers, k.Lever):
 			c.drop(lang, name, "lever "+k.Lever+" not its own")
 		default:
 			k.Take = strings.TrimSpace(k.Take)

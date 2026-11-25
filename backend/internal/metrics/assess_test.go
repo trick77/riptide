@@ -149,29 +149,49 @@ func TestAssessSignals(t *testing.T) {
 	if jam == nil || jam.Tone != ToneAttention || jam.Waiting == nil || jam.Waiting.FirstReview != 4 {
 		t.Fatalf("jam = %+v, want attention (jammed before too), 4 waiting on a first review; have %v", jam, ids)
 	}
-	slow := signal(a, "steady_slow:main:kasse/kasse-web")
-	if signal(a, "steady_slow:main:kasse/kasse-api") != nil {
-		t.Errorf("kasse-api at the kind's median is no steady slow build")
+	// kasse-web is the slowest of its kind in both periods, as slow as
+	// before: a habit, no signal (the slowest three are always someone).
+	for _, sg := range a.Signals {
+		if sg.Repo != nil && *sg.Repo == "kasse/kasse-web" {
+			t.Errorf("a build as slow as before raised %s", sg.ID)
+		}
 	}
-	if slow == nil {
-		t.Fatalf("no steady_slow for kasse-web: %v", ids)
-	}
-	expectNear(t, "slow p50", slow.Facts[0].Value, 1500)
 	rev := signal(a, "change:review_time")
 	if rev == nil || rev.Tone != ToneAttention || len(rev.Drivers) != 1 || rev.Drivers[0].Repo != "kasse/kasse-api" {
 		t.Fatalf("review change = %+v, want worse, driven by kasse-api", rev)
 	}
 	expectNear(t, "driver share", &rev.Drivers[0].Share, 1)
-	// The jam, the slow build and the driver: kasse-api and kasse-web lead.
-	if len(a.Focus) < 2 || a.Focus[0].Repo != "kasse/kasse-api" {
+	// The jam and the driver: kasse-api alone.
+	if len(a.Focus) != 1 || a.Focus[0].Repo != "kasse/kasse-api" {
 		t.Fatalf("focus = %+v", a.Focus)
 	}
-	if !slices.ContainsFunc(a.Focus, func(f FocusRepo) bool { return f.Repo == "kasse/kasse-web" }) {
-		t.Errorf("kasse-web not in the focus: %+v", a.Focus)
+	// kasse-web and kasse-cli built in both periods, portal-web merged 12
+	// PRs in both: judged, no signal. kasse-api carries the signals.
+	if a.Active != 4 || a.Calm != 3 || a.Unjudged != 0 || a.Idle != 0 || a.Repos != 4 {
+		t.Errorf("active %d calm %d unjudged %d idle %d repos %d", a.Active, a.Calm, a.Unjudged, a.Idle, a.Repos)
 	}
-	// kasse-cli built, portal-web merged: active, no signal.
-	if a.Calm < 2 || a.Active < 4 {
-		t.Errorf("active %d calm %d", a.Active, a.Calm)
+}
+
+// A repo is calm only where a rule could judge it: one with a few builds,
+// no open PRs and a few merged PRs is unjudged; one active only before is
+// idle. Calm, unjudged and those with a signal add up to the active ones.
+func TestCalmOnlyWhenJudgeable(t *testing.T) {
+	cur, prev := ClosedPeriod(4, now, zurich), ClosedPrevious(4, now, zurich)
+	mk := func(p Period, repos ...string) *dataset.Dataset {
+		return data(func(ds *dataset.Dataset) {
+			covered(ds, p)
+			for i, repo := range repos {
+				at := p.To.Add(-time.Duration(2+i) * 24 * time.Hour).UTC()
+				ds.PRs = append(ds.PRs, pr(func(x *dataset.PR) {
+					x.Repo, x.PRID, x.MergedAt, x.OpenedAt, x.ReadyAt = repo, int64(i+1), &at, ptr(at.Add(-time.Hour)), ptr(at.Add(-time.Hour))
+					x.FirstCommitAt, x.FirstReviewAt, x.ApprovedAt = ptr(at.Add(-2*time.Hour)), ptr(at.Add(-time.Hour)), ptr(at.Add(-time.Hour))
+				}))
+			}
+		})
+	}
+	a := Assess(mk(cur, "kasse/kasse-api"), mk(prev, "kasse/kasse-api", "portal/portal-web"), Params{Period: cur, Previous: prev}, History{})
+	if a.Active != 1 || a.Calm != 0 || a.Unjudged != 1 || a.Idle != 1 || a.Repos != 2 {
+		t.Errorf("active %d calm %d unjudged %d idle %d repos %d", a.Active, a.Calm, a.Unjudged, a.Idle, a.Repos)
 	}
 }
 
@@ -253,7 +273,8 @@ func TestResolvedPastTheCut(t *testing.T) {
 		})
 	}
 	h := History{Runs: 1, Seen: map[string]int{"failing_more:main:kasse/kasse-api": 1},
-		Latest: map[string]string{"failing_more:main:kasse/kasse-api": ToneAttention}}
+		Latest: map[string]string{"failing_more:main:kasse/kasse-api": ToneAttention},
+		Open:   map[string]Problem{"failing_more:main:kasse/kasse-api": {Tone: ToneAttention, Before: ptr(0.0)}}}
 	a := Assess(mk(cur), mk(prev), Params{Period: cur, Previous: prev}, h)
 	if s := signal(a, "resolved:failing_more:main:kasse/kasse-api"); s == nil || len(s.Facts) != 1 {
 		t.Errorf("resolution past the cut = %+v", s)
@@ -271,12 +292,12 @@ func TestResolvedPastTheCut(t *testing.T) {
 	if s := signal(a, "resolved:failing_more:main:kasse/kasse-api"); s != nil {
 		t.Errorf("resolved on a low sample: %+v", s)
 	}
-	// A steady slow build with too few timed runs to rank is not resolved.
-	h = History{Runs: 1, Seen: map[string]int{"steady_slow:main:kasse/kasse-api": 1},
-		Latest: map[string]string{"steady_slow:main:kasse/kasse-api": ToneAttention}}
-	a = Assess(few(cur, 0), mk(prev), Params{Period: cur, Previous: prev}, h)
+	// A kind dropped since (steady_slow) resolves nothing.
+	h = History{Runs: 1, Latest: map[string]string{"steady_slow:main:kasse/kasse-api": ToneAttention},
+		Open: map[string]Problem{"steady_slow:main:kasse/kasse-api": {Tone: ToneAttention, Before: ptr(600.0)}}}
+	a = Assess(mk(cur), mk(prev), Params{Period: cur, Previous: prev}, h)
 	if s := signal(a, "resolved:steady_slow:main:kasse/kasse-api"); s != nil {
-		t.Errorf("steady slow resolved without a rank: %+v", s)
+		t.Errorf("a dropped kind resolved: %+v", s)
 	}
 }
 
@@ -392,18 +413,21 @@ func TestNewJamAgainstZero(t *testing.T) {
 }
 
 func TestAssessHistory(t *testing.T) {
-	a := assessFixture(t, History{
-		Seen: map[string]int{"pr_jam:kasse/kasse-api": 2},
-		Latest: map[string]string{
-			"pr_jam:kasse/kasse-api":            ToneAttention,
-			"failing_more:main:kasse/kasse-cli": ToneAttention,
-			"change:within_day":                 ToneGood, // a gone improvement is no news
-			"change:open_jammed":                ToneAttention,
-			"steady_slow:main:kasse/kasse-x":    ToneHint, // no runs now: nothing to show
-			// slower last time, steady slow now: still slow, not resolved
-			"slower_build:main:kasse/kasse-web": ToneAttention,
-		},
-	})
+	open := map[string]Problem{
+		"pr_jam:kasse/kasse-api":            {Tone: ToneAttention},
+		"failing_more:main:kasse/kasse-cli": {Tone: ToneAttention, Before: ptr(0.0)},
+		"slower_build:main:kasse/kasse-x":   {Tone: ToneAttention, Before: ptr(300.0)}, // no runs now
+		// raised when kasse-web built in 1000 s: as slow as last period now,
+		// still half as slow again as before, not resolved
+		"slower_build:main:kasse/kasse-web": {Tone: ToneAttention, Before: ptr(1000.0)},
+		// raised before it was known what it was before: never resolved
+		"failing_more:main:kasse/kasse-api": {Tone: ToneAttention},
+	}
+	latest := map[string]string{"change:within_day": ToneGood} // a gone improvement is no news
+	for id, p := range open {
+		latest[id] = p.Tone
+	}
+	a := assessFixture(t, History{Seen: map[string]int{"pr_jam:kasse/kasse-api": 2}, Latest: latest, Open: open})
 	if s := signal(a, "pr_jam:kasse/kasse-api"); s == nil || s.Seen != 2 {
 		t.Errorf("jam seen = %+v", s)
 	}
@@ -417,17 +441,95 @@ func TestAssessHistory(t *testing.T) {
 		t.Errorf("a jam still there resolved")
 	}
 	if signal(a, "resolved:slower_build:main:kasse/kasse-web") != nil {
-		t.Errorf("a build still slow resolved")
+		t.Errorf("a build not back where it was resolved")
 	}
-	if signal(a, "resolved:steady_slow:main:kasse/kasse-x") != nil {
+	if signal(a, "resolved:slower_build:main:kasse/kasse-x") != nil {
 		t.Errorf("resolved without a number")
+	}
+	if signal(a, "resolved:failing_more:main:kasse/kasse-api") != nil {
+		t.Errorf("resolved without the value before")
 	}
 }
 
-// Every better team number is evidence of what runs, a small gain too; a
-// worse one waits for notable, the larger gain ranks first, and the better
-// half of a throughput / instability pair is no gain.
-func TestChangeSignalsGood(t *testing.T) {
+// A problem is resolved only when its number is back where it was before
+// it was raised: a lead time that rose and stayed up reads "same" against a
+// previous period gone bad, and is never resolved, however many periods it
+// stays there. Back at the value before, it is.
+func TestResolvedOnlyWhenBack(t *testing.T) {
+	same := Change{Verdict: ChangeSame, Directed: true, Magnitude: ptr(MagnitudeSame), Score: ptr(0.0), Prev: ptr(150.0)}
+	better := Change{Verdict: ChangeBetter, Directed: true, Magnitude: ptr(MagnitudeNotable), Score: ptr(0.5), Prev: ptr(150.0)}
+	resolved := func(v float64, c Change) bool {
+		a := &assessor{gaps: map[string]bool{},
+			h:    History{Open: map[string]Problem{"change:lead_time": {Tone: ToneAttention, Before: ptr(100.0)}}},
+			team: []teamChange{{"lead_time", "lead_time_p50", UnitSeconds, SourceArgoCD, ptr(v), c}}}
+		a.changeSignals()
+		a.resolvedSignals()
+		return signal(Assessment{Signals: a.out}, "resolved:change:lead_time") != nil
+	}
+	if resolved(150, same) {
+		t.Error("a lead time still at its bad level resolved")
+	}
+	if resolved(120, better) {
+		t.Error("a lead time better than last period, not back where it was, resolved")
+	}
+	if !resolved(105, better) {
+		t.Error("a lead time back within the tolerance of before not resolved")
+	}
+}
+
+// A jam resolves only clearly below the jam: three long-open PRs are one
+// short of it, and next week may tip it back. PRs that only fell out of
+// the open numbers (unknown after lost Bitbucket events, inactive for a
+// month) still hold it.
+func TestJamResolvesClearlyBelow(t *testing.T) {
+	cur, prev := ClosedPeriod(4, now, zurich), ClosedPrevious(4, now, zurich)
+	open := func(long, unknown, inactive int) []dataset.OpenPR {
+		var out []dataset.OpenPR
+		add := func(days float64, last float64, unk bool) {
+			at := cur.To.Add(-time.Duration(days * float64(24*time.Hour))).UTC()
+			out = append(out, openPR(func(o *dataset.OpenPR) {
+				o.PRID, o.OpenedAt, o.ReadyAt, o.ReadySince, o.Unknown = int64(len(out)+1), at, ptr(at), ptr(at), unk
+				o.LastEventAt = cur.To.Add(-time.Duration(last * float64(24*time.Hour))).UTC()
+			}))
+		}
+		for range long {
+			add(10, 1, false)
+		}
+		for range unknown {
+			add(10, 5, true)
+		}
+		for range inactive {
+			add(50, 40, false)
+		}
+		return out
+	}
+	for _, c := range []struct {
+		name                    string
+		long, unknown, inactive int
+		want                    bool
+	}{
+		{"three long-open", 3, 0, 0, false},
+		{"two long-open", 2, 0, 0, true},
+		{"none open", 0, 0, 0, true},
+		{"its PRs unknown now", 0, 4, 0, false},
+		{"its PRs inactive now", 0, 0, 4, false},
+		{"two of them left, one unknown", 1, 1, 0, true},
+	} {
+		mk := func(p Period, o []dataset.OpenPR) *dataset.Dataset {
+			return data(func(ds *dataset.Dataset) { covered(ds, p); ds.OpenPRs = o })
+		}
+		h := History{Open: map[string]Problem{"pr_jam:kasse/kasse-api": {Tone: ToneAttention}}}
+		a := Assess(mk(cur, open(c.long, c.unknown, c.inactive)), mk(prev, open(4, 0, 0)), Params{Period: cur, Previous: prev}, h)
+		if s := signal(a, "resolved:pr_jam:kasse/kasse-api"); (s != nil) != c.want {
+			t.Errorf("%s: resolved %v, want %v", c.name, s != nil, c.want)
+		}
+	}
+}
+
+// A gain counts from where a worsening does: notable both ways, the larger
+// gain first. Deploy frequency and success moving apart are two cards, no
+// trade-off holding the gain back.
+func TestChangeSignalsSymmetric(t *testing.T) {
 	ch := func(verdict, mag string, score float64) Change {
 		return Change{Verdict: verdict, Directed: true, Magnitude: ptr(mag), Score: ptr(score), Prev: ptr(1.0)}
 	}
@@ -437,21 +539,36 @@ func TestChangeSignalsGood(t *testing.T) {
 	a := &assessor{gaps: map[string]bool{}, team: []teamChange{
 		team("lead_time", ch(ChangeBetter, MagnitudeMinor, 0.2)),
 		team("within_day", ch(ChangeBetter, MagnitudeNotable, 0.6)),
+		team("review_time", ch(ChangeBetter, MagnitudeNotable, 0.4)),
 		team("wip_weeks", ch(ChangeWorse, MagnitudeMinor, -0.2)),
 		team("merged_per_week", ch(ChangeBetter, MagnitudeSame, 0)),
-		{"deploy_frequency", "deploy_per_week", UnitPerWeek, SourceArgoCD, ptr(2.0), ch(ChangeBetter, MagnitudeMinor, 0.3)},
+		{"deploy_frequency", "deploy_per_week", UnitPerWeek, SourceArgoCD, ptr(2.0), ch(ChangeBetter, MagnitudeNotable, 0.3)},
+		{"deploy_success", "deploy_success", UnitShare, SourceArgoCD, ptr(0.8), ch(ChangeWorse, MagnitudeNotable, -0.4)},
 	}}
-	a.m.Comparison.DeployFreq = ch(ChangeBetter, MagnitudeMinor, 0.3)
-	a.m.Comparison.DeploySuccess = ch(ChangeWorse, MagnitudeMinor, -0.1)
 	a.changeSignals()
 	rank(a.out)
 	ids := []string{}
 	for _, s := range a.out {
 		ids = append(ids, s.ID+"/"+s.Tone)
 	}
-	want := []string{"throughput_instability/hint", "change:within_day/good", "change:lead_time/good"}
+	want := []string{"change:deploy_success/attention", "change:within_day/good", "change:review_time/good",
+		"change:deploy_frequency/good"}
 	if !slices.Equal(ids, want) {
 		t.Errorf("signals = %v, want %v", ids, want)
+	}
+}
+
+// End to end: 15 % more merged PRs is no gain card, 33 % is.
+func TestSmallGainNoCard(t *testing.T) {
+	cur, prev := ClosedPeriod(4, now, zurich), ClosedPrevious(4, now, zurich)
+	for _, c := range []struct {
+		merged int
+		want   bool
+	}{{14, false}, {16, true}} {
+		a := Assess(quietData(cur, c.merged), quietData(prev, 12), Params{Period: cur, Previous: prev}, History{})
+		if got := signal(a, "change:merged_per_week") != nil; got != c.want {
+			t.Errorf("12 to %d merged PRs: card %v, want %v", c.merged, got, c.want)
+		}
 	}
 }
 
@@ -493,12 +610,12 @@ func TestSeries(t *testing.T) {
 	}
 }
 
-// A worsening the latest assessment raised that is a gain now is resolved,
-// told once: no good change beside the resolution.
+// A worsening an earlier assessment raised that is a gain now, back where
+// it was, is resolved, told once: no good change beside the resolution.
 func TestResolvedGainToldOnce(t *testing.T) {
-	c := Change{Verdict: ChangeBetter, Directed: true, Magnitude: ptr(MagnitudeMinor), Score: ptr(0.2), Prev: ptr(3.0)}
+	c := Change{Verdict: ChangeBetter, Directed: true, Magnitude: ptr(MagnitudeNotable), Score: ptr(0.6), Prev: ptr(3.0)}
 	a := &assessor{gaps: map[string]bool{},
-		h:    History{Latest: map[string]string{"change:lead_time": ToneAttention}},
+		h:    History{Open: map[string]Problem{"change:lead_time": {Tone: ToneAttention, Before: ptr(2.0)}}},
 		team: []teamChange{{"lead_time", "lead_time_p50", UnitSeconds, SourceArgoCD, ptr(2.0), c}}}
 	a.changeSignals()
 	a.resolvedSignals()
@@ -526,27 +643,11 @@ func TestSeenPerTone(t *testing.T) {
 func TestStillWorseNotResolved(t *testing.T) {
 	c := Change{Verdict: ChangeWorse, Directed: true, Magnitude: ptr(MagnitudeMinor), Score: ptr(-0.2), Prev: ptr(3.0)}
 	a := &assessor{gaps: map[string]bool{},
-		h:    History{Latest: map[string]string{"change:lead_time": ToneAttention}},
+		h:    History{Open: map[string]Problem{"change:lead_time": {Tone: ToneAttention, Before: ptr(3.5)}}},
 		team: []teamChange{{"lead_time", "lead_time_p50", UnitSeconds, SourceArgoCD, ptr(3.5), c}}}
 	a.changeSignals()
 	a.resolvedSignals()
 	if len(a.out) != 0 {
 		t.Errorf("signals = %+v, want none", a.out)
-	}
-}
-
-// The better half of a trade-off resolves nothing: the earlier worsening
-// of deploy success is not done while the trade-off says it is no gain.
-func TestTradeoffResolvesNothing(t *testing.T) {
-	better := Change{Verdict: ChangeBetter, Directed: true, Magnitude: ptr(MagnitudeMinor), Score: ptr(0.2), Prev: ptr(0.8)}
-	worse := Change{Verdict: ChangeWorse, Directed: true, Magnitude: ptr(MagnitudeMinor), Score: ptr(-0.2), Prev: ptr(4.0)}
-	a := &assessor{gaps: map[string]bool{},
-		h:    History{Latest: map[string]string{"change:deploy_success": ToneAttention}},
-		team: []teamChange{{"deploy_success", "deploy_success", UnitShare, SourceArgoCD, ptr(0.9), better}}}
-	a.m.Comparison.DeployFreq, a.m.Comparison.DeploySuccess = worse, better
-	a.changeSignals()
-	a.resolvedSignals()
-	if len(a.out) != 1 || a.out[0].ID != "throughput_instability" {
-		t.Errorf("signals = %+v, want the trade-off alone", a.out)
 	}
 }
