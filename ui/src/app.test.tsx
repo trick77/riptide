@@ -329,20 +329,24 @@ describe("App", () => {
         "Argo CD meldete in den letzten 6 Tagen der Periode nichts: Aussagen dazu ausgelassen.",
       ),
     ).toBeInTheDocument();
-    // The tally in one line, the backend's counts.
+    // The tally beside the headline, the backend's counts, what is stuck
+    // first.
     const tally = within(p.getByRole("list", { name: "Bilanz" }));
     expect(tally.getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "4hakt",
       "1läuft",
       "1erledigt",
-      "4hakt",
       "9 von 11aktiven Repos unauffällig",
     ]);
     // Whose they are: the team or one product.
     expect(p.getByText("Team, alle Produkte")).toBeInTheDocument();
-    // Two sides: what runs with its evidence, what is stuck.
-    expect(p.getByRole("heading", { name: "Läuft" })).toBeInTheDocument();
-    expect(p.getByRole("heading", { name: "Hakt" })).toBeInTheDocument();
-    expect(p.queryByRole("heading", { name: "Unauffällig" })).toBeNull();
+    // Two groups: what is stuck, then what runs with its evidence.
+    expect(
+      p
+        .getAllByRole("heading", { level: 4 })
+        .slice(0, 2)
+        .map((h) => h.textContent),
+    ).toEqual(["Hakt", "Läuft"]);
     expect(
       p.getByText("9 von 11 aktiven Repos ohne Befund."),
     ).toBeInTheDocument();
@@ -940,19 +944,19 @@ describe("App", () => {
     const p = within(await screen.findByTestId("assessment"));
     expect(p.getByText("wenig belastbar · 7 PRs")).toBeInTheDocument();
     expect(p.getByText("alle 3 warten auf Änderungen")).toBeInTheDocument();
-    // The gain alone is evidence enough: the left side runs.
+    // The gain alone is evidence enough: the group runs.
     expect(p.getByRole("heading", { name: "Läuft" })).toBeInTheDocument();
     expect(p.queryByText("erledigt")).toBeNull();
   });
 
-  // Without a gain or a resolution the left side is unremarkable, grey:
-  // "wenn nichts läuft, ist läuft gut übertrieben" (user). With the model's
-  // words or the rules', the same.
+  // Without a gain or a resolution no group says "runs": "wenn nichts
+  // läuft, ist läuft gut übertrieben" (user). The foot says why. With the
+  // model's words or the rules', the same.
   it.each([
     ["the rules' words", false],
     ["the model's words", true],
   ])(
-    "says unremarkable without evidence of what runs, with %s",
+    "says nothing runs without evidence of what runs, with %s",
     async (_, worded) => {
       mockFetch((url) => {
         if (url.pathname === "/api/facts") return facts();
@@ -975,11 +979,8 @@ describe("App", () => {
       });
       render(<App />);
       const p = within(await screen.findByTestId("assessment"));
-      expect(
-        p.getByRole("heading", { name: "Unauffällig" }),
-      ).toBeInTheDocument();
       expect(p.queryByRole("heading", { name: "Läuft" })).toBeNull();
-      expect(p.getByText("aktiven Repos ohne Befund")).toBeInTheDocument();
+      expect(p.getByText(/aktiven Repos ohne Befund\./)).toBeInTheDocument();
       expect(
         p.getByText(
           worded
@@ -993,10 +994,9 @@ describe("App", () => {
     },
   );
 
-  // A gain the cards left out still makes the left side run: the side
-  // follows the backend's tally, never the cards shown. Once a gain stood
-  // as a green chip under "also spotted" while the page said nothing was
-  // better.
+  // A gain the cards left out still counts: the tally and the foot follow
+  // the backend's tally, never the cards shown. Once a gain stood as a
+  // green chip under "also spotted" while the page said nothing was better.
   it("never calls a period unremarkable with a gain spotted", async () => {
     mockFetch((url) => {
       if (url.pathname === "/api/facts") return facts();
@@ -1014,8 +1014,35 @@ describe("App", () => {
     });
     render(<App />);
     const p = within(await screen.findByTestId("assessment"));
-    expect(p.getByRole("heading", { name: "Läuft" })).toBeInTheDocument();
+    expect(
+      within(p.getByRole("list", { name: "Bilanz" })).getByText("läuft"),
+    ).toBeInTheDocument();
     expect(p.queryByText(/Keine Verbesserung|Noch kein Vergleich/)).toBeNull();
+  });
+
+  // Stuck, but every finding sits with a focus repo: the heading stays, so
+  // the sentence has its subject.
+  it("says under its heading where stuck findings without a card are", async () => {
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis") {
+        const base = analysisStatus();
+        return analysisStatus({
+          layout: {
+            ...base.layout,
+            cards: base.layout.cards.filter((c) => c.column !== "bad"),
+          },
+        });
+      }
+      return metrics();
+    });
+    render(<App />);
+    const p = within(await screen.findByTestId("assessment"));
+    const stuck = p.getByRole("heading", { name: "Hakt" });
+    expect(stuck.nextElementSibling?.textContent).toBe(
+      "Ohne eigene Karte: Die Befunde stehen weiter unten.",
+    );
+    expect(p.queryByText("Nichts hakt in diesen Wochen.")).toBeNull();
   });
 
   it("says drafts are drafts, and copies with team and product", async () => {
@@ -1134,8 +1161,8 @@ describe("App", () => {
     });
     render(<App />);
     const p = within(await screen.findByTestId("assessment"));
-    // Each side in one sentence, no empty boxes.
-    expect(p.getByRole("heading", { name: "Unauffällig" })).toBeInTheDocument();
+    // One sentence each, no empty group.
+    expect(p.queryAllByRole("heading", { level: 4 })).toEqual([]);
     expect(
       p.getByText("Keine Verbesserung, die als Beleg zählt."),
     ).toBeInTheDocument();

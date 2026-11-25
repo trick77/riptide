@@ -40,8 +40,8 @@ type Layout struct {
 
 // Tally is the assessment in one line: its signals by column, gates aside,
 // counted whether worded or not. Good or done above 0 is what lets the page
-// say "runs"; without either it says "unremarkable" (user: "wenn nichts
-// läuft, ist läuft gut übertrieben").
+// say "runs"; without either it says why nothing counts as a gain (user:
+// "wenn nichts läuft, ist läuft gut übertrieben").
 type Tally struct {
 	Good int `json:"good"`
 	Done int `json:"done"`
