@@ -153,6 +153,7 @@ func TestExcludedProjects(t *testing.T) {
 
 func TestDetectAutomationSource(t *testing.T) {
 	c := mustParse(t, validConfig)
+	c.Automation = append(c.Automation, AutomationSource{Name: "code-scan"})
 	for _, tc := range []struct {
 		name                    string
 		author, display, branch string
@@ -177,6 +178,18 @@ func TestDetectAutomationSource(t *testing.T) {
 		{"bot-shaped display name", "svc01", "release-bot", "", false, "other-bot"},
 		{"human display name", "alice", "Alice Example", "feature/x", false, ""},
 		{"nothing at all", "", "", "", false, ""},
+		// A source of two words matches them in a row only.
+		{"two-word source", "x", "Code Scan Kasse", "", false, "code-scan"},
+		{"two-word source apart", "x", "Scan Code", "", false, ""},
+		// A dependency bot run as an ordinary user, named after its tool and
+		// team: caught on a push to the trunk too, where no branch prefix is.
+		{"source named in the login", "renovate_kasse", "", "", false, "renovate"},
+		{"source named in the display name", "u4712", "Dependabot Kasse", "", false, "dependabot"},
+		{"source name between other words", "svc.renovate.kasse2", "", "master", false, "renovate"},
+		{"service flag beats a named source", "renovate_kasse", "", "", true, "service-account"},
+		// The letters inside a longer word are no name.
+		{"letters in a longer word", "renovates", "Inga Renovatebaum", "", false, ""},
+		{"letters in a person's name", "anoerglern", "Anna Dependabotsky", "", false, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := c.DetectAutomationSource(tc.author, tc.display, tc.branch, tc.service); got != tc.want {

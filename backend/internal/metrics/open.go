@@ -124,8 +124,8 @@ type OpenRepo struct {
 }
 
 // OpenPRs are the PRs open at the dataset's end: GitOps promotions left out,
-// bots left out. Open, Long, Age and the waits leave the inactive ones
-// out.
+// bots left out. Open, Long, Age and the waits leave the inactive and the
+// unknown ones out.
 type OpenPRs struct {
 	// At is the instant: the dataset's end, now on the page (the running
 	// week's dataset), the period's end in the assessment.
@@ -136,11 +136,15 @@ type OpenPRs struct {
 	Open         int       `json:"open"`
 	Long         int       `json:"long"`
 	// Jammed counts the jammed repos, JammedLong their long-open PRs.
-	Jammed     int     `json:"jammed"`
-	JammedLong int     `json:"jammed_long"`
-	Inactive   int     `json:"inactive"`
-	Age        Spread  `json:"age"`
-	Waiting    Waiting `json:"waiting"`
+	Jammed     int `json:"jammed"`
+	JammedLong int `json:"jammed_long"`
+	Inactive   int `json:"inactive"`
+	// Unknown are the PRs whose state is unknown (dataset.OpenPR.Unknown):
+	// last heard of before Bitbucket's events were lost, nothing since.
+	// Counted apart, in no other number, inactive ones included.
+	Unknown int     `json:"unknown"`
+	Age     Spread  `json:"age"`
+	Waiting Waiting `json:"waiting"`
 	// LongWaiting is what the long-open ones wait on, JammedWaiting the
 	// jammed repos' long-open ones.
 	LongWaiting   Waiting `json:"long_waiting"`
@@ -211,6 +215,12 @@ func openSection(ds *dataset.Dataset, f filter) OpenPRs {
 	}
 	repos := map[string]*repoAcc{}
 	for _, pr := range openPRs(ds, f) {
+		// Maybe merged or declined long ago: neither open nor inactive, and
+		// no repo's row.
+		if pr.Unknown {
+			out.Unknown++
+			continue
+		}
 		r := repos[pr.Repo]
 		if r == nil {
 			r = &repoAcc{row: OpenRepo{Repo: pr.Repo}}

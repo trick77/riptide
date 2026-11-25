@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"cmp"
+	"maps"
 	"math"
 	"math/big"
 	"slices"
@@ -158,7 +159,7 @@ func compute(ds *dataset.Dataset, period Period, f filter, base *baseline) Metri
 		Delivery:   delivery(ds, period, f, ch),
 		LeadChain:  leadChain(ch),
 		Review:     review(humans, period, ch),
-		Throughput: throughput(humans, period),
+		Throughput: throughput(ds, humans, period, f),
 		OpenPRs:    openSection(ds, f),
 		Build:      build(ds, period, f, base),
 		Costs:      costs(ds, f),
@@ -172,11 +173,14 @@ func compute(ds *dataset.Dataset, period Period, f filter, base *baseline) Metri
 // ---- Deploys ---------------------------------------------------------------
 
 // Revision classes, ranked: a revision is a release if it brought new
-// images to any App, else a first deploy if it was some App's first, else
-// a re-sync.
+// images to any App, else a first release if it was some App's first
+// deploy counted as one (dataset.Deploy.FirstRelease), else a first deploy
+// if it was some App's first, else a re-sync. A first release counts as a
+// release everywhere one counts.
 const (
 	classSync = iota
 	classFirstSeen
+	classFirstRelease
 	classRelease
 )
 
@@ -184,28 +188,54 @@ func revisionClass(d dataset.Deploy) int {
 	switch {
 	case d.Kind != nil && *d.Kind == "release":
 		return classRelease
+	case d.Kind != nil && *d.Kind == "first_seen" && d.FirstRelease:
+		return classFirstRelease
 	case d.Kind != nil && *d.Kind == "first_seen":
 		return classFirstSeen
 	}
 	return classSync
 }
 
+// failedPhase: a sync that deployed nothing. Argo CD's notification sends
+// Error as well as Failed for one.
+func failedPhase(phase string) bool { return phase == "Failed" || phase == "Error" }
+
 // DeployWeek is one week's revisions by class.
 type DeployWeek struct {
-	Release   int `json:"release"`
-	Sync      int `json:"sync"`
-	FirstSeen int `json:"first_seen"`
+	Release int `json:"release"`
+	// FirstRelease are the Releases that were an App's first deploy.
+	FirstRelease int `json:"first_release"`
+	Sync         int `json:"sync"`
+	FirstSeen    int `json:"first_seen"`
 }
 
 // DeployFrequency is the production deploy frequency over the period.
+// Infrastructure Apps (dataset.Deploy.Infra) are in none of its numbers
+// but Infra and InfraApps: no product's, nothing the team is judged on.
 type DeployFrequency struct {
 	// Releases, Syncs, FirstSeen count distinct GitOps revisions: a release
 	// reconciles every App sharing its revision, so it counts once.
-	Releases  int `json:"releases"`
-	Syncs     int `json:"syncs"`
+	Releases int `json:"releases"`
+	// FirstReleases are the Releases that were an App's first deploy, more
+	// than dataset.FirstDeployGrace after Argo CD first reported: an App
+	// going live.
+	FirstReleases int `json:"first_releases"`
+	Syncs         int `json:"syncs"`
+	// FirstSeen are the App's first deploys within dataset.FirstDeployGrace
+	// of Argo CD's first event: release or re-sync, unknown.
 	FirstSeen int `json:"first_seen"`
 	// Resyncs are the revisions that brought no new images.
 	Resyncs int `json:"resyncs"`
+	// Unattributed are the period's successful deploys, distinct
+	// revisions, that no Bitbucket event names a product of, infrastructure
+	// Apps aside; team-wide whatever product the view shows. In the team
+	// view's numbers, in no product's: a product without deploys may have
+	// its releases here (a GitOps commit Bitbucket's events missed).
+	Unattributed int `json:"unattributed"`
+	// Infra are the period's successful deploys, distinct revisions, of
+	// infrastructure Apps only, InfraApps those Apps by name; team-wide.
+	Infra     int      `json:"infra"`
+	InfraApps []string `json:"infra_apps"`
 	// PerWeek is releases per week over the period, or over the part of it
 	// since Argo CD started reporting.
 	PerWeek float64 `json:"per_week"`
@@ -315,14 +345,28 @@ func (d *DeployFrequency) fillCalendar(p Period, argoStart *time.Time) {
 func deployFrequency(ds *dataset.Dataset, p Period, f filter, env string) DeployFrequency {
 	var ok []dataset.Deploy
 	failed := 0
+	// Team-wide, before the product filter: what no product shows.
+	unattributed, infra, infraApps := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, d := range ds.Deploys {
-		if d.Environment == nil || *d.Environment != env || !f.in(d.Project) || !p.In(&d.At) {
+		if d.Environment == nil || *d.Environment != env || !p.In(&d.At) {
 			continue
 		}
-		switch d.Phase {
-		case "Succeeded":
+		switch {
+		case d.Infra:
+			if d.Phase == "Succeeded" {
+				infra[d.Revision], infraApps[d.App] = true, true
+			}
+			continue
+		case d.Project == nil && d.Phase == "Succeeded":
+			unattributed[d.Revision] = true
+		}
+		if !f.in(d.Project) {
+			continue
+		}
+		switch {
+		case d.Phase == "Succeeded":
 			ok = append(ok, d)
-		case "Failed":
+		case failedPhase(d.Phase):
 			failed++
 		}
 	}
@@ -342,17 +386,31 @@ func deployFrequency(ds *dataset.Dataset, p Period, f filter, env string) Deploy
 			firstAt[d.Revision] = d.At
 		}
 	}
-	out := DeployFrequency{Weeks: make([]DeployWeek, len(p.Weeks))}
+	out := DeployFrequency{Weeks: make([]DeployWeek, len(p.Weeks)), Unattributed: len(unattributed),
+		InfraApps: slices.Sorted(maps.Keys(infraApps))}
+	if out.InfraApps == nil {
+		out.InfraApps = []string{}
+	}
+	// A revision some other App deployed too is that App's.
+	for rev := range infra {
+		if !unattributed[rev] {
+			out.Infra++
+		}
+	}
 	// Each revision in the week of its first deploy in the period, with its
 	// class over the period: the bars add up to the totals, a release rolled
 	// out across a week boundary counts once.
 	for _, rev := range order {
 		w := &out.Weeks[p.WeekIndex(firstAt[rev])]
 		switch class[rev] {
-		case classRelease:
+		case classRelease, classFirstRelease:
 			w.Release++
 			out.Releases++
 			out.releaseAt = append(out.releaseAt, firstAt[rev])
+			if class[rev] == classFirstRelease {
+				w.FirstRelease++
+				out.FirstReleases++
+			}
 		case classFirstSeen:
 			w.FirstSeen++
 			out.FirstSeen++
@@ -479,9 +537,22 @@ func delivery(ds *dataset.Dataset, p Period, f filter, ch rawChain) Delivery {
 
 // ---- PRs -------------------------------------------------------------------
 
-// mergedPRs are the people's PRs merged in the period, GitOps promotions
-// and bots left out.
+// mergedPRs are the people's PRs merged in the period, the merged work every
+// PR number counts: GitOps promotions, bots and the PRs notCounted gives a
+// reason for left out.
 func mergedPRs(ds *dataset.Dataset, p Period, f filter) []dataset.PR {
+	var out []dataset.PR
+	for _, pr := range peopleMerged(ds, p, f) {
+		if notCounted(pr) == "" {
+			out = append(out, pr)
+		}
+	}
+	return out
+}
+
+// peopleMerged are the people's PRs merged in the period, the ones
+// notCounted leaves out included.
+func peopleMerged(ds *dataset.Dataset, p Period, f filter) []dataset.PR {
 	var out []dataset.PR
 	for _, pr := range ds.PRs {
 		if !pr.GitOps && !pr.Bot && pr.State == "merged" && f.inKey(pr.Project) && p.In(pr.MergedAt) {
@@ -489,6 +560,33 @@ func mergedPRs(ds *dataset.Dataset, p Period, f filter) []dataset.PR {
 		}
 	}
 	return out
+}
+
+// Why a person's merged PR is no merged work, the first that applies.
+const (
+	// NotCountedOffTrunk: merged into a feature or umbrella branch; its
+	// work reaches the trunk with another PR (dataset.PR.OffTrunk).
+	NotCountedOffTrunk = "off_trunk"
+	// NotCountedImplicitMerge: marked merged with another PR of its repo in
+	// the same second, without a merge commit: one merge, counted once
+	// (dataset.PR.ImplicitMerge).
+	NotCountedImplicitMerge = "implicit_merge"
+	// NotCountedHousekeeping: the same quick, unapproved change merged
+	// across repos (dataset.PR.Housekeeping).
+	NotCountedHousekeeping = "housekeeping"
+)
+
+// notCounted is why pr is no merged work, "" when it is.
+func notCounted(pr dataset.PR) string {
+	switch {
+	case pr.OffTrunk:
+		return NotCountedOffTrunk
+	case pr.ImplicitMerge:
+		return NotCountedImplicitMerge
+	case pr.Housekeeping:
+		return NotCountedHousekeeping
+	}
+	return ""
 }
 
 // Stage keys of the lead-time breakdown, in order.
@@ -890,8 +988,20 @@ func review(humans []dataset.PR, p Period, ch rawChain) Review {
 type Throughput struct {
 	// Merged are the people's merged PRs, as Review.Merged.
 	Merged int `json:"merged"`
-	// MergedPerWeek is Merged over the period's weeks; null without any.
+	// MergedPerWeek is Merged over the period's weeks, or over the part of
+	// it since Bitbucket started reporting (Since); null without any.
 	MergedPerWeek *float64 `json:"merged_per_week"`
+	// Since is when Bitbucket's data starts inside the period; null when it
+	// covers it.
+	Since *time.Time `json:"since"`
+	// OffTrunk, ImplicitMerges and Housekeeping are the people's PRs merged
+	// in the period left out of Merged and every PR number, by the first
+	// reason that applies (notCounted).
+	OffTrunk       int `json:"off_trunk"`
+	ImplicitMerges int `json:"implicit_merges"`
+	Housekeeping   int `json:"housekeeping"`
+	// Coverage is how many of Merged each PR number rests on.
+	Coverage PRCoverage `json:"coverage"`
 	// BatchSize is the changed lines per merged PR, added plus removed, over
 	// the PRs with a size (dataset.PR.LinesAdded): the median, not the mean,
 	// which one large PR decides.
@@ -902,6 +1012,22 @@ type Throughput struct {
 	// its counts.
 	Weeks []ThroughputWeek `json:"weeks"`
 }
+
+// PRCoverage is, of the people's merged PRs (Count of N each), those a
+// number can read: a PR missing here is missing from that number, not a
+// PR that took no time.
+type PRCoverage struct {
+	// ToProd: its merge commit's first production deploy is known, so it
+	// is in the time to production.
+	ToProd Share `json:"to_prod"`
+	// Sized: noergler's rollup gives its size (prSize), so it is in the
+	// batch size.
+	Sized Share `json:"sized"`
+	// Opened: its pr:opened was seen, so it is in the cycle time.
+	Opened Share `json:"opened"`
+}
+
+func share(count, n int) Share { return Share{Count: count, N: n, Rate: ratio(count, n)} }
 
 // ThroughputWeek is one week's merged PRs and their size.
 type ThroughputWeek struct {
@@ -931,11 +1057,37 @@ func prSize(pr dataset.PR) (lines, files float64, ok bool) {
 }
 
 // throughput is the section over the human PRs merged in the period, from
-// mergedPRs.
-func throughput(humans []dataset.PR, p Period) Throughput {
+// mergedPRs, of ds over p with the product filter f.
+func throughput(ds *dataset.Dataset, humans []dataset.PR, p Period, f filter) Throughput {
 	out := Throughput{Merged: len(humans), Weeks: make([]ThroughputWeek, len(p.Weeks))}
-	if p.Span > 0 {
-		out.MergedPerWeek = ptr(float64(len(humans)) / p.Span)
+	// Bitbucket started reporting inside the period: the rate is over the
+	// weeks it reported, not the empty ones before, as the deploy rate.
+	span := p.Span
+	if start := ds.Meta.DataStart.Bitbucket; start != nil && start.After(p.From) {
+		out.Since = start
+		span = float64(p.To.Sub(*start)) / float64(7*24*time.Hour)
+	}
+	if span > 0 {
+		out.MergedPerWeek = ptr(float64(len(humans)) / span)
+	}
+	for _, pr := range peopleMerged(ds, p, f) {
+		switch notCounted(pr) {
+		case NotCountedOffTrunk:
+			out.OffTrunk++
+		case NotCountedImplicitMerge:
+			out.ImplicitMerges++
+		case NotCountedHousekeeping:
+			out.Housekeeping++
+		}
+	}
+	toProd, opened := 0, 0
+	for _, pr := range humans {
+		if firstDeploy(pr, ds.Meta.ProductionStage) != nil {
+			toProd++
+		}
+		if pr.OpenedAt != nil {
+			opened++
+		}
 	}
 	var lines, files []float64
 	weekly := make([][]float64, len(p.Weeks))
@@ -947,11 +1099,11 @@ func throughput(humans []dataset.PR, p Period) Throughput {
 		if i >= 0 {
 			out.Weeks[i].Merged++
 		}
-		l, f, ok := prSize(pr)
+		l, fc, ok := prSize(pr)
 		if !ok {
 			continue
 		}
-		lines, files = append(lines, l), append(files, f)
+		lines, files = append(lines, l), append(files, fc)
 		if i >= 0 {
 			weekly[i] = append(weekly[i], l)
 		}
@@ -960,6 +1112,8 @@ func throughput(humans []dataset.PR, p Period) Throughput {
 	for i, w := range weekly {
 		out.Weeks[i].Sized, out.Weeks[i].BatchP50 = len(w), Median(w)
 	}
+	n := len(humans)
+	out.Coverage = PRCoverage{ToProd: share(toProd, n), Sized: share(len(lines), n), Opened: share(opened, n)}
 	return out
 }
 

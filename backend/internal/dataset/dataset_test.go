@@ -836,7 +836,9 @@ func TestDatasetExcludedProject(t *testing.T) {
 // deployment-frequency query and every stage of the lead-time breakdown.
 // UTC weeks, as date_trunc('week') in the doc. The period ends with the
 // seed's window: the doc query counts a revision re-synced in a later week in
-// that week too, the metrics once, in the week it first deployed.
+// that week too, the metrics once, in the week it first deployed. The doc
+// query knows no infrastructure App and no first deploy counted as a
+// release: the metrics' are put back where the doc counts them.
 func TestMetricsMatchTheDocumentedQueries(t *testing.T) {
 	st, pool := migrated(t)
 	seed(t, pool)
@@ -853,15 +855,28 @@ func TestMetricsMatchTheDocumentedQueries(t *testing.T) {
 				doc[week.Format(time.DateOnly)] = [3]int64{r[1].(int64), r[2].(int64), r[3].(int64)}
 			}
 		}
-		// The same counts from the metrics: distinct revisions per week.
+		// atlas-prod is infrastructure: no number counts it.
+		f := m.Delivery.Frequency
+		if f.Infra != 1 || !slices.Equal(f.InfraApps, []string{"atlas-prod"}) || f.Releases != 2 || f.FirstReleases != 1 {
+			t.Fatalf("infra %d %v, releases %d, first releases %d", f.Infra, f.InfraApps, f.Releases, f.FirstReleases)
+		}
+		all := *ds
+		all.Deploys = slices.Clone(ds.Deploys)
+		for i := range all.Deploys {
+			all.Deploys[i].Infra = false
+		}
+		f = metrics.Compute(&all, &dataset.Dataset{Meta: ds.Meta}, nil, metrics.Params{Period: period}).Delivery.Frequency
+		// The same counts from the metrics: distinct revisions per week, a
+		// first release as the doc's first_seen.
 		facts := map[string][3]int64{}
-		for i, w := range m.Delivery.Frequency.Weeks {
+		for i, w := range f.Weeks {
 			if n := w.Release + w.FirstSeen + w.Sync; n > 0 {
-				facts[period.Weeks[i].Start.Format(time.DateOnly)] = [3]int64{int64(w.Release), int64(w.FirstSeen), int64(n)}
+				facts[period.Weeks[i].Start.Format(time.DateOnly)] = [3]int64{int64(w.Release - w.FirstRelease),
+					int64(w.FirstSeen + w.FirstRelease), int64(n)}
 			}
 		}
-		if len(doc) != len(facts) || m.Delivery.Frequency.Releases != 1 {
-			t.Fatalf("weeks: doc %v, metrics %v (releases %d)", doc, facts, m.Delivery.Frequency.Releases)
+		if len(doc) != len(facts) || f.Releases-f.FirstReleases != 1 {
+			t.Fatalf("weeks: doc %v, metrics %v (releases %d)", doc, facts, f.Releases)
 		}
 		for wk, want := range doc {
 			if facts[wk] != want {

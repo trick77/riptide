@@ -61,10 +61,26 @@ prs AS (
          max(e.occurred_at) FILTER (WHERE e.event_type = 'pr:deleted') AS deleted_at,
          max(e.occurred_at) FILTER (WHERE e.event_type IN ('pr:opened', 'pr:reopened')) AS last_opened_at,
          max(e.payload->'pullRequest'->'properties'->'mergeCommit'->>'id')
-             FILTER (WHERE e.event_type = 'pr:merged') AS merge_commit
+             FILTER (WHERE e.event_type = 'pr:merged') AS merge_commit,
+         -- The branch it went into, as merged: a PR may be retargeted.
+         coalesce(max(lower(e.payload->'pullRequest'->'toRef'->>'displayId')) FILTER (WHERE e.event_type = 'pr:merged'),
+                  max(lower(e.payload->'pullRequest'->'toRef'->>'displayId')) FILTER (WHERE e.event_type = 'pr:opened'))
+             AS target_branch
   FROM bitbucket_events e
   JOIN window_prs w ON w.repo_full_name = e.repo_full_name AND w.pr_id = e.pr_id
   GROUP BY e.repo_full_name, e.pr_id
+),
+-- The repo's trunk besides master and main: the branch most of its merged
+-- PRs went into, over its whole history, so a window holding one PR into
+-- an umbrella branch does not make that branch the trunk.
+trunks AS (
+  SELECT e.repo_full_name,
+         mode() WITHIN GROUP (ORDER BY lower(e.payload->'pullRequest'->'toRef'->>'displayId')) AS trunk
+  FROM bitbucket_events e
+  WHERE e.event_type = 'pr:merged'
+    AND e.repo_full_name IN (SELECT repo_full_name FROM window_prs)
+    AND e.payload->'pullRequest'->'toRef'->>'displayId' IS NOT NULL
+  GROUP BY e.repo_full_name
 ),
 -- Oldest commit pushed to the PR's branch; a rebase resets it (docs/metrics.md,
 -- lead-time breakdown query). A branch name is reused (a long-lived
@@ -183,9 +199,16 @@ SELECT c.repo_full_name AS repo,
        -- reviewed, and for a rollup that is not the merge's.
        r.lines_added,
        r.lines_removed,
-       r.files_changed
+       r.files_changed,
+       c.target_branch,
+       -- Merged into another branch than the trunk (a feature or umbrella
+       -- branch): its work reaches the trunk with another PR, counted there.
+       -- A target the payload does not name counts as the trunk.
+       c.target_branch IS NOT NULL AND c.target_branch NOT IN ('master', 'main')
+         AND c.target_branch IS DISTINCT FROM t.trunk AS off_trunk
 FROM chain c
 -- pr_key is '<repo_full_name>#<pr_id>', lowercased at ingest.
 LEFT JOIN noergler_pr_rollups r
   ON r.pr_key = lower(c.repo_full_name) || '#' || c.pr_id AND r.outcome = 'merged'
+LEFT JOIN trunks t ON t.repo_full_name = c.repo_full_name
 ORDER BY c.repo_full_name, c.pr_id

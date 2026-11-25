@@ -325,6 +325,12 @@ type Build struct {
 	Hotspots Hotspots `json:"hotspots"`
 	// FeatureHint is nil unless feature builds look unrecognised.
 	FeatureHint *FeatureHint `json:"feature_hint"`
+	// Unattributed are the period's runs with a status and without a
+	// repository, team-wide whatever product the view shows: neither their
+	// commit, nor their pipeline's other runs, nor their pipeline name's
+	// first segment named one (dataset.Run.Repo). In the team view's
+	// numbers, in no product's. GitOps runs aside, as everywhere here.
+	Unattributed int `json:"unattributed"`
 	// repos are every repo's runs per kind, the next period's baseline;
 	// compared the repos per kind with a previous period to compare with.
 	// Both before the hotspots' cut to the top.
@@ -394,11 +400,17 @@ type baseline struct {
 // build is the CI section. base names the repos and holds the previous
 // period's runs to compare with; nil kinds compare nothing.
 func build(ds *dataset.Dataset, p Period, f filter, base *baseline) Build {
-	by := teamRuns(ds, f, gitopsRun(ds))
+	gitops := gitopsRun(ds)
+	by := teamRuns(ds, f, gitops)
 	flaky := flakyRuns(by)
 	out := Build{
 		DataFrom: ds.Meta.BuildDataFrom, Kinds: []BuildStats{},
 		repos: map[string]map[string]*repoRuns{}, compared: map[string]int{},
+	}
+	for _, r := range ds.Runs {
+		if r.Status != nil && r.Repo == nil && !gitops(r) {
+			out.Unattributed++
+		}
 	}
 	if from := ds.Meta.BuildDataFrom; from != nil {
 		out.StartsInside = from.After(p.From)
