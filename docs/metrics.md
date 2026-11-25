@@ -102,7 +102,7 @@ the data captured in v1.
 | **Change lead time** | Per commit, not per release: `SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY lead_time) FROM lead_time_changes WHERE environment='prod' AND NOT is_merge AND NOT author_is_service_account`. The `lead_time_changes` view maps every commit that shipped to the **first** deploy that carried it, so a release rolled out to four Apps counts each change once. Exclude merge commits and release tooling, and report bots on their own line — see [Change lead time (DORA)](dora-lead-time.md) for why, and for the coverage limits. Group by `team` or `repo_full_name`; `change_type` is not available here, since these commits come from master pushes, which carry no branch prefix. Do **not** substitute the newest commit per release: it answers "how stale was the freshest change" and reads ~7× too fast. |
 | **Lead time breakdown** | Where the lead time is spent, per human PR in app repos, as five stages: coding (oldest commit on the branch → PR ready), review (ready → approval), merge (approval → merged), to intg (merged → the merge commit's first intg deploy), to prod (intg → prod). One stage for review, not pickup + review: measured, 95 of 115 approvals were the reviewer's first and only touch, so "first review → approval" is zero by construction; the count is reported as a review-depth signal. Stages 4–5 reach only PRs whose merge commit `lead_time_changes` resolves, so they cover fewer PRs than 1–3 — report the count per stage. See the query below. |
 | **PR cycle time** | `pr:merged.occurred_at − pr:opened.occurred_at` per PR, keyed by `(repo_full_name, pr_id)`: PR ids are numbered per repository, so `pr_id` alone joins unrelated PRs. A PR opened before ingestion started has no `pr:opened` and drops out. Exclude GitOps repos: their PRs are stage promotions (see [Reading the event tables](#reading-the-event-tables)). Merged PRs only: a PR still open is in no cycle time, however long it waits — see Open PR age. |
-| **PR throughput** *(Flow Framework "flow velocity")* | Human PRs merged per week: the merged PRs of the cycle-time row (GitOps repos and bots out) over the period's weeks, or over the weeks since Bitbucket's first event when that lies inside the period (as deploy frequency does for Argo CD), and per week by branch prefix. A PR opened before ingestion started counts: only its merge is needed. Three kinds of merged PR are no merged work and are left out of this and every other PR number, each counted under its first reason so the page can say how many: **off trunk**, merged into another branch than the repo's trunk (`pullRequest.toRef.displayId`; the trunk is master, main, or the branch most of the repo's PRs target), whose work reaches the trunk with a later PR; **implicit merges**, PRs of one repo Bitbucket marks merged within the same second, at most one of them with a merge commit: an umbrella branch merged and took their commits along, one merge, counted once on the PR with the merge commit (else the highest PR number); **housekeeping**, a person's PR opened and merged within 15 minutes without an approval whose title (trimmed, case and inner spaces aside) was merged in at least 3 of the team's repos within an hour: one config change bumped everywhere at once (owner's decision, 2026-11). Per team, never per person. More is better, read next to the batch size: more PRs of the same size is more work done, more because they got smaller is the same work in better portions. |
+| **PR throughput** *(Flow Framework "flow velocity")* | Human PRs merged per week: the merged PRs of the cycle-time row (GitOps repos and bots out) over the period's weeks, or over the weeks since Bitbucket's first event when that lies inside the period (as deploy frequency does for Argo CD), and per week by branch prefix. A PR opened before ingestion started counts: only its merge is needed. A PR is a PR wherever the work happened (owner, 2026-11): one merged into a feature or umbrella branch, not the repo's trunk (`pullRequest.toRef.displayId`; the trunk is master, main, or the branch most of the repo's PRs target, every branch tied for most), and one Bitbucket marked merged without a merge commit of its own in the second another PR of the repo merged (an **implicit merge**: an umbrella branch brought its commits in) are merged work, marked in the facts as merged via an umbrella branch. Two kinds of merged PR are no merged work and are left out of this and every other PR number, each counted under its first reason so the page can say how many: the **umbrella** itself, the vehicle of other people's merged PRs, whose work counts on them: a PR whose source branch is the target of other merged PRs of the repo, over its whole history, or whose merge implicitly merged another person's PR (a bot's PR never makes a person's uncounted, either way); **housekeeping**, a tool's change: a person's PR whose title as opened (trimmed, case and inner spaces aside) was opened by people in at least 3 of the team's repos within an hour, without a person's approval (a bot's, a service's or a declared non-human account's approval is none) and without a ticket key in its title or source branch (owner's decision, 2026-11; how long it stood open says nothing, some of one batch are merged at once, others days later). The openings are the team's of all history, not the window's PRs: a batch opened across a period's edge is housekeeping in both periods. A PR marked merged when an umbrella went in (an implicit merge) whose source branch another merged PR of the repo, counted, came from is the same work and counted once (**twice**: one PR into the umbrella branch, a second of the same branch into master). The umbrella's openers and the siblings' are told bot or person as every PR's opener is, riptide's automation detection at read included. A PR of a **library** repo is merged work, but out of the base of the PRs traced to production (`coverage.to_prod`): a repo that is never rolled out, on positive evidence (owner, 2026-11: a library PR must never read as not traced, nor as a missed release). Over all history: no deployed GitOps release commit names its slug in a compare link, no run of it built an image (deployed or not yet: a repo building one is deployable, in doubt), and no image Argo CD deployed for the team has a path segment equal to its slug (a deployable repo's image is named after it, even when its CI does not report; the tag and digest of the last segment aside, a registry's port is no tag), while the team's tracing works at all (a compare link names some repo, some run's image Argo CD deployed, by its full reference). It needs no build: a starter or client library whose CI does not report is one. A repo one of whose PRs in the window reached any stage is none, whatever the evidence. The rule's residual: a deployable repo whose CI does not report, whose images are named otherwise (one service, several images of other names) and whose release commits name no compare link reads as a library. A view whose counted PRs are all libraries' says so (`libraries_only`): nothing to trace, no release missed, no limit. The weekly rate is null when the weeks since Bitbucket's first event are under one: three PRs in six hours are no 84 a week. Per team, never per person. More is better, read next to the batch size: more PRs of the same size is more work done, more because they got smaller is the same work in better portions. |
 | **Batch size** *(DORA capability "working in small batches")* | Changed lines per merged human PR, added plus removed, median and 90th percentile, and the median per week. The size is the PR's final rollup in `noergler_pr_rollups` (`outcome = 'merged'`), joined on `pr_key` = `lower(repo_full_name) || '#' || pr_id`: Bitbucket DC webhooks carry no diff size. noergler counts the whole PR diff at close, over the files it reviews only, so lock files and vendored bundles are out. No size: a PR noergler never reviewed (no rollup), and a rollup counting 0 lines (noergler could not fetch the diff at close and had no run to fall back on). The median, not the mean, which one large PR decides. Smaller is better. |
 | **Open PR age** | The PRs open at an instant T (the period's end), per repo, with their age and what they wait on. Open at T: no `pr:merged` / `pr:deleted` before T, the PR's latest event before T is no `pr:declined`, and the latest event carrying a `pullRequest.state` has it `OPEN` (none does: open unless declined). Every PR event carries the PR, so a declined PR reopened is open again on its next event. Only events before T count, so the previous period's end reads what was open then; a PR open all along that riptide first heard of after it counts there too, else it would read as a new long-open one. Age: T − its last turn ready, the first event after the last one whose `pullRequest.draft` was true, whether or not the parser recognised the flip; never seen a draft (opened ready, or made ready before ingestion) T − `pullRequest.createdDate`, which every PR event carries, so a PR opened before ingestion has one too. Time as a draft is its author's, not the team's: a long draft just made ready is no long-open PR (user, 2026-11-20). A draft has no age and is in no median. Waits on, the first that applies: draft; changes (a human `NEEDS_WORK` in the latest event's `reviewers` or `participants`, Bitbucket's own status, approvals reset by a push included); merge (a human `APPROVED` there); review (a reviewer touch as in the pickup-time query); first review. Long open: 7 days or more; a repo with 4 long-open PRs or more is jammed (both chosen, not measured; the jam was 3 until 2026-11-18). A draft is never long open and never inactive: it waits on its author and may lie as long as it wants (user, 2026-11-18); it stays open, waiting on "draft". Draft is the latest event's `pullRequest.draft`, so a ready PR turned back into a draft is stored as a synthetic `pr:back_to_draft` (else it read as ready until its next event). Per repo the median age of its ready PRs, never the oldest PR's, which one PR alone decides. Exclude GitOps repos and bots as for cycle time. Inactive: no event of any kind on the PR for 30 days before T (for a PR riptide first heard of after T, since its creation); counted apart, in no other number. Webhook-only data cannot tell a PR whose close event Bitbucket never delivered from one nobody touches, and such losses recur: a lost one counts as open until it goes inactive, and alone never makes a jam. Where the loss is evident it is said: a PR whose latest event came before a Bitbucket silence with unseen runs (see [Sources and silences](#sources-and-silences)) and that has had none since is of **unknown** state, counted apart, in no open, long, jam, wait or WIP number, and listed in the PR table as unknown. Its state is never guessed from the review bot's rollup: noergler never decides a PR's lifecycle. A PR without any event since ingestion is missing. |
 | **Time to first review** *(DX Core 4 "code review pickup time")* | Two-part computation per PR — see the SQL block below the table. Clock-start = `COALESCE(pr:ready_for_review, pr:opened)`: PRs opened ready start at `pr:opened`; PRs opened as drafts start at the synthetic `pr:ready_for_review` (emitted by the parser when a `pr:modified` payload carries `previousDraft=true, draft=false`). Engagement = first reviewer touch (`pr:comment:added`, `pr:reviewer:approved`, `pr:reviewer:unapproved`, `pr:reviewer:needs_work`, `pr:reviewer:updated`) where `lower(author) != lower(pr_opener) AND NOT is_automated AND occurred_at >= clock-start`. The five-event reviewer union covers every touch Bitbucket DC emits (silent approvals, retracted approvals, "needs work" flips, bare reviewer-status changes); the `occurred_at >= clock-start` guard drops early-feedback comments solicited during the draft phase, which would otherwise produce negative pickup times. `NOT is_automated` strips bot comments (noergler / Renovate / etc.) — every review-time bot must be recognisable, otherwise its instant comment drives the metric toward zero. Detection matches the `automation` config block against **both** the login handle (`author`) and the display name (`author_display_name`), because a bot is often provisioned as an ordinary user account whose login says nothing. `is_automated` is decided at ingest, so rows written before a bot was recognised stay marked human: the `non_human_identities` CTE in the query below filters those at read time, on both names too, from the accounts senders declare (`reviewer_handle` + `reviewer_account_kind` on noergler rollups, `actor_handle` + `actor_account_kind` on pipeline events) — riptide stores the declaration, it carries no account names of its own. A declared handle is matched against both the login and the display name, so it must never equal a person's display name: that person's reviews and PRs would drop out as a bot's. |
@@ -169,14 +169,37 @@ riptide counts three things the query leaves out (owner's decisions,
   or a PR's merge commit (see [Reading the event tables](#reading-the-event-tables)).
   An App none of whose successful deploys over the 26 weeks before the
   window's end names a product, one of them after the team's first
-  Bitbucket event, is infrastructure (monitoring, a dependency bot, a
-  rollout tool): its releases, re-syncs and failures are in no number the
-  team is judged on, only counted apart (`infra`, `infra_apps`) and listed
-  in the facts. Most production syncs without a product are such Apps.
-- **A deploy without a product is not "no deploys".** A deploy whose GitOps
-  commit no Bitbucket event names (an outage swallowed it) counts in the
-  team view and in no product view; `unattributed` counts them team-wide in
-  every view, so a product showing none can say why.
+  Bitbucket event, is infrastructure (a log shipper, a dependency bot):
+  its releases, re-syncs and failures are in no number the team is judged
+  on, only counted apart (`infra`, `infra_apps`) and listed in the facts.
+  Never when the team has no deploy with a product at all (its GitOps repo
+  sends Bitbucket nothing, and every App would drop out), and never an App
+  whose first deploy, counted as a release, came while Bitbucket's events
+  were lost or within 7 days after such a hole closed (a lost silence, see
+  [Sources and silences](#sources-and-silences)): its GitOps commit may lie
+  in the hole, synced to production days later (a hole ending Friday, the
+  deploy on Monday). A new App going live after an outage is a release
+  without a product. The page and the analysis class the period and the
+  previous one by the Apps as of the period's end, the running week by its
+  own: one App is never infrastructure in one period and a product's in
+  the other, which would move the comparison by bookkeeping, and the
+  page's tile says what the stored assessment says. A revision an
+  infrastructure App and another App both deployed is the other App's,
+  counted there only.
+  The class is derived from the data, never configured (owner, 2026-11:
+  the real infrastructure Apps must stay out without config work). Its one
+  false positive: a team with a second GitOps repo that sends Bitbucket no
+  webhook. None of that repo's commits names a product, so every App
+  deployed from it is listed as infrastructure on the deploy tile
+  (`infra_apps`) and counts in no number. The remedy is the webhook on
+  that GitOps repo; from its next commit on, its Apps have a product again.
+- **An App does not change products.** A deploy whose revision names none
+  (its GitOps commit fell into an outage) is its App's product's when the
+  App's other deploys name one, the one most of them name.
+- **A deploy without a product is not "no deploys".** A deploy of an App
+  with no known product counts in the team view and in no product view;
+  `unattributed` counts them team-wide in every view, so a product showing
+  none can say they may be why.
 
 #### Lead-time breakdown query
 
@@ -385,7 +408,7 @@ because there's no clock-start to subtract from in the first place.
 | **Tickets per deploy** | `COUNT(DISTINCT unnest(jira_keys))` per deploy — small-batch indicator. Jira keys are extracted at write time from PR title, description, branch name, and commit messages via regex `[A-Z][A-Z0-9]+-\d+`, deduplicated, GIN-indexed. |
 | **Untracked-work rate** | `COUNT(*) WHERE jira_keys = '{}'` over merged PRs outside GitOps repos — process-compliance signal. |
 | **Per-ticket flow** | `WHERE 'ABC-1234' = ANY(jira_keys)` returns every event for a ticket across Bitbucket / pipeline / Argo (joined via commit_sha). |
-| **Human vs automated split** | `WHERE NOT is_automated` (Renovate / Dependabot / Snyk / Mend / generic-bot detection runs at write time and tags `automation_source`, and again at read time on the PR opener and the commit author; besides the configured authors, the branch prefix and the name shape `*-bot`, `*[bot]`, `bot-*`, an account whose login or display name holds a configured automation source's name as whole words (`renovate_team`, "Renovate Team") is that bot, so a dependency bot provisioned as an ordinary user is caught on its direct trunk pushes too, which then count as bot commits in the lead time. A source whose name is an ordinary word would catch people with that word in their name: name sources by their tool; an account the git host itself marks as a service account — Bitbucket DC's built-in system user, which files the default PR tasks — is tagged `service-account` with no config entry), plus the `non_human_identities` filter for accounts a sender declared. Keep `bot` and `service` apart when reading: a **bot** authors work of its own and its velocity is worth its own view, while a **service** account (a CI user pushing merges) authors nothing and should simply not appear in human activity. Default dashboards exclude both. |
+| **Human vs automated split** | `WHERE NOT is_automated` (Renovate / Dependabot / Snyk / Mend / generic-bot detection runs at write time and tags `automation_source`, and again at read time on the PR opener and the commit author; besides the configured authors, the branch prefix and the name shape `*-bot`, `*[bot]`, `bot-*`, an account whose login or display name holds a configured automation source's name as whole words (`renovate_team`, "Renovate Team") is that bot, so a dependency bot provisioned as an ordinary user is caught on its direct trunk pushes too, which then count as bot commits in the lead time. That name rule applies at read time only, never written into `automation_source`: a config that guessed wrong is corrected by fixing it. A source whose name is an ordinary word would catch people with that word in their name: name sources by their tool (a name under 4 letters is warned of at load, `automation_source_name_short`); an account the git host itself marks as a service account — Bitbucket DC's built-in system user, which files the default PR tasks — is tagged `service-account` with no config entry), plus the `non_human_identities` filter for accounts a sender declared. Keep `bot` and `service` apart when reading: a **bot** authors work of its own and its velocity is worth its own view, while a **service** account (a CI user pushing merges) authors nothing and should simply not appear in human activity. Default dashboards exclude both. |
 | **AI reviewer precision** *(noergler)* | `1 - count(noergler_events WHERE event_type='feedback' AND verdict='disagreed') / sum(noergler_pr_rollups.findings_count)` per repo × week — findings on both sides, since one PR can collect several disagreements. Higher = the AI review is more useful. Filter on `outcome='merged'` to score precision only on PRs that shipped. |
 
 ### FinOps signals
@@ -452,7 +475,11 @@ gives the two things of now: the PRs open now (the page's one number of
 now; compared with those open at the previous period's end) and
 `running_week`, the week's releases, merged PRs and runs so far, counted
 as the period counts them. What the page leads with is
-`/api/analysis`, below.
+`/api/analysis`, below. What every window of one request reads alike is
+read once for all of them, first, and kept for that request only: the
+GitOps repos, the silences, the Apps' classes, the library evidence and
+the changes first deployed (`lead_time_changes`, all history: the
+window's lead times and its PRs' stage times are taken from it).
 `product=<key>` narrows it to one Bitbucket project,
 bots' PRs never count. `GET /api/facts` takes the same parameters
 plus `q` and returns the PRs, deploys and runs behind the numbers, the
@@ -553,7 +580,9 @@ Bitbucket never saw (a push lost in an outage) takes the repository its
 pipeline is named after: a Jenkins multibranch job is
 `<repo-slug>/<branch>`, and when the first segment is the slug of exactly
 one repository the team is known for (by its Bitbucket events or another
-run), the run is that repository's. Two projects with a repo of that name,
+run), the run is that repository's. Only a name of exactly two segments:
+Jenkins encodes a `/` inside a branch, so a third segment is a folder's
+job, and a folder named like a repository is none. Two projects with a repo of that name,
 or none, leave the run without one: in the team view's numbers, in no
 product's, and counted (`unattributed`) so a product view can say so.
 A run succeeded on SUCCESS (Jenkins), Succeeded
@@ -615,16 +644,48 @@ Per source (Bitbucket, the CI, Argo CD, noergler) the meta carries its
 first event over all history (`data_start`) and its latest (`data_end`),
 noergler's first event per repository the window's PRs name
 (`repo_starts`: it is set up repo by repo), and the **silences**: spans of 2
-working days or more (Monday to Friday, UTC) inside the window in which one
-source stored nothing for the team while another stored events. That is a
-literal reading: a team that does not deploy or review for two days shows
-an Argo CD or noergler silence too. Only Bitbucket's can be told apart:
-`unseen_runs` counts the CI runs in the span that built a commit Bitbucket
-never saw, of a pipeline whose other commits it did see. Above 0,
-Bitbucket's events were lost, not the team idle. The page's data line
-names each source's start and latest event and the Bitbucket silences with
-unseen runs; a silence without that evidence is left out there, since it
-reads the same as a team that simply did not push, build or deploy.
+working days or more in all (Monday to Friday, UTC) in which one source
+stored nothing for the team while another stored events, every one that
+overlaps the window: 36 working hours on each side of a period boundary
+are one silence in both periods, and one the window ends inside counts
+with its closing event after the end (up to the read's now). A silence
+still running at the read is one too, from the source's last event to now
+(`ongoing`), when another source stored events since: an outage running at
+Monday's scheduled read is a hole then, its open PRs unknown, its counts
+uncompared, not only once its closing event comes. Silent 7 days at the
+period's end, it is that gate's limit (`silent_end`), named once. The
+page names it with no end ("seit"). The instants are when
+riptide stored the events (`created_at`), not when they say they happened:
+a sender's retry storing an old event days late, dated inside a hole,
+would otherwise split it or erase it. That is a literal reading: a team
+that does not deploy or review for two days shows an Argo CD or noergler
+silence too. Only Bitbucket's can be told apart: `unseen_runs` counts the
+CI runs in the span that built a commit Bitbucket never saw (pushed, a
+PR's source head, or the merge commit of a PR merged in the UI, which
+sends no push), of a pipeline whose other commits it did see. Above 0 the
+silence is `lost`: Bitbucket's events were lost, not the team idle. The
+page's data line names each source's start and latest event and the lost
+silences; any other silence is left out there, since it reads the same as
+a team that simply did not push, build or deploy. While a lost silence
+touches either period, no Bitbucket number is compared, on the page or in
+the assessment; in a product view the deploy and build numbers neither,
+which reach a product through Bitbucket's commits, nor a repo's build
+hotspots (no repo is flagged slower or failing more, nor judged on its
+builds).
+
+Two holes the stored time cannot see:
+
+- **riptide itself down.** When no source stores anything for 2 working
+  days or more (riptide or its database down, the ingress broken), no
+  source was silent while another reported: no silence, though
+  Bitbucket's events of those days are lost for good (it does not retry).
+  The data line shows every source's latest event; a gap common to all is
+  only visible there.
+- **Replays and imports.** A replay or backfill that later stores the
+  events of a hole does not close it: it stays `lost`, since the events
+  came after its end, by stored time. A bulk import that does not keep
+  `created_at` (every row stored at the import's instant) shows no silence
+  in the imported span at all, and a hole in it is missed.
 
 Where a number rests on part of the merged PRs, the page says how many of
 how many (`throughput.coverage`, of the people's merged PRs): traced to
@@ -640,10 +701,14 @@ the last *closed* weeks (`BACKEND_ANALYSIS_TZ`, never the running week)
 against the same number before, as the page does in the viewer's zone;
 its open PRs are those at the period's end, the page's those open now.
 Only what the team itself causes and can change is judged: infrastructure
-Apps and the builds of bot branches and bot PRs (Renovate, Dependabot,
-Snyk) never raise a finding and enter no judged number (owner's decision,
-2026-11; a failed dependency-bot build is no quality problem of the team,
-only its CI time is). `metrics.Assess` raises the signals:
+Apps and the builds of bot branches and bot PRs never raise a finding and
+enter no judged number (owner's decision, 2026-11; a failed dependency-bot
+build is no quality problem of the team, only its CI time is). A bot's
+build is flagged as the dataset is read: its branch starts with one of the
+config's automation `branch_prefixes`, or it is the PR-<n> build of a bot's
+PR. It is in no build number of the page either (success, failures,
+durations, hotspots, flaky, CI time), counted apart (`build.bot_runs`, runs
+and CI seconds). `metrics.Assess` raises the signals:
 
 - a jam (4 PRs open 7 days or more in a repo; attention when it was jammed
   at the previous end too, or notably more repos are: 2 or more);
@@ -662,14 +727,19 @@ only its CI time is). `metrics.Assess` raises the signals:
   PRs over that throughput (weeks of work standing open). Gains rank by the
   size of their move;
 - agent waits: half a kind's typical build or more, and at least two
-  minutes, waiting for an agent (a hint);
+  minutes, waiting for an agent (a hint; the page words the rule with the
+  numbers `build.agent_wait_share` and `agent_wait_min_s` send);
 - what an earlier analysis of the window raised and is resolved now, on
   evidence only: today's number back at or better than the value before
   the problem was raised (the stored signal's previous-period fact, from the
   earliest analysis that raised it since its last resolution, 8 weeks of
-  history), never because the baseline drifted to the bad level. A jam
-  resolves only at 2 long-open PRs or fewer, clearly under the jam. A
-  number unknown now resolves nothing. A resolution names no next step.
+  history, analyses of older rules not read: they counted otherwise),
+  never because the baseline drifted to the bad level. A jam resolves only
+  at 2 PRs or fewer still holding it, clearly under the jam: its long-open
+  PRs, and those every open number leaves out since, of unknown state (last
+  heard of before Bitbucket's events were lost) or inactive for 30 days; a
+  jam whose PRs only fell silent is not resolved. A number unknown now
+  resolves nothing. A resolution names no next step.
 
 Dropped in rules version 2, never to be raised again on the same premises:
 the longest stage (some stage always takes longest, and its share was a
@@ -700,28 +770,47 @@ that nothing stands out only when `quiet` is true (owner: never
 `quiet_reasons` says why not, in this order, and the page and the model say
 that instead, one sentence each:
 
-- `no_baseline`: no team number has a previous period to compare with, or
-  a source started reporting after the previous period began;
+- `no_baseline`: no team number resting on enough cases has a previous
+  period to compare with, or a source started reporting after the previous
+  period began. Each number's sample gate holds it; the jammed repos (a
+  count of whatever is open) and deploy frequency on fewer than 10
+  releases in either period (0 against 0 reads "same") compare nothing.
+  When no number of the page has a previous value at all (`comparison.any`
+  false, `nothing_compared`), the page says no comparison was possible and
+  its head names no previous period;
 - `source_gap`: a hole in a source's data the comparison crosses
   (`limits`, with its dates): a source silent for 7 days at the period's
-  end (`silent_end`, a gate: its signals are left out), a Bitbucket
-  silence with unseen runs in either period (`silence`: every number
-  Bitbucket counts loses its verdict, lead time aside), or a source whose
+  end (`silent_end`, a gate: its signals are left out), a lost Bitbucket
+  silence overlapping either period (`silence`: every number Bitbucket
+  counts loses its verdict, lead time aside; in a product view deploy
+  frequency, deploy success and build success too), or a source whose
   first event lies inside the period (`starts`). Another source's silence
   in mid-period never gates: there is no evidence it lost anything;
-- `not_measurable`: Bitbucket never reported, Argo CD does not report, or
-  no merged PR could be traced to production (`coverage.to_prod`; a
-  product without a merge in the period always);
-- `findings`: a signal (a hint on fewer than 10 cases aside) or the
-  question stands out; a gain or a resolution included.
+- `not_measurable`, with the first reason that applies in
+  `not_measurable`: `bitbucket` never reported; `argocd` does not report;
+  `no_merged`, no PR counted as merged work; `no_release`, none of the
+  merged PRs reached production and nothing new went to production in the
+  period at all, no release and no App's first deploy (a re-sync carries
+  no PR; a missing release, not a tracing gap); `to_prod`, deploys went to
+  production but no merged PR could be traced to one (the page names the
+  PRs of repos rolled out when libraries' are left out, `library`). Merged
+  PRs of library repos only had nothing to trace: measurable, and said
+  (`libraries_only`), no limit;
+- `findings`: a signal or the question stands out; a gain or a resolution
+  included.
 
-The repos: `active` had a merged PR, a build or an open PR in the period;
-of them `calm` are without a signal and judgeable (a build kind compared
-with the previous period, 4 or more open PRs at the end, or 10 merged PRs
-in both periods), `unjudged` without a signal and too little data to
-judge; `idle` were active in the previous period only; `repos` is active
-and idle. The page words these counts as sent and never reads a repo it
-could not judge as fine.
+The repos: `active` had people's work in the period: a PR merged as merged
+work, a build of a person's branch, an open PR. A repo whose only merge was
+housekeeping or an umbrella, or whose only builds were a bot's, had
+nothing by people and is not active: idle when it was active in the
+previous period, else in no count at all; a pipeline whose name names no
+repository is no repo. Of them `calm` are without a signal and judgeable (a build kind
+compared with the previous period, or 10 merged PRs in both periods while
+Bitbucket's events are whole), `unjudged` without a signal and too little
+data to judge; `idle` were active in the previous period only; `repos` is
+active and idle. Open PRs make no repo judgeable: many open behind a merge
+freeze riptide cannot see read as fine beside a jam. The page words these
+counts as sent and never reads a repo it could not judge as fine.
 
 The repos are ranked by their signals' weight; a jam alone makes a
 candidate, and repos without a signal stay out of it. The question is the

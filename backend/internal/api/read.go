@@ -22,6 +22,8 @@ import (
 // Reader is what the read API needs from the database.
 type Reader interface {
 	Dataset(ctx context.Context, p dataset.Params) (*dataset.Dataset, error)
+	// Shared reads what every window of one request shares, once.
+	Shared(ctx context.Context, p dataset.SharedParams) (*dataset.Shared, error)
 }
 
 // RegisterUI adds the read API and the UI itself to the UI listener's
@@ -136,21 +138,92 @@ func (d Deps) readView(w http.ResponseWriter, r *http.Request) (view, bool) {
 	}}, true
 }
 
-// load reads the team's dataset from from to to.
-func (d Deps) load(ctx context.Context, v view, from, to time.Time, factsOnly bool) (*dataset.Dataset, error) {
+// What a read is for: the numbers of a period, the facts tables, or the
+// week running now (open PRs and counts: no lead times, reviews,
+// environments or libraries).
+type readKind int
+
+const (
+	readFull readKind = iota
+	readFacts
+	readRunning
+)
+
+// load reads the team's dataset from from to to, with sh, the request's
+// shared reads, its deploys classed by the Apps as of classAt (zero: to).
+// A nil sh reads them for this window alone.
+func (d Deps) load(ctx context.Context, v view, from, to time.Time, kind readKind, sh *dataset.Shared,
+	classAt time.Time) (*dataset.Dataset, error) {
 	cfg := v.cfg
 	return d.Reader.Dataset(ctx, dataset.Params{
 		Team: v.team, From: from, To: to, ProductionStage: cfg.Environments.ProductionStage,
 		// The detection a webhook's author gets at ingest, so a commit and a
-		// PR by the same bot agree. A commit on master has no branch to
-		// match a prefix against, and the SERVICE flag is the view's.
-		Automated: func(author, displayName string) bool {
-			return cfg.DetectAutomationSource(author, displayName, "", false) != ""
-		},
-		Excluded:  cfg.ExcludedProject,
-		Now:       v.now,
-		FactsOnly: factsOnly,
+		// PR by the same bot agree, plus the name rule only read applies. A
+		// commit on master has no branch to match a prefix against, and the
+		// SERVICE flag is the view's.
+		Automated:  cfg.AutomatedAtRead,
+		BotBranch:  cfg.BotBranch,
+		Excluded:   cfg.ExcludedProject,
+		Now:        v.now,
+		FactsOnly:  kind != readFull,
+		CountsOnly: kind == readRunning,
+		Shared:     sh,
+		ClassAt:    classAt,
 	})
+}
+
+// periods reads the team's datasets over ps, the first one the period whose
+// end classes them all (ClassAt), with the reads they share done once; the
+// running week, when given, classed by its own end. Side by side; the first
+// to fail cancels the others, and its error, not the cancellation, is
+// returned.
+func (d Deps) periods(ctx context.Context, v view, ps []metrics.Period, running *metrics.Period) ([]*dataset.Dataset, *dataset.Dataset, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	ends := []time.Time{ps[0].To}
+	if running != nil {
+		ends = append(ends, running.To)
+	}
+	from := ps[0].From
+	for _, p := range ps {
+		if p.From.Before(from) {
+			from = p.From
+		}
+	}
+	sh, err := d.Reader.Shared(ctx, dataset.SharedParams{Team: v.team, From: from, ClassEnds: ends, Now: v.now, Libraries: true,
+		Changes: true})
+	if err != nil {
+		return nil, nil, err
+	}
+	out := make([]*dataset.Dataset, len(ps))
+	errs := make([]error, len(ps)+1)
+	var run *dataset.Dataset
+	var wg sync.WaitGroup
+	for i, p := range ps {
+		wg.Go(func() {
+			if out[i], errs[i] = d.load(ctx, v, p.From, p.To, readFull, sh, ps[0].To); errs[i] != nil {
+				cancel()
+			}
+		})
+	}
+	if running != nil {
+		// Open PRs, releases, merges and runs: no lead times, reviews,
+		// environments or libraries.
+		wg.Go(func() {
+			if run, errs[len(ps)] = d.load(ctx, v, running.From, running.To, readRunning, sh, running.To); errs[len(ps)] != nil {
+				cancel()
+			}
+		})
+	}
+	wg.Wait()
+	// The read that failed, not the one its failure cancelled.
+	var first error
+	for _, err := range errs {
+		if err != nil && (first == nil || errors.Is(first, context.Canceled)) {
+			first = err
+		}
+	}
+	return out, run, first
 }
 
 // statusViewerLeft is nginx's 499 "client closed request".
@@ -195,38 +268,15 @@ func (d Deps) metrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The period, the previous one to compare with, and the week running
-	// now (open PRs as they are, its counts): three reads side by side; the
-	// first to fail cancels the others. Not one longer read: lead times and
+	// now (open PRs as they are, its counts): three reads side by side, the
+	// reads they share done once before. Not one longer read: lead times and
 	// costs take the dataset's bounds as their window.
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
-	var ds, prev, running *dataset.Dataset
-	var errs [3]error
-	var wg sync.WaitGroup
-	read := func(p metrics.Period, factsOnly bool, out **dataset.Dataset, err *error) func() {
-		return func() {
-			if *out, *err = d.load(ctx, v, p.From, p.To, factsOnly); *err != nil {
-				cancel()
-			}
-		}
-	}
-	wg.Go(read(v.params.Period, false, &ds, &errs[0]))
-	wg.Go(read(v.params.Previous, false, &prev, &errs[1]))
-	// Open PRs, releases, merges and runs: no lead times or reviews.
-	wg.Go(read(v.params.Running, true, &running, &errs[2]))
-	wg.Wait()
-	// The read that failed, not the one its failure cancelled.
-	var first error
-	for _, err := range errs {
-		if err != nil && (first == nil || errors.Is(first, context.Canceled)) {
-			first = err
-		}
-	}
-	if first != nil {
-		d.failed(w, r, v.team, first)
+	ds, running, err := d.periods(r.Context(), v, []metrics.Period{v.params.Period, v.params.Previous}, &v.params.Running)
+	if err != nil {
+		d.failed(w, r, v.team, err)
 		return
 	}
-	m := metrics.Compute(ds, prev, running, v.params)
+	m := metrics.Compute(ds[0], ds[1], running, v.params)
 	d.Log.InfoContext(r.Context(), "metrics_served", "team", v.team, "from", v.params.Period.From,
 		"to", v.params.Period.To, "duration_ms", time.Since(started).Milliseconds())
 	httpapi.WriteJSON(w, http.StatusOK, m)
@@ -241,7 +291,13 @@ func (d Deps) facts(w http.ResponseWriter, r *http.Request) {
 	}
 	// The period's closed weeks and on to now: the running week's rows are
 	// listed, marked, counted nowhere.
-	ds, err := d.load(r.Context(), v, v.params.Period.From, v.now, true)
+	// The shared reads first, the changes beside the rest, then the window.
+	sh, err := d.Reader.Shared(r.Context(), dataset.SharedParams{Team: v.team, From: v.params.Period.From,
+		ClassEnds: []time.Time{v.now}, Now: v.now, Libraries: true, Changes: true})
+	var ds *dataset.Dataset
+	if err == nil {
+		ds, err = d.load(r.Context(), v, v.params.Period.From, v.now, readFacts, sh, v.now)
+	}
 	if err != nil {
 		d.failed(w, r, v.team, err)
 		return

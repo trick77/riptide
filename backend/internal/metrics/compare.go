@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"math"
+	"slices"
 	"time"
 
 	"github.com/trick77/riptide/internal/dataset"
@@ -160,6 +161,23 @@ type Comparison struct {
 	// be more work under way, more jammed repos are queues.
 	OpenPRs    Change `json:"open_prs"`
 	OpenJammed Change `json:"open_jammed"`
+	// Any: some number above has the previous period's value to stand
+	// against (a Prev, verdict or not). Without one nothing was compared:
+	// the page names no comparison, the assessment says why.
+	Any bool `json:"any"`
+}
+
+// anyPrev reports whether some number of c has a previous value.
+func (c Comparison) anyPrev() bool {
+	cs := []Change{c.DeployFreq, c.DeploySuccess, c.LeadTime, c.ReviewTime, c.WithinDay, c.FirstTouch, c.Untracked,
+		c.MergedPerWeek, c.BatchSize, c.CostPerKloc, c.WastedShare, c.OpenPRs, c.OpenJammed}
+	if c.LeadTimePre != nil {
+		cs = append(cs, *c.LeadTimePre)
+	}
+	for _, b := range c.Build {
+		cs = append(cs, b.Success, b.Flaky)
+	}
+	return slices.ContainsFunc(cs, func(x Change) bool { return x.Prev != nil })
 }
 
 // direction is which way a number gets better.
@@ -388,8 +406,12 @@ func score(cur, prev float64, d direction, s scale) float64 {
 // a period from then on is not covered by it.
 func before(start *time.Time, from time.Time) bool { return start == nil || start.After(from) }
 
-// compare is cur against prev, prev computed over period.
-func compare(cur, prev Metrics, period Period) Comparison {
+// compare is cur against prev, prev computed over period. lost: Bitbucket's
+// events were lost in either period (lostEvents), so every number it counts
+// reads low there and is not compared; in a product view (product) the
+// deploy and build numbers too, which reach a product through Bitbucket's
+// commits.
+func compare(cur, prev Metrics, period Period, lost, product bool) Comparison {
 	meta := cur.Meta
 	from := period.From
 	argo := before(meta.DataStart.ArgoCD, from)
@@ -486,6 +508,22 @@ func compare(cur, prev Metrics, period Period) Comparison {
 		}
 		out.Build = append(out.Build, kc)
 	}
+	if lost {
+		incomplete := func(cs ...*Change) {
+			for _, c := range cs {
+				*c = Change{Verdict: ChangeNone, Reason: ptr(ReasonIncomplete), Directed: c.Directed}
+			}
+		}
+		incomplete(&out.ReviewTime, &out.WithinDay, &out.FirstTouch, &out.Untracked, &out.MergedPerWeek, &out.BatchSize,
+			&out.OpenPRs, &out.OpenJammed)
+		if product {
+			incomplete(&out.DeployFreq, &out.DeploySuccess)
+			for i := range out.Build {
+				incomplete(&out.Build[i].Success, &out.Build[i].Flaky)
+			}
+		}
+	}
+	out.Any = out.anyPrev()
 	return out
 }
 

@@ -76,13 +76,14 @@ export function dateTime(iso: string): string {
   return `${dayMonth(new Date(iso))} ${clock(iso)}`;
 }
 
-// timeZone: the zone the day is read in; the viewer's without one.
-export function fullDate(d: Date, timeZone?: string): string {
+// A day in the viewer's zone, as the data line and the limits name the same
+// hole: the assessment's own week range (daysLabel) alone is read in the
+// zone its weeks were cut in.
+export function fullDate(d: Date): string {
   return d.toLocaleDateString(LOCALE, {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
-    timeZone,
   });
 }
 

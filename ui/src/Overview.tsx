@@ -38,12 +38,12 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
     : null;
   const lead = durParts(lt.human.p50);
   // Team-wide counts the backend sends in every view. A product view counts
-  // no deploy without a product: when that is why it shows none, it says
-  // so. Infrastructure Apps count nowhere; the team view names how many.
-  const unattributed =
-    m.product && freq.unattributed > 0
-      ? t("overview.freq.unattributed", { count: freq.unattributed })
-      : null;
+  // no deploy of an App without a known product: when it shows none, they
+  // may be why, and the backend says so (maybe_unattributed). Infrastructure
+  // Apps count nowhere; the team view names how many.
+  const unattributed = freq.maybe_unattributed
+    ? t("overview.freq.unattributed", { count: freq.unattributed })
+    : null;
   const infra =
     !m.product && freq.infra > 0 ? (
       <span title={freq.infra_apps.join(", ")}>
@@ -91,8 +91,8 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
       coverage:
         (sinceNote ? `${sinceNote} ` : "") +
         (freq.first_seen > 0
-          ? t("overview.freq.coverageFirst")
-          : t("overview.freq.coverageAll")) +
+          ? t("overview.freq.coverageFirst", { days: freq.grace_days })
+          : t("overview.freq.coverageAll", { days: freq.grace_days })) +
         (freq.infra > 0
           ? t("overview.freq.coverageInfra", {
               count: freq.infra,
@@ -175,7 +175,10 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
           warn={
             sinceNote ??
             (freq.first_seen > 0
-              ? t("overview.freq.firstSeen", { count: freq.first_seen })
+              ? t("overview.freq.firstSeen", {
+                  count: freq.first_seen,
+                  days: freq.grace_days,
+                })
               : undefined)
           }
           compare={{

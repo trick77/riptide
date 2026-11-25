@@ -234,6 +234,10 @@ type uiTerms struct {
 	Flaky       string            `json:"flaky"`
 	Running     string            `json:"running"`
 	RunKind     map[string]string `json:"runKind"`
+	NotCounted  map[string]string `json:"notCounted"`
+	ViaUmbrella string            `json:"viaUmbrella"`
+	Library     string            `json:"library"`
+	Infra       string            `json:"infra"`
 }
 
 // The backend searches the words the UI shows, in both languages: a label
@@ -256,7 +260,8 @@ func TestSearchTermsMatchTheUI(t *testing.T) {
 	}
 	for code, g := range groups {
 		got := slices.Sorted(maps.Keys(g))
-		if want := []string{"changeType", "deployClass", "flaky", "prState", "prWaiting", "promotion", "runKind", "runOutcome", "running"}; !slices.Equal(got, want) {
+		if want := []string{"changeType", "deployClass", "flaky", "infra", "library", "notCounted", "prState", "prWaiting", "promotion",
+			"runKind", "runOutcome", "running", "viaUmbrella"}; !slices.Equal(got, want) {
 			t.Errorf("terms.json %s groups %v, compared %v", code, got, want)
 		}
 	}
@@ -282,6 +287,7 @@ func TestSearchTermsMatchTheUI(t *testing.T) {
 			"changeType":  {u.ChangeType, lang(changeTypeTerm, de)},
 			"runOutcome":  {u.RunOutcome, lang(runOutcomeTerm, de)},
 			"runKind":     {u.RunKind, lang(runKindTerm, de)},
+			"notCounted":  {u.NotCounted, lang(notCountedTerm, de)},
 		} {
 			if !maps.Equal(c[0], c[1]) {
 				t.Errorf("%s %s: ui %v, backend %v", code, name, c[0], c[1])
@@ -295,6 +301,14 @@ func TestSearchTermsMatchTheUI(t *testing.T) {
 		}
 		if want := map[bool]string{true: runningTerm.De, false: runningTerm.En}[de]; u.Running != want {
 			t.Errorf("%s running: ui %q, backend %q", code, u.Running, want)
+		}
+		for name, c := range map[string]struct {
+			ui   string
+			term uiTerm
+		}{"viaUmbrella": {u.ViaUmbrella, viaUmbrellaTerm}, "library": {u.Library, libraryTerm}, "infra": {u.Infra, infraTerm}} {
+			if want := map[bool]string{true: c.term.De, false: c.term.En}[de]; c.ui != want {
+				t.Errorf("%s %s: ui %q, backend %q", code, name, c.ui, want)
+			}
 		}
 	}
 }

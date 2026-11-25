@@ -251,6 +251,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       build_data_from: ago(60),
       build_type_from: ago(10),
       silences: [],
+      lost: [],
       repo_starts: [],
     },
     period: {
@@ -276,6 +277,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
         first_releases: 0,
         syncs: 3,
         first_seen: 1,
+        grace_days: 14,
         resyncs: 1,
         per_week: 0.29,
         low_sample: false,
@@ -291,6 +293,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
         no_data_days: 3,
         weekdays,
         unattributed: 0,
+        maybe_unattributed: false,
         infra: 0,
         infra_apps: [],
       },
@@ -316,7 +319,6 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
         stage("to_prod", spread(1, 0.7 * 86400), 0.48),
       ],
       pre_environment: "intg",
-      attention_share: 0.5,
       min_prs: 10,
       before_prod: 1.3 * 86400,
       reaches_prod: true,
@@ -344,9 +346,12 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       merged: 1,
       merged_per_week: 0.8,
       since: null,
-      off_trunk: 0,
-      implicit_merges: 0,
+      umbrella: 0,
       housekeeping: 0,
+      twice: 0,
+      housekeeping_repos: 3,
+      housekeeping_window_s: 3600,
+      library: 0,
       coverage: {
         to_prod: { count: 1, n: 1, rate: 1 },
         sized: { count: 1, n: 1, rate: 1 },
@@ -365,6 +370,9 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       starts_inside: false,
       gap_weeks: 0,
       unattributed: 0,
+      bot_runs: { runs: 0, ci_seconds: 0 },
+      agent_wait_share: 0.5,
+      agent_wait_min_s: 120,
       // the backend's order: feature first
       kinds: [
         kindStats("feature", 1, 0, n),
@@ -548,6 +556,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       wasted_share: undirected(null, "low_sample"),
       open_prs: undirected(3),
       open_jammed: change("same", 1),
+      any: true,
       build: [
         {
           kind: "release",
@@ -614,6 +623,8 @@ export function prFact(o: Partial<PRFact> = {}): PRFact {
     change_type: "feature",
     state: "merged",
     not_counted: null,
+    via_umbrella: false,
+    library: false,
     review_s: 0.1 * 86400,
     cycle_s: 0.2 * 86400,
     merged_at: ago(1.8),
@@ -778,8 +789,6 @@ function signal(o: Partial<Signal> & Pick<Signal, "id" | "kind">): Signal {
     repo: null,
     run_kind: null,
     metric: null,
-    low_sample: false,
-    sample: null,
     weight: 1,
     seen: 0,
     facts: [],
@@ -834,7 +843,6 @@ export function assessment(): Assessment {
   return {
     period: { from: w[0].start, to: w[3].end, last_day: "", weeks: w },
     previous: { from: w[0].start, to: w[0].start, last_day: "", weeks: [] },
-    gaps: ["argocd"],
     signals: [
       signal({
         id: "data_gap:argocd",
@@ -957,6 +965,11 @@ export function assessment(): Assessment {
     compared: true,
     quiet: false,
     quiet_reasons: ["source_gap", "findings"],
+    not_measurable: null,
+    limited: true,
+    nothing_compared: false,
+    libraries_only: false,
+    library: 0,
     limits: [
       {
         source: "argocd",
@@ -1052,7 +1065,7 @@ export function analysisStatus(
         },
       ],
       also: [],
-      tally: { good: 1, done: 1, bad: 4, talk: 1, baseline: true },
+      tally: { good: 1, done: 1, bad: 4, talk: 1 },
     },
     analysis: null,
     failure: null,
@@ -1103,7 +1116,7 @@ export function analysedStatus(
           lever: "platform_agents",
         },
       ],
-      tally: { good: 1, done: 1, bad: 4, talk: 1, baseline: true },
+      tally: { good: 1, done: 1, bad: 4, talk: 1 },
     },
     analysis: {
       id: 7,

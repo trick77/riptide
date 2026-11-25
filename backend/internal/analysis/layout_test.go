@@ -36,7 +36,7 @@ func TestLayoutSlots(t *testing.T) {
 		sig("g1", metrics.ToneGood), sig("g2", metrics.ToneGood), sig("g3", metrics.ToneGood),
 		sig("d1", "done"), sig("d2", "done"),
 	}, Team: []metrics.Fact{{Verdict: metrics.ChangeNone}, {Verdict: metrics.ChangeBetter}}}
-	want := Tally{Good: 3, Done: 2, Bad: 5, Baseline: true}
+	want := Tally{Good: 3, Done: 2, Bad: 5}
 
 	off := layout(a, nil)
 	got := columns(off.Cards)

@@ -253,6 +253,12 @@ func (s *Store) Dataset(ctx context.Context, p dataset.Params) (*dataset.Dataset
 	return dataset.Load(ctx, s.pool, p)
 }
 
+// Shared reads what every window of one page request shares, once
+// (dataset.LoadShared).
+func (s *Store) Shared(ctx context.Context, p dataset.SharedParams) (*dataset.Shared, error) {
+	return dataset.LoadShared(ctx, s.pool, p)
+}
+
 // RecentActivity counts events received since `since`, per source and per
 // the identifier each source aggregates by, optionally for one team.
 func (s *Store) RecentActivity(ctx context.Context, since time.Time, team string) ([]Activity, error) {

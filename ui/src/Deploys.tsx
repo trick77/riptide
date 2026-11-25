@@ -139,6 +139,7 @@ export function Deploys({ m }: { m: Metrics }) {
           {t("deploys.note", {
             resyncs: t("common.resyncs", { count: freq.resyncs }),
             firstSeen: t("common.firstDeploys", { count: freq.first_seen }),
+            days: freq.grace_days,
           })}
         </p>
       </Card>

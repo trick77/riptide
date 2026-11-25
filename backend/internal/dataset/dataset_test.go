@@ -34,7 +34,8 @@ func load(t *testing.T, s interface {
 }
 
 // automated is the handler's detector over a config naming renovate only:
-// riptide's ingest-time rule, the bot-shaped heuristic included.
+// riptide's ingest-time rule, the bot-shaped heuristic included, and the
+// name rule read adds.
 func automated(t *testing.T) func(string, string) bool {
 	t.Helper()
 	cfg, err := config.Parse([]byte(`{"automation": {
@@ -43,7 +44,7 @@ func automated(t *testing.T) func(string, string) bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return func(author, display string) bool { return cfg.DetectAutomationSource(author, display, "", false) != "" }
+	return cfg.AutomatedAtRead
 }
 
 func ts(t time.Time) *time.Time { return &t }
@@ -860,8 +861,9 @@ func TestMetricsMatchTheDocumentedQueries(t *testing.T) {
 		if f.Infra != 1 || !slices.Equal(f.InfraApps, []string{"atlas-prod"}) || f.Releases != 2 || f.FirstReleases != 1 {
 			t.Fatalf("infra %d %v, releases %d, first releases %d", f.Infra, f.InfraApps, f.Releases, f.FirstReleases)
 		}
+		// Without the Apps' classes, which Compute would apply again.
 		all := *ds
-		all.Deploys = slices.Clone(ds.Deploys)
+		all.Deploys, all.Apps = slices.Clone(ds.Deploys), nil
 		for i := range all.Deploys {
 			all.Deploys[i].Infra = false
 		}

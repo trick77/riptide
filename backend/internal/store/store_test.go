@@ -654,6 +654,73 @@ func TestReadAPIIndexes(t *testing.T) {
 	}
 }
 
+// 0012 builds the read path's indexes in kit's transaction, as 0005; the
+// merge-commit probe the read path writes (sql/fragments/revision_project,
+// gitops.sql, silences.sql) uses its index: the expression and the
+// predicate must match the index's exactly, or Postgres reads every
+// pr:merged payload. Planned with sequential scans off: a test schema of a
+// few rows would scan whatever is indexed.
+func TestReadPathIndexes(t *testing.T) {
+	_, pool := testStore(t)
+	ctx := context.Background()
+	// One index per file, in its own transaction (kit commits per file):
+	// a build holds only its own table's INSERTs, and bitbucket_events,
+	// whose sender does not retry, comes last.
+	for i, f := range []struct{ file, table string }{
+		{"0012_pipeline_events_team_created.sql", "pipeline_events"},
+		{"0013_argocd_events_team_created.sql", "argocd_events"},
+		{"0014_noergler_events_team_created.sql", "noergler_events"},
+		{"0015_bitbucket_events_merge_commit.sql", "bitbucket_events"},
+		{"0016_bitbucket_events_team_created.sql", "bitbucket_events"},
+	} {
+		body, err := migrationFS.ReadFile("migrations/" + f.file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.HasPrefix(string(body), migrate.NoTxMarker) || strings.Contains(string(body), "INDEX CONCURRENTLY") {
+			t.Errorf("%s must build its index in a transaction", f.file)
+		}
+		if n := strings.Count(string(body), "CREATE INDEX"); n != 1 || !strings.Contains(string(body), "ON "+f.table+" ") {
+			t.Errorf("%s (#%d): %d indexes, want one on %s", f.file, i, n, f.table)
+		}
+	}
+	var valid int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_index i
+		JOIN pg_class c ON c.oid = i.indexrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = current_schema()
+		WHERE c.relname IN ('ix_bitbucket_events_merge_commit', 'ix_bitbucket_events_team_created',
+		  'ix_pipeline_events_team_created', 'ix_argocd_events_team_created', 'ix_noergler_events_team_created')
+		  AND i.indisvalid`).Scan(&valid); err != nil || valid != 5 {
+		t.Errorf("valid read path indexes = %d, %v", valid, err)
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "SET LOCAL enable_seqscan = off"); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := tx.Query(ctx, `EXPLAIN SELECT b.repo_full_name FROM bitbucket_events b
+		WHERE b.event_type = 'pr:merged' AND b.repo_full_name IS NOT NULL
+		  AND lower(b.payload->'pullRequest'->'properties'->'mergeCommit'->>'id') = $1`, "abc1234")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan []string
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, line)
+	}
+	rows.Close()
+	if !strings.Contains(strings.Join(plan, "\n"), "ix_bitbucket_events_merge_commit") {
+		t.Errorf("merge commit probe without its index:\n%s", strings.Join(plan, "\n"))
+	}
+}
+
 func TestInsertPipelineBuildType(t *testing.T) {
 	s, pool := testStore(t)
 	ctx := context.Background()

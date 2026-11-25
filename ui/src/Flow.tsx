@@ -198,13 +198,23 @@ function Chain({ m }: { m: Metrics }) {
           {t("common.noMergedPRs")}
         </p>
       )}
-      <p className="mt-2.5 mb-0 text-xs text-muted">
-        {t("flow.chainNote", {
-          prod,
-          traced: m.throughput.coverage.to_prod.count,
-          count: m.throughput.coverage.to_prod.n,
-        })}
-      </p>
+      {/* How many of the merged PRs the last stages read, when there are
+          any to read; a library's PRs are none: never rolled out. */}
+      {(m.throughput.coverage.to_prod.n > 0 || m.throughput.library > 0) && (
+        <p className="mt-2.5 mb-0 text-xs text-muted">
+          {m.throughput.coverage.to_prod.n > 0 &&
+            t("flow.chainNote", {
+              prod,
+              traced: m.throughput.coverage.to_prod.count,
+              count: m.throughput.coverage.to_prod.n,
+            })}
+          {m.throughput.coverage.to_prod.n > 0 &&
+            m.throughput.library > 0 &&
+            " "}
+          {m.throughput.library > 0 &&
+            t("flow.library", { count: m.throughput.library, prod })}
+        </p>
+      )}
     </Card>
   );
 }

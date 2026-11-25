@@ -36,6 +36,21 @@ var zurich = func() *time.Location {
 // now is a Thursday of KW 46: the last closed week is KW 45.
 var now = time.Date(2026, 11, 12, 12, 0, 0, 0, zurich)
 
+// each is a Loader reading every period with load.
+func each(load func(context.Context, string, metrics.Period) (*dataset.Dataset, error)) Loader {
+	return func(ctx context.Context, team string, ps ...metrics.Period) ([]*dataset.Dataset, error) {
+		out := make([]*dataset.Dataset, len(ps))
+		for i, p := range ps {
+			ds, err := load(ctx, team, p)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = ds
+		}
+		return out, nil
+	}
+}
+
 // jammed is a dataset whose repo kasse/kasse-api has four PRs open a week
 // or longer at the period's end, all waiting on a first review.
 func jammed(_ context.Context, team string, p metrics.Period) (*dataset.Dataset, error) {
@@ -218,7 +233,7 @@ func goodAnswer(string) string {
 }
 
 func service(llm LLM, st *memStore) *Service {
-	s := &Service{Store: st, Load: jammed, LLM: llm, Loc: zurich,
+	s := &Service{Store: st, Load: each(jammed), LLM: llm, Loc: zurich,
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: func() time.Time { return now }}
 	s.Start(context.Background())
 	return s
@@ -266,7 +281,7 @@ func TestAliasesTouchOnlyRepos(t *testing.T) {
 		return ds, err
 	}
 	s := service(nil, &memStore{})
-	s.Load = load
+	s.Load = each(load)
 	a, err := s.assess(context.Background(), view)
 	if err != nil {
 		t.Fatal(err)
@@ -379,6 +394,11 @@ func TestRunOncePerScheduledWeek(t *testing.T) {
 	// A click on unchanged data asks nothing.
 	if err := s.Run(ctx, view, TriggerManual); err != nil || llm.calls != 1 {
 		t.Errorf("unchanged input asked again: %d calls, %v", llm.calls, err)
+	}
+	// Unless the row is outdated: it is not shown, the click rewrites it.
+	st.rows[0].RulesVersion = ptr(metrics.RulesVersion - 1)
+	if err := s.Run(ctx, view, TriggerManual); err != nil || llm.calls != 2 {
+		t.Errorf("an outdated row on unchanged input not assessed again: %d calls, %v", llm.calls, err)
 	}
 }
 
@@ -721,12 +741,12 @@ func TestTickLoadsOnceSkipsQuiet(t *testing.T) {
 	st := &memStore{}
 	s := service(llm, st)
 	var loadsN atomic.Int32
-	s.Load = func(ctx context.Context, team string, p metrics.Period) (*dataset.Dataset, error) {
+	s.Load = each(func(ctx context.Context, team string, p metrics.Period) (*dataset.Dataset, error) {
 		loadsN.Add(1)
 		ds, err := jammed(ctx, team, p)
 		ds.Products = append(ds.Products, dataset.Product{Key: "idle", Repos: []string{}, Apps: []string{}})
 		return ds, err
-	}
+	})
 	ctx := context.Background()
 	s.tick(ctx, []string{"team-a"})
 	windows := 1
@@ -759,7 +779,7 @@ func TestTickLoadsOnceSkipsQuiet(t *testing.T) {
 func TestProductsBackOff(t *testing.T) {
 	s := service(&fakeLLM{answer: goodAnswer}, &memStore{})
 	var loadsN atomic.Int32
-	s.Load = func(context.Context, string, metrics.Period) (*dataset.Dataset, error) {
+	s.Load = func(context.Context, string, ...metrics.Period) ([]*dataset.Dataset, error) {
 		loadsN.Add(1)
 		return nil, io.ErrUnexpectedEOF
 	}
@@ -824,10 +844,11 @@ func TestOutdatedAnalysis(t *testing.T) {
 			t.Errorf("layout of the rules' view = %+v", l)
 		}
 	}
-	// Without a model the same: off, outdated, the rules' view.
+	// Without a model: off, the rules' view, the old row not shown, and not
+	// outdated: there is no assessing again to offer.
 	got, err := service(nil, st).Status(ctx, view)
-	if err != nil || got.State != StateOff || !got.Outdated || got.Analysis != nil {
-		t.Errorf("off = %s, outdated %v (%v)", got.State, got.Outdated, err)
+	if err != nil || got.State != StateOff || got.Outdated || got.Analysis != nil || got.Assessment.Question != nil {
+		t.Errorf("off = %s, outdated %v, analysis %v (%v)", got.State, got.Outdated, got.Analysis, err)
 	}
 	// Too old to show anyway: not outdated, simply none.
 	s.Now = func() time.Time { return now.AddDate(0, 0, 14) }
@@ -887,6 +908,21 @@ func TestHistoryOpen(t *testing.T) {
 	if h, _ = s.history(ctx, view, to.AddDate(0, 0, 7)); h.Open["change:lead_time"].Before == nil ||
 		*h.Open["change:lead_time"].Before != 120 {
 		t.Errorf("open after a new raise = %+v", h.Open)
+	}
+
+	// A raise under older rules counted otherwise: its value before is no
+	// mark today's counting must reach, and its streak is none of today's.
+	st.rows = nil
+	week(2, raised(100))
+	st.rows[0].RulesVersion = ptr(metrics.RulesVersion - 1)
+	week(1, raised(130))
+	h, _ = s.history(ctx, view, to)
+	if p := h.Open["change:lead_time"]; p.Before == nil || *p.Before != 130 || h.Seen["change:lead_time"] != 1 || h.Runs != 1 {
+		t.Errorf("with an older row: open %+v, seen %v, runs %d", h.Open, h.Seen, h.Runs)
+	}
+	st.rows[1].RulesVersion = nil
+	if h, _ = s.history(ctx, view, to); len(h.Open) != 0 || h.Runs != 0 || h.Seen["change:lead_time"] != 0 {
+		t.Errorf("older rows only: open %+v, runs %d", h.Open, h.Runs)
 	}
 }
 

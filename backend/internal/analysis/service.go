@@ -30,8 +30,9 @@ type Store interface {
 	ScheduledAttempt(ctx context.Context, v store.AnalysisView, to time.Time) (*store.Analysis, error)
 }
 
-// Loader reads a team's dataset over a period, as the read API does.
-type Loader func(ctx context.Context, team string, p metrics.Period) (*dataset.Dataset, error)
+// Loader reads a team's datasets over periods, as the read API does: the
+// first period's end classes them all, the reads they share done once.
+type Loader func(ctx context.Context, team string, ps ...metrics.Period) ([]*dataset.Dataset, error)
 
 // Triggers.
 const (
@@ -129,26 +130,23 @@ func (s *Service) periods(weeks int) (cur, prev metrics.Period) {
 // analyses before period's end raised.
 func (s *Service) assess(ctx context.Context, v View) (metrics.Assessment, error) {
 	cur, prev := s.periods(v.Weeks)
-	var ds, pds *dataset.Dataset
-	var errs [2]error
-	var wg sync.WaitGroup
-	wg.Go(func() { ds, errs[0] = s.load(ctx, v.Team, cur) })
-	wg.Go(func() { pds, errs[1] = s.load(ctx, v.Team, prev) })
-	wg.Wait()
-	if err := errors.Join(errs[:]...); err != nil {
+	ds, err := s.load(ctx, v.Team, cur, prev)
+	if err != nil {
 		return metrics.Assessment{}, err
 	}
 	h, err := s.history(ctx, v, cur.To)
 	if err != nil {
 		return metrics.Assessment{}, err
 	}
-	return metrics.Assess(ds, pds, metrics.Params{Period: cur, Previous: prev, Product: v.Product}, h), nil
+	return metrics.Assess(ds[0], ds[1], metrics.Params{Period: cur, Previous: prev, Product: v.Product}, h), nil
 }
 
 // history reads the view's done analyses before to: the latest one's
 // signals, how many in a row before to raised each, and the problems open
-// since. Rows of older rules count too: their numbers were right, and a
-// signal they raised that the rules no longer know resolves nothing.
+// since. Rows of older rules (outdated) count as no run: their numbers
+// were counted otherwise (merged PRs, deploys, builds), so a value before a
+// problem was raised can be one today's counting never reaches again, and
+// a streak across the change is two things.
 func (s *Service) history(ctx context.Context, v View, to time.Time) (metrics.History, error) {
 	h := metrics.History{Seen: map[string]int{}, Latest: map[string]string{}, Open: map[string]metrics.Problem{}}
 	// Weeks, not rows: a week holds its scheduled run and any number of
@@ -168,7 +166,7 @@ func (s *Service) history(ctx context.Context, v View, to time.Time) (metrics.Hi
 	var runs []run
 	for _, r := range rows {
 		var a metrics.Assessment
-		if err := json.Unmarshal(r.Assessment, &a); err != nil {
+		if outdated(r) || json.Unmarshal(r.Assessment, &a) != nil {
 			continue
 		}
 		ids, before := map[string]string{}, map[string]*float64{}
@@ -292,8 +290,11 @@ func (s *Service) run(ctx context.Context, v View, trigger string) error {
 	// A click on unchanged data shows what is there. A scheduled run still
 	// runs: skipped, it would leave no row, and every tick would look again.
 	if trigger == TriggerManual {
+		// An outdated row (older rules) is not shown: a click must rewrite
+		// it, whatever the input.
 		if done, err := s.Store.DoneAnalyses(ctx, v, 1); err == nil && len(done) == 1 &&
-			done[0].PeriodTo.Equal(a.Period.To) && done[0].InputHash != nil && *done[0].InputHash == hash {
+			done[0].PeriodTo.Equal(a.Period.To) && done[0].InputHash != nil && *done[0].InputHash == hash &&
+			!outdated(done[0]) {
 			log.InfoContext(ctx, "analysis_skipped", "reason", "input_unchanged", "id", done[0].ID)
 			// Nothing asked: the hour's manual slot goes back.
 			s.releaseManual()
@@ -445,7 +446,7 @@ func (s *Service) mayAsk(ctx context.Context, v View) error {
 		if err != nil {
 			return err
 		}
-		if !slices.ContainsFunc(ds.Products, func(p dataset.Product) bool { return p.Key == v.Product }) {
+		if !slices.ContainsFunc(ds[0].Products, func(p dataset.Product) bool { return p.Key == v.Product }) {
 			return errUnknownProduct
 		}
 	}

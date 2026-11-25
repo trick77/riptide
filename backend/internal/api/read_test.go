@@ -214,16 +214,24 @@ func TestReadMatchesOpenAPISpec(t *testing.T) {
 		Meta: dataset.Meta{Team: "checkout", From: at, To: at, GeneratedAt: at, ProductionStage: "prod",
 			DataStart: dataset.SourceTimes{Bitbucket: &before, Pipeline: &before, ArgoCD: &before, Noergler: &before},
 			DataEnd:   dataset.SourceTimes{Bitbucket: &at, Pipeline: &at, ArgoCD: &at, Noergler: &at}, BuildDataFrom: &before, BuildTypeFrom: &before,
-			Silences:   []dataset.Silence{{Source: dataset.SourceBitbucket, From: before, To: at, UnseenRuns: 2}},
+			Silences: []dataset.Silence{{Source: dataset.SourceBitbucket, From: before, To: at, UnseenRuns: 2, Lost: true},
+				{Source: dataset.SourcePipeline, From: before, To: fixedNow, Ongoing: true}},
+			Lost:       []dataset.Silence{{Source: dataset.SourceBitbucket, From: before, To: at, UnseenRuns: 2, Lost: true}},
 			RepoStarts: []dataset.RepoStart{{Repo: "kasse/kasse-api", Noergler: &before}}},
 		Products: []dataset.Product{{Key: "kasse", Repos: []string{"kasse/kasse-api"}, Apps: []string{"kasse-prod"}}},
 		PRs: []dataset.PR{{Repo: "kasse/kasse-api", Project: "kasse", PRID: 7, Title: s("Rabattregeln"), ChangeType: s("feature"),
 			JiraKeys: []string{"KAS-7"}, State: "merged", OpenedAt: &before, ReadyAt: &before, FirstReviewAt: &before, ApprovedAt: &before,
 			ApprovedOnFirstTouch: true, MergedAt: &at, FirstCommitAt: &before, MergeCommit: s("abc1234"),
 			Environments: []dataset.EnvironmentDeploy{{Environment: "intg", FirstDeployedAt: at}, {Environment: "prod", FirstDeployedAt: at}}},
-			// Merged into a feature branch: listed, in no PR number.
+			// Merged into a feature branch: counted, marked.
 			{Repo: "kasse/kasse-api", Project: "kasse", PRID: 8, Title: s("Teilschritt"), State: "merged", OpenedAt: &before,
-				MergedAt: &at, TargetBranch: s("feature/umbau"), OffTrunk: true}},
+				MergedAt: &at, TargetBranch: s("feature/umbau"), OffTrunk: true},
+			// The umbrella that carried it: listed, in no PR number.
+			{Repo: "kasse/kasse-api", Project: "kasse", PRID: 10, Title: s("Umbau"), State: "merged", OpenedAt: &before,
+				MergedAt: &at, TargetBranch: s("master"), Umbrella: true},
+			// A library's: never rolled out.
+			{Repo: "kasse/kasse-lib", Project: "kasse", PRID: 11, Title: s("Hilfsfunktion"), State: "merged", OpenedAt: &before,
+				MergedAt: &at, Library: true}},
 		// Last heard of before Bitbucket's events were lost.
 		OpenPRs: []dataset.OpenPR{{Repo: "kasse/kasse-api", Project: "kasse", PRID: 9, Title: s("Liegt"), OpenedAt: before,
 			LastEventAt: before, Unknown: true}},
@@ -234,7 +242,7 @@ func TestReadMatchesOpenAPISpec(t *testing.T) {
 				Images: []string{"reg/b:1"}, Kind: s("first_seen"), FirstRelease: true, NewImages: []string{}},
 			{App: "kasse-prod", Project: s("kasse"), Environment: s("prod"), Revision: "abc9999", At: at, Phase: "Error",
 				NewImages: []string{}},
-			{App: "monitoring", Environment: s("prod"), Revision: "fed4321", At: at, Phase: "Succeeded",
+			{App: "log-shipper", Environment: s("prod"), Revision: "fed4321", At: at, Phase: "Succeeded",
 				Images: []string{"reg/m:1"}, Kind: s("release"), NewImages: []string{"reg/m:1"}, Infra: true}},
 		LeadTimes: []dataset.LeadTime{{Repo: "kasse/kasse-api", Project: "kasse", Environment: "prod", LeadTimeS: 3600}},
 		Reviews: []dataset.Review{{Repo: s("kasse/kasse-api"), Project: s("kasse"),
@@ -253,6 +261,10 @@ func TestReadMatchesOpenAPISpec(t *testing.T) {
 			BuildType: s("release"), RunID: "1", CommitSHA: s("abc1234"), Status: s(status), StartedAt: &before, FinishedAt: &at,
 			DurationS: n(d), Repo: s("kasse/kasse-api"), Project: s("kasse"), ImageRefs: []string{"reg/a:1"}})
 	}
+	// A bot's branch: in no build number, counted apart.
+	ds.Runs = append(ds.Runs, dataset.Run{Source: "jenkins", PipelineName: "kasse-api/renovate%2Flib", Branch: "renovate/lib",
+		BranchKind: "other", RunID: "2", CommitSHA: s("abc4321"), Status: s("FAILURE"), StartedAt: &before, FinishedAt: &at,
+		DurationS: n(120), Repo: s("kasse/kasse-api"), Project: s("kasse"), ImageRefs: []string{}, Bot: true})
 	h.mem.dataset = ds
 	for _, path := range []string{"/api/metrics", "/api/facts"} {
 		for _, q := range []string{"team=checkout&tz=Europe/Zurich", "team=checkout&product=kasse", "", "team=nobody", "team=checkout&weeks=3"} {
@@ -263,8 +275,9 @@ func TestReadMatchesOpenAPISpec(t *testing.T) {
 	// against any. They fall in the running week: the facts list them, the
 	// closed period's numbers count none.
 	for path, want := range map[string][]string{
-		"/api/metrics": {`"unknown":1`, `"unseen_runs":2`},
-		"/api/facts":   {`"not_counted":"off_trunk"`, `"state":"unknown"`, `"phase":"Error"`, `"infra":true`, `"first_deploy":true`},
+		"/api/metrics": {`"unknown":1`, `"unseen_runs":2`, `"lost":true`, `"bot_runs":{`, `"grace_days":14`},
+		"/api/facts": {`"not_counted":"umbrella"`, `"via_umbrella":true`, `"library":true`, `"state":"unknown"`,
+			`"phase":"Error"`, `"infra":true`, `"first_deploy":true`},
 	} {
 		body := h.serveUI(newRequest(http.MethodGet, path+"?team=checkout", nil)).Body.String()
 		for _, w := range want {
@@ -274,6 +287,50 @@ func TestReadMatchesOpenAPISpec(t *testing.T) {
 		}
 	}
 }
+
+// analystMem is the in-memory store with a fixed analysis status: the
+// contract's rarer shapes, which the e2e data never reaches.
+type analystMem struct {
+	*memStore
+	st analysis.Status
+}
+
+func (a *analystMem) Status(context.Context, analysis.View) (analysis.Status, error) {
+	return a.st, nil
+}
+func (a *analystMem) Ask(context.Context, analysis.View) error { return nil }
+
+// An outdated analysis, the limits with a span (a lost silence closing after
+// the period, a source silent at the end) and a not-measurable reason match
+// the contract.
+func TestAnalysisShapesMatchOpenAPISpec(t *testing.T) {
+	cur, prev := metrics.ClosedPeriod(4, fixedNow, time.UTC), metrics.ClosedPrevious(4, fixedNow, time.UTC)
+	from, end := cur.To.Add(-60*time.Hour), cur.To.Add(30*time.Hour)
+	share := metrics.Share{Count: 0, N: 3}
+	a := metrics.Assessment{Period: cur, Previous: prev, Signals: []metrics.Signal{}, Focus: []metrics.FocusRepo{},
+		Team: []metrics.Fact{}, QuietReasons: []string{metrics.QuietSourceGap, metrics.QuietNotMeasurable},
+		NotMeasurable: ptrTo(metrics.NotMeasurableNoRelease),
+		Limits: []metrics.Limit{
+			{Source: dataset.SourceBitbucket, Kind: metrics.LimitSilence, From: from, To: &end},
+			{Source: dataset.SourceNoergler, Kind: metrics.LimitSilentEnd, From: cur.To.Add(-9 * 24 * time.Hour), To: &cur.To},
+			{Source: dataset.SourcePipeline, Kind: metrics.LimitStarts, From: from},
+		},
+		Coverage: metrics.PRCoverage{ToProd: share, Sized: share, Opened: share}}
+	st := analysis.Status{State: analysis.StateNone, Enabled: true, Outdated: true, Assessment: a,
+		Layout: analysis.Layout{Focus: []analysis.LayoutFocus{}, Cards: []analysis.LayoutCard{}, Also: []analysis.LayoutCard{}},
+		Zone:   "UTC"}
+	h := newHarness(t, &analystMem{memStore: newMemStore(), st: st})
+	w := h.serveUI(newRequest(http.MethodGet, "/api/analysis?team=checkout", nil))
+	expectStatus(t, w, http.StatusOK)
+	validateResponse(t, specRouter(t), http.MethodGet, "/api/analysis", w)
+	for _, want := range []string{`"outdated":true`, `"kind":"silence"`, `"kind":"silent_end"`, `"not_measurable":"no_release"`} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Errorf("no %s in %s", want, w.Body)
+		}
+	}
+}
+
+func ptrTo[T any](v T) *T { return &v }
 
 func TestReadFailureIs500AndLogged(t *testing.T) {
 	h := newHarness(t, nil)

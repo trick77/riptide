@@ -191,9 +191,15 @@ function changeKey(s: Signal): "changeBad" | "changeGood" {
   return s.tone === "good" ? "changeGood" : "changeBad";
 }
 
-function ruleText(t: TFunction, s: Signal): string {
+// The rule's numbers come from the backend where it has them: the agent
+// wait's floor (Build.agent_wait_min_s) and share.
+function ruleText(t: TFunction, s: Signal, m: Metrics): string {
   if (s.kind === "change") return t(`overview.assess.rule.${changeKey(s)}`);
-  return t(`overview.assess.rule.${s.kind}`, { defaultValue: "" });
+  return t(`overview.assess.rule.${s.kind}`, {
+    defaultValue: "",
+    minutes: num(m.build.agent_wait_min_s / 60),
+    share: pct(m.build.agent_wait_share),
+  });
 }
 
 function Prev({ f }: { f: Fact }) {
@@ -535,57 +541,76 @@ function TallyCount({
   );
 }
 
+// The words for each reason the backend gives a period as not measurable.
+const NOT_MEASURABLE = {
+  bitbucket: "bitbucket",
+  argocd: "argocd",
+  no_merged: "noMerged",
+  no_release: "noRelease",
+  to_prod: "toProd",
+} as const;
+
 // What limits the assessment, one sentence each, in the backend's order of
 // the reasons: no previous period to compare with, the holes in the sources'
-// data with their dates (in the zone the weeks were cut in), and a period
-// that could not be measured. A finding is no limit: the cards show it.
-function limitLines(
-  t: TFunction,
-  a: AssessmentData,
-  m: Metrics,
-  zone?: string,
-): string[] {
-  const day = (iso: string) => fullDate(new Date(iso), zone);
+// data with their dates, and why the period could not be measured, as the
+// backend says. A finding is no limit: the cards show it. The holes' days are
+// the viewer's, as the data line above the page names the same hole.
+function limitLines(t: TFunction, a: AssessmentData, m: Metrics): string[] {
+  const day = (iso: string) => fullDate(new Date(iso));
   const lines: string[] = [];
+  // Nothing compared at all (the backend's nothing_compared), or only some
+  // numbers without a previous value.
   if (a.quiet_reasons.includes("no_baseline"))
-    lines.push(t("overview.assess.reason.no_baseline"));
+    lines.push(
+      t(
+        a.nothing_compared
+          ? "overview.assess.reason.no_baseline_none"
+          : "overview.assess.reason.no_baseline",
+      ),
+    );
+  // In a product view Bitbucket's lost events leave the deploys and builds
+  // uncompared too: they reach a product through its commits.
+  const view = m.product ? "Product" : "";
   for (const l of a.limits) {
     const source = t(`overview.assess.source.${l.source}`, {
       defaultValue: l.source,
     });
     // A silent_end's `to` is the period's end, Monday 00:00: the day after
-    // the period, so not named.
+    // the period, so not named. A silence without `to` still runs.
     if (l.kind === "starts")
       lines.push(
         t("overview.assess.limit.starts", { source, date: day(l.from) }),
       );
     else if (l.kind === "silence")
       lines.push(
-        t("overview.assess.limit.silence", {
-          source,
-          from: day(l.from),
-          to: day(l.to ?? l.from),
-        }),
+        l.to == null
+          ? t(`overview.assess.limit.silenceOngoing${view}`, {
+              source,
+              from: day(l.from),
+            })
+          : t(`overview.assess.limit.silence${view}`, {
+              source,
+              from: day(l.from),
+              to: day(l.to),
+            }),
       );
     else
       lines.push(
         t("overview.assess.limit.silent_end", { source, from: day(l.from) }),
       );
   }
-  if (a.quiet_reasons.includes("not_measurable")) {
-    const nm = "overview.assess.reason.notMeasurable";
-    const n = a.coverage.to_prod.n;
+  if (a.not_measurable) {
+    // The PRs traced are those of repos that are rolled out: with library
+    // PRs left out, the sentence says so.
+    const key = NOT_MEASURABLE[a.not_measurable];
     lines.push(
-      m.meta.data_start.bitbucket == null
-        ? t(`${nm}.bitbucket`)
-        : !m.delivery.frequency.argo_reporting
-          ? t(`${nm}.argocd`)
-          : n === 0
-            ? t(`${nm}.noMerged`)
-            : t(`${nm}.toProd`, {
-                count: n,
-                prod: stage(m.delivery.production_stage),
-              }),
+      t(
+        `overview.assess.reason.notMeasurable.${key === "toProd" && a.library > 0 ? "toProdRolled" : key}`,
+        {
+          count: a.coverage.to_prod.n,
+          prod: stage(m.delivery.production_stage),
+        },
+      ),
     );
   }
   return lines;
@@ -652,6 +677,7 @@ function words(
   a: AssessmentData,
   layout: AnalysisStatus["layout"],
   text: AnalysisText | null,
+  m: Metrics,
 ): Words {
   const facts = factIndex(a);
   const byId = new Map(a.signals.map((s) => [s.id, s]));
@@ -703,7 +729,7 @@ function words(
         s,
         column: lc.column,
         title: signalTitle(t, s),
-        take: ct ? fill(t, ct.take, facts) : ruleText(t, s),
+        take: ct ? fill(t, ct.take, facts) : ruleText(t, s, m),
         retro: ct?.retro ? fill(t, ct.retro, facts) : null,
         lever: lc.lever,
       },
@@ -742,17 +768,19 @@ function Panel({
   const shown = st.analysis;
   const lang = i18n.language === "en" ? "en" : "de";
   const text = shown ? shown.text[lang] : null;
-  const w = words(t, a, st.layout, text);
+  const w = words(t, a, st.layout, text, m);
   const weeks = weeksLabel(t, a);
   // The backend sends cooldown_until only while the view cools down.
   const cooling = st.cooldown_until != null;
 
   // The gates are among the limits (silent at the period's end), with their
   // dates: said once, there.
-  const limits = limitLines(t, a, m, st.zone || undefined);
+  const limits = limitLines(t, a, m);
   // Only a period the backend could measure and compare may be called
-  // calm in any word: nothing stuck, no gain, nothing standing out.
-  const limited = a.quiet_reasons.some((r) => r !== "findings");
+  // calm in any word: nothing stuck, no gain, nothing standing out. A big
+  // 0 "stuck" beside the limits would read as such a word. The backend's
+  // `limited` says when.
+  const limited = a.limited;
   const byId = new Map(a.signals.map((s) => [s.id, s]));
   const also = st.layout.also.flatMap((lc) => {
     const s = byId.get(lc.signal);
@@ -872,6 +900,32 @@ function Panel({
           {st.enabled && t("overview.assess.outdatedAsk")}
         </p>
       )}
+      {/* What limits the assessment first, before any count: the counts
+          read only within it. */}
+      {limits.length > 0 && (
+        <div
+          role="note"
+          aria-label={t("overview.assess.limitsLabel")}
+          className="mt-3 mb-1 grid gap-1 rounded-ui-sm border border-ochre/35 bg-ochre-wash px-2.5 py-1.5 text-[13px] text-ochre"
+        >
+          {limits.map((l) => (
+            <p key={l} className="m-0">
+              {l}
+            </p>
+          ))}
+        </div>
+      )}
+      {/* Libraries only: nothing to roll out, no hole in the data, so no
+          limit; said plainly where the delivery would be. */}
+      {a.libraries_only && (
+        <p className="mt-3 mb-1 text-[13.5px] text-ink-dim">
+          {t(
+            m.product
+              ? "overview.assess.librariesOnly"
+              : "overview.assess.librariesOnlyTeam",
+          )}
+        </p>
+      )}
 
       {/* The headline and the tally side by side; without an analysis the
           tally stands alone. */}
@@ -896,13 +950,16 @@ function Panel({
           aria-label={t("overview.assess.tallyLabel")}
           className="m-0 flex list-none flex-wrap gap-x-[34px] gap-y-3.5 p-0"
         >
-          {/* A zero is no alarm: grey, like the repos. */}
-          <TallyCount
-            look={tally.bad > 0 ? COLUMN_STYLE.bad : undefined}
-            n={num(tally.bad)}
-          >
-            {t("overview.assess.tally.bad")}
-          </TallyCount>
+          {/* A zero is no alarm: grey, like the repos; and none at all
+              where the limits leave it saying nothing. */}
+          {(tally.bad > 0 || !limited) && (
+            <TallyCount
+              look={tally.bad > 0 ? COLUMN_STYLE.bad : undefined}
+              n={num(tally.bad)}
+            >
+              {t("overview.assess.tally.bad")}
+            </TallyCount>
+          )}
           {tally.good > 0 && (
             <TallyCount look={COLUMN_STYLE.good} n={num(tally.good)}>
               {t("overview.assess.tally.good")}
@@ -918,7 +975,7 @@ function Panel({
               {t("overview.assess.tally.talk")}
             </TallyCount>
           )}
-          {a.repos > 0 && (
+          {a.active > 0 && (
             <TallyCount
               n={
                 <>
@@ -926,13 +983,13 @@ function Panel({
                   <small className="text-[22px]">
                     {" "}
                     {t("overview.assess.tally.ofRepos", {
-                      repos: num(a.repos),
+                      repos: num(a.active),
                     })}
                   </small>
                 </>
               }
             >
-              {t("overview.assess.tally.calm", { count: a.repos })}
+              {t("overview.assess.tally.calm", { count: a.active })}
             </TallyCount>
           )}
           {a.unjudged > 0 && (
@@ -942,31 +999,13 @@ function Panel({
           )}
         </ul>
       </div>
-      {limits.length > 0 && (
-        <div
-          role="note"
-          aria-label={t("overview.assess.limitsLabel")}
-          className="mt-3 mb-1 grid gap-1 rounded-ui-sm border border-ochre/35 bg-ochre-wash px-2.5 py-1.5 text-[13px] text-ochre"
-        >
-          {limits.map((l) => (
-            <p key={l} className="m-0">
-              {l}
-            </p>
-          ))}
-        </div>
-      )}
 
-      {a.quiet ? (
+      {/* The one calm word, only where the backend says quiet: findings
+          without anything stuck simply show their cards. */}
+      {a.quiet && (
         <div className="mt-5">
           <Quiet>{t("overview.assess.quiet")}</Quiet>
         </div>
-      ) : (
-        tally.bad === 0 &&
-        !limited && (
-          <div className="mt-5">
-            <Quiet>{t("overview.assess.nothingStuck")}</Quiet>
-          </div>
-        )
       )}
       {(tally.bad > 0 || left.length > 0) && (
         <div className="mt-5 flex flex-wrap gap-x-[18px] gap-y-5">
@@ -1071,20 +1110,30 @@ function Panel({
         {a.repos > 0 && (
           <span className="inline-flex items-center gap-2">
             <span aria-hidden="true" className="size-2 rounded-full bg-faint" />
-            {t("overview.assess.calmLine", {
-              count: a.repos,
-              parts: [
-                t("overview.assess.calmPart", { count: num(a.calm) }),
-                a.unjudged > 0 &&
-                  t("overview.assess.unjudgedPart", {
-                    count: num(a.unjudged),
-                  }),
-                a.idle > 0 &&
-                  t("overview.assess.idlePart", { count: num(a.idle) }),
-              ]
-                .filter(Boolean)
-                .join(", "),
-            })}
+            {/* The active repos, as the panel counts them; the idle ones,
+                active only before, apart. */}
+            {[
+              a.active > 0 &&
+                t("overview.assess.calmLine", {
+                  count: a.active,
+                  parts: [
+                    t("overview.assess.calmPart", { count: num(a.calm) }),
+                    a.unjudged > 0 &&
+                      t("overview.assess.unjudgedPart", {
+                        count: num(a.unjudged),
+                      }),
+                  ]
+                    .filter(Boolean)
+                    .join(", "),
+                }),
+              a.idle > 0 &&
+                t("overview.assess.idleLine", {
+                  count: a.idle,
+                  n: num(a.idle),
+                }),
+            ]
+              .filter(Boolean)
+              .join(" ")}
           </span>
         )}
         {tally.good === 0 && tally.done === 0 && !limited && (

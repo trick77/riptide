@@ -42,7 +42,15 @@
       "feature": "Feature and bugfix builds",
       "other": "Other branches",
       "unknown": "Default branch, kind unknown"
-    }
+    },
+    "notCounted": {
+      "umbrella": "Not counted: umbrella-branch merge",
+      "housekeeping": "Not counted: housekeeping PR",
+      "twice": "Not counted: branch already counted with another PR"
+    },
+    "viaUmbrella": "merged via an umbrella branch",
+    "library": "Library, never rolled out",
+    "infra": "Infrastructure, not counted"
   },
   "de": {
     "prState": {
@@ -87,6 +95,14 @@
       "feature": "Feature- und Bugfix-Builds",
       "other": "Übrige Branches",
       "unknown": "Default-Branch, Art unbekannt"
-    }
+    },
+    "notCounted": {
+      "umbrella": "Nicht gezählt: Merge eines Sammel-Branches",
+      "housekeeping": "Nicht gezählt: Aufräum-PR",
+      "twice": "Nicht gezählt: Branch schon mit einem anderen PR gezählt"
+    },
+    "viaUmbrella": "über Sammel-Branch gemerged",
+    "library": "Bibliothek, wird nicht ausgerollt",
+    "infra": "Infrastruktur, nicht gezählt"
   }
 }

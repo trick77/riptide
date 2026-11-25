@@ -63,6 +63,7 @@ func Load(configPath, keysPath string, log *slog.Logger) (*Runtime, error) {
 	if len(extra) > 0 {
 		log.Warn("team_keys_extra_entries", "extra", extra)
 	}
+	warnShortNames(log, cfg)
 	r.cfg.Store(cfg)
 	r.keys.Store(keys)
 	r.cfgSum = sha256.Sum256(cfgData)
@@ -163,6 +164,7 @@ func (r *Runtime) Reload() {
 		r.cfg.Store(cfg)
 		r.cfgSum = cfgSum
 		r.log.Info("config_reloaded", "teams", len(cfg.Teams))
+		warnShortNames(r.log, cfg)
 	}
 	if keysChanged {
 		r.keys.Store(keys)
@@ -171,6 +173,14 @@ func (r *Runtime) Reload() {
 	}
 	if len(extra) > 0 {
 		r.log.Warn("team_keys_extra_entries", "extra", extra)
+	}
+}
+
+// warnShortNames logs the automation sources whose name is too short to
+// tell a bot by (Config.ShortSourceNames): the config stays live.
+func warnShortNames(log *slog.Logger, cfg *Config) {
+	if short := cfg.ShortSourceNames(); len(short) > 0 {
+		log.Warn("automation_source_name_short", "sources", short, "min_letters", MinSourceNameLetters)
 	}
 }
 

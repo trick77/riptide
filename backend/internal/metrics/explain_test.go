@@ -300,7 +300,7 @@ func TestUnknownNumberResolvesNothing(t *testing.T) {
 	same := Change{Verdict: ChangeSame, Directed: true, Magnitude: ptr(MagnitudeSame), Score: ptr(0.0), Prev: ptr(100.0)}
 	resolved := func(v *float64, c Change) bool {
 		a := &assessor{
-			team: []teamChange{{metric: "lead_time", label: "lead_time_p50", unit: UnitSeconds, source: SourceArgoCD, value: v, c: c}},
+			team: []teamChange{{metric: "lead_time", label: "lead_time_p50", unit: UnitSeconds, source: dataset.SourceArgoCD, value: v, c: c}},
 			h:    History{Open: map[string]Problem{"change:lead_time": {Tone: ToneAttention, Before: ptr(100.0)}}},
 			gaps: map[string]bool{},
 		}

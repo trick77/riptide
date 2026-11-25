@@ -46,7 +46,7 @@ func analyse(s settings.Settings, log *slog.Logger, args []string, out io.Writer
 	}
 	defer db.Close()
 	deps := api.Deps{Store: db, Reader: db, Runtime: rt, Log: log}
-	svc := &analysis.Service{Store: db, Load: deps.Dataset, Loc: s.AnalysisLoc, Log: log}
+	svc := &analysis.Service{Store: db, Load: deps.Datasets, Loc: s.AnalysisLoc, Log: log}
 	v := analysis.View{Team: *team, Weeks: *weeks, Product: *product}
 	if *dry {
 		digest, err := svc.Digest(ctx, v)

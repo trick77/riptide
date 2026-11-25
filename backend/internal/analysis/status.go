@@ -41,7 +41,8 @@ type Layout struct {
 // Tally is the assessment in one line: its signals by column, gates aside,
 // counted whether worded or not. Good or done above 0 is what lets the page
 // say "runs"; without either it says why nothing counts as a gain (user:
-// "wenn nichts läuft, ist läuft gut übertrieben").
+// "wenn nichts läuft, ist läuft gut übertrieben"). Whether anything could
+// be compared at all is the assessment's QuietReasons (no_baseline).
 type Tally struct {
 	Good int `json:"good"`
 	Done int `json:"done"`
@@ -49,9 +50,6 @@ type Tally struct {
 	// Talk is the question, 1 when there is one: a number that moved
 	// notably stands out, though it has no better direction.
 	Talk int `json:"talk"`
-	// Baseline: a team number has a previous period to read better against;
-	// without one nothing can.
-	Baseline bool `json:"baseline"`
 }
 
 // Card slots of the good and done columns, on top of MaxCards: ranked
@@ -250,7 +248,6 @@ func tally(a metrics.Assessment) Tally {
 	if a.Question != nil {
 		t.Talk = 1
 	}
-	t.Baseline = slices.ContainsFunc(a.Team, func(f metrics.Fact) bool { return f.Verdict != metrics.ChangeNone })
 	return t
 }
 
@@ -272,7 +269,9 @@ type Status struct {
 	// assessed under older rules (metrics.RulesVersion): it may word signals
 	// riptide no longer raises, so neither its text nor its numbers show;
 	// Assessment is the rules' view now, and the page offers to assess
-	// again. State then says none (or off) as without an analysis.
+	// again. State then says none as without an analysis. Never without a
+	// model (Enabled): there is nothing to offer, and the old row simply
+	// does not show.
 	Outdated bool `json:"outdated"`
 	// Assessment is the shown analysis' own, numbers and all, so its text
 	// and numbers agree; without one the view's closed weeks now.
@@ -333,9 +332,11 @@ func (s *Service) Status(ctx context.Context, v View) (Status, error) {
 		var rep Report
 		var a metrics.Assessment
 		// A row of older rules shows nothing of itself: its signals and
-		// question are frozen as those rules raised them.
-		st.Outdated = old <= MaxAge(v.Weeks) && outdated(r)
-		if old <= MaxAge(v.Weeks) && !st.Outdated && json.Unmarshal(r.Output, &out) == nil &&
+		// question are frozen as those rules raised them. Outdated only
+		// where the page can offer to assess again: with a model.
+		stale := outdated(r)
+		st.Outdated = s.LLM != nil && old <= MaxAge(v.Weeks) && stale
+		if old <= MaxAge(v.Weeks) && !stale && json.Unmarshal(r.Output, &out) == nil &&
 			json.Unmarshal(r.Assessment, &a) == nil {
 			_ = json.Unmarshal(r.Report, &rep)
 			st.State, st.Assessment = StateFresh, a

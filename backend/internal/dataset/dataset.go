@@ -10,13 +10,16 @@ import (
 	"cmp"
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"maps"
 	"path"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -31,23 +34,24 @@ var sqlFiles embed.FS
 var queries = expand()
 
 var (
-	metaSQL         = query("meta.sql")
-	prsSQL          = query("prs.sql")
-	deploysSQL      = query("deploys.sql")
-	leadTimesSQL    = query("lead_times.sql")
-	environmentsSQL = query("environments.sql")
-	runsSQL         = query("runs.sql")
-	reviewsSQL      = query("reviews.sql")
-	openPRsSQL      = query("open_prs.sql")
-	gitopsSQL       = query("gitops.sql")
-	silencesSQL     = query("silences.sql")
-	reposSQL        = query("repos.sql")
-	repoStartsSQL   = query("repo_starts.sql")
+	metaSQL       = query("meta.sql")
+	prsSQL        = query("prs.sql")
+	deploysSQL    = query("deploys.sql")
+	changesSQL    = query("changes.sql")
+	runsSQL       = query("runs.sql")
+	reviewsSQL    = query("reviews.sql")
+	openPRsSQL    = query("open_prs.sql")
+	gitopsSQL     = query("gitops.sql")
+	silencesSQL   = query("silences.sql")
+	reposSQL      = query("repos.sql")
+	repoStartsSQL = query("repo_starts.sql")
+	appsSQL       = query("apps.sql")
+	librariesSQL  = query("libraries.sql")
 )
 
 const (
-	// FirstDeployGrace: an App's first deploy naming images counts as a
-	// release once Argo CD has reported for the team longer than this. Right
+	// FirstDeployGrace is how long Argo CD must have reported for the team
+	// before an App's first deploy naming images counts as a release. Right
 	// after onboarding every App's first deploy is one, release or re-sync
 	// unknown; later an App deployed for the first time is a new App going
 	// live (owner's decision, 2026-11).
@@ -61,19 +65,29 @@ const (
 	// weeks ago is still lost. metrics.OpenInactiveDays: past it the PR is
 	// inactive anyway.
 	SilenceLookback = 30 * 24 * time.Hour
-	// HousekeepingMaxCycle, HousekeepingWindow and HousekeepingMinRepos
-	// tell a housekeeping PR: opened and merged within HousekeepingMaxCycle
-	// without an approval, its title merged in HousekeepingMinRepos repos
-	// within HousekeepingWindow (one config file bumped in every repo at
-	// once). Not merged work (owner's decision, 2026-11).
-	HousekeepingMaxCycle = 15 * time.Minute
-	HousekeepingWindow   = time.Hour
+	// HousekeepingWindow and HousekeepingMinRepos tell a housekeeping PR: a
+	// tool's change, the same title opened in HousekeepingMinRepos of the
+	// team's repos within HousekeepingWindow (one config file bumped in
+	// every repo at once), no person's approval, no ticket key. Not merged
+	// work (owner's decision, 2026-11). How long it stood open says nothing:
+	// some of one batch are merged at once, others days later.
+	HousekeepingWindow = time.Hour
+	// HousekeepingMinRepos is the number of repos the same title must be
+	// opened in within HousekeepingWindow.
 	HousekeepingMinRepos = 3
-	// ImplicitMergeWindow: PRs of one repo merged this close together, at
-	// most one of them with a merge commit, are one merge. Bitbucket marks
-	// every PR whose commits an umbrella branch brought in merged in the
-	// umbrella's second, without a merge commit of its own.
+	// ImplicitMergeWindow is how close together PRs of one repo must merge,
+	// at most one of them with a merge commit, to count as merged by that one.
+	// Bitbucket marks every PR whose commits an umbrella branch brought in
+	// merged in the umbrella's second, without a merge commit of its own.
 	ImplicitMergeWindow = time.Second
+	// AppHistory is how far back an App's deploys decide its product and
+	// whether it is infrastructure (sql/apps.sql).
+	AppHistory = 26 * 7 * 24 * time.Hour
+	// LostCommitReach is how long before an App went live a lost Bitbucket
+	// silence may have ended and still hold the GitOps commit it went live
+	// with: a production sync waits for its commit up to a week, a hole
+	// ending on Friday holds Monday's deploy.
+	LostCommitReach = 7 * 24 * time.Hour
 )
 
 func query(name string) string {
@@ -144,12 +158,27 @@ type Params struct {
 	// project key are dropped, so neither a number nor the product list
 	// sees them; a row without a project stays. nil excludes nothing.
 	Excluded func(project string) bool
+	// BotBranch is config's automation branch_prefixes: a CI run of such a
+	// branch (lowercased) is a bot's (Run.Bot). nil knows none.
+	BotBranch func(branch string) bool
 	// Now stamps meta.generated_at.
 	Now time.Time
 	// FactsOnly skips the lead times and the reviews: the facts tables read
 	// none, and a search reads the dataset again on every pause. Products
 	// then miss what only those two show.
 	FactsOnly bool
+	// CountsOnly skips the PRs' environments and the library repos
+	// (PR.Environments empty, PR.Library false): the running week's read
+	// counts its merged PRs, releases and runs, nothing traced.
+	CountsOnly bool
+	// Shared are the reads every window of one page shares (LoadShared),
+	// read once for all of them; nil reads them for this window alone.
+	Shared *Shared
+	// ClassAt is the end of the window whose Apps class this one's deploys
+	// (Shared's, App): a page classes its period and the previous one by the
+	// period's end, so an App is no infrastructure in one and a product's in
+	// the other. Zero: To.
+	ClassAt time.Time
 }
 
 // Dataset is one team's facts for a window.
@@ -166,6 +195,26 @@ type Dataset struct {
 	// GitOpsRepos are every GitOps repo (sql/gitops.sql), not the window's
 	// only: a run whose commit Bitbucket never saw is matched by name.
 	GitOpsRepos []string `json:"-"`
+	// Apps are the team's Apps as of Params.ClassAt (sql/apps.sql): the
+	// classes its deploys carry. A page classes its period and the previous
+	// one by the period's end (Classified), so an App is no infrastructure
+	// in one and a product's in the other.
+	Apps []App `json:"-"`
+}
+
+// App is one of the team's Apps as its deploys over AppHistory show it.
+type App struct {
+	Name string
+	// Project is its product: the one most of its deploys' revisions name.
+	// A deploy whose GitOps commit Bitbucket's events missed is still its.
+	Project *string
+	// Infra: none of its deploys names a product, though Bitbucket reported
+	// before one of them and the team has deploys with one. Never an App
+	// that went live as a release (Deploy.FirstRelease) while Bitbucket's
+	// events were lost, or within LostCommitReach after: its GitOps commit
+	// may lie in the hole. A team's second GitOps repo without the Bitbucket
+	// webhook classes every App of it infrastructure (docs/metrics.md).
+	Infra bool
 }
 
 // Meta describes the window and where each source's data starts.
@@ -184,12 +233,17 @@ type Meta struct {
 	// before it a NULL build_type means not collected yet.
 	BuildTypeFrom *time.Time `json:"build_type_from"`
 	// Silences are the spans in which one source stored nothing for the
-	// team while another did, SilenceMin of working time inside the window
-	// or more, oldest first. From and To are the source's events around the
-	// span, so one reaching back before the window starts before From.
-	// DataStart says when a source started, DataEnd when it went quiet at
-	// the end: neither is a silence.
+	// team while another did, SilenceMin of working time or more in all,
+	// that overlap the window, oldest first. From and To are when riptide
+	// stored the source's events around the span, so one reaching over the
+	// window's start or end starts before From or ends after To (up to the
+	// read's now). One still running at the read ends at its now (Ongoing).
+	// DataStart says when a source started: no silence before it.
 	Silences []Silence `json:"silences"`
+	// Lost are the Silences whose events were lost (Silence.Lost): the ones
+	// the page's data line names. The rest are a team that did not deploy or
+	// review for two days as much as a hole.
+	Lost []Silence `json:"lost"`
 	// RepoStarts are noergler's first event per repository of the window's
 	// PRs, by repository: it is set up repo by repo. Empty for a facts-only
 	// read.
@@ -216,6 +270,13 @@ type Silence struct {
 	// commit Bitbucket never saw, of a pipeline whose other commits it did.
 	// More than 0: Bitbucket's events were lost, not the team idle.
 	UnseenRuns int `json:"unseen_runs"`
+	// Lost: Bitbucket's, with unseen runs. Its events were lost: what it
+	// counts reads low, a PR closed in it may still read open. Every other
+	// silence is a fact for the data line, no hole in the data.
+	Lost bool `json:"lost"`
+	// Ongoing: the source has stored nothing since From up to the read's
+	// now, To: still silent, while another source reports.
+	Ongoing bool `json:"ongoing"`
 }
 
 // RepoStart is when noergler first reported a repository; nil never.
@@ -284,25 +345,59 @@ type PR struct {
 	// nil when the payload names none.
 	TargetBranch *string `json:"target_branch" db:"target_branch"`
 	// OffTrunk: merged into another branch than the repo's trunk (master,
-	// main, or the branch most of its PRs go into): a feature or umbrella
-	// branch, whose work reaches the trunk with another PR.
+	// main, or the branch most of its PRs go into; several when tied): a
+	// feature or umbrella branch. Merged work all the same (a PR is a PR,
+	// wherever it goes: owner, 2026-11); the facts say so.
 	OffTrunk bool `json:"off_trunk" db:"off_trunk"`
-	// ImplicitMerge: merged in the same second as other PRs of its repo, at
-	// most one of them with a merge commit, and not the one kept
+	// ImplicitMerge: merged without a merge commit of its own in the same
+	// second as other PRs of its repo, at most one of them with one
 	// (ImplicitMergeWindow): Bitbucket marked it merged when an umbrella
-	// branch brought its commits in. One merge, counted on the one kept: the
-	// one with the merge commit, else the highest PR number.
+	// branch brought its commits in. Merged work all the same.
 	ImplicitMerge bool `json:"implicit_merge" db:"-"`
-	// Housekeeping: a person's PR opened and merged without approval within
-	// HousekeepingMaxCycle, its title merged in HousekeepingMinRepos of the
-	// team's repos within HousekeepingWindow. Decided over the team's PRs,
-	// whatever product a view shows.
+	// Umbrella: the vehicle of other people's merged PRs, none of its own
+	// work: its source branch is where people merged other PRs of the repo,
+	// or its merge brought in another person's PR (ImplicitMerge). Never a
+	// bot's PR beside it: a bot's PR never makes a person's uncounted.
+	Umbrella bool `json:"umbrella" db:"-"`
+	// Twice: merged implicitly (ImplicitMerge) from a source branch another
+	// merged PR of the repo, counted as work, came from: the same work,
+	// counted once.
+	Twice bool `json:"twice" db:"-"`
+	// Housekeeping: a person's PR, its title opened in HousekeepingMinRepos
+	// of the team's repos within HousekeepingWindow, without a person's
+	// approval and without a ticket key in title or source branch. Decided
+	// over the team's PR openings of all history, whatever window and
+	// product a view shows.
 	Housekeeping bool `json:"housekeeping" db:"-"`
+	// Library: in a repo that is never rolled out (libraryEvidence), none of
+	// whose PRs in the window reached a stage: merged work no deploy
+	// carries, so no PR not traced to production.
+	Library bool `json:"library" db:"-"`
 
 	// Read for the derivations above, never sent: no handles leave the API.
 	Touches           []touch `json:"-" db:"touches"`
 	Opener            string  `json:"-" db:"opener"`
 	OpenerDisplayName string  `json:"-" db:"opener_display_name"`
+	// SourceRef is the source branch as the sender spelled it.
+	SourceRef string `json:"-" db:"source_ref"`
+	// UmbrellaOpeners open the other merged PRs into its source branch.
+	UmbrellaOpeners []opening `json:"-" db:"umbrella_openers"`
+	// Siblings are its title's openings within HousekeepingWindow of its own,
+	// itself included; empty unless merged and opened with a title.
+	Siblings []opening `json:"-" db:"siblings"`
+	// OpenedTitle is its title as opened.
+	OpenedTitle *string `json:"-" db:"opened_title"`
+}
+
+// opening is a PR as sql/prs.sql names another one: its repo, its opening
+// and who opened it. Bot is the ingest flag or a declared non-human, a GitOps
+// repo's PR among them (no person's work); Go adds its automation detection.
+type opening struct {
+	Repo        string    `json:"repo"`
+	At          time.Time `json:"at"`
+	Author      string    `json:"author"`
+	DisplayName string    `json:"display_name"`
+	Bot         bool      `json:"bot"`
 }
 
 // OpenPR is a pull request open at the window's end. See sql/open_prs.sql
@@ -390,11 +485,10 @@ type Deploy struct {
 	// first Argo CD event, counted as a release: an App going live, not the
 	// onboarding's first look at an App deployed long before.
 	FirstRelease bool `json:"first_release" db:"-"`
-	// Infra: the App's successful deploys over the 26 weeks before the
-	// window's end never named a product, one of them after the team's
-	// first Bitbucket event: infrastructure (monitoring, a bot), no product
-	// of the team's. In no judged number (owner's decision, 2026-11).
-	Infra bool `json:"infra" db:"infra"`
+	// Infra: its App is infrastructure (App.Infra): a log shipper, a bot,
+	// no product of the team's. In no judged number (owner's decision,
+	// 2026-11). Project, where the revision names none, is the App's.
+	Infra bool `json:"infra" db:"-"`
 }
 
 // LeadTime is one commit's first deploy to one environment.
@@ -441,6 +535,10 @@ type Run struct {
 	ImageRefs  []string  `json:"image_refs" db:"image_refs"`
 	// GitOps: a run in a GitOps repo, a stage promotion's check.
 	GitOps bool `json:"gitops" db:"gitops"`
+	// Bot: a bot's branch built, by the config's automation branch_prefixes
+	// (Params.BotBranch), or a bot PR's PR-<n>. In no build number: a bot's
+	// failed build is no quality problem of the team's (owner, 2026-11).
+	Bot bool `json:"bot" db:"-"`
 }
 
 // Review is one PR's final noergler rollup. CostUSD is the stored decimal
@@ -460,19 +558,201 @@ type DB interface {
 	BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error)
 }
 
-// Load reads the dataset in one read-only snapshot, so the sections agree
-// with each other while webhooks keep landing.
-func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
+// SharedParams select what one page request's windows share: the team,
+// the earliest window start, the ends whose Apps class a window (each
+// window's ClassAt), the read's now, and whether a window marks libraries.
+type SharedParams struct {
+	Team      string
+	From      time.Time
+	ClassEnds []time.Time
+	Now       time.Time
+	Libraries bool
+	// Changes reads the team's changes first deployed (sql/changes.sql): a
+	// window with lead times or its PRs' stage times needs them.
+	Changes bool
+}
+
+// Shared are the reads every window of one page request uses alike, read
+// once for all of them: the GitOps repos, the team's first event per source,
+// the silences from the earliest window's look-back to now, the Apps as of
+// each class end, the library evidence and the changes first deployed.
+// Never kept past the request: metrics are computed on read.
+type Shared struct {
+	gitops    []string
+	starts    SourceTimes
+	silences  []Silence
+	apps      map[time.Time][]App
+	libraries *libraryEvidence
+	changes   []change
+	// changed: changes were read.
+	changed bool
+	// repoStarts is noergler's first event per repository, lowercased.
+	repoStarts map[string]time.Time
+}
+
+// change is a row of sql/changes.sql: a commit's first deploy to one
+// environment, with its lead time.
+type change struct {
+	LeadTime
+	CommitSHA       string    `db:"commit_sha"`
+	FirstDeployedAt time.Time `db:"first_deployed_at"`
+}
+
+// LoadShared reads a page request's Shared: the changes, the costliest
+// read, side by side with the rest, each in a read-only snapshot.
+func LoadShared(ctx context.Context, db DB, p SharedParams) (*Shared, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var sh *Shared
+	var changes []change
+	var errs [2]error
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		tx, err := begin(ctx, db)
+		if err == nil {
+			defer func() { _ = tx.Rollback(ctx) }()
+			sh, err = loadShared(ctx, tx, SharedParams{Team: p.Team, From: p.From, ClassEnds: p.ClassEnds, Now: p.Now,
+				Libraries: p.Libraries})
+		}
+		if errs[0] = err; err != nil {
+			cancel()
+		}
+	})
+	if p.Changes {
+		wg.Go(func() {
+			tx, err := begin(ctx, db)
+			if err == nil {
+				defer func() { _ = tx.Rollback(ctx) }()
+				changes, err = all[change](ctx, tx, "changes", changesSQL, p.Team)
+			}
+			if errs[1] = err; err != nil {
+				cancel()
+			}
+		})
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil && !errors.Is(err, context.Canceled) {
+			return nil, err
+		}
+	}
+	if err := errors.Join(errs[:]...); err != nil {
+		return nil, err
+	}
+	sh.changes, sh.changed = changes, p.Changes
+	return sh, nil
+}
+
+// begin opens a read-only snapshot, so a read's sections agree with each
+// other while webhooks keep landing.
+func begin(ctx context.Context, db DB) (pgx.Tx, error) {
 	tx, err := db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
 	// The lead-time views' row estimates are off by orders of magnitude
 	// (measured: 77 M estimated, 10 k actual), which makes the planner
 	// JIT-compile a 250 ms query for another 600 ms.
-	if _, err := tx.Exec(ctx, "SET LOCAL jit = off"); err != nil {
+	// pgx prepares every query; after five runs Postgres may plan it once
+	// for any parameters, and the team and window decide the plan: a
+	// generic one read the Apps over twenty times slower and the PRs half
+	// again as slow (measured). Planning costs about a millisecond a query.
+	for _, set := range []string{"SET LOCAL jit = off", "SET LOCAL plan_cache_mode = force_custom_plan"} {
+		if _, err := tx.Exec(ctx, set); err != nil {
+			_ = tx.Rollback(ctx)
+			return nil, err
+		}
+	}
+	return tx, nil
+}
+
+func loadShared(ctx context.Context, tx pgx.Tx, p SharedParams) (*Shared, error) {
+	sh := &Shared{apps: map[time.Time][]App{}}
+	// Never nil: pgx sends nil as NULL, `= ANY(NULL)` scans NULL into a
+	// bool and `<> ALL(NULL)` drops every open PR.
+	var gitops []string
+	if err := tx.QueryRow(ctx, gitopsSQL).Scan(&gitops); err != nil {
+		return nil, fmt.Errorf("dataset gitops: %w", err)
+	}
+	if gitops == nil {
+		gitops = []string{}
+	}
+	sh.gitops = gitops
+	meta, err := one[metaRow](ctx, tx, "meta", metaSQL, p.Team, nil)
+	if err != nil {
 		return nil, err
+	}
+	sh.starts = SourceTimes{Bitbucket: meta.Bitbucket, Pipeline: meta.Pipeline, ArgoCD: meta.ArgoCD, Noergler: meta.Noergler}
+	rows := map[time.Time][]appRow{}
+	var live []appRow
+	for _, end := range p.ClassEnds {
+		if _, ok := rows[end]; ok {
+			continue
+		}
+		if rows[end], err = all[appRow](ctx, tx, "apps", appsSQL, p.Team, end); err != nil {
+			return nil, err
+		}
+		live = append(live, rows[end]...)
+	}
+	// From the earliest window's open PRs' look-back, or an App going live
+	// further back, to now: a silence the window ends inside closes after it.
+	from := p.From.Add(-SilenceLookback)
+	if back := liveSince(live, sh.starts.ArgoCD); back != nil && back.Before(from) {
+		from = *back
+	}
+	if sh.silences, err = loadSilences(ctx, tx, p.Team, from, p.Now); err != nil {
+		return nil, err
+	}
+	for end, r := range rows {
+		sh.apps[end] = classify(r, sh.starts, sh.silences)
+	}
+	if p.Libraries {
+		if sh.libraries, err = loadLibraries(ctx, tx, p.Team); err != nil {
+			return nil, err
+		}
+	}
+	if p.Changes {
+		if sh.changes, err = all[change](ctx, tx, "changes", changesSQL, p.Team); err != nil {
+			return nil, err
+		}
+		sh.changed = true
+	}
+	starts, err := all[repoStartRow](ctx, tx, "repo_starts", repoStartsSQL, p.Team)
+	if err != nil {
+		return nil, err
+	}
+	sh.repoStarts = map[string]time.Time{}
+	for _, r := range starts {
+		sh.repoStarts[r.Repo] = r.Noergler
+	}
+	return sh, nil
+}
+
+// Load reads the dataset in one read-only snapshot, so the sections agree
+// with each other while webhooks keep landing.
+func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
+	tx, err := begin(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	classAt := p.ClassAt
+	if classAt.IsZero() {
+		classAt = p.To
+	}
+	sh := p.Shared
+	if sh == nil {
+		if sh, err = loadShared(ctx, tx, SharedParams{Team: p.Team, From: p.From, ClassEnds: []time.Time{classAt}, Now: p.Now,
+			Libraries: !p.CountsOnly, Changes: !p.CountsOnly || !p.FactsOnly}); err != nil {
+			return nil, err
+		}
+	}
+	if (!p.CountsOnly || !p.FactsOnly) && !sh.changed {
+		return nil, errors.New("dataset: the shared read has no changes")
+	}
+	apps, ok := sh.apps[classAt]
+	if !ok {
+		return nil, fmt.Errorf("dataset: no Apps as of %s in the shared read", classAt)
 	}
 	d := &Dataset{Meta: Meta{
 		Team: p.Team, From: p.From.UTC(), To: p.To.UTC(), GeneratedAt: p.Now.UTC(),
@@ -491,24 +771,13 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 	d.Meta.DataEnd = SourceTimes{Bitbucket: meta.BitbucketEnd, Pipeline: meta.PipelineEnd, ArgoCD: meta.ArgoCDEnd,
 		Noergler: meta.NoerglerEnd}
 	d.Meta.BuildDataFrom, d.Meta.BuildTypeFrom = meta.BuildDataFrom, meta.BuildTypeFrom
-	silences, err := loadSilences(ctx, tx, p)
-	if err != nil {
-		return nil, err
-	}
-	d.Meta.Silences = inWindow(silences, p.From, p.To)
+	d.Meta.Silences = inWindow(sh.silences, p.From, p.To)
+	d.Meta.Lost = slices.DeleteFunc(slices.Clone(d.Meta.Silences), func(s Silence) bool { return !s.Lost })
+	d.Apps = apps
 	d.Meta.RepoStarts = []RepoStart{}
 
-	// Never nil: pgx sends nil as NULL, `= ANY(NULL)` scans NULL into a
-	// bool and `<> ALL(NULL)` drops every open PR.
-	var gitops []string
-	if err := tx.QueryRow(ctx, gitopsSQL).Scan(&gitops); err != nil {
-		return nil, fmt.Errorf("dataset gitops: %w", err)
-	}
-	if gitops == nil {
-		gitops = []string{}
-	}
-	d.GitOpsRepos = gitops
-	if d.PRs, err = all[PR](ctx, tx, "prs", prsSQL, p.Team, p.From, p.To, d.GitOpsRepos); err != nil {
+	d.GitOpsRepos = sh.gitops
+	if d.PRs, err = all[PR](ctx, tx, "prs", prsSQL, p.Team, p.From, p.To, d.GitOpsRepos, HousekeepingWindow.Seconds()); err != nil {
 		return nil, err
 	}
 	if d.OpenPRs, err = all[OpenPR](ctx, tx, "open_prs", openPRsSQL, p.Team, p.To, d.GitOpsRepos); err != nil {
@@ -517,13 +786,18 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 	if d.Deploys, err = all[Deploy](ctx, tx, "deploys", deploysSQL, p.Team, p.From, p.To); err != nil {
 		return nil, err
 	}
+	firstReleases(d.Deploys, d.Meta.DataStart.ArgoCD)
+	classDeploys(d.Deploys, d.Apps)
 	if d.Runs, err = all[Run](ctx, tx, "runs", runsSQL, p.Team, p.From, p.To, d.GitOpsRepos); err != nil {
 		return nil, err
 	}
 	d.LeadTimes, d.Reviews = []LeadTime{}, []Review{}
 	if !p.FactsOnly {
-		if d.LeadTimes, err = all[LeadTime](ctx, tx, "lead_times", leadTimesSQL, p.Team, p.From, p.To); err != nil {
-			return nil, err
+		// Every change first deployed in the window, the shared read's order.
+		for _, c := range sh.changes {
+			if !c.FirstDeployedAt.Before(p.From) && c.FirstDeployedAt.Before(p.To) {
+				d.LeadTimes = append(d.LeadTimes, c.LeadTime)
+			}
 		}
 		if d.Reviews, err = all[Review](ctx, tx, "reviews", reviewsSQL, p.Team, p.From, p.To, d.GitOpsRepos); err != nil {
 			return nil, err
@@ -549,31 +823,40 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 	for i := range d.OpenPRs {
 		reviewedOpen(&d.OpenPRs[i], automated)
 	}
+	for i := range d.PRs {
+		markUmbrella(&d.PRs[i], automated)
+	}
 	markImplicitMerges(d.PRs)
-	markHousekeeping(d.PRs)
-	markUnknown(d.OpenPRs, silences)
-	firstReleases(d.Deploys, d.Meta.DataStart.ArgoCD)
-	if !p.FactsOnly {
-		if d.Meta.RepoStarts, err = repoStarts(ctx, tx, d, p.Team); err != nil {
-			return nil, err
-		}
-	}
-	var merges []string
-	for _, pr := range d.PRs {
-		if pr.MergeCommit != nil {
-			merges = append(merges, *pr.MergeCommit)
-		}
-	}
-	shipped := []shippedCommit{}
-	if len(merges) > 0 {
-		if shipped, err = all[shippedCommit](ctx, tx, "environments", environmentsSQL, p.Team, merges); err != nil {
-			return nil, err
-		}
-	}
-	attachEnvironments(d.PRs, shipped)
+	markHousekeeping(d.PRs, automated)
+	markTwice(d.PRs)
+	markUnknown(d.OpenPRs, sh.silences, p.To)
 	for i := range d.Runs {
 		d.Runs[i].Branch = Branch(d.Runs[i].PipelineName)
 		d.Runs[i].BranchKind = BranchKind(d.Runs[i].Branch)
+	}
+	markBotRuns(d, p.BotBranch)
+	if !p.FactsOnly {
+		d.Meta.RepoStarts = repoStarts(d, sh.repoStarts)
+	}
+	shipped := []change{}
+	if !p.CountsOnly {
+		merges := map[string]bool{}
+		for _, pr := range d.PRs {
+			if pr.MergeCommit != nil {
+				merges[*pr.MergeCommit] = true
+			}
+		}
+		for _, c := range sh.changes {
+			if merges[c.CommitSHA] {
+				shipped = append(shipped, c)
+			}
+		}
+	}
+	attachEnvironments(d.PRs, shipped)
+	// The facts too: their column to production must not say "no" for a
+	// library's PR.
+	if !p.CountsOnly && sh.libraries != nil {
+		markLibraries(d, sh.libraries)
 	}
 	d.Products = products(d)
 	d.utc()
@@ -614,17 +897,22 @@ func runRepos(d *Dataset) {
 // otherwise be in no product. The slug must name exactly one repository the
 // team is known for, by its Bitbucket events over all history or by another
 // run; two projects with a repo of that name, or none, leave the run
-// without. A folder before the slug (`<folder>/<repo>/<branch>`) never
-// matches: its first segment is the folder.
+// without. Only a name of exactly two segments: Jenkins encodes a '/'
+// inside the branch, so `<folder>/<repo>/<branch>` is a folder's job, and
+// a folder named like a repo is no repo.
 func pipelineRepos(ctx context.Context, tx pgx.Tx, d *Dataset, team string) error {
 	slugOf := func(repo string) string {
 		_, slug, _ := strings.Cut(repo, "/")
 		return strings.ToLower(slug)
 	}
+	headOf := func(r Run) (string, bool) {
+		head, branch, ok := strings.Cut(r.PipelineName, "/")
+		return strings.ToLower(head), ok && head != "" && branch != "" && !strings.Contains(branch, "/")
+	}
 	heads := map[string]bool{}
 	for _, r := range d.Runs {
-		if head, _, ok := strings.Cut(r.PipelineName, "/"); ok && r.Repo == nil && head != "" {
-			heads[strings.ToLower(head)] = true
+		if head, ok := headOf(r); ok && r.Repo == nil {
+			heads[head] = true
 		}
 	}
 	if len(heads) == 0 {
@@ -649,11 +937,11 @@ func pipelineRepos(ctx context.Context, tx pgx.Tx, d *Dataset, team string) erro
 	}
 	for i := range d.Runs {
 		r := &d.Runs[i]
-		head, _, ok := strings.Cut(r.PipelineName, "/")
-		if !ok || r.Repo != nil || len(bySlug[strings.ToLower(head)]) != 1 {
+		head, ok := headOf(*r)
+		if !ok || r.Repo != nil || len(bySlug[head]) != 1 {
 			continue
 		}
-		for repo := range bySlug[strings.ToLower(head)] {
+		for repo := range bySlug[head] {
 			project, _, _ := strings.Cut(repo, "/")
 			r.Repo, r.Project = ptr(repo), ptr(project)
 			r.GitOps = slices.Contains(d.GitOpsRepos, repo)
@@ -664,41 +952,47 @@ func pipelineRepos(ctx context.Context, tx pgx.Tx, d *Dataset, team string) erro
 
 func ptr[T any](v T) *T { return &v }
 
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 // silenceRow is a row of sql/silences.sql.
 type silenceRow struct {
 	Source     string    `db:"source"`
 	From       time.Time `db:"from_at"`
 	To         time.Time `db:"to_at"`
 	UnseenRuns int64     `db:"unseen_runs"`
+	Ongoing    bool      `db:"ongoing"`
 }
 
-// loadSilences reads the silences over the window and SilenceLookback
-// before its end, whichever reaches further back: those with SilenceMin of
-// working time in all, oldest first.
-func loadSilences(ctx context.Context, tx pgx.Tx, p Params) ([]Silence, error) {
-	from := p.From
-	if back := p.To.Add(-SilenceLookback); back.Before(from) {
-		from = back
-	}
-	rows, err := all[silenceRow](ctx, tx, "silences", silencesSQL, p.Team, from, p.To)
+// loadSilences reads the team's silences from from to now: those with
+// SilenceMin of working time in all, oldest first, the one still running at
+// now (Ongoing) included.
+func loadSilences(ctx context.Context, tx pgx.Tx, team string, from, now time.Time) ([]Silence, error) {
+	rows, err := all[silenceRow](ctx, tx, "silences", silencesSQL, team, from, now)
 	if err != nil {
 		return nil, err
 	}
 	out := []Silence{}
 	for _, r := range rows {
 		if workingTime(r.From, r.To) >= SilenceMin {
-			out = append(out, Silence{Source: r.Source, From: r.From, To: r.To, UnseenRuns: int(r.UnseenRuns)})
+			out = append(out, Silence{Source: r.Source, From: r.From.UTC(), To: r.To.UTC(), UnseenRuns: int(r.UnseenRuns),
+				Lost: r.Source == SourceBitbucket && r.UnseenRuns > 0, Ongoing: r.Ongoing})
 		}
 	}
 	return out, nil
 }
 
-// inWindow are the silences with SilenceMin of working time inside [from,
-// to): one reaching back before the window counts by its part in it.
+// inWindow are the silences that overlap [from, to): one of SilenceMin in
+// all is a hole wherever it lies, also with 36 working hours on each side
+// of a window's edge, or at its end closing on the Tuesday after.
 func inWindow(silences []Silence, from, to time.Time) []Silence {
 	out := []Silence{}
 	for _, s := range silences {
-		if workingTime(later(s.From, from), earlier(s.To, to)) >= SilenceMin {
+		if s.From.Before(to) && s.To.After(from) {
 			out = append(out, s)
 		}
 	}
@@ -735,38 +1029,260 @@ func earlier(a, b time.Time) time.Time {
 	return b
 }
 
-// markUnknown flags the open PRs whose latest event came before a Bitbucket
-// silence with unseen runs, and none since: their close may be what was
-// lost. silences are loadSilences', the look-back included. A PR riptide
-// heard of only after the instant has the instant as its last event, so
-// never.
-func markUnknown(open []OpenPR, silences []Silence) {
+// markUnknown flags the open PRs, at the window's end to, whose latest
+// event came before a lost Bitbucket silence (Silence.Lost) starting before
+// to and ending within SilenceLookback of it, and none since: their close
+// may be what was lost. silences are loadSilences'. A PR riptide heard of
+// only after the instant has the instant as its last event, so never.
+func markUnknown(open []OpenPR, silences []Silence, to time.Time) {
 	for i := range open {
 		o := &open[i]
 		o.Unknown = slices.ContainsFunc(silences, func(s Silence) bool {
-			return s.Source == SourceBitbucket && s.UnseenRuns > 0 && !o.LastEventAt.After(s.From)
+			return s.Lost && s.From.Before(to) && s.To.After(to.Add(-SilenceLookback)) && !o.LastEventAt.After(s.From)
 		})
 	}
 }
 
-// firstReleases counts an App's first deploy as a release once Argo CD has
-// reported for the team longer than FirstDeployGrace (argoStart, all
-// history): the Kind stays first_seen, the row says it is still the App's
-// first known deploy.
+// firstRelease reports whether an App's first deploy at at counts as a
+// release: Argo CD had reported for the team longer than FirstDeployGrace
+// (argoStart, all history).
+func firstRelease(at time.Time, argoStart *time.Time) bool {
+	return argoStart != nil && at.Sub(*argoStart) > FirstDeployGrace
+}
+
+// firstReleases counts an App's first deploy as a release (firstRelease):
+// the Kind stays first_seen, the row says it is still the App's first
+// known deploy.
 func firstReleases(deploys []Deploy, argoStart *time.Time) {
 	for i := range deploys {
 		d := &deploys[i]
-		d.FirstRelease = d.Kind != nil && *d.Kind == "first_seen" && argoStart != nil &&
-			d.At.Sub(*argoStart) > FirstDeployGrace
+		d.FirstRelease = d.Kind != nil && *d.Kind == "first_seen" && firstRelease(d.At, argoStart)
+	}
+}
+
+// appRow is a row of sql/apps.sql.
+type appRow struct {
+	App     string     `db:"app"`
+	Project *string    `db:"project"`
+	LastAt  time.Time  `db:"last_at"`
+	FirstAt *time.Time `db:"first_at"`
+}
+
+// liveSince is how far back the silences must reach to tell whether
+// Bitbucket's events were lost when an App without a product went live as a
+// release (lostBefore): LostCommitReach before the earliest such day. Nil
+// without one.
+func liveSince(apps []appRow, argoStart *time.Time) *time.Time {
+	var out *time.Time
+	for _, a := range apps {
+		if a.Project != nil || a.FirstAt == nil || !firstRelease(*a.FirstAt, argoStart) {
+			continue
+		}
+		if day := a.FirstAt.UTC().Truncate(24 * time.Hour).Add(-LostCommitReach); out == nil || day.Before(*out) {
+			out = &day
+		}
+	}
+	return out
+}
+
+// classify decides each App's product and whether it is infrastructure.
+// An App none of whose deploys names a product is infrastructure only when
+// the team has deploys with one (else its GitOps repo sends Bitbucket
+// nothing, and every App would drop out), Bitbucket reported before one of
+// its deploys, and it did not go live as a release while Bitbucket's events
+// were lost or soon after (lostBefore): a new App's GitOps commit in a hole
+// is a release without a product, not infrastructure.
+func classify(apps []appRow, starts SourceTimes, silences []Silence) []App {
+	product := slices.ContainsFunc(apps, func(a appRow) bool { return a.Project != nil })
+	out := make([]App, 0, len(apps))
+	for _, a := range apps {
+		infra := product && a.Project == nil && starts.Bitbucket != nil && a.LastAt.After(*starts.Bitbucket) &&
+			(a.FirstAt == nil || !firstRelease(*a.FirstAt, starts.ArgoCD) || !lostBefore(*a.FirstAt, silences))
+		out = append(out, App{Name: a.App, Project: a.Project, Infra: infra})
+	}
+	return out
+}
+
+// lostBefore reports whether a lost silence began before at's day ended and
+// ended within LostCommitReach before at's day began, in UTC as the
+// silences' working time: the commit deployed at at may lie in it, though
+// Argo CD synced it days after the hole closed.
+func lostBefore(at time.Time, silences []Silence) bool {
+	day := at.UTC().Truncate(24 * time.Hour)
+	return slices.ContainsFunc(silences, func(s Silence) bool {
+		return s.Lost && s.From.Before(day.Add(24*time.Hour)) && s.To.After(day.Add(-LostCommitReach))
+	})
+}
+
+// classDeploys gives each deploy its App's class: infrastructure or not,
+// and the App's product where the deploy's revision names none. An App
+// apps does not know keeps what the deploy has.
+func classDeploys(deploys []Deploy, apps []App) {
+	by := map[string]App{}
+	for _, a := range apps {
+		by[a.Name] = a
+	}
+	for i := range deploys {
+		d := &deploys[i]
+		a, ok := by[d.App]
+		if !ok {
+			continue
+		}
+		d.Infra = a.Infra
+		if d.Project == nil && a.Project != nil {
+			d.Project = ptr(*a.Project)
+		}
+	}
+}
+
+// Classified is d with its deploys classed by apps, another dataset's Apps:
+// a page classes its period and the previous one by the period's end, so
+// the comparison never moves for an App classed apart. A copy; d is
+// unchanged. Nil apps keep d's own.
+func (d *Dataset) Classified(apps []App) *Dataset {
+	if apps == nil {
+		return d
+	}
+	cp := *d
+	cp.Deploys = slices.Clone(d.Deploys)
+	classDeploys(cp.Deploys, apps)
+	cp.Apps = apps
+	cp.Products = products(&cp)
+	return &cp
+}
+
+// markBotRuns flags the runs of a bot's branch (botBranch, the config's
+// prefixes) and the PR-<n> builds of the dataset's bot PRs: a Jenkins PR
+// build names its PR, not the bot's branch.
+func markBotRuns(d *Dataset, botBranch func(string) bool) {
+	key := func(repo string, id int64) string { return repo + "\x00pr-" + strconv.FormatInt(id, 10) }
+	botPRs := map[string]bool{}
+	for _, pr := range d.PRs {
+		if pr.Bot {
+			botPRs[key(pr.Repo, pr.PRID)] = true
+		}
+	}
+	for _, pr := range d.OpenPRs {
+		if pr.Bot {
+			botPRs[key(pr.Repo, pr.PRID)] = true
+		}
+	}
+	for i := range d.Runs {
+		r := &d.Runs[i]
+		branch := strings.ToLower(r.Branch)
+		r.Bot = (botBranch != nil && branch != "" && botBranch(branch)) ||
+			(r.Repo != nil && botPRs[*r.Repo+"\x00"+branch])
+	}
+}
+
+// libraryEvidence is sql/libraries.sql's row: what tells a library repo, one
+// never rolled out, from a deployable one not traced (yet).
+type libraryEvidence struct {
+	Images    []string `db:"images"`
+	Traced    []string `db:"traced"`
+	Publishes []string `db:"publishes"`
+	RolledOut bool     `db:"rolled_out"`
+	// segments are every path segment of Images, the last one without its
+	// tag or digest, lowercased.
+	segments map[string]bool
+}
+
+func loadLibraries(ctx context.Context, tx pgx.Tx, team string) (*libraryEvidence, error) {
+	e, err := one[libraryEvidence](ctx, tx, "libraries", librariesSQL, team)
+	if err != nil {
+		return nil, err
+	}
+	e.segments = map[string]bool{}
+	for _, ref := range e.Images {
+		for _, s := range imageSegments(ref) {
+			e.segments[s] = true
+		}
+	}
+	return &e, nil
+}
+
+// imageSegments are an image reference's path segments, lowercased, the
+// last one without its digest and tag: "reg:5000/team/kasse-api:1.2" is
+// reg:5000, team, kasse-api. A registry's port is no tag.
+func imageSegments(ref string) []string {
+	ref = strings.ToLower(ref)
+	segs := strings.Split(ref, "/")
+	last := segs[len(segs)-1]
+	last, _, _ = strings.Cut(last, "@")
+	last, _, _ = strings.Cut(last, ":")
+	segs[len(segs)-1] = last
+	return segs
+}
+
+// library reports whether repo is a library, on positive evidence only: the
+// team's tracing works at all (a compare link traced some repo, a run's
+// image was deployed), and of repo none of it does: no deployed GitOps
+// release commit names it in a compare link, no run of it built an image
+// (deployed or not yet), and no image Argo CD deployed for the team is
+// named after it (a path segment equal to its slug: a deployable repo's
+// image is, even when its CI does not report). A deployable repo whose CI
+// does not report, whose image is named otherwise and whose release commits
+// name no compare link reads as a library: docs/metrics.md.
+func (e *libraryEvidence) library(repo string) bool {
+	if !e.RolledOut || len(e.Traced) == 0 {
+		return false
+	}
+	_, slug, _ := strings.Cut(repo, "/")
+	slug = strings.ToLower(slug)
+	return slug != "" && !slices.Contains(e.Traced, slug) && !slices.Contains(e.Publishes, repo) && !e.segments[slug]
+}
+
+// markLibraries flags the merged PRs of library repos (libraryEvidence). A
+// repo one of whose PRs in the window reached any stage is none, whatever
+// the evidence: its merge commit was rolled out. After attachEnvironments.
+func markLibraries(d *Dataset, e *libraryEvidence) {
+	traced := map[string]bool{}
+	for _, pr := range d.PRs {
+		if len(pr.Environments) > 0 {
+			traced[pr.Repo] = true
+		}
+	}
+	for i := range d.PRs {
+		pr := &d.PRs[i]
+		pr.Library = pr.State == "merged" && !pr.GitOps && !traced[pr.Repo] && e.library(pr.Repo)
+	}
+}
+
+// markUmbrella makes a PR an umbrella when a person opened one of the other
+// merged PRs into its source branch, by the same automation detection as
+// every PR's opener (automated).
+func markUmbrella(pr *PR, automated func(login, displayName string) bool) {
+	pr.Umbrella = slices.ContainsFunc(pr.UmbrellaOpeners, func(o opening) bool {
+		return !o.Bot && !automated(o.Author, o.DisplayName)
+	})
+}
+
+// markTwice flags a PR merged implicitly whose source branch another merged
+// PR of the repo came from, one counted as work: a branch merged into an
+// umbrella by its own PR, and marked merged into master too when the
+// umbrella went in, is one piece of work. After markImplicitMerges.
+func markTwice(prs []PR) {
+	counted := map[string]bool{}
+	key := func(pr PR) string { return pr.Repo + "\x00" + strings.ToLower(pr.SourceRef) }
+	for _, pr := range prs {
+		if pr.State == "merged" && !pr.ImplicitMerge && !pr.Umbrella && !pr.Housekeeping && !pr.Bot && !pr.GitOps &&
+			pr.SourceRef != "" {
+			counted[key(pr)] = true
+		}
+	}
+	for i := range prs {
+		pr := &prs[i]
+		pr.Twice = pr.ImplicitMerge && !pr.Umbrella && pr.SourceRef != "" && counted[key(*pr)]
 	}
 }
 
 // markImplicitMerges flags the PRs Bitbucket marked merged when another
 // branch brought their commits in: in one repo, merged within
 // ImplicitMergeWindow of each other (chained), at most one of them with a
-// merge commit. The one with it, else the highest PR number, stays the
-// merge. Two PRs merged in one second each with a merge commit are two
-// merges. Stage promotions aside, as everywhere.
+// merge commit; those without one. The one with it merged them: an
+// umbrella, when one of them is a person's (a bot's PR never makes a
+// person's uncounted). Two PRs merged in one second each with a merge
+// commit are two merges. Stage promotions aside, as everywhere.
 func markImplicitMerges(prs []PR) {
 	byRepo := map[string][]int{}
 	for i, pr := range prs {
@@ -795,54 +1311,51 @@ func markImplicitMerges(prs []PR) {
 			if len(group) < 2 || commits > 1 {
 				continue
 			}
-			if keep < 0 {
-				keep = slices.MaxFunc(group, func(x, y int) int { return cmp.Compare(prs[x].PRID, prs[y].PRID) })
-			}
 			for _, i := range group {
 				prs[i].ImplicitMerge = i != keep
+			}
+			if keep >= 0 && !prs[keep].Bot && slices.ContainsFunc(group, func(i int) bool { return i != keep && !prs[i].Bot }) {
+				prs[keep].Umbrella = true
 			}
 		}
 	}
 }
 
-// markHousekeeping flags the housekeeping PRs: a person's, merged within
-// HousekeepingMaxCycle of its opening without an approval, while some
-// HousekeepingWindow around its merge holds the same title merged by
-// people in HousekeepingMinRepos repos. The title compares trimmed, case
-// and inner spaces aside. A PR opened before ingestion has no cycle time:
-// never one.
-func markHousekeeping(prs []PR) {
-	byTitle := map[string][]int{}
-	for i, pr := range prs {
-		if pr.State != "merged" || pr.MergedAt == nil || pr.Bot || pr.GitOps || pr.Title == nil {
+// markHousekeeping flags the housekeeping PRs: a person's, merged, without
+// a person's approval (ApprovedAt counts no bot, service or declared
+// non-human account) and without a ticket key in its title or source
+// branch, while some HousekeepingWindow holds its title as opened, opened
+// by people in HousekeepingMinRepos repos (PR.Siblings: the team's openings
+// of all history, so a batch across a window's edge is one in both
+// windows). The title compares trimmed, case and inner spaces aside. A PR
+// opened before ingestion has no opening: never one.
+func markHousekeeping(prs []PR, automated func(login, displayName string) bool) {
+	for i := range prs {
+		pr := &prs[i]
+		if pr.Bot || pr.GitOps || pr.State != "merged" || pr.OpenedAt == nil || pr.OpenedTitle == nil ||
+			pr.ApprovedAt != nil || len(parse.JiraKeys(*pr.OpenedTitle, deref(pr.Title), pr.SourceRef)) > 0 {
 			continue
 		}
-		if t := strings.Join(strings.Fields(strings.ToLower(*pr.Title)), " "); t != "" {
-			byTitle[t] = append(byTitle[t], i)
-		}
-	}
-	for _, idx := range byTitle {
-		for _, i := range idx {
-			pr := &prs[i]
-			if pr.ApprovedAt != nil || pr.OpenedAt == nil || pr.MergedAt.Sub(*pr.OpenedAt) >= HousekeepingMaxCycle {
-				continue
+		var people []opening
+		for _, o := range pr.Siblings {
+			if !o.Bot && !automated(o.Author, o.DisplayName) {
+				people = append(people, o)
 			}
-			// A window starting at one of the title's merges and holding
-			// this one.
-			pr.Housekeeping = slices.ContainsFunc(idx, func(j int) bool {
-				start := *prs[j].MergedAt
-				if pr.MergedAt.Before(start) || pr.MergedAt.Sub(start) > HousekeepingWindow {
-					return false
-				}
-				repos := map[string]bool{}
-				for _, k := range idx {
-					if m := *prs[k].MergedAt; !m.Before(start) && m.Sub(start) <= HousekeepingWindow {
-						repos[prs[k].Repo] = true
-					}
-				}
-				return len(repos) >= HousekeepingMinRepos
-			})
 		}
+		// A window starting at one of the title's openings and holding this
+		// one's.
+		pr.Housekeeping = slices.ContainsFunc(people, func(s opening) bool {
+			if pr.OpenedAt.Before(s.At) || pr.OpenedAt.Sub(s.At) > HousekeepingWindow {
+				return false
+			}
+			repos := map[string]bool{}
+			for _, o := range people {
+				if !o.At.Before(s.At) && o.At.Sub(s.At) <= HousekeepingWindow {
+					repos[o.Repo] = true
+				}
+			}
+			return len(repos) >= HousekeepingMinRepos
+		})
 	}
 }
 
@@ -853,16 +1366,8 @@ type repoStartRow struct {
 }
 
 // repoStarts is noergler's first event for each repository the window's PRs
-// name, open ones included, by repository.
-func repoStarts(ctx context.Context, tx pgx.Tx, d *Dataset, team string) ([]RepoStart, error) {
-	rows, err := all[repoStartRow](ctx, tx, "repo_starts", repoStartsSQL, team)
-	if err != nil {
-		return nil, err
-	}
-	first := map[string]time.Time{}
-	for _, r := range rows {
-		first[r.Repo] = r.Noergler
-	}
+// name, open ones included, by repository; first is the shared read's.
+func repoStarts(d *Dataset, first map[string]time.Time) []RepoStart {
 	repos := map[string]bool{}
 	for _, pr := range d.PRs {
 		repos[pr.Repo] = true
@@ -878,7 +1383,7 @@ func repoStarts(ctx context.Context, tx pgx.Tx, d *Dataset, team string) ([]Repo
 		}
 		out = append(out, s)
 	}
-	return out, nil
+	return out
 }
 
 // exclude drops the rows of excluded projects before anything is derived
@@ -977,13 +1482,6 @@ func all[T any](ctx context.Context, tx pgx.Tx, name, sql string, args ...any) (
 	return out, nil
 }
 
-// shippedCommit is a row of sql/environments.sql.
-type shippedCommit struct {
-	CommitSHA       string    `db:"commit_sha"`
-	Environment     string    `db:"environment"`
-	FirstDeployedAt time.Time `db:"first_deployed_at"`
-}
-
 // reviewed sets a PR's bot flag and review times from what prs.sql read:
 // the opener and the reviewer touches go through the same automation
 // detection as commit authors, so a bot added to the config counts as one
@@ -1030,9 +1528,9 @@ func reviewedOpen(pr *OpenPR, automated func(login, displayName string) bool) {
 
 // attachEnvironments gives every PR its merge commit's first deploy per
 // environment. docs/metrics.md's breakdown query looks each one up in
-// lead_time_changes; here the view is read once for all of them. Both SHAs
-// arrive lowercased from SQL.
-func attachEnvironments(prs []PR, shipped []shippedCommit) {
+// lead_time_changes; here the view is read once per page request for all
+// of them (sql/changes.sql). Both SHAs arrive lowercased from SQL.
+func attachEnvironments(prs []PR, shipped []change) {
 	byCommit := map[string][]EnvironmentDeploy{}
 	for _, s := range shipped {
 		byCommit[s.CommitSHA] = append(byCommit[s.CommitSHA], EnvironmentDeploy{Environment: s.Environment, FirstDeployedAt: s.FirstDeployedAt})

@@ -791,6 +791,12 @@ export function Build({
           {t("build.unattributed", { count: b.unattributed })}
         </p>
       )}
+      {/* Bots' branches: in no number of this section, said once. */}
+      {b.bot_runs.runs > 0 && (
+        <p className="mt-2 mb-0 text-[13px] text-muted">
+          {t("build.botRuns", { count: b.bot_runs.runs })}
+        </p>
+      )}
       {stats.length === 0 ? (
         <Card className="mt-3">
           <p className="m-0 text-[13.5px] text-muted">{t("build.noRuns")}</p>

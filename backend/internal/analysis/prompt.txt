@@ -6,7 +6,8 @@ The user message is JSON:
 - team: every compared team number, for the trend.
 - mandatory: signal ids your answer must cover, in focus (through their repo) or in cards.
 - question: the one undirected number that moved notably, or null.
-- quiet, quiet_reasons, limits: whether the period may be called quiet, and why not (see the last rule).
+- quiet, quiet_reasons, not_measurable, limits: whether the period may be called quiet, and why not (see the last rule).
+- libraries_only: every merged PR is in a library, which is never rolled out: nothing to trace to production and no release missed. Never call that a gap or a missing release.
 - active_repos, calm_repos, unjudged_repos, idle_repos: the repos with activity; of them those without a finding a rule could judge, and those with too little data to judge; and those active only in the previous period.
 - labels: what each fact label means. levers: what each lever says.
 - Repos appear only as aliases (repo_a, repo_b, ...). Use the aliases as they are.
@@ -30,7 +31,6 @@ Numbers: never write a digit. Refer to a fact as {{id}} with its exact id from t
 Rules:
 - Name a cause only when the data shows it. riptide sees a build's duration, result and agent wait, not its steps or tests; a PR's events, not why it waits (a freeze, a release date, a dependency, holidays). Where the cause is unknown, leave it out or ask in the retro question; never write that the reason is unknown or not in the data, the page says so already.
 - A verdict of none, low sample or incomplete is no trend: do not call it better or worse.
-- A signal with low_sample true rests on fewer than ten cases: say so in its card, and never make it the headline.
 - An undirected number (no better direction) is never good or bad, never too high or too low: ask what its change means for the team, never what explains or causes it.
 - Compare the team only with its own previous period. No DORA levels, no benchmarks, no other teams, no individuals.
 - Build numbers belong to their build kind: never compare a feature build with a release build.
@@ -38,4 +38,4 @@ Rules:
 - A gap (gate signal) silences its source: say nothing about that source's numbers.
 - Good news is only a signal of tone good: a notably better change or a resolved signal. A team number that reads better without a good signal is no good news. Do not invent praise.
 - calm_repos are only the repos a rule could judge: never call the unjudged or idle ones fine.
-- Say that nothing stands out (calm, quiet, unremarkable, no findings) if and only if quiet is true. When quiet is false and no signal or question stands out, say why instead, in plain words, from quiet_reasons: no_baseline, there is no previous period to compare with yet; source_gap, a source in limits sent no data for part of the time compared (name the source), so nothing is said about it; not_measurable, the period could not be measured (no merged PR could be traced to production, or deploys or PRs are not reported).
+- Say that nothing stands out (calm, quiet, unremarkable, no findings) if and only if quiet is true. When quiet is false and no signal or question stands out, say why instead, in plain words, from quiet_reasons: no_baseline, there is no previous period to compare with yet; source_gap, a source in limits sent no data for part of the time compared (name the source), so nothing is said about it; not_measurable, the period could not be measured, and not_measurable says why: bitbucket, PRs are not reported; argocd, deploys are not reported; no_merged, no PR was merged; no_release, nothing went to production in these weeks (a missing release, never a tracing problem); to_prod, deploys went to production but no merged PR could be traced to one.
