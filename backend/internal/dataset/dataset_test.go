@@ -129,6 +129,20 @@ func TestDataset(t *testing.T) {
 		for _, p := range d.PRs {
 			byKey[p.Repo+"#"+strconv.FormatInt(p.PRID, 10)] = p
 		}
+		// The size is the merge rollup's: PR #7 has one, PR #5 was merged
+		// without a review.
+		num := func(v *int64) int64 {
+			if v == nil {
+				return -1
+			}
+			return *v
+		}
+		if p := byKey[kasseAPI+"#7"]; num(p.LinesAdded) != 10 || num(p.LinesRemoved) != 2 || num(p.FilesChanged) != 3 {
+			t.Errorf("PR 7 size = %d/%d/%d", num(p.LinesAdded), num(p.LinesRemoved), num(p.FilesChanged))
+		}
+		if p := byKey[kasseAPI+"#5"]; p.LinesAdded != nil || p.FilesChanged != nil {
+			t.Errorf("PR 5 size = %d, want none", num(p.LinesAdded))
+		}
 		// In the window: opened or merged in it, this team's only.
 		keys := slices.Sorted(maps.Keys(byKey))
 		if strings.Join(keys, " ") != "kasse/kasse-api#11 kasse/kasse-api#5 kasse/kasse-api#7 kasse/kasse-api#9 kasse/kasse-gitops#3 portal/portal-web#2" {

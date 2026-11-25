@@ -8,6 +8,7 @@ import { Assessment } from "./Assessment";
 import { dur, durParts, fullDate, num, pct, stage } from "./format";
 import type { Tab } from "./state";
 import { Strip } from "./strip";
+import { BatchTile, MergedTile } from "./Throughput";
 import {
   Direction,
   SectionHead,
@@ -222,6 +223,12 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
         </div>
       </div>
       {open && <WhyPanel why={open} />}
+
+      <SubHead title={t("throughput.head")} text={t("throughput.scope")} />
+      <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3">
+        <MergedTile m={m} />
+        <BatchTile m={m} />
+      </div>
     </section>
   );
 }

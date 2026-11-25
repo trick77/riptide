@@ -329,6 +329,17 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       mix_total: { feature: 1, bugfix: 0, hotfix: 0, other: 0 },
       mix_share: { feature: 1, bugfix: 0, hotfix: 0, other: 0 },
     },
+    throughput: {
+      merged: 1,
+      merged_per_week: 0.8,
+      batch_size: spread(1, 140),
+      batch_files: spread(1, 6),
+      weeks: w.map((_, i) => ({
+        merged: i === w.length - 1 ? 1 : 0,
+        sized: i === w.length - 1 ? 1 : 0,
+        batch_p50: i === w.length - 1 ? 140 : null,
+      })),
+    },
     build: {
       data_from: ago(60),
       starts_inside: false,
@@ -509,6 +520,8 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       within_day: lowSample,
       first_touch: undirected(0.5),
       untracked: undirected(null, "low_sample"),
+      merged_per_week: change("better", 0.5, null, 0.4),
+      batch_size: change("worse", 80, null, -0.5),
       cost_per_kloc: undirected(null, "incomplete"),
       wasted_share: undirected(null, "low_sample"),
       open_prs: undirected(3),

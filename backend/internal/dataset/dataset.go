@@ -201,6 +201,11 @@ type PR struct {
 	// intg/prod fields: the stages are whatever namespaces the team deploys
 	// to, and only production_stage is configured.
 	Environments []EnvironmentDeploy `json:"environments" db:"-"`
+	// LinesAdded, LinesRemoved and FilesChanged are the merged PR's size as
+	// noergler's final rollup counts it; nil without one.
+	LinesAdded   *int64 `json:"lines_added" db:"lines_added"`
+	LinesRemoved *int64 `json:"lines_removed" db:"lines_removed"`
+	FilesChanged *int64 `json:"files_changed" db:"files_changed"`
 
 	// Read for the derivations above, never sent: no handles leave the API.
 	Touches           []touch `json:"-" db:"touches"`

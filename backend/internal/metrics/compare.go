@@ -127,15 +127,19 @@ type Comparison struct {
 	From time.Time `json:"from"`
 	To   time.Time `json:"to"`
 	// LastDay is the previous period's last day, as Period's.
-	LastDay       string       `json:"last_day"`
-	DeployFreq    Change       `json:"deploy_frequency"`
-	DeploySuccess Change       `json:"deploy_success"`
-	LeadTime      Change       `json:"lead_time"`
-	LeadTimePre   *Change      `json:"lead_time_pre"`
-	ReviewTime    Change       `json:"review_time"`
-	WithinDay     Change       `json:"within_day"`
-	FirstTouch    Change       `json:"first_touch"`
-	Untracked     Change       `json:"untracked"`
+	LastDay       string  `json:"last_day"`
+	DeployFreq    Change  `json:"deploy_frequency"`
+	DeploySuccess Change  `json:"deploy_success"`
+	LeadTime      Change  `json:"lead_time"`
+	LeadTimePre   *Change `json:"lead_time_pre"`
+	ReviewTime    Change  `json:"review_time"`
+	WithinDay     Change  `json:"within_day"`
+	FirstTouch    Change  `json:"first_touch"`
+	Untracked     Change  `json:"untracked"`
+	// MergedPerWeek and BatchSize are Throughput's two numbers: more PRs
+	// merged and smaller ones are better.
+	MergedPerWeek Change       `json:"merged_per_week"`
+	BatchSize     Change       `json:"batch_size"`
 	CostPerKloc   Change       `json:"cost_per_kloc"`
 	WastedShare   Change       `json:"wasted_share"`
 	Build         []KindChange `json:"build"`
@@ -194,8 +198,9 @@ const (
 	repoDurationMetric
 	repoFailureMetric
 	buildFlakyMetric
-	// The assessment's own team numbers: flow and the PR mix.
 	mergedPerWeekMetric
+	batchSizeMetric
+	// The assessment's own team numbers: flow and the PR mix.
 	wipWeeksMetric
 	waitShareMetric
 	featureShareMetric
@@ -219,6 +224,7 @@ func (id metricID) def() metric {
 		repoFailureMetric:   {down, points},
 		buildFlakyMetric:    {down, points},
 		mergedPerWeekMetric: {up, relative},
+		batchSizeMetric:     {down, relative},
 		wipWeeksMetric:      {down, relative},
 		waitShareMetric:     {down, points},
 		featureShareMetric:  {undirected, points},
@@ -387,6 +393,12 @@ func compare(cur, prev Metrics, period Period) Comparison {
 		side{pr.FirstTouchRate, pr.Approved >= lowSample}, bitbucket)
 	out.Untracked = untrackedMetric.judge(side{cr.UntrackedRate, cr.Merged >= lowSample},
 		side{pr.UntrackedRate, pr.Merged >= lowSample}, bitbucket)
+	ct, pt := cur.Throughput, prev.Throughput
+	out.MergedPerWeek = mergedPerWeekMetric.judge(side{ct.MergedPerWeek, ct.Merged >= lowSample},
+		side{pt.MergedPerWeek, pt.Merged >= lowSample}, bitbucket)
+	// The size is noergler's, the PRs Bitbucket's: both must cover it.
+	out.BatchSize = batchSizeMetric.judge(side{ct.BatchSize.P50, ct.BatchSize.N >= lowSample},
+		side{pt.BatchSize.P50, pt.BatchSize.N >= lowSample}, bitbucket || noergler)
 	// A count, no sample: both periods' ends count whatever is open.
 	co, po := cur.OpenPRs, prev.OpenPRs
 	out.OpenPRs = openPRsMetric.judge(side{ptr(float64(co.Open)), true}, side{ptr(float64(po.Open)), true},

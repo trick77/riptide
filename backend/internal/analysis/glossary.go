@@ -114,6 +114,7 @@ var labels = map[string]string{
 	"jammed_repos":    "repos with four or more PRs open a week or longer; fewer is better",
 	"build_success":   "share of a run kind's runs that succeeded; higher is better",
 	"merged_per_week": "human PRs merged per week, the team's throughput; more is better",
+	"batch_size":      "median changed lines (added plus removed) per merged human PR, the batch size; smaller is better",
 	"wip_weeks":       "open PRs over PRs merged per week: weeks of work standing open; fewer is better",
 	"wait_share":      "part of the lead time spent waiting (review, merge, deploys) rather than coding; lower is better; null when no PR reached production",
 	"stage_share":     "the stage's part of the lead time",

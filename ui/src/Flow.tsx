@@ -10,6 +10,7 @@ import { dateTime, dur, durParts, pct, stage } from "./format";
 import { OpenPRs } from "./OpenPRs";
 import { StageRidge } from "./ridgeline";
 import type { Tab } from "./state";
+import { ThroughputCard } from "./Throughput";
 import {
   Card,
   CardHead,
@@ -305,6 +306,7 @@ export function Flow({ m, why, onWhy, onFacts }: Props) {
           ["SPACE", "Efficiency & flow"],
         ]}
       />
+      <ThroughputCard m={m} />
       <Chain m={m} />
       <StageRidge
         chain={m.lead_chain}
