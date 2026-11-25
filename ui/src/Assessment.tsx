@@ -509,56 +509,68 @@ function SignalCard({ c }: { c: CardView }) {
   );
 }
 
-// A count of the tally, in its column's colour; the calm repos grey.
-function TallyChip({
+// A count of the tally as a big number, in its column's colour; the calm
+// repos grey.
+function TallyCount({
   col,
   n,
   children,
 }: {
   col?: Column;
-  n: string;
+  n: ReactNode;
   children: ReactNode;
 }) {
   const style = col ? COLUMN_STYLE[col] : null;
   return (
-    <li
-      className={`inline-flex items-baseline gap-[7px] rounded-full border py-[5px] pr-[13px] pl-[11px] text-[13px] text-muted ${
-        style ? style.line : "border-border"
-      }`}
-    >
-      <span
-        aria-hidden="true"
-        className={`size-2 self-center rounded-full ${style ? style.dot : "bg-faint"}`}
-      />
+    <li className="flex flex-col gap-1">
       <strong
-        className={`font-serif text-[17px] font-medium ${style ? style.ink : "text-ink"}`}
+        className={`font-serif text-[44px] leading-none font-normal tabular-nums ${style ? style.ink : "text-muted"}`}
       >
         {n}
       </strong>
-      {children}
-    </li>
-  );
-}
-
-// One side of the assessment: what runs (or, without evidence, what is
-// unremarkable) and what is stuck.
-function Side({ col, children }: { col?: Column; children: ReactNode }) {
-  const { t } = useTranslation();
-  const style = col ? COLUMN_STYLE[col] : null;
-  return (
-    <section className="flex min-w-0 flex-col gap-2.5">
-      <h4
-        className={`m-0 flex items-center gap-2 text-[11px] font-medium tracking-[.12em] uppercase ${
-          style ? style.ink : "text-muted"
-        }`}
-      >
+      <span className="flex items-center gap-[7px] text-[12.5px] text-muted">
         <span
           aria-hidden="true"
           className={`size-2 rounded-full ${style ? style.dot : "bg-faint"}`}
         />
-        {t(`overview.assess.col.${col ?? "calm"}`)}
+        {children}
+      </span>
+    </li>
+  );
+}
+
+// A group of findings: what is stuck, what runs. Groups share a row by
+// their card count, so one card never holds half the width beside three;
+// a group without a card is not drawn.
+function Group({
+  col,
+  n,
+  children,
+}: {
+  col: "good" | "bad";
+  n: number;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  const style = COLUMN_STYLE[col];
+  const share = Math.min(n, 4);
+  return (
+    <section
+      className="min-w-0"
+      style={{ flex: `${share} 1 ${share * 260}px` }}
+    >
+      <h4
+        className={`m-0 mb-2.5 flex items-center gap-2 text-[11px] font-medium tracking-[.12em] uppercase ${style.ink}`}
+      >
+        <span
+          aria-hidden="true"
+          className={`size-2 rounded-full ${style.dot}`}
+        />
+        {t(`overview.assess.col.${col}`)}
       </h4>
-      {children}
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(250px,100%),1fr))] gap-2.5">
+        {children}
+      </div>
     </section>
   );
 }
@@ -711,14 +723,10 @@ function Panel({
   };
 
   const tally = st.layout.tally;
-  // Each side in the backend's order: gains and resolutions as it ranked
+  // Each group in the backend's order: gains and resolutions as it ranked
   // them, the worries as worded.
   const left = w.cards.filter((c) => c.column !== "bad");
   const stuck = w.cards.filter((c) => c.column === "bad");
-  const calmOf = t("overview.assess.tally.calmOf", {
-    calm: num(a.calm),
-    active: num(a.active),
-  });
 
   const button =
     st.enabled &&
@@ -798,11 +806,65 @@ function Panel({
         </p>
       )}
 
-      {w.headline && (
-        <h3 className="mt-4 mb-1.5 max-w-[36ch] font-serif text-[clamp(22px,2.4vw,30px)] leading-[1.2] font-normal tracking-[-.01em] text-ink">
-          {w.headline}
-        </h3>
-      )}
+      {/* The headline and the tally side by side; without an analysis the
+          tally stands alone. */}
+      <div
+        className={`mt-4 grid items-end gap-x-12 gap-y-4 border-b border-border-soft pb-5 ${
+          w.headline ? "lg:grid-cols-[minmax(0,1.4fr)_auto]" : ""
+        }`}
+      >
+        {w.headline && (
+          <div className="min-w-0">
+            <h3 className="m-0 max-w-[24ch] font-serif text-[clamp(26px,3.2vw,42px)] leading-[1.12] font-normal tracking-[-.01em] text-balance text-ink">
+              {w.headline}
+            </h3>
+            {w.trend && (
+              <p className="mt-2.5 mb-0 max-w-[70ch] text-[15px] text-ink-dim">
+                {w.trend}
+              </p>
+            )}
+          </div>
+        )}
+        <ul
+          aria-label={t("overview.assess.tallyLabel")}
+          className="m-0 flex list-none flex-wrap gap-x-[34px] gap-y-3.5 p-0"
+        >
+          {/* A zero is no alarm: grey, like the calm repos. */}
+          <TallyCount
+            col={tally.bad > 0 ? "bad" : undefined}
+            n={num(tally.bad)}
+          >
+            {t("overview.assess.tally.bad")}
+          </TallyCount>
+          {tally.good > 0 && (
+            <TallyCount col="good" n={num(tally.good)}>
+              {t("overview.assess.tally.good")}
+            </TallyCount>
+          )}
+          {tally.done > 0 && (
+            <TallyCount col="done" n={num(tally.done)}>
+              {t("overview.assess.tally.done")}
+            </TallyCount>
+          )}
+          {a.calm > 0 && (
+            <TallyCount
+              n={
+                <>
+                  {num(a.calm)}
+                  <small className="text-[22px]">
+                    {" "}
+                    {t("overview.assess.tally.ofActive", {
+                      active: num(a.active),
+                    })}
+                  </small>
+                </>
+              }
+            >
+              {t("overview.assess.tally.calm", { count: a.active })}
+            </TallyCount>
+          )}
+        </ul>
+      </div>
       {gates.map((g) => (
         <p
           key={g.id}
@@ -816,94 +878,35 @@ function Panel({
           })}
         </p>
       ))}
-      {w.trend && (
-        <p className="mt-2 mb-0 max-w-[70ch] text-[15px] text-ink-dim">
-          {w.trend}
-        </p>
+
+      {tally.bad === 0 && (
+        <div className="mt-5">
+          <Quiet>{t("overview.assess.nothingStuck")}</Quiet>
+        </div>
       )}
-
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <ul
-          aria-label={t("overview.assess.tallyLabel")}
-          className="m-0 flex list-none flex-wrap gap-2 p-0"
-        >
-          {tally.good > 0 && (
-            <TallyChip col="good" n={num(tally.good)}>
-              {t("overview.assess.tally.good")}
-            </TallyChip>
+      {(tally.bad > 0 || left.length > 0) && (
+        <div className="mt-5 flex flex-wrap gap-x-[18px] gap-y-5">
+          {/* Stuck without a card of its own keeps its heading: the
+              sentence says where the findings are. */}
+          {tally.bad > 0 && (
+            <Group col="bad" n={Math.max(stuck.length, 1)}>
+              {stuck.map((c) => (
+                <SignalCard key={c.s.id} c={c} />
+              ))}
+              {stuck.length === 0 && (
+                <Quiet>{t("overview.assess.stuckBelow")}</Quiet>
+              )}
+            </Group>
           )}
-          {tally.done > 0 && (
-            <TallyChip col="done" n={num(tally.done)}>
-              {t("overview.assess.tally.done")}
-            </TallyChip>
+          {left.length > 0 && (
+            <Group col="good" n={left.length}>
+              {left.map((c) => (
+                <SignalCard key={c.s.id} c={c} />
+              ))}
+            </Group>
           )}
-          <TallyChip col="bad" n={num(tally.bad)}>
-            {t("overview.assess.tally.bad")}
-          </TallyChip>
-          {a.calm > 0 && (
-            <TallyChip n={calmOf}>
-              {t("overview.assess.tally.calm", { count: a.active })}
-            </TallyChip>
-          )}
-        </ul>
-        {/* Whose the counts and cards are: the team or one product. */}
-        <span className="text-[12px] text-faint">
-          {m.product
-            ? t("overview.assess.scopeProduct", { product: m.product })
-            : t("overview.assess.scopeAll")}
-        </span>
-      </div>
-
-      <div className="mt-4 grid gap-[18px] md:grid-cols-2">
-        {tally.good > 0 || tally.done > 0 ? (
-          <Side col="good">
-            {left.map((c) => (
-              <SignalCard key={c.s.id} c={c} />
-            ))}
-            {a.calm > 0 && (
-              <Quiet>
-                {t("overview.assess.calmLine", {
-                  count: a.active,
-                  calm: num(a.calm),
-                  active: num(a.active),
-                })}
-              </Quiet>
-            )}
-          </Side>
-        ) : (
-          <Side>
-            {a.calm > 0 && (
-              <article className="min-w-0 rounded-ui border border-l-[3px] border-border border-l-faint px-3.5 pt-3 pb-3">
-                <div className="flex flex-wrap items-baseline gap-2">
-                  <span className="font-serif text-[32px] leading-none text-ink tabular-nums">
-                    {calmOf}
-                  </span>
-                  <span className="text-[13px] text-muted">
-                    {t("overview.assess.calmLabel", { count: a.active })}
-                  </span>
-                </div>
-              </article>
-            )}
-            <Quiet>
-              {tally.baseline
-                ? t("overview.assess.noGain")
-                : t("overview.assess.noBaseline")}
-            </Quiet>
-          </Side>
-        )}
-        <Side col="bad">
-          {stuck.map((c) => (
-            <SignalCard key={c.s.id} c={c} />
-          ))}
-          {stuck.length === 0 && (
-            <Quiet>
-              {tally.bad > 0
-                ? t("overview.assess.stuckBelow")
-                : t("overview.assess.nothingStuck")}
-            </Quiet>
-          )}
-        </Side>
-      </div>
+        </div>
+      )}
 
       {w.focus.length > 0 && (
         <>
@@ -976,6 +979,32 @@ function Panel({
           ))}
         </div>
       )}
+      {/* What the findings leave out: the repos without one, why nothing
+          counts as a gain, and whose the counts and cards are. */}
+      <p className="mt-5 mb-0 flex flex-wrap items-center gap-x-[18px] gap-y-1 border-t border-border-soft pt-3 text-[13px] text-muted">
+        {a.calm > 0 && (
+          <span className="inline-flex items-center gap-2">
+            <span aria-hidden="true" className="size-2 rounded-full bg-faint" />
+            {t("overview.assess.calmLine", {
+              count: a.active,
+              calm: num(a.calm),
+              active: num(a.active),
+            })}
+          </span>
+        )}
+        {tally.good === 0 && tally.done === 0 && (
+          <span>
+            {tally.baseline
+              ? t("overview.assess.noGain")
+              : t("overview.assess.noBaseline")}
+          </span>
+        )}
+        <span className="ml-auto text-[12px] text-faint">
+          {m.product
+            ? t("overview.assess.scopeProduct", { product: m.product })
+            : t("overview.assess.scopeAll")}
+        </span>
+      </p>
     </div>
   );
 }
