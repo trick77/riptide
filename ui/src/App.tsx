@@ -296,16 +296,67 @@ export default function App() {
                 {t("page.runningView")}
               </button>
             </p>
+            {/* Per source since when and until when it reports; the
+                reviewer's start per repo on hover (it is set up repo by
+                repo). Then the silences in which events were lost: a
+                silence without that evidence is a team that did not push,
+                build or deploy for two days, no gap in the data, so not
+                named. */}
             <p className="mt-1 mb-0 text-[12.5px] text-faint">
               {t("page.dataAsOf")}{" "}
-              {SOURCES.map(([k, label]) => {
+              {SOURCES.map(([k, label], i) => {
+                const since = m.meta.data_start[k];
                 const at = m.meta.data_end[k];
-                return t("page.source", {
-                  source: label,
-                  at: at ? dateTime(at) : t("page.noData"),
-                });
-              }).join(" · ")}
+                const text =
+                  since && at
+                    ? t("page.source", {
+                        source: label,
+                        since: fullDate(new Date(since)),
+                        at: dateTime(at),
+                      })
+                    : t("page.sourceNone", { source: label });
+                const starts =
+                  k === "noergler" && m.meta.repo_starts.length
+                    ? m.meta.repo_starts
+                        .map((r) =>
+                          r.noergler
+                            ? t("page.repoStart", {
+                                repo: r.repo,
+                                date: fullDate(new Date(r.noergler)),
+                              })
+                            : t("page.repoNever", { repo: r.repo }),
+                        )
+                        .join("\n")
+                    : undefined;
+                return (
+                  <span key={k}>
+                    {i > 0 && " · "}
+                    <span
+                      title={starts}
+                      className={
+                        starts ? "underline decoration-dotted" : undefined
+                      }
+                    >
+                      {text}
+                    </span>
+                  </span>
+                );
+              })}
             </p>
+            {m.meta.silences
+              .filter((s) => s.unseen_runs > 0)
+              .map((s) => (
+                <p
+                  key={`${s.source}${s.from}`}
+                  className="mt-1 mb-0 text-[12.5px] text-ochre"
+                >
+                  {t("page.lost", {
+                    source: SOURCES.find(([k]) => k === s.source)?.[1],
+                    from: dateTime(s.from),
+                    to: dateTime(s.to),
+                  })}
+                </p>
+              ))}
           </>
         )}
 

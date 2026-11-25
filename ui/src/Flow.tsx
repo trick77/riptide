@@ -198,7 +198,13 @@ function Chain({ m }: { m: Metrics }) {
           {t("common.noMergedPRs")}
         </p>
       )}
-      <p className="mt-2.5 mb-0 text-xs text-muted">{t("flow.chainNote")}</p>
+      <p className="mt-2.5 mb-0 text-xs text-muted">
+        {t("flow.chainNote", {
+          prod,
+          traced: m.throughput.coverage.to_prod.count,
+          count: m.throughput.coverage.to_prod.n,
+        })}
+      </p>
     </Card>
   );
 }
@@ -266,7 +272,10 @@ export function Flow({ m, why, onWhy, onFacts }: Props) {
         t("common.withoutBots"),
         t("flow.cycle.filterMerged"),
       ],
-      coverage: t("flow.cycle.coverage"),
+      coverage: t("flow.cycle.coverage", {
+        seen: m.throughput.coverage.opened.count,
+        total: m.throughput.coverage.opened.n,
+      }),
       query: "docs/metrics.md · PR cycle time",
     },
     open: {

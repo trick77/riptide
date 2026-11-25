@@ -31,6 +31,8 @@ var prStateTerm = map[string]uiTerm{
 	"open":     {"Offen", "Open"},
 	"declined": {"Abgelehnt", "Declined"},
 	"deleted":  {"Gelöscht", "Deleted"},
+	// PRStateUnknown: a PR open at the end whose close may have been lost.
+	PRStateUnknown: {"Unbekannt", "Unknown"},
 }
 
 // prStateAlias is a state's word the UI showed before, still searched so a

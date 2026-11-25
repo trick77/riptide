@@ -22,11 +22,19 @@ import {
   type WaitingCounts,
 } from "./api";
 import { shareLow, Spark } from "./charts";
-import { stageNames } from "./Flow";
-import { clock, dayMonth, dur, money, num, pct, stage } from "./format";
+import {
+  clock,
+  dayMonth,
+  dur,
+  fullDate,
+  money,
+  num,
+  pct,
+  stage,
+} from "./format";
 import { SEP, WAIT_FILL, WAITS } from "./shared";
 import type { Tab } from "./state";
-import { Delta, Eyebrow, Pill } from "./ui";
+import { Delta, Eyebrow } from "./ui";
 
 const POLL_MS = 3000;
 // Small meta text: plain spaces around the middot are fine there.
@@ -143,14 +151,15 @@ function daysLabel(a: AssessmentData, zone?: string): string {
   return `${dayMonth(new Date(w[0].start), zone)}–${dayMonth(last, zone)}`;
 }
 
+// A number's words; a label the catalog does not know shows nothing, never
+// its key.
+function labelText(t: TFunction, label: string): string {
+  return t(`overview.assess.label.${label}`, { defaultValue: "" });
+}
+
 // The rule title of a signal, its words filled from the signal itself.
-function signalTitle(t: TFunction, s: Signal, m: Metrics): string {
-  const prod = stage(m.delivery.production_stage);
-  const label = s.facts[0]
-    ? t(`overview.assess.label.${s.facts[0].label}`, {
-        defaultValue: s.facts[0].label,
-      })
-    : "";
+function signalTitle(t: TFunction, s: Signal): string {
+  const label = s.facts[0] ? labelText(t, s.facts[0].label) : "";
   const vars = {
     repo: s.repo ?? "",
     kind: s.run_kind
@@ -160,24 +169,26 @@ function signalTitle(t: TFunction, s: Signal, m: Metrics): string {
       defaultValue: s.source,
     }),
     label,
-    stage: s.stage ? stageNames(t, m.lead_chain, prod)[s.stage][0] : "",
     what: "",
   };
   if (s.kind === "change")
     return t(`overview.assess.title.${changeKey(s)}`, vars);
   if (s.kind === "resolved") {
     const was = (s.metric ?? "").split(":")[0];
-    const kindWord = t(`overview.assess.kind.${was}`, { defaultValue: was });
-    vars.what = s.repo ? `${s.repo} (${kindWord})` : label || kindWord;
+    const kindWord = t(`overview.assess.kind.${was}`, { defaultValue: "" });
+    vars.what = s.repo
+      ? kindWord
+        ? `${s.repo} (${kindWord})`
+        : s.repo
+      : label || kindWord;
   }
-  return t(`overview.assess.title.${s.kind}`, vars);
+  return t(`overview.assess.title.${s.kind}`, { ...vars, defaultValue: "" });
 }
 
-// A change's words by the backend's tone and magnitude: a small gain is
-// never "notably" better.
-function changeKey(s: Signal): "changeBad" | "changeGood" | "changeGoodMinor" {
-  if (s.tone !== "good") return "changeBad";
-  return s.facts[0]?.magnitude === "minor" ? "changeGoodMinor" : "changeGood";
+// A change's words by the backend's tone: a gain is raised only when
+// notable, as a worsening.
+function changeKey(s: Signal): "changeBad" | "changeGood" {
+  return s.tone === "good" ? "changeGood" : "changeBad";
 }
 
 function ruleText(t: TFunction, s: Signal): string {
@@ -197,20 +208,6 @@ function Seen({ n }: { n: number }) {
     <span className="inline-block rounded-full border border-ochre/40 px-1.5 font-mono text-[10.5px] text-ochre">
       {t("overview.assess.seen", { count: n })}
     </span>
-  );
-}
-
-// LowSample says how few cases the signal rests on, where the backend
-// counted them: ochre, read with care.
-function LowSample({ s }: { s: Signal }) {
-  const { t } = useTranslation();
-  if (!s.low_sample) return null;
-  return (
-    <Pill tone="warn">
-      {s.sample != null
-        ? t("overview.assess.lowSample", { count: s.sample })
-        : t("common.lowSample")}
-    </Pill>
   );
 }
 
@@ -288,13 +285,15 @@ function CompareBars({ f }: { f: Fact }) {
   );
 }
 
+// The next step, where the backend gives one: none for a resolution, and
+// none the catalog does not know, never its key.
 function Lever({ k }: { k: string }) {
   const { t } = useTranslation();
-  if (!k) return null;
+  const text = k ? t(`overview.assess.lever.${k}`, { defaultValue: "" }) : "";
+  if (!text) return null;
   return (
     <div className="text-[13.5px] text-ink">
-      <span className="text-accent-strong">→</span>{" "}
-      {t(`overview.assess.lever.${k}`, { defaultValue: k })}
+      <span className="text-accent-strong">→</span> {text}
     </div>
   );
 }
@@ -366,9 +365,7 @@ function FocusBlock({
                 {fmtFact(t, x.unit, x.value)}
               </span>
               <span className="text-xs leading-snug text-muted">
-                {t(`overview.assess.label.${x.label}`, {
-                  defaultValue: x.label,
-                })}
+                {labelText(t, x.label)}
               </span>
               <Prev f={x} />
             </div>
@@ -457,7 +454,7 @@ function SignalCard({ c }: { c: CardView }) {
   const style = COLUMN_STYLE[c.column];
   // The column says "runs" or "stuck"; only a resolution, which shares the
   // left with the gains, names its own.
-  const tags = c.column === "done" || c.s.low_sample || c.s.seen > 0;
+  const tags = c.column === "done" || c.s.seen > 0;
   return (
     <article
       className={`min-w-0 rounded-ui border border-l-[3px] bg-linear-to-b ${style.wash} to-transparent to-75% px-3.5 pt-3 pb-3 ${style.border}`}
@@ -471,7 +468,6 @@ function SignalCard({ c }: { c: CardView }) {
               {t("overview.assess.col.done")}
             </span>
           )}
-          <LowSample s={c.s} />
           <Seen n={c.s.seen} />
         </div>
       )}
@@ -485,9 +481,7 @@ function SignalCard({ c }: { c: CardView }) {
               {fmtFact(t, f.unit, f.value)}
             </span>
             <span className="text-[13px] text-muted">
-              {t(`overview.assess.label.${f.label}`, {
-                defaultValue: f.label,
-              })}
+              {labelText(t, f.label)}
             </span>
             <Prev f={f} />
           </div>
@@ -509,34 +503,92 @@ function SignalCard({ c }: { c: CardView }) {
   );
 }
 
-// A count of the tally as a big number, in its column's colour; the calm
-// repos grey.
+// The question's colour in the tally, the retro pill's.
+const TALK_STYLE = { ink: "text-s3", dot: "bg-s3" };
+
+// A count of the tally as a big number, in its column's colour; the repos
+// grey.
 function TallyCount({
-  col,
+  look,
   n,
   children,
 }: {
-  col?: Column;
+  look?: { ink: string; dot: string };
   n: ReactNode;
   children: ReactNode;
 }) {
-  const style = col ? COLUMN_STYLE[col] : null;
   return (
     <li className="flex flex-col gap-1">
       <strong
-        className={`font-serif text-[44px] leading-none font-normal tabular-nums ${style ? style.ink : "text-muted"}`}
+        className={`font-serif text-[44px] leading-none font-normal tabular-nums ${look ? look.ink : "text-muted"}`}
       >
         {n}
       </strong>
       <span className="flex items-center gap-[7px] text-[12.5px] text-muted">
         <span
           aria-hidden="true"
-          className={`size-2 rounded-full ${style ? style.dot : "bg-faint"}`}
+          className={`size-2 rounded-full ${look ? look.dot : "bg-faint"}`}
         />
         {children}
       </span>
     </li>
   );
+}
+
+// What limits the assessment, one sentence each, in the backend's order of
+// the reasons: no previous period to compare with, the holes in the sources'
+// data with their dates (in the zone the weeks were cut in), and a period
+// that could not be measured. A finding is no limit: the cards show it.
+function limitLines(
+  t: TFunction,
+  a: AssessmentData,
+  m: Metrics,
+  zone?: string,
+): string[] {
+  const day = (iso: string) => fullDate(new Date(iso), zone);
+  const lines: string[] = [];
+  if (a.quiet_reasons.includes("no_baseline"))
+    lines.push(t("overview.assess.reason.no_baseline"));
+  for (const l of a.limits) {
+    const source = t(`overview.assess.source.${l.source}`, {
+      defaultValue: l.source,
+    });
+    // A silent_end's `to` is the period's end, Monday 00:00: the day after
+    // the period, so not named.
+    if (l.kind === "starts")
+      lines.push(
+        t("overview.assess.limit.starts", { source, date: day(l.from) }),
+      );
+    else if (l.kind === "silence")
+      lines.push(
+        t("overview.assess.limit.silence", {
+          source,
+          from: day(l.from),
+          to: day(l.to ?? l.from),
+        }),
+      );
+    else
+      lines.push(
+        t("overview.assess.limit.silent_end", { source, from: day(l.from) }),
+      );
+  }
+  if (a.quiet_reasons.includes("not_measurable")) {
+    const nm = "overview.assess.reason.notMeasurable";
+    const n = a.coverage.to_prod.n;
+    lines.push(
+      m.meta.data_start.bitbucket == null
+        ? t(`${nm}.bitbucket`)
+        : !m.delivery.frequency.argo_reporting
+          ? t(`${nm}.argocd`)
+          : n === 0
+            ? t(`${nm}.noMerged`)
+            : t(`${nm}.toProd`, {
+                count: n,
+                prod: stage(m.delivery.production_stage),
+              }),
+    );
+  }
+  return lines;
 }
 
 // A group of findings: what is stuck, what runs. Groups share a row by
@@ -599,7 +651,6 @@ function words(
   t: TFunction,
   a: AssessmentData,
   layout: AnalysisStatus["layout"],
-  m: Metrics,
   text: AnalysisText | null,
 ): Words {
   const facts = factIndex(a);
@@ -609,10 +660,12 @@ function words(
     const s = byId.get(r.signals[0]);
     return s ? t(`overview.assess.kind.${s.kind}`) : "";
   };
+  // The rules' question, only where the backend raised one: a number that
+  // moved notably. No question without it, whatever a model wrote.
   const question = a.question
-    ? `${fmtFact(t, a.question.facts[0]?.unit ?? "count", a.question.facts[0]?.value ?? null)} ${t(
-        `overview.assess.label.${a.question.facts[0]?.label ?? ""}`,
-        { defaultValue: "" },
+    ? `${fmtFact(t, a.question.facts[0]?.unit ?? "count", a.question.facts[0]?.value ?? null)} ${labelText(
+        t,
+        a.question.facts[0]?.label ?? "",
       )}: ${t(`overview.assess.questionFixed.${a.question.metric ?? ""}`, {
         defaultValue: "",
       })}`
@@ -635,7 +688,7 @@ function words(
         seen: r.seen,
         take: ft
           ? fill(t, ft.take, facts)
-          : sigs.map((s) => signalTitle(t, s, m)).join("; "),
+          : sigs.map((s) => signalTitle(t, s)).join("; "),
         retro: ft?.retro ? fill(t, ft.retro, facts) : null,
         lever: lf.lever,
       },
@@ -649,7 +702,7 @@ function words(
       {
         s,
         column: lc.column,
-        title: signalTitle(t, s, m),
+        title: signalTitle(t, s),
         take: ct ? fill(t, ct.take, facts) : ruleText(t, s),
         retro: ct?.retro ? fill(t, ct.retro, facts) : null,
         lever: lc.lever,
@@ -661,7 +714,8 @@ function words(
     trend: text?.trend ? fill(t, text.trend, facts) : null,
     focus,
     cards,
-    question: text?.question ? fill(t, text.question, facts) : question,
+    question:
+      a.question && text?.question ? fill(t, text.question, facts) : question,
   };
 }
 
@@ -688,12 +742,17 @@ function Panel({
   const shown = st.analysis;
   const lang = i18n.language === "en" ? "en" : "de";
   const text = shown ? shown.text[lang] : null;
-  const w = words(t, a, st.layout, m, text);
+  const w = words(t, a, st.layout, text);
   const weeks = weeksLabel(t, a);
   // The backend sends cooldown_until only while the view cools down.
   const cooling = st.cooldown_until != null;
 
-  const gates = a.signals.filter((s) => s.tone === "gate");
+  // The gates are among the limits (silent at the period's end), with their
+  // dates: said once, there.
+  const limits = limitLines(t, a, m, st.zone || undefined);
+  // Only a period the backend could measure and compare may be called
+  // calm in any word: nothing stuck, no gain, nothing standing out.
+  const limited = a.quiet_reasons.some((r) => r !== "findings");
   const byId = new Map(a.signals.map((s) => [s.id, s]));
   const also = st.layout.also.flatMap((lc) => {
     const s = byId.get(lc.signal);
@@ -751,7 +810,9 @@ function Panel({
         }
         className="no-print rounded-ui-sm border border-border-soft bg-transparent px-2.5 py-1 text-[12.5px] text-faint hover:border-border hover:text-muted disabled:opacity-60"
       >
-        {shown ? t("overview.assess.ask") : t("overview.assess.askFirst")}
+        {shown || st.outdated
+          ? t("overview.assess.ask")
+          : t("overview.assess.askFirst")}
       </button>
     ));
 
@@ -805,6 +866,12 @@ function Panel({
             : t("overview.assess.failed", { detail: st.failure!.detail })}
         </p>
       )}
+      {st.outdated && (
+        <p className="mt-3 mb-0 rounded-ui-sm border border-border bg-active px-3 py-2 text-[13.5px] text-ink-dim">
+          {t("overview.assess.outdated")}
+          {st.enabled && t("overview.assess.outdatedAsk")}
+        </p>
+      )}
 
       {/* The headline and the tally side by side; without an analysis the
           tally stands alone. */}
@@ -829,60 +896,77 @@ function Panel({
           aria-label={t("overview.assess.tallyLabel")}
           className="m-0 flex list-none flex-wrap gap-x-[34px] gap-y-3.5 p-0"
         >
-          {/* A zero is no alarm: grey, like the calm repos. */}
+          {/* A zero is no alarm: grey, like the repos. */}
           <TallyCount
-            col={tally.bad > 0 ? "bad" : undefined}
+            look={tally.bad > 0 ? COLUMN_STYLE.bad : undefined}
             n={num(tally.bad)}
           >
             {t("overview.assess.tally.bad")}
           </TallyCount>
           {tally.good > 0 && (
-            <TallyCount col="good" n={num(tally.good)}>
+            <TallyCount look={COLUMN_STYLE.good} n={num(tally.good)}>
               {t("overview.assess.tally.good")}
             </TallyCount>
           )}
           {tally.done > 0 && (
-            <TallyCount col="done" n={num(tally.done)}>
+            <TallyCount look={COLUMN_STYLE.done} n={num(tally.done)}>
               {t("overview.assess.tally.done")}
             </TallyCount>
           )}
-          {a.calm > 0 && (
+          {tally.talk > 0 && (
+            <TallyCount look={TALK_STYLE} n={num(tally.talk)}>
+              {t("overview.assess.tally.talk")}
+            </TallyCount>
+          )}
+          {a.repos > 0 && (
             <TallyCount
               n={
                 <>
                   {num(a.calm)}
                   <small className="text-[22px]">
                     {" "}
-                    {t("overview.assess.tally.ofActive", {
-                      active: num(a.active),
+                    {t("overview.assess.tally.ofRepos", {
+                      repos: num(a.repos),
                     })}
                   </small>
                 </>
               }
             >
-              {t("overview.assess.tally.calm", { count: a.active })}
+              {t("overview.assess.tally.calm", { count: a.repos })}
+            </TallyCount>
+          )}
+          {a.unjudged > 0 && (
+            <TallyCount n={num(a.unjudged)}>
+              {t("overview.assess.tally.unjudged", { count: a.unjudged })}
             </TallyCount>
           )}
         </ul>
       </div>
-      {gates.map((g) => (
-        <p
-          key={g.id}
-          className="mt-3 mb-1 rounded-ui-sm border border-ochre/35 bg-ochre-wash px-2.5 py-1.5 text-[13px] text-ochre"
+      {limits.length > 0 && (
+        <div
+          role="note"
+          aria-label={t("overview.assess.limitsLabel")}
+          className="mt-3 mb-1 grid gap-1 rounded-ui-sm border border-ochre/35 bg-ochre-wash px-2.5 py-1.5 text-[13px] text-ochre"
         >
-          {t("overview.assess.gap", {
-            source: t(`overview.assess.source.${g.source}`, {
-              defaultValue: g.source,
-            }),
-            days: num(g.facts[0]?.value ?? 0),
-          })}
-        </p>
-      ))}
-
-      {tally.bad === 0 && (
-        <div className="mt-5">
-          <Quiet>{t("overview.assess.nothingStuck")}</Quiet>
+          {limits.map((l) => (
+            <p key={l} className="m-0">
+              {l}
+            </p>
+          ))}
         </div>
+      )}
+
+      {a.quiet ? (
+        <div className="mt-5">
+          <Quiet>{t("overview.assess.quiet")}</Quiet>
+        </div>
+      ) : (
+        tally.bad === 0 &&
+        !limited && (
+          <div className="mt-5">
+            <Quiet>{t("overview.assess.nothingStuck")}</Quiet>
+          </div>
+        )
       )}
       {(tally.bad > 0 || left.length > 0) && (
         <div className="mt-5 flex flex-wrap gap-x-[18px] gap-y-5">
@@ -974,30 +1058,37 @@ function Panel({
               key={s.id}
               className={`rounded-full border px-2.5 py-0.5 text-[12.5px] ${COLUMN_STYLE[column].line} ${COLUMN_STYLE[column].ink}`}
             >
-              {signalTitle(t, s, m)}
+              {signalTitle(t, s)}
             </span>
           ))}
         </div>
       )}
-      {/* What the findings leave out: the repos without one, why nothing
-          counts as a gain, and whose the counts and cards are. */}
+      {/* What the findings leave out: the repos without one, those too
+          thin to judge and the idle ones, the backend's counts as sent;
+          that nothing counts as a gain only where a gain could be told;
+          and whose the counts and cards are. */}
       <p className="mt-5 mb-0 flex flex-wrap items-center gap-x-[18px] gap-y-1 border-t border-border-soft pt-3 text-[13px] text-muted">
-        {a.calm > 0 && (
+        {a.repos > 0 && (
           <span className="inline-flex items-center gap-2">
             <span aria-hidden="true" className="size-2 rounded-full bg-faint" />
             {t("overview.assess.calmLine", {
-              count: a.active,
-              calm: num(a.calm),
-              active: num(a.active),
+              count: a.repos,
+              parts: [
+                t("overview.assess.calmPart", { count: num(a.calm) }),
+                a.unjudged > 0 &&
+                  t("overview.assess.unjudgedPart", {
+                    count: num(a.unjudged),
+                  }),
+                a.idle > 0 &&
+                  t("overview.assess.idlePart", { count: num(a.idle) }),
+              ]
+                .filter(Boolean)
+                .join(", "),
             })}
           </span>
         )}
-        {tally.good === 0 && tally.done === 0 && (
-          <span>
-            {tally.baseline
-              ? t("overview.assess.noGain")
-              : t("overview.assess.noBaseline")}
-          </span>
+        {tally.good === 0 && tally.done === 0 && !limited && (
+          <span>{t("overview.assess.noGain")}</span>
         )}
         <span className="ml-auto text-[12px] text-faint">
           {m.product

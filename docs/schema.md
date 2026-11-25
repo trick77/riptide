@@ -181,6 +181,7 @@ Go types:
 | `attempts` | integer | no | `1` |  |
 | `created_at` | timestamp with time zone | no | `now()` |  |
 | `finished_at` | timestamp with time zone | yes |  |  |
+| `rules_version` | integer | yes |  |  |
 
 Indexes:
 
@@ -336,5 +337,6 @@ erDiagram
         integer attempts
         timestamp_with_time_zone created_at
         timestamp_with_time_zone finished_at
+        integer rules_version
     }
 ```

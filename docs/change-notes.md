@@ -7,6 +7,34 @@ repository.
 Real account handles, hostnames and tokens belong in the mounted
 `riptide.json` / team-keys Secret, never in this file: the repository is public.
 
+## 2026-11-25 — counting as it happened, and saying what is missing
+
+**Migration 0011** adds `team_analyses.rules_version`. Every analysis
+stored before it is of older rules: the page no longer shows its text or
+cards, shows the current rules' view with a note instead, and offers to
+assess again. The schedule does not re-word a week it already worded, so
+click "assess again" on the views people read, or wait for each view's
+next scheduled run.
+
+**Numbers of past periods change once**, since every metric is computed on
+read: an App's first production deploy counts as a release once Argo CD has
+reported for the team over 14 days; Argo CD's `Error` phase counts as a
+failed deploy; infrastructure Apps (none of their deploys names a product)
+count nowhere; merged PRs into another branch than the trunk, implicit
+merges of an umbrella branch and housekeeping PRs across many repos are no
+merged work; open PRs whose close was lost in a Bitbucket outage are of
+unknown state, not open; a dependency bot provisioned as an ordinary user is
+recognised by its name. Both periods of a comparison are counted alike; see
+[metrics.md](metrics.md).
+
+**Name automation sources by their tool** in `riptide.json`: an account
+whose login or display name holds a source's name as whole words now counts
+as that bot. A source named with an ordinary word would catch people.
+
+The `deploys` and `gitops` reads now look up PR merge commits in the
+payload without an index; watch `metrics_served` durations after the
+deploy.
+
 ## 2026-11-18 — Bitbucket webhooks self-service, `onboard-bitbucket` gone
 
 **`POST /onboard/{team}` replaces `riptide onboard-bitbucket`.** A team

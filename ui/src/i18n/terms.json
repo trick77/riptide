@@ -4,7 +4,8 @@
       "merged": "Merged",
       "open": "Open",
       "declined": "Declined",
-      "deleted": "Deleted"
+      "deleted": "Deleted",
+      "unknown": "Unknown"
     },
     "prWaiting": {
       "draft": "Draft",
@@ -48,7 +49,8 @@
       "merged": "Gemerged",
       "open": "Offen",
       "declined": "Abgelehnt",
-      "deleted": "Gelöscht"
+      "deleted": "Gelöscht",
+      "unknown": "Unbekannt"
     },
     "prWaiting": {
       "draft": "Entwurf",
