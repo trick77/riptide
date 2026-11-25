@@ -40,6 +40,16 @@ const (
 	// ratio aside: 0 to 1 or 1 to 2 clears NotableChange, but one jammed
 	// repo more is no news (user, 2026-11-19).
 	NotableCountStep = 2
+	// NotableCases: a share over fewer cases than this, in either period,
+	// moves notably only by NotableCountStep cases or more. Below it one
+	// case is worth NotableShareChange or more: one failed deploy of 12 is
+	// 8 points, no news (owner, 2026-11).
+	NotableCases = 20
+	// NotableReleases: deploy frequency, a rate of releases, on fewer
+	// releases than this in either period is news only where the releases
+	// moved notably as a count: 1 to 2 releases doubles the rate, and was
+	// "notably better" (owner, 2026-11).
+	NotableReleases = 10
 )
 
 // Magnitudes of a Change with a verdict.
@@ -99,7 +109,8 @@ type Change struct {
 	Score *float64 `json:"score"`
 	// Magnitude is how far it moved: same within the tolerance, notable past
 	// NotableChange (NotableShareChange for a share, NotableCountStep on top
-	// for a count), minor between. Null
+	// for a count; a share on few cases and deploy frequency on few releases
+	// by such a step too: caseGate, releaseGate), minor between. Null
 	// when the verdict is none. Undirected numbers have one too, so a large
 	// shift can still be asked about.
 	Magnitude *string `json:"magnitude"`
@@ -202,7 +213,6 @@ const (
 	batchSizeMetric
 	// The assessment's own team numbers: flow and the PR mix.
 	wipWeeksMetric
-	waitShareMetric
 	featureShareMetric
 )
 
@@ -226,7 +236,6 @@ func (id metricID) def() metric {
 		mergedPerWeekMetric: {up, relative},
 		batchSizeMetric:     {down, relative},
 		wipWeeksMetric:      {down, relative},
-		waitShareMetric:     {down, points},
 		featureShareMetric:  {undirected, points},
 	}[id]
 }
@@ -325,6 +334,34 @@ func magnitude(cur, prev float64, s scale) string {
 	return MagnitudeSame
 }
 
+// caseGate is c with a notable move of a share kept only where it is more
+// than a case or so: on fewer than NotableCases cases in either period
+// (nCur, nPrev), the move must be NotableCountStep cases of the smaller
+// one, else it is minor. Verdict and score stay: the number did move.
+func caseGate(c Change, cur, prev *float64, nCur, nPrev int) Change {
+	n := min(nCur, nPrev)
+	if c.Magnitude == nil || *c.Magnitude != MagnitudeNotable || n >= NotableCases || cur == nil || prev == nil {
+		return c
+	}
+	if math.Abs(*cur-*prev)*float64(n)+eps < NotableCountStep {
+		c.Magnitude = ptr(MagnitudeMinor)
+	}
+	return c
+}
+
+// releaseGate is c, deploy frequency, with a notable move kept on fewer
+// than NotableReleases releases in either period only where the releases
+// themselves moved notably as a count (damped, NotableCountStep or more).
+func releaseGate(c Change, cur, prev int) Change {
+	if c.Magnitude == nil || *c.Magnitude != MagnitudeNotable || min(cur, prev) >= NotableReleases {
+		return c
+	}
+	if magnitude(float64(cur), float64(prev), count) != MagnitudeNotable {
+		c.Magnitude = ptr(MagnitudeMinor)
+	}
+	return c
+}
+
 // score is Change.Score of cur against prev, d not undirected.
 func score(cur, prev float64, d direction, s scale) float64 {
 	var x float64
@@ -369,10 +406,11 @@ func compare(cur, prev Metrics, period Period) Comparison {
 		DeployFreq: deployFreqMetric.judge(side{ptr(cf.PerWeek), !cf.LowSample && cf.ArgoReporting},
 			side{ptr(pf.PerWeek), !pf.LowSample && pf.ArgoReporting},
 			argo || pf.FirstSeen > pf.Releases || cf.FirstSeen > cf.Releases),
-		DeploySuccess: deploySuccessMetric.judge(side{cf.SuccessRate, cf.Finished >= lowSample},
-			side{pf.SuccessRate, pf.Finished >= lowSample}, argo),
+		DeploySuccess: caseGate(deploySuccessMetric.judge(side{cf.SuccessRate, cf.Finished >= lowSample},
+			side{pf.SuccessRate, pf.Finished >= lowSample}, argo), cf.SuccessRate, pf.SuccessRate, cf.Finished, pf.Finished),
 		LeadTime: leadChange(cur.Delivery.LeadTime, prev.Delivery.LeadTime, argo || bitbucket),
 	}
+	out.DeployFreq = releaseGate(out.DeployFreq, cf.Releases, pf.Releases)
 	if !cf.ArgoReporting {
 		out.DeployFreq = deployFreqMetric.none(ReasonNotReporting)
 		out.DeploySuccess = deploySuccessMetric.none(ReasonNotReporting)
@@ -387,12 +425,15 @@ func compare(cur, prev Metrics, period Period) Comparison {
 	cr, pr := cur.Review, prev.Review
 	out.ReviewTime = reviewTimeMetric.judge(side{cr.Review.P50, cr.Review.N >= lowSample},
 		side{pr.Review.P50, pr.Review.N >= lowSample}, bitbucket)
-	out.WithinDay = withinDayMetric.judge(side{cr.WithinDay.Rate, cr.WithinDay.N >= lowSample},
-		side{pr.WithinDay.Rate, pr.WithinDay.N >= lowSample}, bitbucket)
-	out.FirstTouch = firstTouchMetric.judge(side{cr.FirstTouchRate, cr.Approved >= lowSample},
-		side{pr.FirstTouchRate, pr.Approved >= lowSample}, bitbucket)
-	out.Untracked = untrackedMetric.judge(side{cr.UntrackedRate, cr.Merged >= lowSample},
-		side{pr.UntrackedRate, pr.Merged >= lowSample}, bitbucket)
+	out.WithinDay = caseGate(withinDayMetric.judge(side{cr.WithinDay.Rate, cr.WithinDay.N >= lowSample},
+		side{pr.WithinDay.Rate, pr.WithinDay.N >= lowSample}, bitbucket),
+		cr.WithinDay.Rate, pr.WithinDay.Rate, cr.WithinDay.N, pr.WithinDay.N)
+	out.FirstTouch = caseGate(firstTouchMetric.judge(side{cr.FirstTouchRate, cr.Approved >= lowSample},
+		side{pr.FirstTouchRate, pr.Approved >= lowSample}, bitbucket), cr.FirstTouchRate, pr.FirstTouchRate,
+		cr.Approved, pr.Approved)
+	out.Untracked = caseGate(untrackedMetric.judge(side{cr.UntrackedRate, cr.Merged >= lowSample},
+		side{pr.UntrackedRate, pr.Merged >= lowSample}, bitbucket), cr.UntrackedRate, pr.UntrackedRate,
+		cr.Merged, pr.Merged)
 	ct, pt := cur.Throughput, prev.Throughput
 	out.MergedPerWeek = mergedPerWeekMetric.judge(side{ct.MergedPerWeek, ct.Merged >= lowSample},
 		side{pt.MergedPerWeek, pt.Merged >= lowSample}, bitbucket)
@@ -406,6 +447,8 @@ func compare(cur, prev Metrics, period Period) Comparison {
 	out.OpenJammed = openJammedMetric.judge(side{ptr(float64(co.Jammed)), true},
 		side{ptr(float64(po.Jammed)), true}, bitbucket)
 	cc, pc := cur.Costs, prev.Costs
+	// The wasted share is spend, not cases: one large declined PR may be
+	// most of it, and no count of PRs gates it.
 	out.CostPerKloc = costPerKlocMetric.judge(side{cc.PerKloc, cc.MergedReviews >= lowSample},
 		side{pc.PerKloc, pc.MergedReviews >= lowSample}, noergler)
 	out.WastedShare = wastedShareMetric.judge(side{cc.WastedShare, cc.MergedReviews >= lowSample},
@@ -421,10 +464,10 @@ func compare(cur, prev Metrics, period Period) Comparison {
 		}
 		kc := KindChange{
 			Kind: b.Kind,
-			Success: buildSuccessMetric.judge(side{b.SuccessRate, b.Runs >= lowSample},
-				side{p.SuccessRate, p.Runs >= lowSample}, builds),
-			Flaky: buildFlakyMetric.judge(side{b.FlakyRate, b.judged >= lowSample},
-				side{p.FlakyRate, p.judged >= lowSample}, builds),
+			Success: caseGate(buildSuccessMetric.judge(side{b.SuccessRate, b.Runs >= lowSample},
+				side{p.SuccessRate, p.Runs >= lowSample}, builds), b.SuccessRate, p.SuccessRate, b.Runs, p.Runs),
+			Flaky: caseGate(buildFlakyMetric.judge(side{b.FlakyRate, b.judged >= lowSample},
+				side{p.FlakyRate, p.judged >= lowSample}, builds), b.FlakyRate, p.FlakyRate, b.judged, p.judged),
 			Compared: cur.Build.compared[b.Kind],
 		}
 		// The hotspots keep every flagged repo past their cut to the top.

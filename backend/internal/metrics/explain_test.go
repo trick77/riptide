@@ -295,67 +295,38 @@ func TestCompareWithThePreviousPeriod(t *testing.T) {
 }
 
 // A worsening whose number is now unknown (no PR reached production, so no
-// wait share) is not resolved: nothing says it got better.
+// lead time) is not resolved: nothing says it got better.
 func TestUnknownNumberResolvesNothing(t *testing.T) {
-	resolved := func(v *float64) bool {
+	same := Change{Verdict: ChangeSame, Directed: true, Magnitude: ptr(MagnitudeSame), Score: ptr(0.0), Prev: ptr(100.0)}
+	resolved := func(v *float64, c Change) bool {
 		a := &assessor{
-			team: []teamChange{{metric: "wait_share", label: "wait_share", unit: UnitShare, source: SourceBitbucket, value: v}},
-			h:    History{Latest: map[string]string{"change:wait_share": ToneAttention}},
+			team: []teamChange{{metric: "lead_time", label: "lead_time_p50", unit: UnitSeconds, source: SourceArgoCD, value: v, c: c}},
+			h:    History{Open: map[string]Problem{"change:lead_time": {Tone: ToneAttention, Before: ptr(100.0)}}},
 			gaps: map[string]bool{},
 		}
 		a.resolvedSignals()
-		return len(a.out) == 1 && a.out[0].ID == "resolved:change:wait_share"
+		return len(a.out) == 1 && a.out[0].ID == "resolved:change:lead_time"
 	}
-	if resolved(nil) {
-		t.Error("an unknown wait share resolved the worsening")
+	if resolved(nil, leadTimeMetric.none(ReasonNoValue)) {
+		t.Error("an unknown lead time resolved the worsening")
 	}
-	if !resolved(ptr(0.4)) {
-		t.Error("a known wait share no longer resolves")
+	if resolved(ptr(100.0), leadTimeMetric.none(ReasonLowSample)) {
+		t.Error("a lead time on too few commits resolved the worsening")
+	}
+	if !resolved(ptr(100.0), same) {
+		t.Error("a known lead time back where it was no longer resolves")
 	}
 }
 
-// The longest stage: attention from half the time to production on enough
-// PRs, else a hint (some stage always takes longest); moved, a signal of
-// its own.
-func TestStageSignals(t *testing.T) {
-	chain := func(key string, hot float64, low bool) Chain {
-		return Chain{Stages: []Stage{
-			{Key: StageReview, Share: ptr(1 - hot)},
-			{Key: key, Share: ptr(hot), Hot: true, LowSample: low},
-		}}
-	}
-	signals := func(cur, prev Chain) string {
-		a := &assessor{m: Metrics{LeadChain: cur}, pm: Metrics{LeadChain: prev}, gaps: map[string]bool{}}
-		a.flowSignals()
-		out := ""
-		for _, s := range a.out {
-			out += s.ID + ":" + s.Tone + " "
-		}
-		return out
-	}
-	same := chain(StageToProd, 0.86, false)
-	if got := signals(same, same); got != "slow_stage:to_prod:attention " {
-		t.Errorf("past half = %q", got)
-	}
-	if got := signals(chain(StageToProd, 0.4, false), same); got != "slow_stage:to_prod:hint " {
-		t.Errorf("under half = %q", got)
-	}
-	if got := signals(chain(StageToProd, 0.9, true), same); got != "slow_stage:to_prod:hint " {
-		t.Errorf("few PRs = %q", got)
-	}
-	// The signal says how many PRs it rests on, few or not.
-	few := chain(StageToProd, 0.9, true)
-	few.Stages[1].N = 7
-	a := &assessor{m: Metrics{LeadChain: few}, gaps: map[string]bool{}}
-	a.flowSignals()
-	if s := a.out[0]; s.Sample == nil || *s.Sample != 7 || !s.LowSample {
-		t.Errorf("sample of a low-sample stage = %v, low %v", s.Sample, s.LowSample)
-	}
-	if got := signals(chain(StageCoding, 0.6, false), same); got != "slow_stage:coding:attention bottleneck_moved:hint " {
-		t.Errorf("moved = %q", got)
-	}
-	if got := signals(Chain{}, Chain{}); got != "" {
-		t.Errorf("no PRs = %q", got)
+// No stage raises a signal: some stage always takes longest, and its share
+// is a ratio of medians over different PRs. The chain keeps the numbers.
+func TestNoStageSignals(t *testing.T) {
+	chain := Chain{Stages: []Stage{{Key: StageReview, Share: ptr(0.1)}, {Key: StageToProd, Share: ptr(0.9), Hot: true}}}
+	prev := Chain{Stages: []Stage{{Key: StageCoding, Share: ptr(0.9), Hot: true}, {Key: StageToProd, Share: ptr(0.1)}}}
+	a := &assessor{m: Metrics{LeadChain: chain}, pm: Metrics{LeadChain: prev}, ds: data(), prev: data()}
+	a.run()
+	if len(a.out) != 0 {
+		t.Errorf("signals = %+v", a.out)
 	}
 }
 

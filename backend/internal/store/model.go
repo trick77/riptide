@@ -32,6 +32,10 @@ type Analysis struct {
 	Attempts     int
 	CreatedAt    time.Time
 	FinishedAt   *time.Time
+	// RulesVersion is the assessment rules the row was assessed under
+	// (metrics.RulesVersion); nil for a row from before the column, older
+	// than any. A row of older rules is not shown as the assessment's words.
+	RulesVersion *int
 }
 
 // Activity is how many events one sender identifier produced: a count per

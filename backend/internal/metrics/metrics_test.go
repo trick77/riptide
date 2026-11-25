@@ -668,13 +668,6 @@ func TestChainThatDoesNotReachProduction(t *testing.T) {
 			t.Errorf("%s: share %v, hot %v", s.Key, s.Share, s.Hot)
 		}
 	}
-	// So no slow stage to name and no wait share for the assessment.
-	if hotStage(c) != nil {
-		t.Error("hot stage without production")
-	}
-	if ws, _ := waitShare(c); ws != nil {
-		t.Errorf("wait share = %v", *ws)
-	}
 	// The medians stay: only the shares need the whole way.
 	expectNear(t, "coding p50", stage(c, StageCoding).P50, 5*86400)
 	if c.BeforeProd <= 0 {

@@ -5,6 +5,7 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,14 @@ import (
 // tolerance), plus the starting values below, user-chosen 2026-11-16 and
 // not measured.
 const (
+	// RulesVersion names the rules below: raised whenever a rule changes
+	// what is raised, how it is judged or what the model is told. An
+	// analysis stores the version it was assessed under; one of an older
+	// version (or none, before the column) words signals the rules no longer
+	// raise, and is not shown as the assessment's wording. 2: wave 1 (dropped
+	// signals, symmetric thresholds, quiet decided here, resolved on
+	// evidence).
+	RulesVersion = 2
 	// FocusMinWeight is the weight a repo's signals need for it to be a
 	// focus candidate: one attention signal, or a hint and a notable change.
 	FocusMinWeight = 3
@@ -26,45 +35,44 @@ const (
 	// watered down to a sentence each.
 	FocusCandidates = 5
 	FocusMax        = 3
-	// SteadySlowTop: a repo among the SteadySlowTop slowest of its kind in
-	// both periods, and slower than the kind's median, builds slowly as a
-	// habit, not as a change. No factor against the median: a kind mixes
-	// toolchains, and a factor would claim a slowness a different toolchain
-	// explains.
-	SteadySlowTop = 3
 	// AgentWaitShare: when the median wait for a build agent is this much of
-	// the median run or more, the time is the platform's, not the build's.
+	// the median build or more, the time is the platform's, not the build's.
 	AgentWaitShare = 0.5
-	// ResyncShare: re-syncs past this part of the syncs, on enough syncs,
-	// are deploys that ship nothing.
-	ResyncShare = 0.5
+	// AgentWaitMinS is the median wait in seconds a kind's builds need on
+	// top of AgentWaitShare: half of a one-minute build is no capacity
+	// problem worth a step (owner, 2026-11).
+	AgentWaitMinS = 120
 	// SilentDays: a source that reported before and is silent this long at
 	// the period's end has a gap; its numbers say nothing about the work.
 	SilentDays = 7
 	// DriverShare: a repo carrying this part of a notable worsening or more
 	// is its driver, and counts toward the focus.
 	DriverShare = 0.5
-	// StageAttention: a stage that takes this part of the time to
-	// production or more needs attention; below it the longest stage is
-	// only a hint, as some stage always takes longest. A starting value.
+	// JamResolvedMax is the most long-open PRs a jammed repo may keep and
+	// count as resolved: clearly below the jam (OpenJamMin), not one PR
+	// under it, where the next week tips it back.
+	JamResolvedMax = OpenJamMin - 2
+	// StageAttention is the lead chain's Chain.AttentionShare, the page's
+	// mark on a stage taking this part of the time to production or more.
+	// No signal reads it since rules version 2: some stage always takes
+	// longest, and its share is a ratio of medians over different PRs.
 	StageAttention = 0.5
 )
 
-// Signal kinds.
+// Signal kinds. Dropped in rules version 2, never to be raised again from
+// the same premises: slow_stage (one stage always takes longest),
+// bottleneck_moved (a near tie flips on noise), throughput_instability,
+// resync_share (re-syncs of infrastructure Apps, no "deploys that ship
+// nothing"), steady_slow (the slowest three are always someone),
+// inactive_prs and shared_stall (fired on one case; the open PRs and the
+// build hotspots show them as numbers).
 const (
 	SignalDataGap     = "data_gap"
 	SignalPRJam       = "pr_jam"
-	SignalStage       = "slow_stage"
 	SignalSlower      = "slower_build"
-	SignalSteadySlow  = "steady_slow"
 	SignalFailingMore = "failing_more"
 	SignalChange      = "change"
-	SignalBottleneck  = "bottleneck_moved"
-	SignalTradeoff    = "throughput_instability"
 	SignalAgentWait   = "agent_wait"
-	SignalSharedStall = "shared_stall"
-	SignalInactive    = "inactive_prs"
-	SignalResync      = "resync_share"
 	SignalResolved    = "resolved"
 	SignalQuestion    = "question"
 )
@@ -85,6 +93,36 @@ const (
 	SourcePipeline  = "pipeline"
 	SourceArgoCD    = "argocd"
 	SourceNoergler  = "noergler"
+)
+
+// Why a period is not quiet (Assessment.QuietReasons), in this order.
+const (
+	// QuietNoBaseline: no team number has a previous period to compare
+	// with, or a source started reporting after the previous period began.
+	QuietNoBaseline = "no_baseline"
+	// QuietSourceGap: a source's data has a hole touching the comparison
+	// (Limits): silent at the end, Bitbucket's events lost, or a source
+	// starting inside the period.
+	QuietSourceGap = "source_gap"
+	// QuietNotMeasurable: Bitbucket or Argo CD never reported for the team,
+	// or no merged PR could be traced to production.
+	QuietNotMeasurable = "not_measurable"
+	// QuietFindings: a signal or the question stands out.
+	QuietFindings = "findings"
+)
+
+// Limit kinds.
+const (
+	// LimitSilentEnd: silent SilentDays or more at the period's end, a gate.
+	LimitSilentEnd = "silent_end"
+	// LimitSilence: Bitbucket stored nothing for a span while CI runs built
+	// commits it never saw (dataset.Silence.UnseenRuns): events lost, not a
+	// team idle. Another source's silence has no such evidence and is no
+	// limit: a team may simply not deploy or review for two days.
+	LimitSilence = "silence"
+	// LimitStarts: the source's first event lies after the previous
+	// period's start, so the comparison lacks it.
+	LimitStarts = "starts"
 )
 
 // Fact units, for the UI's formatting.
@@ -130,14 +168,11 @@ type Signal struct {
 	RunKind *string `json:"run_kind"`
 	// Metric names the number of a change, resolved or question signal.
 	Metric *string `json:"metric"`
-	Stage  *string `json:"stage"`
-	// PrevStage is the bottleneck's previous stage.
-	PrevStage *string `json:"prev_stage"`
-	// LowSample: the signal rests on fewer than 10 cases (a stage's PRs);
-	// shown, never a headline.
+	// LowSample: the signal rests on fewer than 10 cases; shown, never a
+	// headline, and a hint on so few keeps a period quiet.
 	LowSample bool `json:"low_sample"`
-	// Sample is the cases the signal rests on, where counted (a stage's PRs):
-	// the page says how few, not only that LowSample.
+	// Sample is the PRs the signal rests on, where counted: the page says
+	// how few, not only that LowSample.
 	Sample *int `json:"sample"`
 	// Weight ranks the signals and the focus.
 	Weight int `json:"weight"`
@@ -175,14 +210,44 @@ type FocusRepo struct {
 	Waiting *Waiting `json:"waiting"`
 }
 
+// Problem is a problem an earlier assessment raised, not resolved since.
+type Problem struct {
+	// Tone is the latest tone it was raised in.
+	Tone string
+	// Before is its hero number before it was raised: the previous-period
+	// value of its first fact in the earliest assessment that raised it
+	// since it was last resolved, within the history read. A resolution
+	// needs today's number back at it or better; nil, nothing resolves it
+	// but a jam's own rule.
+	Before *float64
+}
+
 // History is what earlier assessments of the same window raised: how many
-// times in a row each signal ID, and the latest one's signals by ID with
-// their tone.
+// times in a row each signal ID, the latest one's signals by ID with their
+// tone, and the problems open since.
 type History struct {
 	Seen   map[string]int
 	Latest map[string]string
+	// Open are the problems (a jam, a build slower or failing more, a
+	// notable worsening) raised by any assessment read and not resolved by
+	// a later one, by ID: one no longer raised (its comparison drifted to
+	// the bad level) stays open until its number is back.
+	Open map[string]Problem
 	// Runs are the earlier assessments read; none: the view's first.
 	Runs int
+}
+
+// Limit is a hole in a source's data the comparison crosses: a reason the
+// period is not quiet, for the page to name with its dates.
+type Limit struct {
+	Source string `json:"source"`
+	Kind   string `json:"kind"`
+	// From is the source's last event before the hole (silent_end,
+	// silence) or its first event ever (starts).
+	From time.Time `json:"from"`
+	// To is the source's first event after a silence, the period's end for
+	// silent_end; null for starts.
+	To *time.Time `json:"to"`
 }
 
 // Assessment is the overview's "what now" over closed weeks.
@@ -195,17 +260,35 @@ type Assessment struct {
 	Signals []Signal `json:"signals"`
 	// Focus are the candidates, ranked; the page shows FocusMax of them.
 	Focus []FocusRepo `json:"focus"`
-	// Active are the repos with a PR, a run or an open PR in the period;
-	// Calm those of them without a signal.
-	Active int `json:"active"`
-	Calm   int `json:"calm"`
+	// Active are the repos with a merged PR, a build or an open PR in the
+	// period. Of them Calm are those without a signal that a repo rule
+	// could judge (judgeable), Unjudged those without a signal and too
+	// little data to judge; the rest carry a signal. Idle were active in the
+	// previous period and are not now; Repos is Active and Idle.
+	Active   int `json:"active"`
+	Calm     int `json:"calm"`
+	Unjudged int `json:"unjudged"`
+	Idle     int `json:"idle"`
+	Repos    int `json:"repos"`
 	// Team are the compared team numbers, every one, for the trend.
 	Team []Fact `json:"team"`
-	// Question is the one number to talk about.
+	// Question is the one undirected number that moved notably; null when
+	// none did. Never a fixed question: no question without a move.
 	Question *Signal `json:"question"`
 	// Compared: an assessment of the view for an earlier week was there to
 	// tell what is resolved; without one, nothing can be.
 	Compared bool `json:"compared"`
+	// Quiet: nothing stands out and the period could be measured and
+	// compared: the one case the page and the model may say so (owner: never
+	// "unremarkable" where nothing could be compared). QuietReasons say why
+	// not, in the order of the Quiet* constants; empty when Quiet.
+	Quiet        bool     `json:"quiet"`
+	QuietReasons []string `json:"quiet_reasons"`
+	// Limits are the holes in the data the comparison crosses, oldest first.
+	Limits []Limit `json:"limits"`
+	// Coverage is of the period's merged PRs, as Throughput's: how many
+	// reached production, have a size, were seen opened.
+	Coverage PRCoverage `json:"coverage"`
 }
 
 // WeekStart is the Monday 00:00 of t's week in loc: where ClosedPeriod
@@ -226,8 +309,12 @@ func ClosedPrevious(weeks int, now time.Time, loc *time.Location) Period {
 
 // Assess is the assessment of ds over p.Period against prev over
 // p.Previous, both closed weeks (ClosedPeriod), with what earlier ones
-// raised. prev is never nil, as in Compute.
+// raised. prev is never nil, as in Compute. The dependency bots' builds are
+// left out of every number it reads (withoutBotBuilds); infrastructure Apps
+// are out of the deploy numbers already (deployFrequency).
 func Assess(ds, prev *dataset.Dataset, p Params, h History) Assessment {
+	bots := botPRBranches(ds, prev)
+	ds, prev = withoutBotBuilds(ds, bots), withoutBotBuilds(prev, bots)
 	m, pm := computeBoth(ds, prev, nil, p)
 	a := &assessor{m: m, pm: pm, ds: ds, prev: prev, p: p, f: newFilter(ds, p), h: h}
 	return a.run()
@@ -240,21 +327,23 @@ type assessor struct {
 	f        filter
 	h        History
 	gaps     map[string]bool
-	out      []Signal
+	limits   []Limit
+	// lost: Bitbucket's events were lost in one of the two periods
+	// (LimitSilence). Its counts read low there, so none of its numbers is
+	// compared: a false worsening now, a false gain once the hole lies in the
+	// previous period.
+	lost bool
+	out  []Signal
 	// team are the compared team numbers, computed once.
 	team []teamChange
-	// held are the gains a trade-off holds back: no signal, still there.
-	held map[string]bool
 }
 
 func (a *assessor) run() Assessment {
-	a.team = a.teamChanges()
 	a.gapSignals()
+	a.team = a.teamChanges()
 	a.jamSignals()
 	a.buildSignals()
 	a.changeSignals()
-	a.flowSignals()
-	a.deploySignals()
 	a.resolvedSignals()
 	for i := range a.out {
 		a.out[i].Seen = a.h.Seen[a.out[i].ID]
@@ -271,9 +360,10 @@ func (a *assessor) run() Assessment {
 	rank(a.out)
 	out := Assessment{
 		Period: a.p.Period, Previous: a.p.Previous, Gaps: append([]string{}, slices.Sorted(maps.Keys(a.gaps))...),
-		Signals: a.out, Question: a.question(), Compared: a.h.Runs > 0,
+		Signals: a.out, Question: a.question(), Compared: a.h.Runs > 0, Limits: a.limits,
+		Coverage: a.m.Throughput.Coverage,
 	}
-	out.Focus, out.Active, out.Calm = a.focus()
+	out.Focus = a.focus(&out)
 	out.Team = []Fact{}
 	for _, t := range a.team {
 		if !a.gaps[t.source] {
@@ -283,6 +373,8 @@ func (a *assessor) run() Assessment {
 	if out.Signals == nil {
 		out.Signals = []Signal{}
 	}
+	out.QuietReasons = a.quietReasons(out)
+	out.Quiet = len(out.QuietReasons) == 0
 	return out
 }
 
@@ -329,32 +421,139 @@ func plain(id, label, unit string, v *float64) Fact {
 
 func f64(n int) *float64 { return ptr(float64(n)) }
 
-// ---- Gaps ------------------------------------------------------------------
+// ---- Bots' builds ----------------------------------------------------------
+
+// botBranchStems are the dependency bots' branch schemes, as build.go's
+// notFeatureStems names them: renovate/…, dependabot-….
+var botBranchStems = map[string]bool{"renovate": true, "dependabot": true, "snyk": true}
+
+// botPRBranches are the PR-<n> branches (lowercased, by repo) of the bots'
+// PRs either dataset holds: a Jenkins PR build names its PR, not the bot's
+// branch. A bot PR neither opened, merged nor open in the windows is not
+// known, and its builds stay in.
+func botPRBranches(ds ...*dataset.Dataset) map[string]bool {
+	out := map[string]bool{}
+	add := func(repo string, id int64) { out[repo+"\x00pr-"+strconv.FormatInt(id, 10)] = true }
+	for _, d := range ds {
+		for _, pr := range d.PRs {
+			if pr.Bot {
+				add(pr.Repo, pr.PRID)
+			}
+		}
+		for _, pr := range d.OpenPRs {
+			if pr.Bot {
+				add(pr.Repo, pr.PRID)
+			}
+		}
+	}
+	return out
+}
+
+// botBuild reports whether r built a bot's branch: a dependency bot's
+// scheme, or a bot PR's PR-<n>.
+func botBuild(r dataset.Run, botPRs map[string]bool) bool {
+	p := branchPrefix(r.Branch)
+	if botBranchStems[strings.TrimSuffix(strings.TrimSuffix(p, "/"), "-…")] {
+		return true
+	}
+	return r.Repo != nil && botPRs[*r.Repo+"\x00"+strings.ToLower(r.Branch)]
+}
+
+// withoutBotBuilds is ds without the bots' builds (owner, 2026-11: a bot's
+// failed build is no quality problem of the team's, and no judged number
+// reads it). A copy: the page's dataset keeps them.
+func withoutBotBuilds(ds *dataset.Dataset, botPRs map[string]bool) *dataset.Dataset {
+	if !slices.ContainsFunc(ds.Runs, func(r dataset.Run) bool { return botBuild(r, botPRs) }) {
+		return ds
+	}
+	cp := *ds
+	cp.Runs = slices.DeleteFunc(slices.Clone(ds.Runs), func(r dataset.Run) bool { return botBuild(r, botPRs) })
+	return &cp
+}
+
+// ---- Gaps and limits -------------------------------------------------------
 
 // gapSignals silence a source that reported before and went quiet for
 // SilentDays at the period's end: a dead webhook must not read as a team
-// that stopped deploying.
+// that stopped deploying. They and the other holes the comparison crosses
+// are the limits.
 func (a *assessor) gapSignals() {
 	a.gaps = map[string]bool{}
+	a.limits = []Limit{}
 	end := a.p.Period.To
-	ends := a.m.Meta.DataEnd
+	ends, starts := a.m.Meta.DataEnd, a.m.Meta.DataStart
 	for _, s := range []struct {
-		name string
-		at   *time.Time
+		name      string
+		at, start *time.Time
 	}{
-		{SourceBitbucket, ends.Bitbucket}, {SourcePipeline, ends.Pipeline},
-		{SourceArgoCD, ends.ArgoCD}, {SourceNoergler, ends.Noergler},
+		{SourceBitbucket, ends.Bitbucket, starts.Bitbucket}, {SourcePipeline, ends.Pipeline, starts.Pipeline},
+		{SourceArgoCD, ends.ArgoCD, starts.ArgoCD}, {SourceNoergler, ends.Noergler, starts.Noergler},
 	} {
+		// A source never heard of is not a hole: the team has none.
+		if s.start != nil && s.start.After(a.p.Previous.From) && s.start.Before(end) {
+			a.limits = append(a.limits, Limit{Source: s.name, Kind: LimitStarts, From: *s.start})
+		}
 		if s.at == nil || end.Sub(*s.at) < SilentDays*24*time.Hour {
 			continue
 		}
 		a.gaps[s.name] = true
+		a.limits = append(a.limits, Limit{Source: s.name, Kind: LimitSilentEnd, From: *s.at, To: ptr(end)})
 		days := float64(int(end.Sub(*s.at).Hours() / 24))
 		a.out = append(a.out, Signal{
 			ID: "data_gap:" + s.name, Kind: SignalDataGap, Tone: ToneGate, Source: s.name, Weight: 10,
 			Facts: []Fact{plain("data_gap_"+s.name+".silent", "silent_days", UnitDays, &days)},
 		})
 	}
+	// Bitbucket's lost events, in either period: a silence at the boundary
+	// is in both datasets once.
+	seen := map[[2]time.Time]bool{}
+	for _, s := range slices.Concat(a.prev.Meta.Silences, a.ds.Meta.Silences) {
+		key := [2]time.Time{s.From, s.To}
+		if s.Source != dataset.SourceBitbucket || s.UnseenRuns <= 0 || seen[key] {
+			continue
+		}
+		seen[key] = true
+		a.lost = true
+		a.limits = append(a.limits, Limit{Source: SourceBitbucket, Kind: LimitSilence, From: s.From, To: ptr(s.To)})
+	}
+	slices.SortStableFunc(a.limits, func(x, y Limit) int { return x.From.Compare(y.From) })
+}
+
+// quietReasons are why the period is not quiet, none when it is: every
+// number there, compared against a covered previous period, and nothing
+// standing out, a gain or a resolution included (a gain stands out; the
+// page must not call a period with one unremarkable).
+func (a *assessor) quietReasons(out Assessment) []string {
+	reasons := []string{}
+	baseline := slices.ContainsFunc(out.Team, func(f Fact) bool { return f.Verdict != ChangeNone })
+	starts, hole := false, false
+	for _, l := range a.limits {
+		switch {
+		case l.Kind != LimitStarts:
+			hole = true
+		case !l.From.Before(a.p.Period.From):
+			starts, hole = true, true
+		default:
+			starts = true
+		}
+	}
+	if !baseline || starts {
+		reasons = append(reasons, QuietNoBaseline)
+	}
+	if hole {
+		reasons = append(reasons, QuietSourceGap)
+	}
+	if a.m.Meta.DataStart.Bitbucket == nil || !a.m.Delivery.Frequency.ArgoReporting || out.Coverage.ToProd.Count == 0 {
+		reasons = append(reasons, QuietNotMeasurable)
+	}
+	findings := out.Question != nil || slices.ContainsFunc(out.Signals, func(s Signal) bool {
+		// A hint on fewer than lowSample cases is no finding.
+		return s.Tone != ToneGate && (s.Tone != ToneHint || !s.LowSample)
+	})
+	if findings {
+		reasons = append(reasons, QuietFindings)
+	}
+	return reasons
 }
 
 // ---- Open PRs --------------------------------------------------------------
@@ -367,15 +566,19 @@ func (a *assessor) jamSignals() {
 		}
 	}
 	// More jammed repos lift every jam only as news: one more is none.
-	oj := a.m.Comparison.OpenJammed
-	more := oj.Verdict == ChangeWorse && oj.Magnitude != nil && *oj.Magnitude == MagnitudeNotable
+	var more bool
+	for _, t := range a.team {
+		if t.metric == "open_jammed" {
+			more = t.c.Verdict == ChangeWorse && t.c.Magnitude != nil && *t.c.Magnitude == MagnitudeNotable
+		}
+	}
 	for _, r := range a.m.OpenPRs.Repos {
 		if !r.Jammed {
 			continue
 		}
 		id := "pr_jam:" + r.Repo
-		// A jam and a steady slow build make their repo a focus candidate
-		// alone: the two patterns the assessment is there to name.
+		// A jam makes its repo a focus candidate alone: the pattern the
+		// assessment is there to name.
 		tone, w := ToneHint, FocusMinWeight
 		if more || prevJammed[r.Repo] {
 			tone, w = ToneAttention, FocusMinWeight+1
@@ -392,7 +595,7 @@ func (a *assessor) jamSignals() {
 			Verdict: ChangeNone}
 		// Against the previous end only where Bitbucket covers that period:
 		// a repo riptide did not hear of yet reads as 0 then.
-		if incomplete := before(a.m.Meta.DataStart.Bitbucket, a.p.Previous.From); !incomplete {
+		if incomplete := before(a.m.Meta.DataStart.Bitbucket, a.p.Previous.From) || a.lost; !incomplete {
 			c := openJammedMetric.judge(side{f64(r.Long), true}, side{prevLong, true}, false)
 			long.Verdict, long.Magnitude = c.Verdict, c.Magnitude
 		} else {
@@ -406,45 +609,16 @@ func (a *assessor) jamSignals() {
 			Waiting: &w2,
 		})
 	}
-	if n := a.m.OpenPRs.Inactive; n > 0 {
-		a.add(Signal{
-			ID: "inactive_prs", Kind: SignalInactive, Tone: ToneHint, Source: SourceBitbucket, Weight: 1,
-			Facts: []Fact{plain("inactive_prs.count", "inactive", UnitCount, f64(n))},
-		})
-	}
 }
 
 // ---- Builds ----------------------------------------------------------------
 
 func (a *assessor) buildSignals() {
-	// Among the slowest and slower than the kind's median: with three repos
-	// in a kind, every one is among the top three.
-	top := func(k KindHotspots) []RepoHotspot {
-		var out []RepoHotspot
-		for _, h := range k.Slowest[:min(len(k.Slowest), SteadySlowTop)] {
-			if k.Duration.P50 != nil && *h.Duration.P50 > *k.Duration.P50+eps {
-				out = append(out, h)
-			}
-		}
-		return out
-	}
-	prevTop := map[string]map[string]bool{}
-	for _, k := range a.pm.Build.Hotspots.Kinds {
-		prevTop[k.Kind] = map[string]bool{}
-		for _, h := range top(k) {
-			prevTop[k.Kind][h.Repo] = true
-		}
-	}
 	for _, k := range a.m.Build.Hotspots.Kinds {
 		kind := k.Kind
-		steady := map[string]bool{}
-		for _, h := range top(k) {
-			steady[h.Repo] = prevTop[kind][h.Repo]
-		}
 		for _, h := range k.Repos {
 			// Slower than its own previous period: a change, not a habit.
-			// One also slow as a habit is the steady signal's, attention.
-			if h.Slow && !steady[h.Repo] {
+			if h.Slow {
 				id := "slower_build:" + kind + ":" + h.Repo
 				a.add(Signal{
 					ID: id, Kind: SignalSlower, Tone: ToneAttention, Source: SourcePipeline, Repo: ptr(h.Repo),
@@ -466,50 +640,21 @@ func (a *assessor) buildSignals() {
 					plain(id+".runs", "runs", UnitCount, f64(h.Runs))},
 			})
 		}
-		for _, h := range top(k) {
-			if !prevTop[kind][h.Repo] {
-				continue
-			}
-			id := "steady_slow:" + kind + ":" + h.Repo
-			tone, w := ToneHint, FocusMinWeight
-			if h.Slow {
-				tone, w = ToneAttention, FocusMinWeight+1
-			}
-			a.add(Signal{
-				ID: id, Kind: SignalSteadySlow, Tone: tone, Source: SourcePipeline, Repo: ptr(h.Repo),
-				RunKind: ptr(kind), Weight: w,
-				Facts: []Fact{fact(id+".p50", "build_p50", UnitSeconds, h.Duration.P50, h.DurationChange),
-					plain(id+".kind_p50", "kind_p50", UnitSeconds, k.Duration.P50),
-					plain(id+".wait", "build_wait_p50", UnitSeconds, h.Waiting.P50),
-					plain(id+".work", "build_work_p50", UnitSeconds, h.Building.P50)},
-			})
-		}
 	}
+	// Agents: a hint, the platform's capacity and not the team's builds.
 	for _, b := range a.m.Build.Kinds {
 		if b.Waiting.N < lowSample || b.Waiting.P50 == nil || b.Duration.P50 == nil || *b.Duration.P50 <= 0 {
 			continue
 		}
-		if *b.Waiting.P50 / *b.Duration.P50 + eps < AgentWaitShare {
+		if *b.Waiting.P50 / *b.Duration.P50 + eps < AgentWaitShare || *b.Waiting.P50+eps < AgentWaitMinS {
 			continue
 		}
 		id := "agent_wait:" + b.Kind
 		a.add(Signal{
-			ID: id, Kind: SignalAgentWait, Tone: ToneAttention, Source: SourcePipeline, RunKind: ptr(b.Kind),
+			ID: id, Kind: SignalAgentWait, Tone: ToneHint, Source: SourcePipeline, RunKind: ptr(b.Kind),
 			Weight: 2,
 			Facts: []Fact{plain(id+".wait", "build_wait_p50", UnitSeconds, b.Waiting.P50),
 				plain(id+".p50", "build_p50", UnitSeconds, b.Duration.P50)},
-		})
-	}
-	shared := 0
-	for _, g := range a.m.Build.Hotspots.OutlierGroups {
-		if g.Shared {
-			shared++
-		}
-	}
-	if shared > 0 {
-		a.add(Signal{
-			ID: "shared_stall", Kind: SignalSharedStall, Tone: ToneHint, Source: SourcePipeline, Weight: 1,
-			Facts: []Fact{plain("shared_stall.groups", "stall_groups", UnitCount, f64(shared))},
 		})
 	}
 }
@@ -521,6 +666,40 @@ type teamChange struct {
 	metric, label, unit, source string
 	value                       *float64
 	c                           Change
+}
+
+// teamMetrics are the team numbers' definitions, by metric, for a
+// resolution's judgement against its value before (build_success:<kind>
+// aside, in teamMetric).
+var teamMetrics = map[string]metricID{
+	"deploy_frequency": deployFreqMetric, "deploy_success": deploySuccessMetric, "lead_time": leadTimeMetric,
+	"review_time": reviewTimeMetric, "within_day": withinDayMetric, "open_jammed": openJammedMetric,
+	"merged_per_week": mergedPerWeekMetric, "batch_size": batchSizeMetric, "wip_weeks": wipWeeksMetric,
+}
+
+func teamMetric(name string) (metric, bool) {
+	if strings.HasPrefix(name, "build_success:") {
+		return buildSuccessMetric.def(), true
+	}
+	id, ok := teamMetrics[name]
+	return id.def(), ok
+}
+
+// bitbucketCounted are the team numbers read off Bitbucket's events: lost
+// events (lost) leave them uncompared. Lead time is Argo CD's: a commit
+// whose push was lost is missing from it, the others' times are right.
+var bitbucketCounted = map[string]bool{
+	"review_time": true, "within_day": true, "open_jammed": true, "merged_per_week": true, "batch_size": true,
+	"wip_weeks": true, "feature_share": true, "untracked": true, "open_prs": true, "first_touch": true,
+}
+
+// unlost is c, or no verdict for a number of Bitbucket's when its events
+// were lost (lost).
+func (a *assessor) unlost(metric string, c Change) Change {
+	if !a.lost || !bitbucketCounted[metric] {
+		return c
+	}
+	return Change{Verdict: ChangeNone, Reason: ptr(ReasonIncomplete), Directed: c.Directed}
 }
 
 func (a *assessor) teamChanges() []teamChange {
@@ -542,7 +721,7 @@ func (a *assessor) teamChanges() []teamChange {
 		}
 	}
 	bb := before(m.Meta.DataStart.Bitbucket, a.p.Previous.From)
-	// Flow numbers: throughput, work in progress against it, waiting.
+	// Flow numbers: throughput, work in progress against it.
 	merged, pmerged := a.m.Throughput.MergedPerWeek, a.pm.Throughput.MergedPerWeek
 	ok, pok := a.m.Review.Merged >= lowSample, a.pm.Review.Merged >= lowSample
 	out = append(out, teamChange{"merged_per_week", "merged_per_week", UnitPerWeek, SourceBitbucket, merged, c.MergedPerWeek})
@@ -550,10 +729,9 @@ func (a *assessor) teamChanges() []teamChange {
 	wip, pwip := wipWeeks(a.m, merged), wipWeeks(a.pm, pmerged)
 	out = append(out, teamChange{"wip_weeks", "wip_weeks", UnitWeeks, SourceBitbucket, wip,
 		wipWeeksMetric.judge(side{wip, ok}, side{pwip, pok}, bb)})
-	ws, wok := waitShare(a.m.LeadChain)
-	pws, pwok := waitShare(a.pm.LeadChain)
-	out = append(out, teamChange{"wait_share", "wait_share", UnitShare, SourceBitbucket, ws,
-		waitShareMetric.judge(side{ws, wok}, side{pws, pwok}, bb)})
+	for i := range out {
+		out[i].c = a.unlost(out[i].metric, out[i].c)
+	}
 	return out
 }
 
@@ -566,48 +744,18 @@ func wipWeeks(m Metrics, merged *float64) *float64 {
 	return ptr(float64(m.OpenPRs.Open) / *merged)
 }
 
-// waitShare is the part of the summed stage medians that is not coding:
-// waiting for review, merge and deploys. Nil when the chain does not reach
-// production: without the production wait it would be a part of the time
-// to merge.
-func waitShare(c Chain) (*float64, bool) {
-	for _, s := range c.Stages {
-		if s.Key == StageCoding && s.Share != nil {
-			return ptr(1 - *s.Share), !s.LowSample
-		}
-	}
-	return nil, false
-}
-
-// changeSignals are the moves of the directed team numbers: every better
-// one past the tolerance, as what runs needs evidence and a small gain is
-// one; a worse one only when notable, or the stuck side fills with noise
-// (user, 2026-11-18). The worse ones carry the repos that drive them where
-// riptide can tell.
+// changeSignals are the notable moves of the directed team numbers, better
+// and worse alike (owner, 2026-11: a gain counts from where a worsening
+// does, 25 % or 5 points; a small one was noise read as success). The worse
+// ones carry the repos that drive them where riptide can tell.
 func (a *assessor) changeSignals() {
-	a.held = map[string]bool{}
-	m := a.m
-	cf, ds := m.Comparison.DeployFreq, m.Comparison.DeploySuccess
-	tradeoff := (cf.Verdict == ChangeBetter && ds.Verdict == ChangeWorse) ||
-		(cf.Verdict == ChangeWorse && ds.Verdict == ChangeBetter)
 	for _, t := range a.team {
 		c := t.c
-		if c.Magnitude == nil || !c.Directed {
-			continue
-		}
-		good := c.Verdict == ChangeBetter && *c.Magnitude != MagnitudeSame
-		bad := c.Verdict == ChangeWorse && *c.Magnitude == MagnitudeNotable
-		if !good && !bad {
+		if c.Magnitude == nil || !c.Directed || *c.Magnitude != MagnitudeNotable ||
+			(c.Verdict != ChangeBetter && c.Verdict != ChangeWorse) {
 			continue
 		}
 		id := "change:" + t.metric
-		// The better half of a throughput / instability pair is no progress
-		// (the trade-off's own claim): never a good card beside it, and no
-		// resolution of its earlier worsening either.
-		if good && tradeoff && (t.metric == "deploy_frequency" || t.metric == "deploy_success") {
-			a.held[id] = true
-			continue
-		}
 		s := Signal{
 			ID: id, Kind: SignalChange, Tone: ToneGood, Source: t.source, Metric: ptr(t.metric), Weight: 2,
 			Facts: []Fact{fact(id+".value", t.label, t.unit, t.value, c)},
@@ -616,7 +764,7 @@ func (a *assessor) changeSignals() {
 			s.RunKind = ptr(kind)
 		}
 		s.Series = a.series(t.metric)
-		if bad {
+		if c.Verdict == ChangeWorse {
 			s.Tone = ToneAttention
 			if t.metric == "review_time" {
 				s.Drivers = a.reviewDrivers()
@@ -625,13 +773,6 @@ func (a *assessor) changeSignals() {
 			s.score = math.Abs(*c.Score)
 		}
 		a.add(s)
-	}
-	if tradeoff {
-		a.add(Signal{
-			ID: "throughput_instability", Kind: SignalTradeoff, Tone: ToneHint, Source: SourceArgoCD, Weight: 2,
-			Facts: []Fact{fact("throughput_instability.freq", "deploy_per_week", UnitPerWeek, ptr(m.Delivery.Frequency.PerWeek), cf),
-				fact("throughput_instability.success", "deploy_success", UnitShare, m.Delivery.Frequency.SuccessRate, ds)},
-		})
 	}
 }
 
@@ -713,70 +854,29 @@ func (a *assessor) reviewByRepo(ds *dataset.Dataset, p Period) map[string][]floa
 	return out
 }
 
-// ---- Flow and deploys ------------------------------------------------------
+// ---- Resolved --------------------------------------------------------------
 
-func hotStage(c Chain) *Stage {
-	for i := range c.Stages {
-		if c.Stages[i].Hot {
-			return &c.Stages[i]
-		}
-	}
-	return nil
+// resolvable are the kinds a resolution can follow: a problem with a
+// number that can come back.
+var resolvable = []string{SignalPRJam, SignalFailingMore, SignalSlower, SignalChange}
+
+// backAt reports whether v is back at before or better: no worse than it
+// beyond the tolerance, in the number's own direction.
+func backAt(m metric, v, before *float64) bool {
+	return v != nil && before != nil && m.d != undirected && changeVerdict(*v, *before, m.d, m.s) != ChangeWorse
 }
 
-// flowSignals: the stage that takes longest, attention past StageAttention
-// of the time to production on enough PRs (some stage always takes
-// longest, so below that a hint); and another one than before.
-func (a *assessor) flowSignals() {
-	cur, prev := hotStage(a.m.LeadChain), hotStage(a.pm.LeadChain)
-	if cur != nil && cur.Share != nil {
-		tone, w := ToneHint, 1
-		if *cur.Share+eps >= StageAttention && !cur.LowSample {
-			tone, w = ToneAttention, 3
-		}
-		a.add(Signal{
-			ID: "slow_stage:" + cur.Key, Kind: SignalStage, Tone: tone, Source: SourceBitbucket, Weight: w,
-			Stage: ptr(cur.Key), LowSample: cur.LowSample, Sample: ptr(cur.N),
-			Facts: []Fact{plain("slow_stage.share", "stage_share", UnitShare, cur.Share),
-				plain("slow_stage.p50", "stage_p50", UnitSeconds, cur.P50),
-				plain("slow_stage.p90", "stage_p90", UnitSeconds, cur.P90)},
-		})
-	}
-	if cur == nil || prev == nil || cur.LowSample || prev.LowSample || cur.Key == prev.Key {
-		return
-	}
-	a.add(Signal{
-		ID: "bottleneck_moved", Kind: SignalBottleneck, Tone: ToneHint, Source: SourceBitbucket, Weight: 2,
-		Stage: ptr(cur.Key), PrevStage: ptr(prev.Key),
-		Facts: []Fact{plain("bottleneck_moved.share", "stage_share", UnitShare, cur.Share),
-			plain("bottleneck_moved.p50", "stage_p50", UnitSeconds, cur.P50)},
-	})
-}
-
-// deploySignals: syncs that ship nothing.
-func (a *assessor) deploySignals() {
-	f := a.m.Delivery.Frequency
-	if f.Syncs < lowSample {
-		return
-	}
-	share := ratio(f.Resyncs, f.Syncs)
-	if share == nil || *share+eps < ResyncShare {
-		return
-	}
-	a.add(Signal{
-		ID: "resync_share", Kind: SignalResync, Tone: ToneHint, Source: SourceArgoCD, Weight: 1,
-		Facts: []Fact{plain("resync_share.share", "resync_share", UnitShare, share),
-			plain("resync_share.syncs", "syncs", UnitCount, f64(f.Syncs))},
-	})
-}
-
-// resolvedSignals: what the latest assessment of the window raised as a
-// problem and is gone now, with today's number where there is one.
+// resolvedSignals: a problem an earlier assessment of the window raised,
+// not resolved since, whose number is back now: at or better than before
+// it was raised (Problem.Before), not merely no worse than a previous
+// period that drifted to the bad level; a jam clearly below the jam
+// (JamResolvedMax). Today's number must be judged against the previous
+// period too, and no worse there. A resolution names no step (owner: no
+// recommendation without a finding behind it).
 func (a *assessor) resolvedSignals() {
 	// A worsening that turned into a gain is resolved, told once: as the
 	// resolution, not as a good change beside it.
 	now, gains := map[string]bool{}, map[string]bool{}
-	maps.Copy(now, a.held)
 	for _, s := range a.out {
 		if s.Tone == ToneGood {
 			gains[s.ID] = true
@@ -785,30 +885,22 @@ func (a *assessor) resolvedSignals() {
 		}
 	}
 	resolved := map[string]bool{}
-	for _, id := range slices.Sorted(maps.Keys(a.h.Latest)) {
+	for _, id := range slices.Sorted(maps.Keys(a.h.Open)) {
+		pb := a.h.Open[id]
 		kind, rest, _ := strings.Cut(id, ":")
-		if now[id] || !slices.Contains([]string{SignalPRJam, SignalFailingMore, SignalSteadySlow, SignalSlower, SignalChange}, kind) {
-			continue
-		}
-		// Slower and steady slow are one problem under two names: a repo
-		// that got slower and stays slow moves from one to the other, and is
-		// not resolved.
-		if (kind == SignalSlower && now[SignalSteadySlow+":"+rest]) || (kind == SignalSteadySlow && now[SignalSlower+":"+rest]) {
+		if now[id] || !slices.Contains(resolvable, kind) {
 			continue
 		}
 		s := Signal{ID: "resolved:" + id, Kind: SignalResolved, Tone: ToneGood, Weight: 2, Metric: ptr(id)}
 		switch kind {
 		case SignalPRJam:
+			long := a.jamHeld(rest)
+			if long > JamResolvedMax {
+				continue
+			}
 			s.Source, s.Repo = SourceBitbucket, ptr(rest)
-			for _, r := range a.m.OpenPRs.all {
-				if r.Repo == rest {
-					s.Facts = []Fact{plain(s.ID+".long", "open_long", UnitCount, f64(r.Long))}
-				}
-			}
-			if s.Facts == nil {
-				s.Facts = []Fact{plain(s.ID+".long", "open_long", UnitCount, ptr(0.0))}
-			}
-		case SignalFailingMore, SignalSteadySlow, SignalSlower:
+			s.Facts = []Fact{plain(s.ID+".long", "open_long", UnitCount, f64(long))}
+		case SignalFailingMore, SignalSlower:
 			runKind, repo, _ := strings.Cut(rest, ":")
 			s.Source, s.Repo, s.RunKind = SourcePipeline, ptr(repo), ptr(runKind)
 			for _, k := range a.m.Build.Hotspots.Kinds {
@@ -819,14 +911,14 @@ func (a *assessor) resolvedSignals() {
 					if h.Repo != repo {
 						continue
 					}
-					// Resolved only on a number judged and no worse than
-					// before: a low sample or a repo still worse is not done,
-					// nor a steady slow build with too few runs to rank.
-					f := fact(s.ID+".p50", "build_p50", UnitSeconds, h.Duration.P50, h.DurationChange)
+					// Judged (enough builds in both periods), no worse than
+					// the previous period, and back where it was.
+					f, def := fact(s.ID+".p50", "build_p50", UnitSeconds, h.Duration.P50, h.DurationChange), repoDurationMetric
 					if kind == SignalFailingMore {
 						f = fact(s.ID+".failure_rate", "failure_rate", UnitShare, h.FailureRate, h.FailureChange)
+						def = repoFailureMetric
 					}
-					if f.Prev == nil || f.Verdict == ChangeWorse || kind == SignalSteadySlow && h.Duration.N < SlowestMinRuns {
+					if f.Prev == nil || f.Verdict == ChangeWorse || !backAt(def.def(), f.Value, pb.Before) {
 						continue
 					}
 					s.Facts = []Fact{f}
@@ -835,18 +927,19 @@ func (a *assessor) resolvedSignals() {
 		case SignalChange:
 			// Only a worsening is a problem to resolve; a gone improvement is
 			// no news.
-			if a.h.Latest[id] != ToneAttention {
+			if pb.Tone != ToneAttention {
 				continue
 			}
-			// A number gone unknown (no PR reached production: no wait
-			// share) is no resolution: say nothing. Nor is one still worse,
-			// only no longer notably: it is not done.
+			def, ok := teamMetric(rest)
 			for _, t := range a.team {
-				if t.metric == rest && t.value != nil && t.c.Verdict != ChangeWorse {
-					s.Source = t.source
-					s.Facts = []Fact{fact(s.ID+".value", t.label, t.unit, t.value, t.c)}
-					s.Series = a.series(rest)
+				// A number gone unknown, or not judged against the previous
+				// period, resolves nothing; nor one still worse than that.
+				if !ok || t.metric != rest || t.c.Prev == nil || t.c.Verdict == ChangeWorse || !backAt(def, t.value, pb.Before) {
+					continue
 				}
+				s.Source = t.source
+				s.Facts = []Fact{fact(s.ID+".value", t.label, t.unit, t.value, t.c)}
+				s.Series = a.series(rest)
 			}
 		}
 		if s.Facts != nil && !a.gaps[s.Source] {
@@ -857,10 +950,25 @@ func (a *assessor) resolvedSignals() {
 	a.out = slices.DeleteFunc(a.out, func(s Signal) bool { return gains[s.ID] && resolved[s.ID] })
 }
 
+// jamHeld is the repo's open PRs still holding its jam at the period's
+// end: the long-open ones, and those every open number leaves out since,
+// unknown (last heard of before Bitbucket's events were lost) or inactive
+// for OpenInactiveDays. A jam whose PRs only fell silent is not resolved.
+func (a *assessor) jamHeld(repo string) int {
+	at, n := a.m.OpenPRs.At, 0
+	for _, pr := range openPRs(a.ds, a.f) {
+		if pr.Repo == repo && !pr.Draft && (pr.Unknown || openInactive(pr, at) || openLong(pr, at)) {
+			n++
+		}
+	}
+	return n
+}
+
 // ---- Question --------------------------------------------------------------
 
 // question is the first undirected number in a fixed order that moved
-// notably; else the approvals without a comment, the page's fixed one.
+// notably; none when none did. No fixed question beside it: a question
+// judged against nothing is no finding (owner, 2026-11).
 func (a *assessor) question() *Signal {
 	m, c := a.m, a.m.Comparison
 	feature, pfeature := m.Review.MixShare.Feature, a.pm.Review.MixShare.Feature
@@ -871,7 +979,8 @@ func (a *assessor) question() *Signal {
 	bb := before(m.Meta.DataStart.Bitbucket, a.p.Previous.From)
 	cands := []teamChange{
 		{"feature_share", "feature_share", UnitShare, SourceBitbucket, feature,
-			featureShareMetric.judge(side{feature, mixN(m) >= lowSample}, side{pfeature, mixN(a.pm) >= lowSample}, bb)},
+			caseGate(featureShareMetric.judge(side{feature, mixN(m) >= lowSample}, side{pfeature, mixN(a.pm) >= lowSample}, bb),
+				feature, pfeature, mixN(m), mixN(a.pm))},
 		{"untracked", "untracked", UnitShare, SourceBitbucket, m.Review.UntrackedRate, c.Untracked},
 		{"wasted_share", "wasted_share", UnitShare, SourceNoergler, m.Costs.WastedShare, c.WastedShare},
 		{"cost_per_kloc", "cost_per_kloc", UnitUSD, SourceNoergler, m.Costs.PerKloc, c.CostPerKloc},
@@ -879,13 +988,11 @@ func (a *assessor) question() *Signal {
 		{"first_touch", "first_touch", UnitShare, SourceBitbucket, m.Review.FirstTouchRate, c.FirstTouch},
 	}
 	for _, t := range cands {
+		t.c = a.unlost(t.metric, t.c)
 		if a.gaps[t.source] || t.c.Magnitude == nil || *t.c.Magnitude != MagnitudeNotable {
 			continue
 		}
 		return a.questionOf(t)
-	}
-	if m.Review.Approved > 0 && !a.gaps[SourceBitbucket] {
-		return a.questionOf(cands[len(cands)-1])
 	}
 	return nil
 }
@@ -902,9 +1009,8 @@ func (a *assessor) questionOf(t teamChange) *Signal {
 
 // focus ranks the repos by the weight of their signals, a driver of a
 // notable worsening counting as an attention signal; candidates need
-// FocusMinWeight. Active counts the repos with any activity, Calm those
-// of them without a signal.
-func (a *assessor) focus() (out []FocusRepo, active, calm int) {
+// FocusMinWeight. It counts out's repos: active, calm, unjudged, idle.
+func (a *assessor) focus(out *Assessment) []FocusRepo {
 	by := map[string]*FocusRepo{}
 	get := func(repo string) *FocusRepo {
 		if by[repo] == nil {
@@ -939,41 +1045,73 @@ func (a *assessor) focus() (out []FocusRepo, active, calm int) {
 			}
 		}
 	}
+	var focus []FocusRepo
 	for _, r := range by {
 		if r.Weight >= FocusMinWeight {
-			out = append(out, *r)
+			focus = append(focus, *r)
 		}
 	}
-	slices.SortFunc(out, func(x, y FocusRepo) int { return cmp.Or(cmp.Compare(y.Weight, x.Weight), cmp.Compare(x.Repo, y.Repo)) })
-	out = out[:min(len(out), FocusCandidates)]
-	if out == nil {
-		out = []FocusRepo{}
+	slices.SortFunc(focus, func(x, y FocusRepo) int { return cmp.Or(cmp.Compare(y.Weight, x.Weight), cmp.Compare(x.Repo, y.Repo)) })
+	focus = focus[:min(len(focus), FocusCandidates)]
+	if focus == nil {
+		focus = []FocusRepo{}
 	}
-	act := a.activeRepos()
-	active = len(act)
+	act, merged := activeRepos(a.ds, a.p.Period, a.m, a.f)
+	pact, pmerged := activeRepos(a.prev, a.p.Previous, a.pm, a.f)
+	out.Active = len(act)
 	for repo := range act {
-		if by[repo] == nil {
-			calm++
+		switch {
+		case by[repo] != nil:
+		case a.judgeable(repo, merged[repo], pmerged[repo]):
+			out.Calm++
+		default:
+			out.Unjudged++
 		}
 	}
-	return out, active, calm
+	for repo := range pact {
+		if !act[repo] {
+			out.Idle++
+		}
+	}
+	out.Repos = out.Active + out.Idle
+	return focus
 }
 
-// activeRepos are the repos with a merged PR, a run or an open PR in the
-// period, in the product. An open PR inactive for OpenInactiveDays makes no
-// repo active: it counts in no number but its own.
-func (a *assessor) activeRepos() map[string]bool {
-	out := map[string]bool{}
-	for _, pr := range mergedPRs(a.ds, a.p.Period, a.f) {
-		out[pr.Repo] = true
+// judgeable reports whether a repo rule had the data to raise something
+// on repo: a build kind of it compared with the previous period (the
+// hotspots' HotspotMinRuns in both), OpenJamMin open PRs or more at the
+// period's end (a jam could be there), or lowSample merged PRs in both
+// periods (a review worsening could name it a driver). A repo with less is
+// no repo without a finding, only one riptide cannot judge.
+func (a *assessor) judgeable(repo string, merged, pmerged int) bool {
+	for _, k := range a.m.Build.Hotspots.Kinds {
+		if slices.ContainsFunc(k.all, func(h RepoHotspot) bool { return h.Repo == repo && h.Compared }) {
+			return true
+		}
 	}
-	for _, r := range a.m.OpenPRs.all {
+	if slices.ContainsFunc(a.m.OpenPRs.all, func(r OpenRepo) bool { return r.Repo == repo && r.Open >= OpenJamMin }) {
+		return true
+	}
+	return merged >= lowSample && pmerged >= lowSample
+}
+
+// activeRepos are the repos with a merged PR, a build or an open PR in
+// the period, in the product, and each one's merged PRs. An open PR
+// inactive for OpenInactiveDays makes no repo active: it counts in no
+// number but its own.
+func activeRepos(ds *dataset.Dataset, p Period, m Metrics, f filter) (map[string]bool, map[string]int) {
+	out, merged := map[string]bool{}, map[string]int{}
+	for _, pr := range mergedPRs(ds, p, f) {
+		out[pr.Repo] = true
+		merged[pr.Repo]++
+	}
+	for _, r := range m.OpenPRs.all {
 		out[r.Repo] = true
 	}
-	for _, repos := range a.m.Build.repos {
+	for _, repos := range m.Build.repos {
 		for repo := range repos {
 			out[repo] = true
 		}
 	}
-	return out
+	return out, merged
 }

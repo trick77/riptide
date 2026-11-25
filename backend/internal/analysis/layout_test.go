@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"encoding/json"
 	"slices"
 	"testing"
 
@@ -94,6 +95,43 @@ func TestLayoutSlots(t *testing.T) {
 		Team: []metrics.Fact{{Verdict: metrics.ChangeNone}}}
 	if l := layout(old, &Text{Cards: []CardText{{Signal: "b1"}}}); l.Tally != (Tally{Bad: 1}) || len(l.Cards) != 1 {
 		t.Errorf("old row = %+v", l)
+	}
+}
+
+// The question counts in the tally: a number that moved notably stands
+// out. Without one, nothing is counted for it.
+func TestTallyCountsTheQuestion(t *testing.T) {
+	a := metrics.Assessment{Signals: []metrics.Signal{sig("b1", metrics.ToneAttention)},
+		Question: &metrics.Signal{ID: "question:open_prs", Kind: metrics.SignalQuestion, Tone: metrics.ToneTalk}}
+	if got := tally(a); got != (Tally{Bad: 1, Talk: 1}) {
+		t.Errorf("tally = %+v", got)
+	}
+	a.Question = nil
+	if got := tally(a); got != (Tally{Bad: 1}) {
+		t.Errorf("tally without a question = %+v", got)
+	}
+}
+
+// A resolution carries no step: worded with one, the card is dropped;
+// without, it stays. Rule-based, it has no lever either.
+func TestResolvedWithoutLever(t *testing.T) {
+	res := sig("resolved:change:lead_time", "done")
+	a := metrics.Assessment{Signals: []metrics.Signal{res}}
+	if l := layout(a, nil); len(l.Cards) != 1 || l.Cards[0].Lever != "" {
+		t.Errorf("rule card = %+v", l.Cards)
+	}
+	al := newAliases(a)
+	answer := func(lever string) string {
+		text := Text{Headline: "Die Lead Time ist zurück.", Focus: []FocusText{},
+			Cards: []CardText{{Signal: res.ID, Take: "Wieder wie vorher.", Lever: lever}}}
+		b, _ := json.Marshal(Output{DE: text, EN: text})
+		return string(b)
+	}
+	if out, _, err := validate(answer(""), a, al); err != nil || len(out.DE.Cards) != 1 {
+		t.Errorf("without a lever: %+v, %v", out.DE.Cards, err)
+	}
+	if out, rep, err := validate(answer(LeverNameWhatHelped), a, al); err != nil || len(out.DE.Cards) != 0 || len(rep.Dropped) == 0 {
+		t.Errorf("with a lever: %+v, dropped %v, %v", out.DE.Cards, rep.Dropped, err)
 	}
 }
 
