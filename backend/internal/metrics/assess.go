@@ -543,10 +543,10 @@ func (a *assessor) teamChanges() []teamChange {
 	}
 	bb := before(m.Meta.DataStart.Bitbucket, a.p.Previous.From)
 	// Flow numbers: throughput, work in progress against it, waiting.
-	merged, pmerged := a.mergedPerWeek(a.m), a.mergedPerWeek(a.pm)
+	merged, pmerged := a.m.Throughput.MergedPerWeek, a.pm.Throughput.MergedPerWeek
 	ok, pok := a.m.Review.Merged >= lowSample, a.pm.Review.Merged >= lowSample
-	out = append(out, teamChange{"merged_per_week", "merged_per_week", UnitPerWeek, SourceBitbucket, merged,
-		mergedPerWeekMetric.judge(side{merged, ok}, side{pmerged, pok}, bb)})
+	out = append(out, teamChange{"merged_per_week", "merged_per_week", UnitPerWeek, SourceBitbucket, merged, c.MergedPerWeek})
+	out = append(out, teamChange{"batch_size", "batch_size", UnitCount, SourceNoergler, m.Throughput.BatchSize.P50, c.BatchSize})
 	wip, pwip := wipWeeks(a.m, merged), wipWeeks(a.pm, pmerged)
 	out = append(out, teamChange{"wip_weeks", "wip_weeks", UnitWeeks, SourceBitbucket, wip,
 		wipWeeksMetric.judge(side{wip, ok}, side{pwip, pok}, bb)})
@@ -555,15 +555,6 @@ func (a *assessor) teamChanges() []teamChange {
 	out = append(out, teamChange{"wait_share", "wait_share", UnitShare, SourceBitbucket, ws,
 		waitShareMetric.judge(side{ws, wok}, side{pws, pwok}, bb)})
 	return out
-}
-
-// mergedPerWeek counts every merged PR, also one whose opening riptide never
-// heard of: that one is missing from the opened-to-merged numbers.
-func (a *assessor) mergedPerWeek(m Metrics) *float64 {
-	if m.Period.Span <= 0 {
-		return nil
-	}
-	return ptr(float64(m.Review.Merged) / m.Period.Span)
 }
 
 // wipWeeks is the open PRs at the period's end over the PRs merged per

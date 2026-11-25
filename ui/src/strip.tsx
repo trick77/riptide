@@ -80,6 +80,26 @@ function rows(t: TFunction, m: Metrics): Row[] {
       format: pct,
     },
     {
+      key: "merged_per_week",
+      label: t("throughput.merged.label"),
+      change: c.merged_per_week,
+      now:
+        m.throughput.merged_per_week == null
+          ? "–"
+          : num(m.throughput.merged_per_week, 1),
+      format: (v) => num(v, 1),
+    },
+    {
+      key: "batch_size",
+      label: t("throughput.batch.label"),
+      change: c.batch_size,
+      now:
+        m.throughput.batch_size.p50 == null
+          ? "–"
+          : num(m.throughput.batch_size.p50),
+      format: (v) => num(v),
+    },
+    {
       key: "open_jammed",
       label: t("open.jammed.label"),
       change: c.open_jammed,

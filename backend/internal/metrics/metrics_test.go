@@ -395,6 +395,62 @@ func TestPRs(t *testing.T) {
 	}
 }
 
+// Throughput and batch size count the people's merged PRs only: a bot's PR
+// and a stage promotion are in neither, however large. A PR without a
+// rollup, or with one that counted no line, is merged but has no size.
+func TestThroughput(t *testing.T) {
+	p := p4()
+	size := func(id int64, days float64, added, removed, files int64) func(*dataset.PR) {
+		return func(pr *dataset.PR) {
+			pr.PRID, pr.MergedAt = id, agoP(days)
+			pr.LinesAdded, pr.LinesRemoved, pr.FilesChanged = n(added), n(removed), n(files)
+		}
+	}
+	ds := data(func(ds *dataset.Dataset) {
+		ds.PRs = []dataset.PR{
+			pr(size(1, 1.8, 10, 2, 3)),
+			pr(size(2, 1.8, 4000, 1000, 90), func(pr *dataset.PR) { pr.Bot = true }),
+			pr(size(3, 1.8, 4000, 1000, 90), func(pr *dataset.PR) { pr.GitOps = true }),
+			pr(size(6, 9, 100, 50, 7)),
+			pr(func(pr *dataset.PR) { pr.PRID, pr.MergedAt = 7, agoP(9) }),
+			pr(size(8, 9, 0, 0, 0)),
+			pr(size(9, 9, 30, 0, 1)),
+		}
+	})
+	th := throughput(mergedPRs(ds, p, filter{}), p)
+	if th.Merged != 5 || th.BatchSize.N != 3 || th.BatchFiles.N != 3 {
+		t.Fatalf("throughput = %+v", th)
+	}
+	// The test period's last week still runs: per week of what has run.
+	expectNear(t, "merged per week", th.MergedPerWeek, 5/p.Span)
+	expectNear(t, "batch p50", th.BatchSize.P50, 30)
+	expectNear(t, "batch p90", th.BatchSize.P90, 126)
+	expectNear(t, "files p50", th.BatchFiles.P50, 3)
+	if w := th.Weeks[3]; w.Merged != 1 || w.Sized != 1 {
+		t.Errorf("last week = %+v", w)
+	}
+	expectNear(t, "last week p50", th.Weeks[3].BatchP50, 12)
+	if w := th.Weeks[2]; w.Merged != 4 || w.Sized != 2 {
+		t.Errorf("week before = %+v", w)
+	}
+	expectNear(t, "week before p50", th.Weeks[2].BatchP50, 90)
+	if w := th.Weeks[0]; w.Merged != 0 || w.BatchP50 != nil {
+		t.Errorf("empty week = %+v", w)
+	}
+
+	// Smaller batches are the better direction, more merged PRs too.
+	ok := func(v float64) side { return side{ptr(v), true} }
+	if c := batchSizeMetric.judge(ok(80), ok(200), false); c.Verdict != ChangeBetter {
+		t.Errorf("smaller batch = %+v", c)
+	}
+	if c := batchSizeMetric.judge(ok(200), ok(80), false); c.Verdict != ChangeWorse {
+		t.Errorf("larger batch = %+v", c)
+	}
+	if c := mergedPerWeekMetric.judge(ok(12), ok(8), false); c.Verdict != ChangeBetter {
+		t.Errorf("more merged = %+v", c)
+	}
+}
+
 func stage(c Chain, key string) Stage {
 	for _, s := range c.Stages {
 		if s.Key == key {

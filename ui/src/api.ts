@@ -418,11 +418,23 @@ export type Comparison = {
   within_day: Change;
   first_touch: Change;
   untracked: Change;
+  merged_per_week: Change;
+  batch_size: Change;
   cost_per_kloc: Change;
   wasted_share: Change;
   build: KindChange[];
   open_prs: Change;
   open_jammed: Change;
+};
+
+// The people's merged PRs per week and their size (changed lines, added
+// plus removed); stage promotions and bots are in neither.
+export type Throughput = {
+  merged: number;
+  merged_per_week: number | null;
+  batch_size: Spread;
+  batch_files: Spread;
+  weeks: { merged: number; sized: number; batch_p50: number | null }[];
 };
 
 export type Metrics = {
@@ -433,6 +445,7 @@ export type Metrics = {
   delivery: Delivery;
   lead_chain: LeadChain;
   review: Review;
+  throughput: Throughput;
   open_prs: OpenPRs;
   build: Build;
   costs: Costs;

@@ -942,8 +942,8 @@ components:
     Metrics:
       type: object
       additionalProperties: false
-      required: [meta, period, products, product, delivery, lead_chain, review, open_prs, build, costs,
-                 comparison, running_week]
+      required: [meta, period, products, product, delivery, lead_chain, review, throughput, open_prs, build,
+                 costs, comparison, running_week]
       properties:
         running_week: { $ref: "#/components/schemas/RunningWeek" }
         meta: { $ref: "#/components/schemas/Meta" }
@@ -957,6 +957,7 @@ components:
         delivery: { $ref: "#/components/schemas/Delivery" }
         lead_chain: { $ref: "#/components/schemas/LeadChain" }
         review: { $ref: "#/components/schemas/Review" }
+        throughput: { $ref: "#/components/schemas/Throughput" }
         open_prs: { $ref: "#/components/schemas/OpenPRs" }
         build: { $ref: "#/components/schemas/Build" }
         costs: { $ref: "#/components/schemas/Costs" }
@@ -1042,7 +1043,8 @@ components:
       description: The page's numbers against the same number of whole weeks right before the period.
       additionalProperties: false
       required: [from, to, last_day, deploy_frequency, deploy_success, lead_time, lead_time_pre, review_time,
-                 within_day, first_touch, untracked, cost_per_kloc, wasted_share, build, open_prs, open_jammed]
+                 within_day, first_touch, untracked, merged_per_week, batch_size, cost_per_kloc, wasted_share,
+                 build, open_prs, open_jammed]
       properties:
         from: { $ref: "#/components/schemas/Instant" }
         to: { $ref: "#/components/schemas/Instant" }
@@ -1058,6 +1060,8 @@ components:
         within_day: { $ref: "#/components/schemas/Change" }
         first_touch: { $ref: "#/components/schemas/Change" }
         untracked: { $ref: "#/components/schemas/Change" }
+        merged_per_week: { $ref: "#/components/schemas/Change" }
+        batch_size: { $ref: "#/components/schemas/Change" }
         cost_per_kloc: { $ref: "#/components/schemas/Change" }
         wasted_share: { $ref: "#/components/schemas/Change" }
         build:
@@ -1428,6 +1432,40 @@ components:
         bugfix: { type: integer }
         hotfix: { type: integer }
         other: { type: integer }
+
+    Throughput:
+      type: object
+      description: >-
+        How much the team finishes and in what portions: the people's merged PRs per week and their
+        size. Stage promotions (GitOps repos) and bots' PRs are in neither.
+      additionalProperties: false
+      required: [merged, merged_per_week, batch_size, batch_files, weeks]
+      properties:
+        merged: { type: integer, description: "Merged PRs, people's only." }
+        merged_per_week:
+          allOf: [{ $ref: "#/components/schemas/NullableNumber" }]
+          description: Merged PRs per week over the period.
+        batch_size:
+          allOf: [{ $ref: "#/components/schemas/Spread" }]
+          description: >-
+            Changed lines per merged PR, added plus removed, as the AI reviewer's final rollup counts
+            the PR's diff (reviewed files only). Over the PRs with a size.
+        batch_files:
+          allOf: [{ $ref: "#/components/schemas/Spread" }]
+          description: Changed files per merged PR, over the same PRs.
+        weeks:
+          type: array
+          description: Both per week of the period.
+          items:
+            type: object
+            additionalProperties: false
+            required: [merged, sized, batch_p50]
+            properties:
+              merged: { type: integer }
+              sized: { type: integer, description: "Of those, with a size." }
+              batch_p50:
+                allOf: [{ $ref: "#/components/schemas/NullableNumber" }]
+                description: Median changed lines of the week's PRs with a size.
 
     Build:
       type: object

@@ -64,9 +64,11 @@ type Metrics struct {
 	Delivery  Delivery `json:"delivery"`
 	LeadChain Chain    `json:"lead_chain"`
 	Review    Review   `json:"review"`
-	OpenPRs   OpenPRs  `json:"open_prs"`
-	Build     Build    `json:"build"`
-	Costs     Costs    `json:"costs"`
+	// Throughput is the merged PRs per week and their size.
+	Throughput Throughput `json:"throughput"`
+	OpenPRs    OpenPRs    `json:"open_prs"`
+	Build      Build      `json:"build"`
+	Costs      Costs      `json:"costs"`
 	// Comparison is the numbers against the previous period.
 	Comparison Comparison `json:"comparison"`
 	// RunningWeek is the week running now, counted in no number above.
@@ -150,15 +152,16 @@ func compute(ds *dataset.Dataset, period Period, f filter, base *baseline) Metri
 	humans := mergedPRs(ds, period, f)
 	ch := chain(ds, humans)
 	m := Metrics{
-		Meta:      ds.Meta,
-		Period:    period,
-		Products:  ds.Products,
-		Delivery:  delivery(ds, period, f, ch),
-		LeadChain: leadChain(ch),
-		Review:    review(humans, period, ch),
-		OpenPRs:   openSection(ds, f),
-		Build:     build(ds, period, f, base),
-		Costs:     costs(ds, f),
+		Meta:       ds.Meta,
+		Period:     period,
+		Products:   ds.Products,
+		Delivery:   delivery(ds, period, f, ch),
+		LeadChain:  leadChain(ch),
+		Review:     review(humans, period, ch),
+		Throughput: throughput(humans, period),
+		OpenPRs:    openSection(ds, f),
+		Build:      build(ds, period, f, base),
+		Costs:      costs(ds, f),
 	}
 	if f.product != "" {
 		m.Product = ptr(f.product)
@@ -877,6 +880,87 @@ func review(humans []dataset.PR, p Period, ch rawChain) Review {
 			Hotfix: ratio(total.Hotfix, all), Other: ratio(total.Other, all),
 		},
 	}
+}
+
+// ---- Throughput ------------------------------------------------------------
+
+// Throughput is how much the team finishes and in what portions: the
+// people's merged PRs (mergedPRs) per week and their size. Flow velocity
+// and batch size; stage promotions and bots are in neither.
+type Throughput struct {
+	// Merged are the people's merged PRs, as Review.Merged.
+	Merged int `json:"merged"`
+	// MergedPerWeek is Merged over the period's weeks; null without any.
+	MergedPerWeek *float64 `json:"merged_per_week"`
+	// BatchSize is the changed lines per merged PR, added plus removed, over
+	// the PRs with a size (dataset.PR.LinesAdded): the median, not the mean,
+	// which one large PR decides.
+	BatchSize Spread `json:"batch_size"`
+	// BatchFiles is the changed files per PR, over the same PRs.
+	BatchFiles Spread `json:"batch_files"`
+	// Weeks are both per week: a week of few PRs swings, so each carries
+	// its counts.
+	Weeks []ThroughputWeek `json:"weeks"`
+}
+
+// ThroughputWeek is one week's merged PRs and their size.
+type ThroughputWeek struct {
+	Merged int `json:"merged"`
+	// Sized are the week's PRs with a size, BatchP50 their median changed
+	// lines; null without one.
+	Sized    int      `json:"sized"`
+	BatchP50 *float64 `json:"batch_p50"`
+}
+
+// prSize is a merged PR's changed lines and files as noergler's final
+// rollup counts them. No size without a rollup, and none for one without a
+// line: a close whose diff noergler could not fetch reports 0, which is no
+// empty PR.
+func prSize(pr dataset.PR) (lines, files float64, ok bool) {
+	if pr.LinesAdded == nil || pr.LinesRemoved == nil {
+		return 0, 0, false
+	}
+	n := *pr.LinesAdded + *pr.LinesRemoved
+	if n <= 0 {
+		return 0, 0, false
+	}
+	if pr.FilesChanged != nil {
+		files = float64(*pr.FilesChanged)
+	}
+	return float64(n), files, true
+}
+
+// throughput is the section over the human PRs merged in the period, from
+// mergedPRs.
+func throughput(humans []dataset.PR, p Period) Throughput {
+	out := Throughput{Merged: len(humans), Weeks: make([]ThroughputWeek, len(p.Weeks))}
+	if p.Span > 0 {
+		out.MergedPerWeek = ptr(float64(len(humans)) / p.Span)
+	}
+	var lines, files []float64
+	weekly := make([][]float64, len(p.Weeks))
+	for _, pr := range humans {
+		i := -1
+		if pr.MergedAt != nil {
+			i = p.WeekIndex(*pr.MergedAt)
+		}
+		if i >= 0 {
+			out.Weeks[i].Merged++
+		}
+		l, f, ok := prSize(pr)
+		if !ok {
+			continue
+		}
+		lines, files = append(lines, l), append(files, f)
+		if i >= 0 {
+			weekly[i] = append(weekly[i], l)
+		}
+	}
+	out.BatchSize, out.BatchFiles = spread(lines), spread(files)
+	for i, w := range weekly {
+		out.Weeks[i].Sized, out.Weeks[i].BatchP50 = len(w), Median(w)
+	}
+	return out
 }
 
 // ---- Costs -----------------------------------------------------------------

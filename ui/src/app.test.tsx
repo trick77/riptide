@@ -25,6 +25,7 @@ import { initialLanguage } from "./i18n";
 import { keepLabels } from "./marimekko";
 import { parseState, stateQuery } from "./state";
 import { Strip } from "./strip";
+import { BatchTile, MergedTile, ThroughputCard } from "./Throughput";
 import {
   ago,
   analysedStatus,
@@ -3032,6 +3033,70 @@ describe("flow", () => {
   });
 });
 
+describe("throughput", () => {
+  it("shows PR throughput and batch size as the backend sends them", () => {
+    const base = metrics();
+    const m = {
+      ...base,
+      throughput: {
+        merged: 47,
+        merged_per_week: 11.75,
+        batch_size: { n: 40, p50: 86.5, p90: 412 },
+        batch_files: { n: 40, p50: 5, p90: 14 },
+        weeks: base.throughput.weeks,
+      },
+    };
+    render(
+      <>
+        <MergedTile m={m} />
+        <BatchTile m={m} />
+        <ThroughputCard m={m} />
+      </>,
+    );
+    const merged = screen
+      .getByText("PR Throughput")
+      .closest("div")!.parentElement!;
+    expect(within(merged).getByText("11.8")).toBeInTheDocument();
+    expect(within(merged).getByText("PRs pro Woche")).toBeInTheDocument();
+    expect(
+      within(merged).getByText("47 PRs im Zeitraum gemerged"),
+    ).toBeInTheDocument();
+    expect(within(merged).getByText("vorher 0.5")).toBeInTheDocument();
+    expect(within(merged).getByText("Besser")).toBeInTheDocument();
+
+    const batch = screen.getByText("Batch Size").closest("div")!.parentElement!;
+    expect(within(batch).getByText("87")).toBeInTheDocument();
+    expect(
+      within(batch).getByText(
+        "grösste 10 % ab 412 Zeilen · typisch 5 Dateien · 40 von 47 PRs mit Grösse",
+      ),
+    ).toBeInTheDocument();
+    expect(within(batch).getByText("vorher 80")).toBeInTheDocument();
+    expect(within(batch).getByText("Schlechter")).toBeInTheDocument();
+    // Two charts, a column per week each.
+    expect(screen.getAllByTestId("week-col")).toHaveLength(
+      2 * m.period.weeks.length,
+    );
+  });
+
+  it("says so when no PR has a size", () => {
+    const m = metrics();
+    render(
+      <BatchTile
+        m={{
+          ...m,
+          throughput: {
+            ...m.throughput,
+            batch_size: { n: 0, p50: null, p90: null },
+            batch_files: { n: 0, p50: null, p90: null },
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("Keine PR-Grössen im Zeitraum.")).toBeVisible();
+  });
+});
+
 describe("colour", () => {
   // One meaning per colour: the change under a number in its verdict's
   // colour, the number itself ink; the deploy section says it too.
@@ -3087,9 +3152,14 @@ describe("strip", () => {
       />,
     );
     const rows = screen.getAllByTestId("strip-row");
-    // freq, lead, lead to intg, deploy success, review, within a day,
-    // jammed, three kinds; first touch and open PRs have no direction.
-    expect(rows).toHaveLength(10);
+    // freq, lead, lead to intg, deploy success, review, within a day, PR
+    // throughput, batch size, jammed, three kinds; first touch and open PRs
+    // have no direction.
+    expect(rows).toHaveLength(12);
+    expect(within(rows[6]).getByText("PR Throughput")).toBeInTheDocument();
+    expect(within(rows[6]).getAllByText("0.8")[0]).toBeInTheDocument();
+    expect(within(rows[7]).getByText("Batch Size")).toBeInTheDocument();
+    expect(within(rows[7]).getByText("140")).toBeInTheDocument();
     expect(screen.queryByText("Approval ohne Kommentar")).toBeNull();
     expect(screen.queryByText("Offene PRs")).toBeNull();
     expect(screen.getByText("◀ Schlechter")).toBeInTheDocument();
@@ -3114,7 +3184,7 @@ describe("strip", () => {
 
     expect(within(rows[2]).getByText("Vorperiode unvollständig")).toBeVisible();
     expect(within(rows[5]).getByText("zu wenig Daten")).toBeInTheDocument();
-    expect(within(rows[7]).getByText("Erfolgsquote, Releases")).toBeVisible();
+    expect(within(rows[9]).getByText("Erfolgsquote, Releases")).toBeVisible();
 
     fireEvent.mouseEnter(bar);
     const tip = screen.getByRole("tooltip");
@@ -3167,7 +3237,7 @@ describe("strip", () => {
       />,
     );
     const rows = screen.getAllByTestId("strip-row");
-    expect(rows).toHaveLength(8);
+    expect(rows).toHaveLength(10);
     expect(screen.queryByText("Deploy-Frequenz")).toBeNull();
     expect(screen.queryByText("Innert 24 h gemerged")).toBeNull();
     expect(within(rows[3]).getByText("zu wenig Daten")).toBeVisible();

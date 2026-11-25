@@ -176,6 +176,16 @@ SELECT c.repo_full_name AS repo,
        lower(c.merge_commit) AS merge_commit,
        -- the opener, for Go's automation detection only; never sent
        coalesce(c.pr_opener, '') AS opener,
-       coalesce(c.pr_opener_display_name, '') AS opener_display_name
+       coalesce(c.pr_opener_display_name, '') AS opener_display_name,
+       -- The PR's size at merge: noergler's final rollup, the whole PR diff
+       -- over the files it reviews (no lock files, no vendored bundles).
+       -- Bitbucket sends no diff size. NULL for a PR noergler never
+       -- reviewed, and for a rollup that is not the merge's.
+       r.lines_added,
+       r.lines_removed,
+       r.files_changed
 FROM chain c
+-- pr_key is '<repo_full_name>#<pr_id>', lowercased at ingest.
+LEFT JOIN noergler_pr_rollups r
+  ON r.pr_key = lower(c.repo_full_name) || '#' || c.pr_id AND r.outcome = 'merged'
 ORDER BY c.repo_full_name, c.pr_id
