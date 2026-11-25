@@ -2869,6 +2869,8 @@ describe("flow", () => {
     expect(screen.getAllByText(/25 % der Zeit/)).toHaveLength(4);
     expect(screen.queryByText(/Bis null/)).toBeNull();
     expect(screen.getByText("gemerged → auf PROD")).toBeInTheDocument();
+    // Without a stage before PROD the stretch is named from the merge.
+    expect(screen.getAllByText("Ab Merge bis PROD").length).toBeGreaterThan(0);
     // No stage is hot: no lever named.
     expect(screen.queryByText(/Der Hebel liegt/)).toBeNull();
   });
@@ -2974,19 +2976,19 @@ describe("flow", () => {
     fireEvent.mouseEnter(rows[4]);
     // The drawing is hidden from assistive tech, its tooltip with it.
     const tip = screen.getByRole("tooltip", { hidden: true });
-    expect(tip).toHaveTextContent("Warten auf PROD");
+    expect(tip).toHaveTextContent("Von INTG bis PROD");
     expect(tip).toHaveTextContent("PRs3");
     expect(tip).toHaveTextContent("typischer Wert16.8 h");
     expect(tip).toHaveTextContent("die langsamsten 10 %: über16.8 h");
     expect(document.body.textContent).not.toMatch(/NaN/);
     // Assistive tech gets the numbers once, as a table; a stage without
     // PRs reads as such, not as dashes.
-    const table = screen.getByRole("table", { name: "Wartezeit je Etappe" });
+    const table = screen.getByRole("table", { name: "Wartezeit je Abschnitt" });
     const merge = within(table).getByRole("row", { name: /^Merge/ });
     expect(merge).toHaveTextContent("Merge0keine PRs");
     expect(
-      within(table).getByRole("row", { name: /^Warten auf PROD/ }),
-    ).toHaveTextContent("Warten auf PROD316.8 h16.8 h");
+      within(table).getByRole("row", { name: /^Von INTG bis PROD/ }),
+    ).toHaveTextContent("Von INTG bis PROD316.8 h16.8 h");
     // New data drops the hover on the old rows.
     rerender(
       <Flow

@@ -38,7 +38,10 @@ export function stageNames(
       t("flow.stage.toPreDesc", { pre }),
     ],
     to_prod: [
-      t("flow.stage.toProd", { prod }),
+      // Named by where the change lies: on the stage before, or merged.
+      pre
+        ? t("flow.stage.toProdPre", { pre, prod })
+        : t("flow.stage.toProd", { prod }),
       pre
         ? t("flow.stage.toProdDescPre", { pre, prod })
         : t("flow.stage.toProdDesc", { prod }),
