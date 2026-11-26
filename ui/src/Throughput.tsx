@@ -4,15 +4,18 @@
 
 import { useTranslation } from "react-i18next";
 import type { Metrics } from "./api";
-import { WeekStack } from "./charts";
 import { fullDate, num } from "./format";
-import { Card, CardHead, Direction, Legend, Swatch, Tile } from "./ui";
+import { spreadOf, StripBlock } from "./repostrip";
+import { TileSpark } from "./trends";
+import { Direction, Tile } from "./ui";
 
 // The people's merged PRs the backend left out of every PR number, each
 // under its first reason, with what the reason means on hover.
 const LEFT_OUT = ["housekeeping", "umbrella", "twice"] as const;
 
-export function MergedTile({ m }: { m: Metrics }) {
+type TileArgs = { m: Metrics; onRepo?: (repo: string) => void };
+
+export function MergedTile({ m, onRepo }: TileArgs) {
   const { t } = useTranslation();
   const th = m.throughput;
   // The housekeeping rule's numbers are the backend's.
@@ -57,11 +60,19 @@ export function MergedTile({ m }: { m: Metrics }) {
         change: m.comparison.merged_per_week,
         format: (v) => num(v, 1),
       }}
+      spark={<TileSpark m={m} series="merged" label={t("trends.merged")} />}
+      extra={
+        <StripBlock
+          s={spreadOf(m, "merged")}
+          title={t("repos.strip.merged")}
+          onRepo={onRepo}
+        />
+      }
     />
   );
 }
 
-export function BatchTile({ m }: { m: Metrics }) {
+export function BatchTile({ m, onRepo }: TileArgs) {
   const { t } = useTranslation();
   const th = m.throughput;
   const b = th.batch_size;
@@ -93,68 +104,14 @@ export function BatchTile({ m }: { m: Metrics }) {
         change: m.comparison.batch_size,
         format: (v) => num(v),
       }}
+      spark={<TileSpark m={m} series="batch" label={t("trends.batch")} />}
+      extra={
+        <StripBlock
+          s={spreadOf(m, "batch")}
+          title={t("repos.strip.batch")}
+          onRepo={onRepo}
+        />
+      }
     />
-  );
-}
-
-const MIX = [
-  ["feature", "bg-s1"],
-  ["bugfix", "bg-s2"],
-  ["hotfix", "bg-s3"],
-  ["other", "bg-other"],
-] as const;
-
-export function ThroughputCard({ m }: { m: Metrics }) {
-  const { t } = useTranslation();
-  const labels = m.period.weeks.map((w) => t("common.cw", { kw: w.kw }));
-  const mix = MIX.map(([key, className]) => ({
-    key,
-    label: t(`mix.${key}`),
-    className,
-  }));
-  return (
-    <Card className="mt-3">
-      <CardHead title={t("throughput.cardTitle")} sub={t("throughput.scope")} />
-      <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-6 max-md:grid-cols-1">
-        <div className="min-w-0">
-          <div className="text-[12.5px] text-muted">
-            {t("throughput.merged.chart")}
-          </div>
-          <WeekStack
-            labels={labels}
-            series={mix}
-            values={m.review.change_mix}
-            ariaLabel={t("throughput.merged.chart")}
-          />
-          <div className="mt-2">
-            <Legend>
-              {mix.map((s) => (
-                <Swatch key={s.key} className={s.className} label={s.label} />
-              ))}
-            </Legend>
-          </div>
-        </div>
-        <div className="min-w-0">
-          <div className="text-[12.5px] text-muted">
-            {t("throughput.batch.chart")}
-          </div>
-          <WeekStack
-            labels={labels}
-            series={[
-              {
-                key: "lines",
-                label: t("throughput.batch.series"),
-                className: "bg-s1",
-              },
-            ]}
-            // A week without a sized PR draws no bar.
-            values={m.throughput.weeks.map((w) => ({
-              lines: w.batch_p50 ?? 0,
-            }))}
-            ariaLabel={t("throughput.batch.chart")}
-          />
-        </div>
-      </div>
-    </Card>
   );
 }

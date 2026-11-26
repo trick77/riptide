@@ -949,9 +949,11 @@ components:
       type: object
       additionalProperties: false
       required: [meta, period, products, product, delivery, lead_chain, coverage, review, throughput, open_prs, build,
-                 costs, comparison, running_week]
+                 costs, comparison, running_week, trends, repos]
       properties:
         running_week: { $ref: "#/components/schemas/RunningWeek" }
+        trends: { $ref: "#/components/schemas/Trends" }
+        repos: { $ref: "#/components/schemas/RepoView" }
         coverage: { $ref: "#/components/schemas/Coverage" }
         meta: { $ref: "#/components/schemas/Meta" }
         period: { $ref: "#/components/schemas/Period" }
@@ -994,6 +996,327 @@ components:
           type: integer
           minimum: 0
           description: The team's finished CI runs, GitOps repos' left out, as the build section counts them.
+
+    Trends:
+      type: object
+      description: |
+        The people's merged PRs, their typical size and the releases to
+        production week by week: the previous period's weeks, the period's,
+        then the week running now. A week a source could not have seen in
+        full is a gap (null with a reason), never a zero.
+      additionalProperties: false
+      required: [weeks, split, merged, batch, releases]
+      properties:
+        weeks:
+          type: array
+          items: { $ref: "#/components/schemas/TrendWeek" }
+        split:
+          type: integer
+          minimum: 0
+          description: Index of the period's first week in `weeks`.
+        merged:
+          allOf: [{ $ref: "#/components/schemas/TrendSeries" }]
+          description: Merged PRs per week, as `throughput.weeks[].merged` counts them; n the same.
+        batch:
+          allOf: [{ $ref: "#/components/schemas/TrendSeries" }]
+          description: Median changed lines per merged PR with a size; n the PRs with a size.
+        releases:
+          allOf: [{ $ref: "#/components/schemas/TrendSeries" }]
+          description: Releases to production per week, as `delivery.frequency.weeks[].release` counts them.
+
+    TrendWeek:
+      type: object
+      additionalProperties: false
+      required: [start, end, kw, running]
+      properties:
+        start: { $ref: "#/components/schemas/Instant" }
+        end: { $ref: "#/components/schemas/Instant" }
+        kw: { type: integer, minimum: 1, maximum: 53, description: ISO 8601 week number. }
+        running:
+          type: boolean
+          description: The week running now, counted up to now; no whole week.
+
+    TrendSeries:
+      type: object
+      description: One value per entry of `trends.weeks`, in the same order.
+      additionalProperties: false
+      required: [values, n, gaps]
+      properties:
+        values:
+          type: array
+          items: { $ref: "#/components/schemas/NullableNumber" }
+        n:
+          type: array
+          description: Each week's base (merged PRs, PRs with a size, releases).
+          items: { type: integer, minimum: 0 }
+        gaps:
+          type: array
+          description: |
+            Why a week's value is null; empty where it has one. `no_data`:
+            the source had not reported by the week's start. `lost`: a lost
+            Bitbucket silence overlaps the week's working time. `none`: no
+            case to take a typical value of.
+          items: { type: string, enum: ["", no_data, lost, none] }
+
+    RepoView:
+      type: object
+      description: |
+        The period's numbers per repo of the view, so a team number never
+        stands alone where repos differ: a ranking row per repo with a merged
+        PR in the period or the previous one, and a strip per number.
+      additionalProperties: false
+      required: [rows, open, groups, hint_days, breach_days, spreads]
+      properties:
+        rows:
+          type: array
+          description: |
+            Ranked: by group (none, rare, unjudged, regular, library, idle);
+            within none and rare the longest without a release first, within
+            regular those past a red threshold first, then the slowest to
+            production; else by name.
+          items: { $ref: "#/components/schemas/RepoRow" }
+        open:
+          type: integer
+          minimum: 0
+          description: Rows the ranking shows before "show all"; all of them when fewer than three would stay hidden.
+        groups:
+          type: array
+          description: The groups with rows, in rank order.
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, count, hidden_count, hidden, more]
+            properties:
+              key: { $ref: "#/components/schemas/RepoGroupKey" }
+              count: { type: integer, minimum: 1 }
+              hidden_count: { type: integer, minimum: 0, description: "Its repos past `open`." }
+              hidden:
+                type: array
+                description: Its repos past `open`, in rank order, the first five.
+                items: { type: string }
+              more:
+                type: integer
+                minimum: 0
+                description: The hidden repos past those five.
+        hint_days: { type: integer, description: "The team's release_hint_days the groups were cut by." }
+        breach_days: { type: integer, description: "The team's release_breach_days the groups were cut by." }
+        spreads:
+          type: array
+          description: One strip per number; build ones per kind.
+          items: { $ref: "#/components/schemas/RepoSpread" }
+
+    RepoGroupKey:
+      type: string
+      description: |
+        `none`: rolled out, worked on, nothing released for more than
+        release_breach_days. `rare`: last release more than
+        release_hint_days back. `unjudged`: worked on, but whether it is
+        rolled out cannot be told (`reason`). `regular`: released within
+        release_hint_days. `library`: never rolled out. `idle`: no counted
+        work since its last release nor within release_breach_days.
+      enum: [none, rare, unjudged, regular, library, idle]
+
+    RepoRow:
+      type: object
+      description: |
+        One repo's numbers over the period. A `*_prev` value is the previous
+        period's, null where its sources did not see the previous period
+        whole (the comparison's `incomplete`).
+      additionalProperties: false
+      required: [repo, project, group, reason, last_release, days_since, since_lower_bound, releases,
+                 releases_per_week, releases_prev, release_weeks, to_prod, to_prod_n, to_prod_prev, not_yet, merged,
+                 merged_per_week, merged_prev, merged_weeks, batch, sized, batch_prev, pickup, pickup_n, flags]
+      properties:
+        repo: { type: string }
+        project: { type: string }
+        group: { $ref: "#/components/schemas/RepoGroupKey" }
+        reason:
+          type: [string, "null"]
+          enum: [not_reporting, infra, untraced, null]
+          description: |
+            Why its releases cannot be judged, in the unjudged group only:
+            Argo CD not reporting, only infrastructure Apps deploy it, no
+            deploy ever showed an App deploying it.
+        last_release:
+          $ref: "#/components/schemas/NullableInstant"
+          description: |
+            Its last release to production before the period's end: a
+            release of an App deploying it that tracing does not show leaving
+            it unchanged, as tracing knew it then.
+        days_since:
+          allOf: [{ $ref: "#/components/schemas/NullableNumber" }]
+          description: |
+            Whole days from `last_release` to the period's end; without one,
+            from Argo CD's first report (`since_lower_bound`). Null for a
+            library and a repo no App is known to deploy.
+        since_lower_bound: { type: boolean }
+        releases:
+          type: integer
+          minimum: 0
+          description: |
+            Such releases in the period, each GitOps revision once; an App's
+            first deploy within the grace after Argo CD's first event is none,
+            as `delivery.frequency` counts it.
+        releases_per_week:
+          allOf: [{ $ref: "#/components/schemas/NullableNumber" }]
+          description: Per week over the period's weeks Argo CD reported; null under a week.
+        releases_prev: { $ref: "#/components/schemas/NullableNumber" }
+        release_weeks:
+          type: array
+          description: Per entry of `trends.weeks` but the running one; null where Argo CD had not reported.
+          items: { type: [integer, "null"] }
+        to_prod:
+          allOf: [{ $ref: "#/components/schemas/NullableNumber" }]
+          description: |
+            Typical days its PRs merged in the period waited from the trunk to
+            production, as the slow_to_prod state judges it; null under
+            not_on_prod_min_prs PRs (`to_prod_n`).
+        to_prod_n: { type: integer, minimum: 0 }
+        to_prod_prev: { $ref: "#/components/schemas/NullableNumber" }
+        not_yet: { type: integer, minimum: 0, description: "Merged PRs not on production at the period's end (`coverage.repos`)." }
+        merged: { type: integer, minimum: 0 }
+        merged_per_week:
+          allOf: [{ $ref: "#/components/schemas/NullableNumber" }]
+          description: Over the period's weeks Bitbucket reported; null under a week.
+        merged_prev: { $ref: "#/components/schemas/NullableNumber" }
+        merged_weeks:
+          type: array
+          description: Per entry of `trends.weeks` but the running one; null where `trends.merged` has a gap.
+          items: { type: [integer, "null"] }
+        batch:
+          allOf: [{ $ref: "#/components/schemas/NullableNumber" }]
+          description: Typical changed lines per merged PR; null under three PRs with a size (`sized`).
+        sized: { type: integer, minimum: 0 }
+        batch_prev: { $ref: "#/components/schemas/NullableNumber" }
+        pickup:
+          allOf: [{ $ref: "#/components/schemas/NullableNumber" }]
+          description: |
+            Typical working days from ready to the first review, as the
+            first_review_wait state judges it; null under
+            first_review_min_prs PRs (`pickup_n`).
+        pickup_n: { type: integer, minimum: 0 }
+        flags:
+          type: array
+          description: The thresholds its numbers are past, by the state they belong to.
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, tone, value]
+            properties:
+              key: { type: string, enum: [no_release, release_due, slow_to_prod, first_review_wait] }
+              tone: { type: string, enum: [breach, hint] }
+              value: { type: number, description: "Days, or working days for first_review_wait." }
+
+    RepoSpread:
+      type: object
+      description: |
+        One number per repo on a strip. Positions run 0..1 with the better
+        end at 0. A repo with too few cases is counted (`thin`), never
+        placed.
+      additionalProperties: false
+      required: [key, kind, unit, higher_better, shown, same, scale, dots, mark, note, typical, typical_x, team, judged,
+                 thin, apart]
+      properties:
+        key: { type: string, enum: [releases, to_prod, merged, batch, pickup, build_duration, build_success] }
+        kind:
+          type: [string, "null"]
+          enum: [release, main, feature, other, unknown, null]
+          description: The build kind of a build strip (see RunKind); null otherwise.
+        unit: { type: string, enum: [per_week, days, lines, working_days, seconds, share] }
+        higher_better: { type: boolean }
+        shown:
+          type: boolean
+          description: Placed repos at two values or more; no strip otherwise.
+        same:
+          allOf: [{ $ref: "#/components/schemas/NullableNumber" }]
+          description: |
+            The one value every placed repo has, where two or more share it and
+            none differs: no strip, a line instead. Null otherwise.
+        scale:
+          type: object
+          additionalProperties: false
+          required: [lo, hi, log, ticks]
+          properties:
+            lo: { type: number }
+            hi: { type: number }
+            log: { type: boolean }
+            ticks:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [value, x]
+                properties:
+                  value: { type: number }
+                  x: { type: number, minimum: 0, maximum: 1 }
+        dots:
+          type: array
+          description: Sorted by value, the better end first; repos set apart last.
+          items:
+            type: object
+            additionalProperties: false
+            required: [repo, project, value, n, verdict, x, clamped, apart]
+            properties:
+              repo: { type: string }
+              project: { type: string }
+              value:
+                allOf: [{ $ref: "#/components/schemas/NullableNumber" }]
+                description: Null for a repo set apart (nothing released).
+              n: { type: integer, minimum: 0, description: "The cases the value rests on." }
+              verdict:
+                type: string
+                enum: [breach, hint, within, neutral]
+                description: |
+                  Against the team's threshold: past one whose finding is the
+                  rule broken (breach) or a hint, within it; neutral where the
+                  number has none.
+              x:
+                type: [number, "null"]
+                minimum: 0
+                maximum: 1
+              clamped: { type: boolean, description: "Outside the scale, at its end." }
+              apart: { type: boolean, description: "Set apart at the strip's end: nothing released." }
+        mark:
+          type: [object, "null"]
+          description: The team's threshold, its config key and value in the strip's unit.
+          additionalProperties: false
+          required: [key, value, x]
+          properties:
+            key: { type: string }
+            value: { type: number }
+            x: { type: number, minimum: 0, maximum: 1 }
+        note:
+          type: [object, "null"]
+          description: |
+            What the team's number hides: `dominant`, one repo carries
+            `share` of the count; `far`, `above` and `below` of `of` repos
+            lie more than twice or under half the typical repo's value;
+            `pooled`, the team's number itself lies that far from it
+            (`additive`: it adds the repos up).
+          additionalProperties: false
+          required: [kind, repo, share, of, near, above, below, additive]
+          properties:
+            kind: { type: string, enum: [dominant, far, pooled] }
+            repo: { type: [string, "null"] }
+            share: { $ref: "#/components/schemas/NullableNumber" }
+            of: { type: integer, minimum: 0 }
+            near: { type: integer, minimum: 0 }
+            above: { type: integer, minimum: 0 }
+            below: { type: integer, minimum: 0 }
+            additive: { type: boolean }
+        typical:
+          allOf: [{ $ref: "#/components/schemas/NullableNumber" }]
+          description: The typical repo, the median of the placed repos' values.
+        typical_x:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 1
+        team:
+          allOf: [{ $ref: "#/components/schemas/NullableNumber" }]
+          description: The team's own number the page's tile shows, pooled over every case; null where there is none.
+        judged: { type: integer, minimum: 0, description: "Placed repos with a value." }
+        thin: { type: integer, minimum: 0, description: "Repos with too few cases, not placed." }
+        apart: { type: integer, minimum: 0 }
 
     Change:
       type: object

@@ -7,9 +7,12 @@ import type { Metrics, Query } from "./api";
 import { Assessment } from "./Assessment";
 import { traceLines } from "./Flow";
 import { dur, durParts, fullDate, num, pct, stage } from "./format";
+import { Ranking } from "./Ranking";
+import { spreadOf, StripBlock } from "./repostrip";
 import type { Tab } from "./state";
 import { Strip } from "./strip";
 import { BatchTile, MergedTile } from "./Throughput";
+import { TileSpark } from "./trends";
 import {
   Direction,
   SectionHead,
@@ -144,6 +147,8 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
     },
   };
   const open = why && whys[why] ? whys[why] : null;
+  // A repo on a strip or in the ranking: its PRs in the facts.
+  const onRepo = (repo: string) => onFacts("prs", repo);
 
   return (
     <section id="ueberblick" aria-labelledby="h-ueberblick" className="mt-9">
@@ -153,138 +158,168 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
         title={t("overview.title")}
         lead={t("overview.intro", { weeks: query.weeks })}
       />
-      <Assessment query={query} m={m} onFacts={onFacts} />
+      <div id="einschaetzung">
+        <Assessment query={query} m={m} onFacts={onFacts} />
+      </div>
       <Strip m={m} />
 
-      <SubHead title={t("overview.throughput")} />
-      <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3">
-        <Tile
-          label={t("overview.freq.label")}
-          dora={t("overview.freq.dora")}
-          question={t("overview.freq.question", { prod })}
-          value={freq.syncs ? num(freq.per_week, 1) : "–"}
-          unit={freq.syncs ? t("overview.freq.unit") : ""}
-          note={freqNote}
-          direction={
-            <Direction
-              arrow="up"
-              label={t("overview.freq.direction")}
-              why={t("overview.freq.directionWhy")}
-            />
-          }
-          warn={
-            sinceNote ??
-            (freq.first_seen > 0
-              ? t("overview.freq.firstSeen", {
-                  count: freq.first_seen,
-                  days: freq.grace_days,
-                })
-              : undefined)
-          }
-          compare={{
-            change: c.deploy_frequency,
-            format: (v) => num(v, 1),
-          }}
-          open={why === "freq"}
-          onWhy={() => onWhy("freq")}
-        />
-        <Tile
-          label={t("overview.lead.label", { prod })}
-          dora={t("overview.lead.dora")}
-          question={t("overview.lead.question", { prod })}
-          value={lead.value}
-          unit={
-            lt.human.p50 == null ? "" : t("common.typical", { unit: lead.unit })
-          }
-          note={
-            <>
-              {lt.human.n === 0
-                ? t("overview.lead.noHuman", { prod })
-                : t("overview.lead.slowest", {
-                    p90: dur(lt.human.p90),
-                    count: lt.human.n,
-                  })}
-              {/* Of how many merged PRs, and how many are not there yet:
+      <div id="ausliefern">
+        <SubHead title={t("overview.throughput")} />
+        <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3">
+          <Tile
+            label={t("overview.freq.label")}
+            dora={t("overview.freq.dora")}
+            question={t("overview.freq.question", { prod })}
+            value={freq.syncs ? num(freq.per_week, 1) : "–"}
+            unit={freq.syncs ? t("overview.freq.unit") : ""}
+            note={freqNote}
+            direction={
+              <Direction
+                arrow="up"
+                label={t("overview.freq.direction")}
+                why={t("overview.freq.directionWhy")}
+              />
+            }
+            warn={
+              sinceNote ??
+              (freq.first_seen > 0
+                ? t("overview.freq.firstSeen", {
+                    count: freq.first_seen,
+                    days: freq.grace_days,
+                  })
+                : undefined)
+            }
+            compare={{
+              change: c.deploy_frequency,
+              format: (v) => num(v, 1),
+            }}
+            open={why === "freq"}
+            onWhy={() => onWhy("freq")}
+            spark={
+              <TileSpark
+                m={m}
+                series="releases"
+                label={t("trends.releases", { prod })}
+              />
+            }
+            extra={
+              <StripBlock
+                s={spreadOf(m, "releases")}
+                title={t("repos.strip.releases", { prod })}
+                onRepo={onRepo}
+              />
+            }
+          />
+          <Tile
+            label={t("overview.lead.label", { prod })}
+            dora={t("overview.lead.dora")}
+            question={t("overview.lead.question", { prod })}
+            value={lead.value}
+            unit={
+              lt.human.p50 == null
+                ? ""
+                : t("common.typical", { unit: lead.unit })
+            }
+            note={
+              <>
+                {lt.human.n === 0
+                  ? t("overview.lead.noHuman", { prod })
+                  : t("overview.lead.slowest", {
+                      p90: dur(lt.human.p90),
+                      count: lt.human.n,
+                    })}
+                {/* Of how many merged PRs, and how many are not there yet:
                   the number reads only with its base (owner, 2026-11). */}
-              {m.coverage.merged > 0 && (
-                <span className="block">
-                  {t("overview.lead.traced", {
-                    traced: m.coverage.on_prod,
-                    count: m.coverage.merged,
-                    prod,
-                  })}
-                  {/* The traced PRs the time leaves out: no start known. */}
-                  {lt.unmeasured > 0 &&
-                    ` · ${t("overview.lead.unmeasured", { count: lt.unmeasured })}`}
-                  {m.coverage.not_yet > 0 &&
-                    ` · ${t("overview.lead.notYet", { count: m.coverage.not_yet, prod })}`}
-                </span>
-              )}
-            </>
-          }
-          direction={
-            <Direction
-              arrow="down"
-              label={t("common.shorterBetter")}
-              why={t("overview.lead.directionWhy")}
-            />
-          }
-          warn={lt.low_sample ? t("overview.lead.lowSample") : undefined}
-          compare={{
-            change: c.lead_time,
-            format: dur,
-          }}
-          open={why === "lead"}
-          onWhy={() => onWhy("lead")}
-        />
-        <Tile
-          label={t("overview.dsucc.label")}
-          dora={t("overview.dsucc.dora")}
-          question={t("overview.dsucc.question")}
-          value={pct(freq.success_rate)}
-          unit={freq.finished ? t("overview.dsucc.unit") : ""}
-          note={t("overview.dsucc.note", {
-            failed: freq.failed,
-            count: freq.finished,
-          })}
-          direction={
-            <Direction
-              arrow="up"
-              label={t("overview.dsucc.direction")}
-              why={t("common.ownHistory")}
-            />
-          }
-          compare={{
-            change: c.deploy_success,
-            format: pct,
-          }}
-          open={why === "dsucc"}
-          onWhy={() => onWhy("dsucc")}
-        />
-        <div className="flex flex-col gap-1 rounded-ui border border-dashed border-border px-3.5 py-3">
-          <span className="text-[11px] font-medium tracking-[.12em] text-muted uppercase">
-            {t("overview.instability.label")}
-          </span>
-          <div className="-mt-1 text-[11px] text-faint">
-            {t("overview.instability.dora")}
-          </div>
-          <div className="text-[13px] text-ink-dim">
-            {t("overview.instability.question")}
-          </div>
-          <div className="text-[22px] font-medium text-faint">
-            {t("overview.instability.value")}
-          </div>
-          <div className="text-xs text-muted">
-            {t("overview.instability.text")}
+                {m.coverage.merged > 0 && (
+                  <span className="block">
+                    {t("overview.lead.traced", {
+                      traced: m.coverage.on_prod,
+                      count: m.coverage.merged,
+                      prod,
+                    })}
+                    {/* The traced PRs the time leaves out: no start known. */}
+                    {lt.unmeasured > 0 &&
+                      ` · ${t("overview.lead.unmeasured", { count: lt.unmeasured })}`}
+                    {m.coverage.not_yet > 0 &&
+                      ` · ${t("overview.lead.notYet", { count: m.coverage.not_yet, prod })}`}
+                  </span>
+                )}
+              </>
+            }
+            direction={
+              <Direction
+                arrow="down"
+                label={t("common.shorterBetter")}
+                why={t("overview.lead.directionWhy")}
+              />
+            }
+            warn={lt.low_sample ? t("overview.lead.lowSample") : undefined}
+            compare={{
+              change: c.lead_time,
+              format: dur,
+            }}
+            open={why === "lead"}
+            onWhy={() => onWhy("lead")}
+            extra={
+              <StripBlock
+                s={spreadOf(m, "to_prod")}
+                title={t("repos.strip.toProd", { prod })}
+                onRepo={onRepo}
+              />
+            }
+          />
+          <Tile
+            label={t("overview.dsucc.label")}
+            dora={t("overview.dsucc.dora")}
+            question={t("overview.dsucc.question")}
+            value={pct(freq.success_rate)}
+            unit={freq.finished ? t("overview.dsucc.unit") : ""}
+            note={t("overview.dsucc.note", {
+              failed: freq.failed,
+              count: freq.finished,
+            })}
+            direction={
+              <Direction
+                arrow="up"
+                label={t("overview.dsucc.direction")}
+                why={t("common.ownHistory")}
+              />
+            }
+            compare={{
+              change: c.deploy_success,
+              format: pct,
+            }}
+            open={why === "dsucc"}
+            onWhy={() => onWhy("dsucc")}
+          />
+          <div className="flex flex-col gap-1 rounded-ui border border-dashed border-border px-3.5 py-3">
+            <span className="text-[11px] font-medium tracking-[.12em] text-muted uppercase">
+              {t("overview.instability.label")}
+            </span>
+            <div className="-mt-1 text-[11px] text-faint">
+              {t("overview.instability.dora")}
+            </div>
+            <div className="text-[13px] text-ink-dim">
+              {t("overview.instability.question")}
+            </div>
+            <div className="text-[22px] font-medium text-faint">
+              {t("overview.instability.value")}
+            </div>
+            <div className="text-xs text-muted">
+              {t("overview.instability.text")}
+            </div>
           </div>
         </div>
-      </div>
-      {open && <WhyPanel why={open} />}
+        {open && <WhyPanel why={open} />}
 
-      <SubHead title={t("throughput.head")} text={t("throughput.scope")} />
-      <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3">
-        <MergedTile m={m} />
-        <BatchTile m={m} />
+        <SubHead title={t("throughput.head")} text={t("throughput.scope")} />
+        <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3">
+          <MergedTile m={m} onRepo={onRepo} />
+          <BatchTile m={m} onRepo={onRepo} />
+        </div>
+
+        <SubHead title={t("repos.head")} text={t("repos.headText")} />
+        <Ranking m={m} onRepo={onRepo} />
       </div>
     </section>
   );

@@ -641,6 +641,72 @@ fails more against the previous one with nothing changed in the builds. Whether 
 the infrastructure or the network failed is not in the data. Not
 measured on a real import yet.
 
+### Trends and the numbers per repo
+
+`trends` carries three numbers week by week across the previous period, the
+period and the week running now (`split` marks the period's first week,
+`running` the last): the people's merged PRs and their typical size as
+`throughput.weeks` counts them, and the releases to production as
+`delivery.frequency.weeks` does. A week is a gap, null with a reason, never
+a zero: `no_data` when the series' source started after the week's start
+(Bitbucket for merged PRs; Bitbucket and noergler for the size; Argo CD for
+releases), `lost` when a lost Bitbucket silence overlaps the week's working
+time (one reaching into a Sunday took no merges), `none` when a week has no
+PR with a size. Built from the sections the request computes anyway, no
+read of its own.
+
+A team number pools busy and quiet repos: nine repos releasing once a
+month and one shipping five times a day read as "twice a week". `repos`
+sets the period's numbers out per repo of the view, each repo with a merged
+PR in the period or the previous one, from the rows the request already
+holds (both periods' PRs, tracing's releases, the build section's runs per
+repo):
+
+- A repo's releases are its Apps' releases to production that tracing does
+  not show leaving it unchanged, read as tracing knew them by the period's
+  end, each GitOps revision once; an App's first deploy within the grace
+  after Argo CD's first event counts as no release, as the team's frequency
+  has it, but its last release was then or before. Its last one against the team's
+  `release_hint_days` and `release_breach_days` puts it in a group: rolls
+  out regularly, rarely, or not at all (`none`, the sprint rule broken). Not
+  judged: a library (never rolled out), a repo nobody works on (no counted
+  merge since its last release nor within `release_breach_days`, as the
+  release state counts a project active), and, as `unjudged` with a reason,
+  one no App is known to deploy, one only infrastructure Apps deploy, or
+  Argo CD not reporting. Never judged as regular for want of data.
+- The wait from the trunk to production, the typical pickup to the first
+  review and a build kind's typical duration and failures are the states'
+  own numbers (`slow_to_prod`, `first_review_wait`, `long_builds`,
+  `release_failing`), the same helper and the same minimums: a repo under
+  them is counted as too few (`thin`), never placed on a strip. Batch size
+  per repo needs 3 PRs with a size.
+- A previous value per repo only where its sources saw the previous period
+  whole, as the comparison holds.
+
+The ranking orders the groups none, rare, unjudged, regular, library,
+idle; the longest without a release first, within regular those past a red
+threshold first, then the slowest to production. It opens 8 rows, or all of
+them when fewer than 3 would stay hidden, and names the first 5 hidden per
+group.
+
+Each strip (`spreads`) carries the repos' values at positions 0..1 with the
+better end at 0, on a scale fitted to the values and the team's threshold:
+a share from the nearest 10 % below its lowest value to 100 %, values
+spanning a factor of 8 or more on a log scale (one daily repo would squeeze
+the rest into one spot), else a linear one; ticks on round values of the
+unit. Each dot's verdict is against the team's threshold where the number
+has one (`breach` where its state is the rule broken, `hint` where it is a
+hint), `neutral` where it has none. A repo that released nothing in the
+period while not rolling out (`none`) is set apart at the strip's end, not
+placed at zero. Placed repos at one value only make no strip (every dot on
+one spot reads as a picture of nothing): `same` carries the value for a line
+instead. The typical repo is the median of the placed repos. A note says what the team's number hides,
+from 3 repos with a value on: one repo carrying half of an added-up count or
+more (`dominant`), repos more than twice or under half the typical one's
+value (`far`), or the team's number itself that far from the typical repo
+(`pooled`: it adds the repos up, or counts every case so the busiest repos
+decide it). Starting values, not measured.
+
 ### Sources and silences
 
 What the data covers is computed from the data, never from a list of dates.

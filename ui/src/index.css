@@ -116,6 +116,18 @@ html {
   color-scheme: dark;
 }
 
+/* A jump link lands below the sticky header, whatever height it wrapped
+   to: App measures it into --head-h. */
+main [id] {
+  scroll-margin-top: calc(var(--head-h, 64px) + 12px);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
 body {
   margin: 0;
   background: var(--color-bg);
@@ -206,6 +218,10 @@ svg.chart {
   }
   section {
     break-inside: avoid;
+  }
+  /* On paper the header is the first page's only. */
+  .sticky-head {
+    position: static !important;
   }
 }
 

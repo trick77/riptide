@@ -10,8 +10,9 @@ import { dateTime, dur, durParts, fullDate, num, pct, stage } from "./format";
 import { OpenPRs } from "./OpenPRs";
 import { StageRidge } from "./ridgeline";
 import { TABLE_HEAD } from "./shared";
+import { spreadOf, StripBlock } from "./repostrip";
 import type { Tab } from "./state";
-import { ThroughputCard } from "./Throughput";
+import { TrendCard } from "./trends";
 import {
   Card,
   CardHead,
@@ -442,108 +443,119 @@ export function Flow({ m, why, onWhy, onFacts }: Props) {
           ["SPACE", "Efficiency & flow"],
         ]}
       />
-      <ThroughputCard m={m} />
+      <TrendCard m={m} />
       <Chain m={m} />
       <StageRidge
         chain={m.lead_chain}
         names={stageNames(t, m.lead_chain, prod)}
       />
 
-      <Card className="mt-3">
-        <CardHead title={t("flow.reviewTitle")} />
-        <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-3">
-          <Tile
-            label={t("flow.review.label")}
-            question={t("flow.review.question")}
-            value={rv.value}
-            unit={
-              r.review.p50 == null ? "" : t("common.typical", { unit: rv.unit })
-            }
-            note={t("flow.review.note", {
-              p90: dur(r.review.p90),
-              count: r.review.n,
-            })}
-            direction={
-              <Direction
-                arrow="down"
-                label={t("common.shorterBetter")}
-                why={t("common.ownHistory")}
-              />
-            }
-            compare={{
-              change: c.review_time,
-              format: dur,
-            }}
-            open={why === "review"}
-            onWhy={() => onWhy("review")}
-          />
-          <Tile
-            label={t("flow.touch.label")}
-            question={t("flow.touch.question")}
-            value={pct(r.first_touch_rate)}
-            unit={t("common.nOf", {
-              n: r.approved_on_first_touch,
-              total: r.approved,
-            })}
-            direction={
-              <Direction
-                label={t("common.noDirection")}
-                why={t("flow.touch.directionWhy")}
-              />
-            }
-            compare={{
-              change: c.first_touch,
-              format: pct,
-            }}
-            open={why === "touch"}
-            onWhy={() => onWhy("touch")}
-          />
-        </div>
-        <div className="mt-5 grid grid-cols-[minmax(240px,1fr)_2fr] gap-5 max-md:grid-cols-1">
-          <Tile
-            label={t("flow.cycle.label")}
-            question={t("flow.cycle.question")}
-            value={pct(r.within_day.rate)}
-            unit={t("flow.cycle.unit", {
-              n: r.within_day.count,
-              count: r.within_day.n,
-            })}
-            direction={
-              <Direction
-                arrow="up"
-                label={t("flow.cycle.direction")}
-                why={t("flow.cycle.directionWhy")}
-              />
-            }
-            compare={{
-              change: c.within_day,
-              format: pct,
-            }}
-            open={why === "cycle"}
-            onWhy={() => onWhy("cycle")}
-          />
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-              <div className="text-[12.5px] text-muted">
-                {t("flow.histHead")}
-                {day >= 0 && t("flow.histLine")}
-              </div>
-            </div>
-            <GroupedBars
-              labels={labels}
-              series={series}
-              values={[r.cycle_histogram.human]}
-              markAfter={day >= 0 ? day : undefined}
-              markLabel="24 h"
-              ariaLabel={t("flow.histAria", {
-                parts: labels
-                  .map((l, i) => `${l} ${r.cycle_histogram.human[i]}`)
-                  .join(", "),
+      <div id="review">
+        <Card className="mt-3">
+          <CardHead title={t("flow.reviewTitle")} />
+          <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-3">
+            <Tile
+              label={t("flow.review.label")}
+              question={t("flow.review.question")}
+              value={rv.value}
+              unit={
+                r.review.p50 == null
+                  ? ""
+                  : t("common.typical", { unit: rv.unit })
+              }
+              note={t("flow.review.note", {
+                p90: dur(r.review.p90),
+                count: r.review.n,
               })}
+              direction={
+                <Direction
+                  arrow="down"
+                  label={t("common.shorterBetter")}
+                  why={t("common.ownHistory")}
+                />
+              }
+              compare={{
+                change: c.review_time,
+                format: dur,
+              }}
+              open={why === "review"}
+              onWhy={() => onWhy("review")}
+            />
+            <Tile
+              label={t("flow.touch.label")}
+              question={t("flow.touch.question")}
+              value={pct(r.first_touch_rate)}
+              unit={t("common.nOf", {
+                n: r.approved_on_first_touch,
+                total: r.approved,
+              })}
+              direction={
+                <Direction
+                  label={t("common.noDirection")}
+                  why={t("flow.touch.directionWhy")}
+                />
+              }
+              compare={{
+                change: c.first_touch,
+                format: pct,
+              }}
+              open={why === "touch"}
+              onWhy={() => onWhy("touch")}
             />
           </div>
-        </div>
-      </Card>
+          <div className="mt-5 grid grid-cols-[minmax(240px,1fr)_2fr] gap-5 max-md:grid-cols-1">
+            <Tile
+              label={t("flow.cycle.label")}
+              question={t("flow.cycle.question")}
+              value={pct(r.within_day.rate)}
+              unit={t("flow.cycle.unit", {
+                n: r.within_day.count,
+                count: r.within_day.n,
+              })}
+              direction={
+                <Direction
+                  arrow="up"
+                  label={t("flow.cycle.direction")}
+                  why={t("flow.cycle.directionWhy")}
+                />
+              }
+              compare={{
+                change: c.within_day,
+                format: pct,
+              }}
+              open={why === "cycle"}
+              onWhy={() => onWhy("cycle")}
+            />
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                <div className="text-[12.5px] text-muted">
+                  {t("flow.histHead")}
+                  {day >= 0 && t("flow.histLine")}
+                </div>
+              </div>
+              <GroupedBars
+                labels={labels}
+                series={series}
+                values={[r.cycle_histogram.human]}
+                markAfter={day >= 0 ? day : undefined}
+                markLabel="24 h"
+                ariaLabel={t("flow.histAria", {
+                  parts: labels
+                    .map((l, i) => `${l} ${r.cycle_histogram.human[i]}`)
+                    .join(", "),
+                })}
+              />
+            </div>
+          </div>
+          <div className="mt-4 max-w-[640px]">
+            <StripBlock
+              s={spreadOf(m, "pickup")}
+              title={t("repos.strip.pickup")}
+              onRepo={(repo) => onFacts("prs", repo)}
+            />
+          </div>
+        </Card>
+      </div>
       {open && why !== "open" && <WhyPanel why={open} />}
 
       <OpenPRs

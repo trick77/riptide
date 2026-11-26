@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ApiError,
@@ -15,6 +15,7 @@ import { Facts } from "./Facts";
 import { Flow } from "./Flow";
 import { dateTime, fullDate, fullDay } from "./format";
 import { FrameworkMap } from "./FrameworkMap";
+import { SECTIONS, SectionNav, useActiveSection } from "./nav";
 import { Overview } from "./Overview";
 import {
   WINDOWS,
@@ -24,22 +25,6 @@ import {
   type ViewState,
 } from "./state";
 import { Eyebrow, LanguageSwitch, Mono } from "./ui";
-
-// The sections' anchors: German ids, kept in both languages so a shared
-// link lands in the same place. The flow from commit to prod first, then
-// its parts in a change's order, builds before rollout; what the team works
-// on after the delivery path. The sections below render in this order too
-// (tested).
-const NAV = [
-  "ueberblick",
-  "fluss",
-  "build",
-  "deploys",
-  "arbeitsmix",
-  "kosten",
-  "daten",
-  "frameworks",
-] as const;
 
 const SOURCES: [keyof Metrics["meta"]["data_end"], string][] = [
   ["bitbucket", "Bitbucket"],
@@ -109,9 +94,33 @@ export default function App() {
 
   useEffect(() => {
     const q = stateQuery(state);
+    // The section a link points at stays: a filter change keeps the hash.
     if (q !== window.location.search)
-      window.history.replaceState(null, "", `${window.location.pathname}${q}`);
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.pathname}${q}${window.location.hash}`,
+      );
   }, [state]);
+
+  // The sticky header's height, for the anchors' scroll margin and the
+  // section marking: it wraps on a narrow window.
+  const head = useRef<HTMLElement>(null);
+  const headHeight = useCallback(() => head.current?.offsetHeight ?? 0, []);
+  useEffect(() => {
+    const el = head.current;
+    if (!el) return;
+    const set = () =>
+      document.documentElement.style.setProperty(
+        "--head-h",
+        `${el.offsetHeight}px`,
+      );
+    set();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     const ctl = new AbortController();
@@ -185,32 +194,55 @@ export default function App() {
     document.getElementById("daten")?.scrollIntoView?.({ behavior: "smooth" });
   }, []);
   const weeks = m?.period.weeks ?? [];
+  const active = useActiveSection(SECTIONS, m != null, headHeight);
+
+  // A link to a section: the sections render once the numbers are in, so
+  // the browser's own jump on load found nothing to land on. Once, then the
+  // reader scrolls.
+  const landed = useRef(false);
+  useEffect(() => {
+    if (!m || landed.current) return;
+    landed.current = true;
+    const id = decodeURIComponent(window.location.hash.slice(1));
+    if (id)
+      requestAnimationFrame(() =>
+        document
+          .getElementById(id)
+          ?.scrollIntoView?.({ behavior: "instant" as ScrollBehavior }),
+      );
+  }, [m]);
 
   return (
     <div className="flex min-h-screen flex-col bg-bg text-ink">
-      <header className="flex min-h-14 flex-wrap items-center gap-x-[22px] gap-y-1.5 border-b border-border bg-panel px-6 py-2.5">
+      <header
+        ref={head}
+        className="sticky-head sticky top-0 z-30 flex min-h-14 flex-wrap items-center gap-x-[22px] gap-y-1.5 border-b border-border bg-panel px-6 py-2.5"
+      >
         {/* On one baseline: centred boxes leave the 21px serif mark, its
             descender included, 3px below the 13.5px links' text. */}
         <div className="flex flex-wrap items-baseline gap-x-[22px] gap-y-1.5">
           <h1 className="m-0 font-serif text-[21px] leading-7 font-medium whitespace-nowrap text-wordmark">
             riptide
           </h1>
-          <nav
-            aria-label={t("nav.label")}
-            className="no-print flex flex-wrap gap-0.5"
-          >
-            {NAV.map((id) => (
-              <a
-                key={id}
-                href={`#${id}`}
-                className="rounded-ui-sm px-2.5 py-1.5 text-[13.5px] text-muted no-underline hover:bg-active hover:text-ink"
-              >
-                {t(`nav.${id}`)}
-              </a>
-            ))}
-          </nav>
+          <SectionNav active={active} />
         </div>
         <div className="ml-auto flex items-center gap-3 text-[13px] text-muted">
+          {/* The view the numbers are for, always in sight; a click goes
+              to where it is changed. */}
+          {m && weeks.length > 0 && (
+            <a
+              href="#ansicht"
+              data-testid="head-view"
+              className="no-print rounded-ui-sm px-1.5 py-1 text-[12.5px] whitespace-nowrap text-muted no-underline hover:bg-active hover:text-ink"
+            >
+              {t("nav.view", {
+                product: m.product ?? t("page.allProducts"),
+                from: weeks[0].kw,
+                to: weeks[weeks.length - 1].kw,
+                weeks: weeks.length,
+              })}
+            </a>
+          )}
           <label htmlFor="team" className="sr-only">
             {t("page.team")}
           </label>
@@ -362,6 +394,7 @@ export default function App() {
         )}
 
         <section
+          id="ansicht"
           aria-label={t("page.filter")}
           className="no-print mt-5 flex flex-col gap-3 rounded-ui-lg border border-border bg-panel px-4 py-3.5"
         >

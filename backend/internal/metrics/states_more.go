@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/trick77/riptide/internal/config"
 	"github.com/trick77/riptide/internal/dataset"
 )
 
@@ -182,9 +183,9 @@ func (a *assessor) firstReviewState(at stateAt) []stateEval {
 		}
 	}
 	for _, pr := range mergedPRs(a.states.all, at.period, a.f) {
-		if pr.ReadyAt != nil && pr.FirstReviewAt != nil && !pr.FirstReviewAt.Before(*pr.ReadyAt) {
+		if w, ok := pickupDays(pr, loc); ok {
 			r := get(pr.Repo, pr.Project)
-			r.pickups = append(r.pickups, workingDays(*pr.ReadyAt, *pr.FirstReviewAt, loc))
+			r.pickups = append(r.pickups, w)
 		}
 	}
 	e := stateEval{key: StateFirstReviewWait, unit: UnitRepo, source: dataset.SourceBitbucket, tone: ToneHint,
@@ -200,9 +201,9 @@ func (a *assessor) firstReviewState(at stateAt) []stateEval {
 			u.began = nthBegan(r.crossings, th.FirstReviewWaiting)
 			u.Since = u.began
 		case len(r.pickups) >= th.FirstReviewMinPRs:
-			u.Value, u.Count, u.Measure, u.status = round1(*Median(r.pickups)), ptr(len(r.pickups)), ptr(MeasureTypical),
-				unitClear
-			if u.Value > th.FirstReviewDays {
+			v, _, fires := typicalPickup(r.pickups, th)
+			u.Value, u.Count, u.Measure, u.status = v, ptr(len(r.pickups)), ptr(MeasureTypical), unitClear
+			if fires {
 				u.status = unitFires
 			}
 		case !at.now:
@@ -212,6 +213,47 @@ func (a *assessor) firstReviewState(at stateAt) []stateEval {
 		e.units = append(e.units, u)
 	}
 	return []stateEval{e}
+}
+
+// pickupDays is a merged PR's wait from ready to its first review in
+// working days in loc; false without both, or a review before ready.
+func pickupDays(pr dataset.PR, loc *time.Location) (float64, bool) {
+	if pr.ReadyAt == nil || pr.FirstReviewAt == nil || pr.FirstReviewAt.Before(*pr.ReadyAt) {
+		return 0, false
+	}
+	return workingDays(*pr.ReadyAt, *pr.FirstReviewAt, loc), true
+}
+
+// typicalPickup is a repo's typical pickup over pickups (pickupDays),
+// rounded to a tenth: judged on FirstReviewMinPRs PRs or more, past
+// FirstReviewDays the wait is a finding.
+func typicalPickup(pickups []float64, th config.Thresholds) (value float64, judged, fires bool) {
+	if len(pickups) < th.FirstReviewMinPRs || len(pickups) == 0 {
+		return 0, false, false
+	}
+	value = round1(*Median(pickups))
+	return value, true, value > th.FirstReviewDays
+}
+
+// longBuild is a repo's typical green build of a kind in minutes, rounded
+// to a tenth: judged on BuildMinRuns timed runs or more, past BuildMinutes
+// too long (feature and main builds: the ones developers wait on).
+func longBuild(h RepoHotspot, th config.Thresholds) (minutes float64, judged, fires bool) {
+	if h.Duration.N < th.BuildMinRuns || h.Duration.P50 == nil {
+		return 0, false, false
+	}
+	minutes = round1(*h.Duration.P50 / 60)
+	return minutes, true, minutes > th.BuildMinutes
+}
+
+// releaseBuildsFailing reports whether a repo's release builds are judged
+// (ReleaseBuildsMin runs) and fail at least ReleaseBuildsFailed times and
+// ReleaseBuildsShare of them.
+func releaseBuildsFailing(h RepoHotspot, th config.Thresholds) (judged, fires bool) {
+	if h.Runs < th.ReleaseBuildsMin || h.FailureRate == nil {
+		return false, false
+	}
+	return true, h.Failures >= th.ReleaseBuildsFailed && *h.FailureRate >= th.ReleaseBuildsShare
 }
 
 // ---- Builds ----------------------------------------------------------------
@@ -442,18 +484,18 @@ func (a *assessor) buildStates(at stateAt) []stateEval {
 				}
 				worse(fl, f)
 				l := unit()
-				if h.Duration.N >= th.BuildMinRuns && h.Duration.P50 != nil {
-					l.status, l.Value, l.Count = unitClear, round1(*h.Duration.P50/60), ptr(h.Duration.N)
-					if l.Value > th.BuildMinutes {
+				if v, judged, fires := longBuild(h, th); judged {
+					l.status, l.Value, l.Count = unitClear, v, ptr(h.Duration.N)
+					if fires {
 						l.status = unitFires
 					}
 				}
 				worse(lo, l)
 			case KindRelease:
 				r := unit()
-				if h.Runs >= th.ReleaseBuildsMin && h.FailureRate != nil {
+				if judged, fires := releaseBuildsFailing(h, th); judged {
 					r.status, r.Value, r.Count, r.Of = unitClear, *h.FailureRate, ptr(h.Failures), ptr(h.Runs)
-					if h.Failures >= th.ReleaseBuildsFailed && *h.FailureRate >= th.ReleaseBuildsShare {
+					if fires {
 						r.status = unitFires
 					}
 				}

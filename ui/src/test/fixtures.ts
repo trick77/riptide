@@ -16,9 +16,17 @@ import type {
   KindHotspots,
   Metrics,
   PRFact,
+  RepoDot,
+  RepoRow,
+  RepoSpread,
+  RepoView,
   RunFact,
   Spread,
   Stage,
+  TrendGap,
+  Trends,
+  TrendSeries,
+  TrendWeek,
   Week,
 } from "../api";
 
@@ -189,6 +197,296 @@ export function undirected(
 }
 
 const lowSample = change("none", null, "low_sample");
+
+// The trends over the previous n weeks and these n, then the running week:
+// Bitbucket's first previous week before its data, a lost week in the
+// period, the running week counted so far.
+export function trends(n = 4): Trends {
+  const prev = weeks(2 * n).slice(0, n);
+  const cur = weeks(n);
+  const run = cur[n - 1];
+  const all: TrendWeek[] = [...prev, ...cur]
+    .map((x) => ({ ...x, running: false }))
+    .concat({
+      start: run.end,
+      end: new Date(Date.parse(run.end) + 7 * DAY).toISOString(),
+      kw: run.kw + 1,
+      running: true,
+    });
+  const series = (vals: (number | null)[], gaps: TrendGap[]): TrendSeries => ({
+    values: vals,
+    n: vals.map((v) => v ?? 0),
+    gaps,
+  });
+  const merged = all.map((_, i) =>
+    i === 0 ? null : i === n + 1 ? null : 3 + (i % 3),
+  );
+  const gaps = all.map((_, i): TrendGap =>
+    i === 0 ? "no_data" : i === n + 1 ? "lost" : "",
+  );
+  return {
+    weeks: all,
+    split: n,
+    merged: series(merged, gaps),
+    batch: series(
+      merged.map((v) => (v == null ? null : 60 + 10 * v)),
+      gaps,
+    ),
+    releases: series(
+      all.map((_, i) => (i % 2 ? 1 : 0)),
+      all.map(() => ""),
+    ),
+  };
+}
+
+const row = (o: Partial<RepoRow>): RepoRow => ({
+  repo: "kasse/kasse-api",
+  project: "kasse",
+  group: "regular",
+  reason: null,
+  last_release: ago(3),
+  days_since: 3,
+  since_lower_bound: false,
+  releases: 4,
+  releases_per_week: 1,
+  releases_prev: 0.75,
+  release_weeks: [null, 0, 1, 0, 1, 1, 1, 1],
+  to_prod: 2.5,
+  to_prod_n: 6,
+  to_prod_prev: 3,
+  not_yet: 0,
+  merged: 12,
+  merged_per_week: 3,
+  merged_prev: 2.5,
+  merged_weeks: [null, 2, 3, 2, 3, null, 3, 4],
+  batch: 80,
+  sized: 10,
+  batch_prev: 95,
+  pickup: 0.5,
+  pickup_n: 10,
+  flags: [],
+  ...o,
+});
+
+// The per-repo view of a team of nine repos: one rolling out not at all,
+// one rarely, one nobody can place, five regular, a library; eight open.
+export function repoView(): RepoView {
+  const rows: RepoRow[] = [
+    row({
+      repo: "lager/lager-api",
+      project: "lager",
+      group: "none",
+      last_release: ago(40),
+      days_since: 37,
+      releases: 0,
+      releases_per_week: 0,
+      to_prod: null,
+      to_prod_n: 0,
+      not_yet: 3,
+      flags: [{ key: "no_release", tone: "breach", value: 37 }],
+    }),
+    row({
+      repo: "lager/lager-ui",
+      project: "lager",
+      group: "rare",
+      days_since: 19,
+      releases: 1,
+      releases_per_week: 0.25,
+      flags: [{ key: "release_due", tone: "hint", value: 19 }],
+    }),
+    row({
+      repo: "portal/portal-web",
+      project: "portal",
+      group: "unjudged",
+      reason: "untraced",
+      days_since: null,
+      last_release: null,
+      to_prod: null,
+      to_prod_n: 0,
+    }),
+    row({
+      repo: "kasse/kasse-api",
+      flags: [{ key: "slow_to_prod", tone: "breach", value: 16.5 }],
+      to_prod: 16.5,
+    }),
+    ...["kasse-ui", "kasse-belege", "kasse-druck", "kasse-scan"].map((r) =>
+      row({ repo: `kasse/${r}`, batch: null, sized: 2 }),
+    ),
+    row({
+      repo: "kasse/kasse-lib",
+      group: "library",
+      days_since: null,
+      last_release: null,
+    }),
+  ];
+  const dot = (
+    repo: string,
+    value: number | null,
+    x: number | null,
+    o: Partial<RepoDot> = {},
+  ): RepoDot => ({
+    repo,
+    project: repo.split("/")[0],
+    value,
+    n: 4,
+    verdict: "within",
+    x,
+    clamped: false,
+    apart: false,
+    ...o,
+  });
+  const spread = (
+    key: RepoSpread["key"],
+    o: Partial<RepoSpread> = {},
+  ): RepoSpread => ({
+    key,
+    kind: null,
+    unit: "per_week",
+    higher_better: true,
+    shown: true,
+    same: null,
+    scale: {
+      lo: 0.2,
+      hi: 2,
+      log: true,
+      ticks: [
+        { value: 0.5, x: 0.6 },
+        { value: 1, x: 0.3 },
+      ],
+    },
+    dots: [
+      dot("kasse/kasse-api", 1, 0.3),
+      dot("kasse/kasse-ui", 1, 0.3),
+      dot("lager/lager-ui", 0.25, 0.9, { verdict: "hint" }),
+      dot("lager/lager-api", null, null, { verdict: "breach", apart: true }),
+    ],
+    mark: null,
+    note: {
+      kind: "far",
+      repo: null,
+      share: null,
+      of: 3,
+      near: 2,
+      above: 0,
+      below: 1,
+      additive: true,
+    },
+    typical: 1,
+    typical_x: 0.3,
+    team: 2.25,
+    judged: 3,
+    thin: 0,
+    apart: 1,
+    ...o,
+  });
+  return {
+    rows,
+    open: 8,
+    groups: [
+      { key: "none", count: 1, hidden_count: 0, hidden: [], more: 0 },
+      { key: "rare", count: 1, hidden_count: 0, hidden: [], more: 0 },
+      { key: "unjudged", count: 1, hidden_count: 0, hidden: [], more: 0 },
+      {
+        key: "regular",
+        count: 5,
+        hidden_count: 1,
+        hidden: ["kasse/kasse-scan"],
+        more: 0,
+      },
+      {
+        key: "library",
+        count: 1,
+        hidden_count: 1,
+        hidden: ["kasse/kasse-lib"],
+        more: 0,
+      },
+    ],
+    hint_days: 14,
+    breach_days: 28,
+    spreads: [
+      spread("releases"),
+      spread("to_prod", {
+        unit: "days",
+        higher_better: false,
+        scale: {
+          lo: 1,
+          hi: 20,
+          log: false,
+          ticks: [
+            { value: 5, x: 0.2 },
+            { value: 15, x: 0.75 },
+          ],
+        },
+        dots: [
+          dot("kasse/kasse-ui", 2.5, 0.08),
+          dot("kasse/kasse-api", 16.5, 0.82, { verdict: "breach" }),
+          dot("lager/lager-api", null, null, {
+            verdict: "breach",
+            apart: true,
+          }),
+        ],
+        mark: { key: "not_on_prod_days", value: 14, x: 0.68 },
+        note: null,
+        typical: 9.5,
+        typical_x: 0.45,
+        team: null,
+        judged: 2,
+        thin: 3,
+      }),
+      spread("merged", {
+        note: {
+          kind: "dominant",
+          repo: "kasse/kasse-api",
+          share: 0.6,
+          of: 3,
+          near: 0,
+          above: 0,
+          below: 0,
+          additive: true,
+        },
+      }),
+      spread("batch", {
+        unit: "lines",
+        higher_better: false,
+        note: {
+          kind: "pooled",
+          repo: null,
+          share: null,
+          of: 3,
+          near: 3,
+          above: 0,
+          below: 0,
+          additive: false,
+        },
+        typical: 80,
+      }),
+      // Every repo picked up within the hour: one value, a line.
+      spread("pickup", {
+        unit: "working_days",
+        higher_better: false,
+        shown: false,
+        same: 0,
+        note: null,
+        typical: 0,
+        thin: 2,
+        apart: 0,
+      }),
+      spread("build_duration", {
+        kind: "feature",
+        unit: "seconds",
+        higher_better: false,
+        note: null,
+        typical: 300,
+      }),
+      spread("build_success", {
+        kind: "feature",
+        unit: "share",
+        note: null,
+        typical: 0.9,
+      }),
+    ],
+  };
+}
 
 // The sample team: one release, a re-sync and a first deploy on prod, a
 // failed sync; one human PR through intg to prod, a bot's PR; three runs.
@@ -628,6 +926,8 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       merged: 2,
       runs: 1,
     },
+    trends: trends(n),
+    repos: repoView(),
     ...o,
   };
 }

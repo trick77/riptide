@@ -4,6 +4,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/trick77/riptide/internal/config"
 	"github.com/trick77/riptide/internal/dataset"
 )
 
@@ -89,11 +90,13 @@ func (a *assessor) releaseStates(at stateAt) []stateEval {
 			u.status = unitClear
 		}
 		b, d := u, u
-		if u.status == unitClear && days > float64(th.ReleaseBreachDays) {
-			b.status, d.status = unitFires, unitEscalated
-		}
-		if u.status == unitClear && days > float64(th.ReleaseHintDays) && days <= float64(th.ReleaseBreachDays) {
-			d.status = unitFires
+		if u.status == unitClear {
+			switch releaseStanding(days, th) {
+			case releaseBreach:
+				b.status, d.status = unitFires, unitEscalated
+			case releaseDue:
+				d.status = unitFires
+			}
 		}
 		breach.units = append(breach.units, b)
 		due.units = append(due.units, d)
@@ -101,7 +104,67 @@ func (a *assessor) releaseStates(at stateAt) []stateEval {
 	return []stateEval{breach, due}
 }
 
+// Where a unit's last release to production stands against the sprint rule
+// (releaseStanding).
+const (
+	releaseRegular = iota
+	releaseDue
+	releaseBreach
+)
+
+// releaseStanding is days since a unit's last release against the team's
+// thresholds: past ReleaseBreachDays the rule is broken, past
+// ReleaseHintDays the release is due. One cut for the states and the
+// per-repo view alike.
+func releaseStanding(days float64, th config.Thresholds) int {
+	switch {
+	case days > float64(th.ReleaseBreachDays):
+		return releaseBreach
+	case days > float64(th.ReleaseHintDays):
+		return releaseDue
+	}
+	return releaseRegular
+}
+
 // ---- Merged work before production -----------------------------------------
+
+// trunkArrival is when a merged PR's work reached the trunk: TrunkAt, else
+// its merge. Where the wait for production starts.
+func trunkArrival(pr dataset.PR) *time.Time {
+	if pr.TrunkAt != nil {
+		return pr.TrunkAt
+	}
+	return pr.MergedAt
+}
+
+// toProdCandidate reports whether a merged PR of a repo counts for the
+// rule that merged work reaches production within a sprint: a person's
+// counted work, no library's, placed on a trunk, in a repo an App is known
+// to deploy that is no infrastructure Apps' only (infra: infraRepos).
+func toProdCandidate(pr dataset.PR, traces map[string]dataset.RepoTrace, infra map[string]bool) bool {
+	if pr.Library || notCounted(pr) != "" || (pr.TrunkAt == nil && pr.OffTrunk) || infra[pr.Repo] {
+		return false
+	}
+	rt, ok := traces[pr.Repo]
+	return ok && rt.DeployedSince != nil
+}
+
+// toProdDays is the days from a PR's arrival on the trunk to at, its first
+// production deploy.
+func toProdDays(pr dataset.PR, at time.Time) float64 {
+	return at.Sub(*trunkArrival(pr)).Hours() / 24
+}
+
+// typicalToProd is a repo's typical wait from the trunk to production over
+// waits (toProdDays), rounded to a tenth of a day: judged on
+// NotOnProdMinPRs PRs or more, past NotOnProdDays the rule is broken.
+func typicalToProd(waits []float64, th config.Thresholds) (value float64, judged, fires bool) {
+	if len(waits) < th.NotOnProdMinPRs || len(waits) == 0 {
+		return 0, false, false
+	}
+	value = round1(*Median(waits))
+	return value, true, value > float64(th.NotOnProdDays)
+}
 
 // notOnProdStates judge each deployable repo against the team's rule that
 // merged work reaches production within a sprint (owner, 2026-11): its
@@ -123,12 +186,7 @@ func (a *assessor) notOnProdStates(at stateAt) []stateEval {
 	}
 	by := map[string]*acc{}
 	for _, pr := range a.states.prs {
-		if pr.Library || notCounted(pr) != "" || !pr.MergedAt.Before(end) || (pr.TrunkAt == nil && pr.OffTrunk) ||
-			a.states.infra[pr.Repo] {
-			continue
-		}
-		rt, ok := a.states.traces[pr.Repo]
-		if !ok || rt.DeployedSince == nil {
+		if !pr.MergedAt.Before(end) || !toProdCandidate(pr, a.states.traces, a.states.infra) {
 			continue
 		}
 		r := by[pr.Repo]
@@ -136,15 +194,12 @@ func (a *assessor) notOnProdStates(at stateAt) []stateEval {
 			r = &acc{project: pr.Project}
 			by[pr.Repo] = r
 		}
-		arrived := pr.MergedAt
-		if pr.TrunkAt != nil {
-			arrived = pr.TrunkAt
-		}
+		arrived := trunkArrival(pr)
 		pl := a.states.placed(pr, end)
 		switch pl.state {
 		case ProdOnProd:
 			if at.period.In(pr.MergedAt) && pl.at != nil {
-				r.waits = append(r.waits, pl.at.Sub(*arrived).Hours()/24)
+				r.waits = append(r.waits, toProdDays(pr, *pl.at))
 			}
 		case ProdNotYet:
 			r.notYet++
@@ -181,9 +236,9 @@ func (a *assessor) notOnProdStates(at stateAt) []stateEval {
 		lying.units = append(lying.units, u)
 		s := stateUnit{StateUnit: StateUnit{Name: repo, Project: ptr(r.project), Count: ptr(len(r.waits)),
 			Names: []string{}}, status: unitUnjudged}
-		if len(r.waits) >= th.NotOnProdMinPRs {
-			s.Value, s.status = round1(*Median(r.waits)), unitClear
-			if s.Value > limit {
+		if v, judged, fires := typicalToProd(r.waits, th); judged {
+			s.Value, s.status = v, unitClear
+			if fires {
 				s.status = unitFires
 			}
 		}

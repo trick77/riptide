@@ -85,6 +85,12 @@ type Metrics struct {
 	Comparison Comparison `json:"comparison"`
 	// RunningWeek is the week running now, counted in no number above.
 	RunningWeek RunningWeek `json:"running_week"`
+	// Trends are the merged PRs, their size and the releases week by week
+	// over the previous period, the period and the running week.
+	Trends Trends `json:"trends"`
+	// Repos are the period's numbers per repo: the ranking and a strip per
+	// number, so a team number never stands alone where repos differ.
+	Repos RepoView `json:"repos"`
 }
 
 // RunningWeek is the week running now so far, counted as the page counts
@@ -127,9 +133,15 @@ func runningWeek(ds *dataset.Dataset, p Period, f filter) RunningWeek {
 // nil: no previous data is an empty dataset under ds's Meta. A nil running,
 // or no p.Running, keeps the open PRs at the period's end and counts no
 // running week.
+//
+// The trends and the per-repo view are the page's only: the assessment
+// (Assess) reads neither, so they cost its request nothing.
 func Compute(ds, prev, running *dataset.Dataset, p Params) Metrics {
 	ds, prev = classified(ds, prev)
-	m, _ := computeBoth(ds, prev, running, p)
+	m, pm := computeBoth(ds, prev, running, p)
+	f := newFilter(ds, p)
+	m.Trends = trends(m, pm, running, p, f)
+	m.Repos = repoView(ds, prev, m, pm, p, f)
 	return m
 }
 
