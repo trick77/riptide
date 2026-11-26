@@ -139,9 +139,18 @@ export function RepoStrip({
   if (!s.shown) return null;
   const apart = s.dots.filter((d) => d.apart);
   const perRow = 5;
-  // Wide enough for its label too, so the axis' last tick stays clear of it.
+  // The set-apart dots' caption, a phrase that reads alone ("kein Release
+  // im Zeitraum").
+  const apartLabel = t(`repos.apart.${s.key}`, {
+    defaultValue: t("repos.apart.releases"),
+  });
+  // Wide enough for its label too (about 5.2 px a character at 9.5 px), so
+  // the axis' last tick stays clear of it and the label of the tile's edge.
   const apartW = apart.length
-    ? Math.max(Math.min(apart.length, perRow) * 11 + 6, 84) + APART_GAP
+    ? Math.max(
+        Math.min(apart.length, perRow) * 11 + 6,
+        Math.ceil(apartLabel.length * 5.2),
+      ) + APART_GAP
     : 0;
   const x0 = PAD;
   const x1 = W - PAD - apartW;
@@ -163,7 +172,7 @@ export function RepoStrip({
   );
   const tipText = (d: RepoDot) =>
     d.apart || d.value == null
-      ? t(`repos.apart.${s.key}`, { defaultValue: t("repos.apart.releases") })
+      ? apartLabel
       : `${unitValue(t, s.unit, d.value)} · ${t(`repos.n.${s.key}`, { count: d.n })}`;
   const shown = active != null ? all[active] : null;
   const typical = s.typical_x != null ? at(s.typical_x) : null;
@@ -266,9 +275,7 @@ export function RepoStrip({
               fontSize="9.5"
               fill="var(--color-danger-ink)"
             >
-              {t(`repos.apart.${s.key}`, {
-                defaultValue: t("repos.apart.releases"),
-              })}
+              {apartLabel}
             </text>
           </g>
         )}

@@ -77,7 +77,8 @@ function Td({ cell, t }: { cell: Cell; t: TFunction }) {
   );
 }
 
-export function FrameworkMap() {
+// prod is the production stage as the page shows it.
+export function FrameworkMap({ prod }: { prod: string }) {
   const { t } = useTranslation();
   return (
     <section id="frameworks" aria-labelledby="h-frameworks" className="mt-10">
@@ -110,7 +111,7 @@ export function FrameworkMap() {
                     MISSING.includes(row) ? "text-muted" : "text-ink"
                   }`}
                 >
-                  {t(`frameworks.row.${row}`)}
+                  {t(`frameworks.row.${row}`, { prod })}
                 </th>
                 {cells.map((c, i) => (
                   <Td key={i} cell={c} t={t} />

@@ -206,7 +206,7 @@ export function signalTitle(t: TFunction, s: Signal, prod = "PROD"): string {
     what: "",
   };
   if (s.kind === "change")
-    return t(`overview.assess.title.${changeKey(s)}`, vars);
+    return upperFirst(t(`overview.assess.title.${changeKey(s)}`, vars));
   if (s.kind === "resolved") {
     const parts = (s.metric ?? "").split(":");
     const was = parts[0];
@@ -226,7 +226,20 @@ export function signalTitle(t: TFunction, s: Signal, prod = "PROD"): string {
         ? kindWord || label
         : label || kindWord;
   }
-  return t(`overview.assess.title.${s.kind}`, { ...vars, defaultValue: "" });
+  const title = t(`overview.assess.title.${s.kind}`, {
+    ...vars,
+    defaultValue: "",
+  });
+  // Only a title a label leads: a repo or a source keeps its own case.
+  return s.kind === "question" || (s.kind === "resolved" && !s.repo)
+    ? upperFirst(title)
+    : title;
+}
+
+// A title led by a number's label ("gemergte PRs pro Woche: …") starts
+// upper case, as every title does.
+function upperFirst(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 // A change's words by the backend's tone: a gain is raised only when

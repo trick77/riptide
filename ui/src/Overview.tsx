@@ -71,7 +71,7 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
 
   const whys: Record<string, Why> = {
     freq: {
-      title: t("overview.freq.label"),
+      title: t("overview.freq.label", { prod }),
       means: t("overview.freq.means"),
       watch: t("overview.freq.watch"),
       lever: t("overview.freq.lever"),
@@ -87,8 +87,8 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
           ? t("overview.freq.basisFirst", { count: freq.first_releases })
           : ""),
       filters: [
-        "operation_phase = Succeeded",
-        `environment = ${prod}`,
+        t("overview.freq.filterSucceeded"),
+        t("overview.freq.filterStage", { prod }),
         t("overview.freq.filterImages"),
         t("overview.freq.filterRevision"),
       ],
@@ -108,7 +108,6 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
               count: freq.unattributed,
             })
           : ""),
-      query: "docs/metrics.md · Deployment-frequency query",
     },
     lead: {
       title: t("overview.lead.label", { prod }),
@@ -117,7 +116,10 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
       lever: t("overview.lead.lever"),
       def: t("overview.lead.def", { prod }),
       basis: t("overview.lead.basis", { count: lt.human.n, prod }),
-      filters: [t("overview.lead.filterBots"), `environment = ${prod}`],
+      filters: [
+        t("overview.lead.filterBots"),
+        t("overview.freq.filterStage", { prod }),
+      ],
       coverage: [
         t("overview.lead.coverage", {
           prod,
@@ -126,7 +128,6 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
         }),
         ...traceLines(t, m, prod),
       ].join(" "),
-      query: "docs/dora-lead-time.md",
     },
     dsucc: {
       title: t("overview.dsucc.label"),
@@ -139,11 +140,10 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
         failed: freq.failed,
       }),
       filters: [
-        "operation_phase IN (Succeeded, Failed, Error)",
-        `environment = ${prod}`,
+        t("overview.dsucc.filterFinished"),
+        t("overview.freq.filterStage", { prod }),
       ],
       coverage: t("overview.dsucc.coverage"),
-      query: "argocd_events",
     },
   };
   const open = why && whys[why] ? whys[why] : null;
@@ -164,10 +164,15 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
       <Strip m={m} />
 
       <div id="ausliefern">
-        <SubHead title={t("overview.throughput")} />
+        {/* "Typisch" and the one rule for every number below, said once
+            here rather than on each tile. */}
+        <SubHead
+          title={t("overview.throughput", { prod })}
+          text={`${t("overview.throughputText")} ${t("common.ownHistory")}`}
+        />
         <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3">
           <Tile
-            label={t("overview.freq.label")}
+            label={t("overview.freq.label", { prod })}
             dora={t("overview.freq.dora")}
             question={t("overview.freq.question", { prod })}
             value={freq.syncs ? num(freq.per_week, 1) : "–"}
@@ -279,11 +284,7 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
               count: freq.finished,
             })}
             direction={
-              <Direction
-                arrow="up"
-                label={t("overview.dsucc.direction")}
-                why={t("common.ownHistory")}
-              />
+              <Direction arrow="up" label={t("overview.dsucc.direction")} />
             }
             compare={{
               change: c.deploy_success,

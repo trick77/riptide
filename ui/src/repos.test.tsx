@@ -41,7 +41,8 @@ describe("repo strip", () => {
     // The set-apart dot sits right of every placed one.
     const cx = dots.map((d) => Number(d.getAttribute("cx")));
     expect(cx[3]).toBeGreaterThan(Math.max(...cx.slice(0, 3)));
-    expect(screen.getByText("nichts ausgerollt")).toBeInTheDocument();
+    // The caption reads alone: what is missing, and when.
+    expect(screen.getByText("kein Release im Zeitraum")).toBeInTheDocument();
     expect(screen.getByText("typisch")).toBeInTheDocument();
   });
 
@@ -62,7 +63,9 @@ describe("repo strip", () => {
     expect(onRepo).toHaveBeenCalledTimes(2);
     expect(onRepo).toHaveBeenCalledWith("lager/lager-ui");
     const apart = screen.getByRole("button", { name: /^lager\/lager-api: / });
-    expect(apart).toHaveAccessibleName("lager/lager-api: nichts ausgerollt");
+    expect(apart).toHaveAccessibleName(
+      "lager/lager-api: kein Release im Zeitraum",
+    );
   });
 
   it("draws nothing the backend did not show", () => {
@@ -82,17 +85,17 @@ describe("repo strip", () => {
       return out;
     };
     expect(lines(rel)).toEqual([
-      "Typisches Repo: 1.0 pro Woche, aus 3 Repos",
+      "Das typische Repo: 1.0 pro Woche, aus 3 Repos",
       "2 von 3 Repos liegen nahe beim typischen Repo, 1 weit darunter.",
     ]);
     expect(lines(spreadOf(m, "merged")!)).toContain(
       "kasse/kasse-api trägt 60 % davon.",
     );
     expect(lines(spreadOf(m, "batch")!)).toContain(
-      "Die Teamzahl zählt alle PRs mit Grösse zusammen: Repos mit vielen PRs mit Grösse bestimmen sie. Das typische Repo liegt bei 80 Zeilen.",
+      "Die Zahl des Teams zählt alle PRs mit bekannter Grösse zusammen: Repos mit vielen PRs mit bekannter Grösse bestimmen sie. Das typische Repo liegt bei 80 Zeilen.",
     );
     expect(lines(spreadOf(m, "to_prod")!)).toEqual([
-      "Typisches Repo: 9.5 Tage, aus 2 Repos",
+      "Das typische Repo: 9.5 Tage, aus 2 Repos",
       "3 Repos mit zu wenigen PRs für einen typischen Wert",
     ]);
   });
@@ -107,7 +110,7 @@ describe("repo strip", () => {
     expect(
       screen.getByText("2 Repos mit zu wenigen PRs für einen typischen Wert"),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/Typisches Repo/)).toBeNull();
+    expect(screen.queryByText(/typische Repo/)).toBeNull();
   });
 
   it("writes each unit's value", () => {
@@ -151,16 +154,22 @@ describe("ranking", () => {
     expect(
       within(rank).getByText("typisch 16.5 Tage bis PROD"),
     ).toBeInTheDocument();
-    expect(within(rank).getByText("liegt noch")).toBeInTheDocument();
+    // A repo that rolls nothing out: its wait reads alone, its PRs below.
+    expect(within(rank).getByText("kein PR auf PROD")).toBeInTheDocument();
     expect(
       within(rank).getByText(/3 PRs noch nicht auf PROD/),
     ).toBeInTheDocument();
-    // The hidden rows, a line per group: a group partly open says "weitere".
+    // The hidden rows, a line per group: a group partly open reads as the
+    // rest of the group above, never as a second group of the same name; a
+    // group with no row open gets its head and rule.
     const more = within(rank).getAllByTestId("rank-more");
     expect(more.map((r) => r.textContent)).toEqual([
-      expect.stringMatching(/Rollt regelmässig aus1weitere: kasse-scan$/),
-      expect.stringMatching(/Wird nicht ausgerollt1Library: .*kasse-lib$/),
+      "und 1 weiteres Repo dieser Gruppe: kasse-scan",
+      expect.stringMatching(
+        /^Bibliotheken1werden nie selbst ausgerollt, darum fehlt hier kein Release.*kasse-lib$/,
+      ),
     ]);
+    expect(within(rank).getAllByText("Rollt regelmässig aus")).toHaveLength(1);
     fireEvent.click(
       within(rank).getByRole("button", { name: "alle 9 zeigen" }),
     );
@@ -212,7 +221,7 @@ describe("trend lines", () => {
       /KW 47 \d+ \(laufende Woche, bis jetzt\)/,
     );
     expect(chart).toHaveAccessibleName(
-      /KW 39 keine Daten: die Quelle lieferte noch nicht/,
+      /KW 39 keine Daten: Die Quelle lieferte damals noch nichts/,
     );
     expect(chart.textContent).toContain("Vorperiode");
   });

@@ -62,6 +62,10 @@ type digestSignal struct {
 	metrics.Signal
 	Means  string   `json:"means"`
 	Levers []string `json:"levers"`
+	// Word is the page's name for the signal's kind; none for a state,
+	// which states names by its own title (a hint or a limit is no
+	// finding).
+	Word *Words `json:"word,omitempty"`
 	// Series shadows the signal's weeks, always nil (omitted): the weeks
 	// are the page's picture, the model words the facts.
 	Series *struct{} `json:"series,omitempty"`
@@ -120,9 +124,13 @@ type Digest struct {
 	LibrariesOnly bool              `json:"libraries_only"`
 	Limits        []metrics.Limit   `json:"limits"`
 	Labels        map[string]string `json:"labels"`
-	Levers        map[string]string `json:"levers"`
+	// Levers are the levers' words on the page, German and English.
+	Levers map[string]Words `json:"levers"`
 	// States are the state keys' meanings and the page's words for them.
 	States map[string]StateGloss `json:"states"`
+	// Words is the page's fixed vocabulary: one word per thing, in both
+	// languages, and the words the page never uses for it.
+	Words []Term `json:"words"`
 }
 
 // MandatoryTop is how many of the ranked signals, gates aside, the answer
@@ -320,16 +328,22 @@ func buildDigest(a metrics.Assessment) ([]byte, *aliases, error) {
 		f.Signals, f.Facts = sigs, al.hideFacts(f.Facts)
 		focus[i] = f
 	}
+	stage := stageWord(a.ProductionStage)
 	d := Digest{
 		WindowWeeks: len(a.Period.Weeks), Weeks: weekRange(a.Period), Mandatory: mand,
 		Team: a.Team, Focus: focus, Active: a.Active, Calm: a.Calm, Unjudged: a.Unjudged, Idle: a.Idle,
 		Question: a.Question, Quiet: a.Quiet, QuietReasons: a.QuietReasons, NotMeasurable: a.NotMeasurable,
 		LibrariesOnly: a.LibrariesOnly, Limits: a.Limits,
-		Labels: labels, Levers: leverText, States: stateGlosses(a.ProductionStage),
+		Labels: labels, Levers: leverTexts(stage), States: stateGlosses(stage), Words: vocabularyFor(stage),
 	}
 	for _, s := range a.Signals {
+		var word *Words
+		if s.State == nil {
+			w := kinds[s.Kind].word
+			word = &w
+		}
 		d.Signals = append(d.Signals, digestSignal{Signal: al.hideSignal(s), Means: kinds[s.Kind].means, Levers: leversFor(s),
-			State: newDigestState(s.State)})
+			Word: word, State: newDigestState(s.State)})
 	}
 	raw, err := json.Marshal(d)
 	return raw, al, err

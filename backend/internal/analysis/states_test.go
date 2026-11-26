@@ -122,6 +122,103 @@ func TestStateTitlesAreThePages(t *testing.T) {
 	}
 }
 
+// catalog is a UI catalog's text (ui/src/i18n/<lang>.ts).
+func catalog(t *testing.T, lang string) string {
+	t.Helper()
+	raw, err := os.ReadFile("../../../ui/src/i18n/" + lang + ".ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+// block is the catalog from the object opened by head on, so a key is read
+// where the page reads it (overview.assess.lever, not freq.lever).
+func block(t *testing.T, src, head string) string {
+	t.Helper()
+	i := strings.Index(src, "\n"+head+" {\n")
+	if i < 0 {
+		t.Fatalf("catalog has no %q block", head)
+	}
+	return src[i:]
+}
+
+// The model picks levers and names kinds in the page's own words: each
+// lever's text and each kind's word is the catalog's, in both languages,
+// the production stage as the page's placeholder.
+func TestLeversAndKindsAreThePages(t *testing.T) {
+	for _, lang := range []string{"de", "en"} {
+		src := catalog(t, lang)
+		pick := func(w Words) string { return map[string]string{"de": w.DE, "en": w.EN}[lang] }
+		levers := block(t, src, "      lever:")
+		for k, w := range leverText {
+			m := regexp.MustCompile(`\n\s+` + k + `:\s+"([^"]*)"`).FindStringSubmatch(levers)
+			if m == nil || m[1] != pick(w) {
+				t.Errorf("%s lever %s: page %q, glossary %q", lang, k, m, pick(w))
+			}
+		}
+		kindsSrc := block(t, src, "      kind:")
+		for k, g := range kinds {
+			m := regexp.MustCompile(`\n\s+` + k + `:\s+"([^"]*)"`).FindStringSubmatch(kindsSrc)
+			if m == nil || m[1] != pick(g.word) {
+				t.Errorf("%s kind %s: page %q, glossary %q", lang, k, m, pick(g.word))
+			}
+		}
+	}
+	// Every lever a signal may carry has its words.
+	for _, ls := range stateLevers {
+		for _, l := range ls {
+			if _, ok := leverText[l]; !ok {
+				t.Errorf("lever %s has no words", l)
+			}
+		}
+	}
+}
+
+// The model's vocabulary is the page's: every word of it stands in the
+// catalog of its language (docs/metrics.md, "Words on the page").
+func TestVocabularyIsThePages(t *testing.T) {
+	paren := regexp.MustCompile(` \([^)]*\)`)
+	for _, lang := range []string{"de", "en"} {
+		src := strings.ToLower(catalog(t, lang))
+		for _, v := range vocabulary {
+			w := map[string]string{"de": v.DE, "en": v.EN}[lang]
+			for _, part := range strings.Split(paren.ReplaceAllString(w, ""), ", ") {
+				if !strings.Contains(src, strings.ToLower(part)) {
+					t.Errorf("%s: %q (%s) is not on the page", lang, part, v.Thing)
+				}
+			}
+		}
+	}
+	// The prompt tells the model to keep to it.
+	if !strings.Contains(promptText, "- words: the page's fixed vocabulary") || !strings.Contains(promptText, "Write the page's words only") {
+		t.Errorf("the prompt does not hold the model to the page's words")
+	}
+	// The digest carries it with the view's stage, never the placeholder.
+	for _, v := range vocabularyFor("PRD") {
+		if strings.Contains(v.DE+v.EN, metrics.StageWord) {
+			t.Errorf("vocabulary keeps the stage placeholder: %+v", v)
+		}
+	}
+	raw, _, err := buildDigest(metrics.Assessment{Signals: []metrics.Signal{
+		stateSig(metrics.StateNoRelease, metrics.ToneAttention, "lager"),
+		{ID: "pr_jam:kasse/kasse-api", Kind: metrics.SignalPRJam, Tone: metrics.ToneAttention, Repo: ptr("kasse/kasse-api"),
+			Facts: []metrics.Fact{}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"words":[`, `"PR-Grösse"`, `"Zeit vom ersten Commit bis PROD"`,
+		`"word":{"de":"PR-Stau","en":"PR jam"}`, `"plan the next release to PROD, or name what holds it"`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("digest lacks %s", want)
+		}
+	}
+	// A state is named by its title: a hint or a limit is no "Befund".
+	if strings.Count(string(raw), `"word":`) != 1 {
+		t.Errorf("a state signal carries a kind word: %s", raw)
+	}
+}
+
 // A state card is a team-wide card: worded with its own lever, it shows;
 // a data-honesty card sits in its own column.
 func TestStateCardsInLayout(t *testing.T) {
