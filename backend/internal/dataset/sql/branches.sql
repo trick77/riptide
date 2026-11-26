@@ -1,8 +1,8 @@
 -- Every branch the team pushed to since $2, per repo, as of any instant the
 -- branch states judge at (metrics): every push's time, the first PR event
--- from it at or after its first push, whether it is any PR's target in the
--- repo (trunk, develop, a release line), and when its last head reached the
--- repo's trunk without a PR (merged): a trunk push whose tip it is (a
+-- from it at or after its first push, since when it is a PR's target in the
+-- repo (trunk, develop, a release line, an epic), and when its last head
+-- reached the repo's trunk without a PR (merged): a trunk push whose tip it is (a
 -- fast-forward), that lists it, or whose commit names it a parent (a merge
 -- commit, the push's tip, never hidden by the 5-commit cap). A branch's
 -- deletion is not stored (a delete-only push is ignored at ingest), so
@@ -41,12 +41,15 @@ with_pr AS MATERIALIZED (
              AND p.event_type LIKE 'pr:%' AND p.occurred_at >= b.first_at) AS pr_at
   FROM branches b
 ),
--- The targets of the PRs of the repos with a branch without a PR.
+-- The targets of the PRs of the repos pushed to, each since its first PR:
+-- an epic branch is a target from the first PR into it on, also once a PR
+-- came from it.
 targets AS MATERIALIZED (
-  SELECT DISTINCT e.repo_full_name, lower(e.payload->'pullRequest'->'toRef'->>'displayId') AS target
+  SELECT e.repo_full_name, lower(e.payload->'pullRequest'->'toRef'->>'displayId') AS target, min(e.occurred_at) AS since
   FROM bitbucket_events e
   WHERE e.team = $1 AND e.event_type IN ('pr:opened', 'pr:merged')
-    AND e.repo_full_name IN (SELECT repo_full_name FROM with_pr WHERE pr_at IS NULL)
+    AND e.repo_full_name IN (SELECT repo_full_name FROM with_pr)
+  GROUP BY 1, 2
 ),
 candidates AS MATERIALIZED (
   SELECT w.repo_full_name, w.branch_name, w.last_at, w.head_sha
@@ -98,9 +101,8 @@ SELECT w.repo_full_name AS repo,
        w.pushes,
        w.push_times,
        w.pr_at,
-       w.pr_at IS NULL AND NOT EXISTS (SELECT 1 FROM candidates c
-                                        WHERE c.repo_full_name = w.repo_full_name AND c.branch_name = w.branch_name)
-         AS target,
+       (SELECT t.since FROM targets t WHERE t.repo_full_name = w.repo_full_name AND t.target = w.branch_name)
+         AS target_at,
        (SELECT least(
                  -- A trunk push whose tip the head is, at any time: a
                  -- fast-forward, or a branch cut from the trunk with no

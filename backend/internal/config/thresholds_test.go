@@ -43,7 +43,12 @@ func TestThresholdsInvalid(t *testing.T) {
 		{`{"thresholds": {"branch_silent_days": 90}}`, "below `branch_silent_max_days`"},
 		// Past the states' look-back nothing could ever fire; a day count
 		// past it, a loop over each day, hung every assessment.
-		{`{"thresholds": {"silent_builds_days": 5000}}`, "silent_builds_days` must be at most 130"},
+		{`{"thresholds": {"silent_builds_days": 5000}}`, "silent_builds_days` must be at most 15"},
+		// Past the runs the shortest view reads, the span before it is not
+		// read: the state could never judge a repo.
+		{`{"thresholds": {"silent_builds_days": 16}}`, "silent_builds_days` must be at most 15"},
+		// Dropped: a key no longer known refuses to start.
+		{`{"thresholds": {"merge_pause_wait_days": 0.5}}`, "not a known threshold"},
 		{`{"thresholds": {"not_on_prod_days": 200}}`, "at most 182"},
 		{`{"thresholds": {"merge_pause_weeks": 40}}`, "at most 26"},
 		{`{"thresholds": {"build_minutes": 2000}}`, "at most 1440"},

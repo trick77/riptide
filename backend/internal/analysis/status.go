@@ -133,7 +133,8 @@ func tab(s metrics.Signal) string {
 // and resolutions get GoodCards and DoneCards slots on top: without words
 // the best ones; with words the best gain and resolution always, the worded
 // ones beside them (past the slots if need be), unworded ones in a slot
-// left. The rest, gates and the question aside, is "also spotted".
+// left, red state cards in a red slot left. The rest, gates and the
+// question aside, is "also spotted".
 func layout(a metrics.Assessment, text *Text) Layout {
 	l := Layout{Focus: []LayoutFocus{}, Cards: []LayoutCard{}, Also: []LayoutCard{}, Tally: tally(a)}
 	covered := map[string]bool{}
@@ -202,6 +203,24 @@ func layout(a metrics.Assessment, text *Text) Layout {
 				continue
 			}
 			addCard(k.Signal, k.Lever, true, false)
+		}
+		// Red slots the model left free take the red state cards it did not
+		// word, in the backend's rank: a state's card has its own words (the
+		// page's), so a red state never hides under "also spotted" while a
+		// slot is free. A red change the model left out stays a chip.
+		red := 0
+		for _, c := range l.Cards {
+			if c.Column == ColumnBad {
+				red++
+			}
+		}
+		for _, s := range a.Signals {
+			if red < MaxCards && column(s) == ColumnBad && s.State != nil && !shown[s.ID] && !covered[s.ID] {
+				addCard(s.ID, "", false, false)
+				if shown[s.ID] {
+					red++
+				}
+			}
 		}
 		// Which show first, then in the backend's rank across both columns:
 		// the page lists gains and resolutions as ranked.

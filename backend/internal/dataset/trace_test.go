@@ -422,6 +422,8 @@ func TestTraceResyncKeepsTheStart(t *testing.T) {
 func TestTraceDevelopTrunk(t *testing.T) {
 	st, pool := migrated(t)
 	s := &seeder{t: t, pool: pool}
+	// Argo CD reports from before the PRs on.
+	s.deploy(team, "shop-prod", "prod", sha("0"), "Failed", days(0.5))
 	s.push(shopAPI, "master", days(1), commit{sha: sha("a"), authored: days(1)})
 	s.push(shopAPI, "develop", days(1), commit{sha: sha("d"), authored: days(1)})
 	for i, id := range []int64{1, 2, 3} {
@@ -443,6 +445,52 @@ func TestTraceDevelopTrunk(t *testing.T) {
 	d := load(t, st, t0, days(28))
 	expectProd(t, d, shopAPI, map[int64]string{1: "96h0m0s/compare", 2: "96h0m0s/compare", 3: "96h0m0s/compare",
 		4: "-"})
+	// At the period's end after the master release, #4 is in develop, which
+	// no PR brought to master: merged into a branch that did not reach it,
+	// never a release that cannot be resolved (it was, exactly).
+	period := metrics.NewPeriod(1, days(5), time.UTC)
+	d = load(t, st, period.From, period.To)
+	c := metrics.Compute(d, &dataset.Dataset{Meta: d.Meta}, nil, metrics.Params{Period: period}).Coverage
+	if c.NotPlaceable != 1 || c.Reasons.OffTrunk != 1 || c.Reasons.ReleaseUnresolved != 0 || c.OnProd != 3 {
+		t.Errorf("coverage %s, want #1-3 on prod and #4 off the main branch", jsonString(c.TraceCounts))
+	}
+}
+
+// A PR merged through an umbrella into develop, the trunk, reaches master
+// with the PR that merges develop into it, like develop's own PRs.
+func TestTraceDevelopUmbrellaChild(t *testing.T) {
+	st, pool := migrated(t)
+	s := &seeder{t: t, pool: pool}
+	s.deploy(team, "shop-prod", "prod", sha("0"), "Failed", days(0.5))
+	s.push(shopAPI, "master", days(1), commit{sha: sha("a"), authored: days(1)})
+	s.push(shopAPI, "develop", days(1), commit{sha: sha("d"), authored: days(1)})
+	for i, id := range []int64{1, 2, 3} {
+		at := days(2).Add(time.Duration(i) * time.Hour)
+		mc := strings.Repeat(fmt.Sprintf("d%d", id), 20)
+		s.pr(prEvent{event: "pr:merged", repo: shopAPI, id: id, author: "dev-anna", branch: fmt.Sprintf("feature/f-%d", id),
+			target: "develop", mergeCommit: mc, at: at})
+		s.push(shopAPI, "develop", at, commit{sha: mc, authored: at, merge: true})
+	}
+	// #5 into the umbrella feature/rework, #6 the umbrella into develop.
+	s.pr(prEvent{event: "pr:opened", repo: shopAPI, id: 5, author: "dev-anna", branch: "feature/shop-5",
+		target: "feature/rework", at: days(2.2)})
+	s.pr(prEvent{event: "pr:merged", repo: shopAPI, id: 5, author: "dev-anna", branch: "feature/shop-5",
+		target: "feature/rework", mergeCommit: strings.Repeat("f5", 20), at: days(2.5)})
+	s.pr(prEvent{event: "pr:merged", repo: shopAPI, id: 6, author: "dev-otto", branch: "feature/rework",
+		target: "develop", mergeCommit: strings.Repeat("e6", 20), at: days(2.8)})
+	s.push(shopAPI, "develop", days(2.8), commit{sha: strings.Repeat("e6", 20), authored: days(2.8), merge: true})
+	s.pr(prEvent{event: "pr:merged", repo: shopAPI, id: 9, author: "dev-otto", branch: "develop",
+		target: "master", mergeCommit: strings.Repeat("e9", 20), at: days(3)})
+	s.push(shopAPI, "master", days(3), commit{sha: strings.Repeat("e9", 20), authored: days(3), merge: true})
+	s.release(sha("1"), days(4).Add(-time.Hour), compare(shopAPI, sha("a"), strings.Repeat("e9", 20)))
+	s.deploy(team, "shop-prod", "prod", sha("1"), "Succeeded", days(4), "reg/shop-api:1.0")
+	d := load(t, st, t0, days(28))
+	expectProd(t, d, shopAPI, map[int64]string{1: "96h0m0s/compare", 5: "96h0m0s/compare"})
+	for _, p := range d.PRs {
+		if p.PRID == 5 && (p.OnwardAt == nil || !p.OnwardAt.Equal(days(3)) || p.OnwardBranch == nil || *p.OnwardBranch != "master") {
+			t.Errorf("#5 onward %v %v, want master on day 3", p.OnwardAt, p.OnwardBranch)
+		}
+	}
 }
 
 // A release that changed only an image none of its App's repos publishes

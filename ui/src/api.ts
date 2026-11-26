@@ -824,6 +824,9 @@ export type StateUnit = {
   week: Week | null;
   names: string[];
   held: boolean;
+  // A lasting state's unit that held it two sprints: what made its card
+  // red.
+  two_sprints: boolean;
   reason: TraceReason | null;
   ci_seconds: number | null;
   // The facts search listing the unit's rows in the card's facts table;
@@ -856,9 +859,10 @@ export type StateCard = {
     unit: "days" | "working_days" | "count" | "share" | "minutes";
     min_key: string | null;
     min: number | null;
-    // A span a case must lie in (minutes, or days), where the state has one.
+    // A span a case must lie in, where the state has one, in within_unit.
     within_key: string | null;
     within: number | null;
+    within_unit: "minutes" | "working_days" | "days" | null;
   } | null;
   at: string;
   was: string | null;

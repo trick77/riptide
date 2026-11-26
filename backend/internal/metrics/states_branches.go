@@ -23,38 +23,46 @@ const (
 	StateBranchSilent = "branch_silent"
 )
 
-// longLived reports whether a branch is long-lived by design, never judged
-// as work: the trunk, a PR's target (develop, a release line), a scheme no
-// developer's work in progress has (release, a dependency bot's, nightly).
-func longLived(b dataset.BranchLife) bool {
-	return b.Target || dataset.BranchKind(b.Branch) == dataset.BranchMain || notFeature(branchPrefix(b.Branch))
+// longLived reports whether a branch is long-lived by design at t, never
+// judged as work: the trunk, a PR's target by then (develop, a release
+// line, an epic), a scheme no developer's work in progress has (release, a
+// dependency bot's, nightly).
+func longLived(b dataset.BranchLife, t time.Time) bool {
+	return (b.TargetAt != nil && b.TargetAt.Before(t)) || dataset.BranchKind(b.Branch) == dataset.BranchMain ||
+		notFeature(branchPrefix(b.Branch))
 }
 
-// pushesBefore are b's first and last push before t; ok false when none.
-func pushesBefore(b dataset.BranchLife, t time.Time) (first, last time.Time, ok bool) {
+// pushesBefore are b's pushes before t: the start of their latest run (a
+// silence of gap or more between two pushes starts a new one) and the last;
+// ok false when none.
+func pushesBefore(b dataset.BranchLife, t time.Time, gap time.Duration) (run, last time.Time, ok bool) {
 	for _, p := range b.PushTimes {
 		if !p.Before(t) {
 			break
 		}
-		if !ok {
-			first, ok = p, true
+		if !ok || p.Sub(last) >= gap {
+			run = p
 		}
-		last = p
+		ok, last = true, p
 	}
-	return first, last, ok
+	return run, last, ok
 }
 
-// branchStates judge each repo's branches (states-catalogue B-4, BR-1,
-// BR-2) as of the instant: how long its merged PRs' branches typically
-// lived before the PR was ready (a lower bound: a rebase resets the first
-// commit), on BranchLifeMinPRs PRs; branches without a PR still worked on
-// past BranchOpenDays; branches without a PR silent for BranchSilentDays to
-// BranchSilentMaxDays (a hint: Bitbucket does not report a deletion, so
-// whether they exist is unknown). Only pushes before the instant count: a
-// branch pushed after a closed period's end was silent at it. A branch is
-// without a PR until its first PR event, and not one merged onto the trunk
-// without a PR by then. Bots' branches, a tool's, long-lived ones by design
-// and GitOps repos are out.
+// branchStates judge each repo's branches as of the instant: how long its
+// merged PRs' branches typically lived before the PR was ready (a lower
+// bound: a rebase resets the first commit), on BranchLifeMinPRs PRs;
+// branches without a PR worked on for more than BranchOpenDays; branches
+// without a PR silent for BranchSilentDays to BranchSilentMaxDays (a hint:
+// Bitbucket does not report a deletion, so whether they exist is unknown).
+// Worked on is a run of pushes, none BranchSilentDays or more after the one
+// before (silent that long, it was a silent branch), the last within
+// BranchActiveDays working days of the instant: a branch left lying and
+// pushed again starts a new run, so it is open from its new run's start
+// plus BranchOpenDays, never for the time it lay silent. Only pushes before
+// the instant count: a branch pushed after a closed period's end was silent
+// at it. A branch is without a PR until its first PR event, and not one
+// merged onto the trunk without a PR by then. Bots' branches, a tool's,
+// long-lived ones by design and GitOps repos are out.
 func (a *assessor) branchStates(at stateAt) []stateEval {
 	th, end, loc := a.states.th, at.end, a.states.loc
 	life := stateEval{key: StateBranchLife, unit: UnitRepo, source: dataset.SourceBitbucket, tone: ToneHint,
@@ -91,11 +99,11 @@ func (a *assessor) branchStates(at stateAt) []stateEval {
 	openSince := end.AddDate(0, 0, -th.BranchOpenDays)
 	silentFrom, silentTo := end.AddDate(0, 0, -th.BranchSilentMaxDays), end.AddDate(0, 0, -th.BranchSilentDays)
 	for _, b := range a.ds.Branches {
-		first, last, ok := pushesBefore(b, end)
+		run, last, ok := pushesBefore(b, end, time.Duration(th.BranchSilentDays)*24*time.Hour)
 		// Merged onto the trunk without a PR: done work, not one "without a
 		// PR" still worked on or left lying.
 		if !ok || b.Bot || (b.PRAt != nil && b.PRAt.Before(end)) || (b.MergedAt != nil && b.MergedAt.Before(end)) ||
-			longLived(b) || !a.f.inKey(b.Project) {
+			longLived(b, end) || !a.f.inKey(b.Project) {
 			continue
 		}
 		r := by[b.Repo]
@@ -104,13 +112,13 @@ func (a *assessor) branchStates(at stateAt) []stateEval {
 			by[b.Repo] = r
 		}
 		switch {
-		case first.Before(openSince) && workingDays(last, end, loc) <= th.BranchActiveDays:
+		case run.Before(openSince) && workingDays(last, end, loc) <= th.BranchActiveDays:
 			r.open = append(r.open, b.Branch)
-			if age := calendarDays(first, end); age > r.oldest {
-				// Worked on past BranchOpenDays since then; the branch is older
-				// where its first push lies at the look-back's start.
-				r.oldest, r.since = age, ptr(first.AddDate(0, 0, th.BranchOpenDays))
-				r.lower = !first.After(a.states.from.AddDate(0, 0, 1))
+			if age := calendarDays(run, end); age > r.oldest {
+				// Worked on past BranchOpenDays since then; the work is older
+				// where its run starts at the look-back's start.
+				r.oldest, r.since = age, ptr(run.AddDate(0, 0, th.BranchOpenDays))
+				r.lower = !run.After(a.states.from.AddDate(0, 0, 1))
 			}
 		case !last.Before(silentFrom) && last.Before(silentTo):
 			r.silent = append(r.silent, b.Branch)
@@ -123,7 +131,7 @@ func (a *assessor) branchStates(at stateAt) []stateEval {
 	open := stateEval{key: StateBranchOpen, unit: UnitRepo, source: dataset.SourceBitbucket, tone: ToneHint,
 		tier: tierLasting, lasting: true,
 		threshold: StateThreshold{Key: "branch_open_days", Value: float64(th.BranchOpenDays), Unit: ThresholdDays,
-			WithinKey: ptr("branch_active_days"), Within: ptr(th.BranchActiveDays)}}
+			WithinKey: ptr("branch_active_days"), Within: ptr(th.BranchActiveDays), WithinUnit: ptr(ThresholdWorkingDays)}}
 	silent := stateEval{key: StateBranchSilent, unit: UnitRepo, source: dataset.SourceBitbucket, tone: ToneHint,
 		tier: tierLasting, valueUnit: UnitCount,
 		threshold: StateThreshold{Key: "branch_silent_days", Value: float64(th.BranchSilentDays), Unit: ThresholdDays,

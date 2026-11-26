@@ -317,6 +317,9 @@ type Assessment struct {
 	// Coverage is of the period's merged PRs, as Throughput's: how many
 	// reached production, have a size, were seen opened.
 	Coverage PRCoverage `json:"coverage"`
+	// ProductionStage is the production stage the view read (config), for
+	// the model's words; the page has its own.
+	ProductionStage string `json:"-"`
 }
 
 // WeekStart is the Monday 00:00 of t's week in loc: where ClosedPeriod
@@ -404,7 +407,7 @@ func (a *assessor) run() Assessment {
 	out := Assessment{
 		Period: a.p.Period, Previous: a.p.Previous,
 		Signals: a.out, Question: a.question(), Compared: a.h.Runs > 0, Limits: a.limits,
-		Coverage: a.m.Throughput.Coverage,
+		Coverage: a.m.Throughput.Coverage, ProductionStage: a.ds.Meta.ProductionStage,
 	}
 	out.Focus = a.focus(&out)
 	out.Team = []Fact{}
@@ -629,7 +632,7 @@ func (a *assessor) jamSignals() {
 		}
 	}
 	// Each repo's merged PRs per week: the jam's weeks of work standing open
-	// (Little's law, the states-catalogue's B-11 fact).
+	// (Little's law).
 	perWeek := map[string]float64{}
 	if a.p.Period.Span > 0 {
 		for _, pr := range mergedPRs(a.ds, a.p.Period, a.f) {

@@ -46,9 +46,10 @@ into a trunk at or after it (its umbrella), one level deep; a PR Bitbucket
 marked merged when an umbrella's merge brought it in, with the umbrella. A PR
 with none of these is not placeable (`no_merge_commit`, or `off_trunk` for one
 into another branch no PR merged on). A PR into a trunk other than master or
-main (develop, where most PRs go) also arrives on master or main with the
-first PR merged from its trunk into one of them: releases built from master
-hold it there, releases built from develop where it reached develop.
+main (develop, where most PRs go), itself or through its umbrella, also
+arrives on master or main with the first PR merged from its trunk into one
+of them: releases built from master hold it there, releases built from
+develop where it reached develop.
 
 **Which stretch of the trunk a deploy shipped.** For every successful deploy,
 per repo, the first of these routes that resolves:
@@ -95,7 +96,7 @@ Otherwise it is **not placeable**, with the first reason that applies:
 
 | Reason | Meaning |
 |---|---|
-| `off_trunk` | merged into another branch, and no PR merged that branch into the trunk by the cutoff: its work may wait there, or have gone on by a push or a hotfix deploy; the same when its umbrella merges only after the cutoff |
+| `off_trunk` | merged into another branch, and no PR merged that branch into the trunk by the cutoff: its work may wait there, or have gone on by a push or a hotfix deploy; the same when its umbrella merges only after the cutoff, and for a PR on a develop trunk no PR merged on to master by the cutoff while the master releases since were resolved exactly (an unresolved one keeps `release_unresolved`) |
 | `no_merge_commit` | nothing marks where it reached the trunk |
 | `repo_untraced` | no deploy ever showed an App deploys its repo (a compare link naming it, an image of its runs, an image named after it) |
 | `in_silence` | a release that may have shipped it lay in or within a week after a lost Bitbucket silence, Argo CD did not report yet when it reached the trunk, or a release shows it went out unseen (below) |

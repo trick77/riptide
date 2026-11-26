@@ -450,6 +450,8 @@ What riptide does **not** provide today, and the natural seam for it:
   endpoint as follow-ups.
 - **Pre-aggregated metric tables.** Compute on read; only materialize when
   query volume justifies it.
+- **Builds that start and never report an end.** The data holds such runs;
+  no state names them yet.
 
 Bitbucket and pipeline events join on the **commit SHA**
 (`bitbucket_events.commit_sha` = `pipeline_events.commit_sha`, App-repo SHA on
@@ -797,13 +799,16 @@ read unjudged). Look-back: at most 26 weeks before the period's end
 (`StateLookbackWeeks`), in every view (a 26-week view reads its previous
 26 weeks too; no state looks into them); the analysis reads the weeks
 before the compared periods for it (PRs and deploys only), the approvals
-from 30 days before the period and the branches' pushes from the look-back's
-start, once per request. A thresholds value past what the look-back holds
-is refused (`thresholds` bounds: days 182, working days 130, minutes 1440,
-weeks 26). Whose a branch is (a bot's, a tool's: every push's head commit by
-a git identity of the `.invalid` e-mail domain, or one the config's
-automation `authors` names) is read on every page: such a branch's builds
-are bots' builds in every number.
+from 30 days before the look-back's start and the branches' pushes from it,
+once per request, whatever the view's length. A thresholds value past what
+the look-back holds is refused (`thresholds` bounds: days 182, working days
+130, minutes 1440, weeks 26; `silent_builds_days` 15, what the runs of the
+shortest view hold). Whose a branch is is read on every page: a bot's when
+every push is a bot's (flagged at ingest, its head commit by a git identity
+of the `.invalid` e-mail domain, or its pusher or head commit automation by
+riptide's detection, the config's automation `authors` included), never
+because of its last push alone. Such a branch's builds are bots' builds in
+every number.
 
 Tones and groups: `attention` red ("Hakt"); `hint` a neutral group of its
 own ("Hinweise", never red); `limit` what cannot be judged ("Nicht
@@ -813,11 +818,17 @@ held since its onset where the data tells it (when the Nth approved or
 ready PR had waited past the threshold, when a branch without a PR passed
 `branch_open_days`), else firing at each of the four weekly instants back
 over those 28 days (a state over a period's sample: builds, review and
-size, branch life), each judged again from the data.
+size, branch life), each judged again from the data. A week its number
+stood only within the hysteresis counts for nothing, nor does a unit held
+within it now: first past the threshold, a unit is a hint whatever it stood
+at before. The unit that held it two sprints is marked (`two_sprints`); one
+such unit turns the whole card red, its fresh units beside it.
 Ranking (`weight`): the team's rule broken (9), held up now (7), lasting
 (5), data honesty (4); within a tier by breadth (count over judged), then
 the distance past the threshold. Layout slots: 4 red, 3 hints, 1 limit, 2
-gains, 1 resolution; the rest are "also spotted".
+gains, 1 resolution; the rest are "also spotted". With a model's words, the
+red slots it leaves free take the red state cards it did not word (their
+words are the page's), in rank; a red change it did not word stays a chip.
 
 Persistence, judged again a week before the period's end (the assessment
 before this one) from the same reads and against today's thresholds (a
@@ -828,7 +839,14 @@ now is resolved, once ("gelöst"), only where every unit it named is clear on
 evidence; where one of them can no longer be judged it reads
 `unmeasurable` ("nicht mehr messbar", tone limit, its units named, no
 lever), never resolved; a unit fallen idle, gone or escalated (a release
-hint past the breach) is neither. States the period's numbers alone tell
+hint past the breach) is neither. A held unit's chain reads the four weeks
+back: one in the band longer drops out silently (no card, no "gelöst")
+while under the threshold; past it again, it fires. An episode (a merge
+pause's week, a run of failed trunk or feature builds, a bot's loop) shows
+on its card, dated, while it lies in the period; it is resolved the
+instant after it ended (the week after the pause merged again, the trunk
+green again), not when its week leaves the view, and a running one keeps
+the state unresolved. States the period's numbers alone tell
 (data honesty; the waiting PRs of `first_review_wait`, known at the
 period's end only) are judged at the end only. A notable worsening of a
 team number a red state covers (deploy frequency: the release states; lead
@@ -864,26 +882,36 @@ The states, their conditions and starting values (`thresholds` keys):
   `merge_pause_share` (0.2) of its typical week (median of the
   `merge_pause_weeks` (8) weeks before that Bitbucket covered and the
   look-back holds, at least 3 such weeks, typical at least
-  `merge_pause_min_typical` (3)) while `merge_pause_waiting` (3) PRs with a
-  person's approval standing in the week had waited `merge_pause_wait_days`
-  (0.5) working days or longer by its end (to their merge, close, the
-  approval's end or the week's end: a closed week reads the same whenever it
-  is read). Half a day, not `approved_wait_days`: measured to the week's end,
-  a PR approved on Thursday or Friday has a day or less of it left. A PR
-  whose merge may lie in a lost silence since its approval counts for
-  nothing; a lost silence takes its working time out of the week and its
-  expectation. Held up now when it is the period's last week.
+  `merge_pause_min_typical` (3)) while at the week's end `merge_pause_waiting`
+  (3) PRs or more were open with a person's approval standing, however long
+  they had waited: a wait cut at the week's end is short for a PR approved
+  late in it (a waiting-time threshold of half a day was tuned to one case
+  and dropped). Not an approval another reviewer's needs work holds (not
+  ready to merge), nor one on a PR untouched for `OpenInactiveDays` (30) by
+  then (given up long ago), nor one whose merge may lie in a lost silence
+  since it; a lost silence takes its working time out of the week and its
+  expectation. Read as of the week's end: a closed week reads the same
+  whenever it is read. The card names the approved PRs open at the week's
+  end. Held up now when it is the period's last week.
 - `approved_waiting`: a repo's PRs with a person's approval (not the
   author's) standing at the period's end, waiting longer than
   `approved_wait_days` (1) working days for their merge, at least
-  `approved_waiting_prs` (2). An approval withdrawn, set to needs work or
-  reset by a push (the reviewer status every PR event carries) waits no
-  more; given again, it waits from then. A PR untouched for
-  `OpenInactiveDays` (30) waits for nothing; one whose merge may lie in a
-  lost silence since its approval is of unknown state (its repo unjudged
-  where it could decide it). The approvals are read whatever the PR's
-  opening (one opened while events were lost has none). Holds since the
-  Nth PR had waited past the threshold. Lasting.
+  `approved_waiting_prs` (2). An approval withdrawn, set to needs work by
+  its approver or reset by a push (the reviewer status every PR event
+  carries) waits no more; given again, it waits from then. A PR stays
+  counted while it is open and approved, touched or not: the forgotten
+  approved PR is what the state is for, and it never reads "gelöst" while
+  it waits, only once merged, closed or no longer approved. Another
+  reviewer's needs work leaves the approval standing in Bitbucket, but the
+  PR is not ready to merge: it waits for nothing here, and where it could
+  decide its repo the repo is not judged (no "gelöst" either). One whose
+  merge may lie in a lost silence since its approval is of unknown state
+  (its repo unjudged where it could decide it). Closed at an earlier instant
+  is read from the events before it (a decline reopened later was closed
+  between). The approvals are read whatever the PR's opening (one opened
+  while events were lost has none), approved within the look-back and 30
+  days before it: one approved earlier and still waiting is not read.
+  Holds since the Nth PR had waited past the threshold. Lasting.
 - `first_review_wait`: a repo's ready PRs waiting longer than
   `first_review_days` (2) working days for anyone's first touch, at least
   `first_review_waiting` (3), holding since the third had waited past it;
@@ -900,8 +928,9 @@ The states, their conditions and starting values (`thresholds` keys):
   of its PRs arrive on) failed from the first failure to the next success
   (or the period's end) for more than `trunk_failing_days` (1) working day
   with `trunk_failed_builds` (2) failures, the run counted from its first
-  failure in the runs read; release builds aside. Red; held up now when
-  still failing at the end.
+  failure in the runs read; release builds aside. Each trunk branch is a
+  sequence of its own: a green master build says nothing of a develop
+  trunk. Red; held up now when still failing at the end.
 - `branch_failing`: a person's feature or bugfix branch failing
   `branch_failing_builds` (5) builds in a row over `branch_failing_days`
   (1) working day. Never a bot's branch. A hint.
@@ -926,23 +955,27 @@ The states, their conditions and starting values (`thresholds` keys):
 - `branch_life`: a repo's typical working days from a branch's first commit
   to its PR being ready over `branch_life_days` (5) on `branch_life_min_prs`
   (5) (a lower bound: a rebase resets the first commit). `branch_open`:
-  branches without a PR first pushed more than `branch_open_days` (14) ago
-  and pushed within `branch_active_days` (5) working days. `branch_silent`:
+  branches without a PR worked on for more than `branch_open_days` (14):
+  a run of pushes, none `branch_silent_days` (14) or more after the one
+  before, the first more than 14 days back, the last within
+  `branch_active_days` (5) working days. A branch left lying and pushed
+  again starts a new run: open from its new start plus 14 days, never for
+  the time it lay silent. `branch_silent`:
   `branch_silent_min` (3) branches without a PR last pushed
   `branch_silent_days` (14) to `branch_silent_max_days` (60) ago; whether
   they still exist Bitbucket does not report (deletions are not stored).
-  Branches that are a PR's target, the trunk, release lines, a dependency
-  bot's scheme, bots' pushes, and branches whose every push's head commit
-  is a tool's (a git identity of the `.invalid` e-mail domain, the one
-  behind housekeeping commits; or one the config's automation `authors`
-  names) are out, and so is a branch merged without a PR: its last head
+  Branches that are a PR's target (from the first PR into them on, an epic
+  branch with a PR of its own included), the trunk, release lines, a
+  dependency bot's scheme, bots' pushes, and bots' branches (every push a
+  bot's, above) are out, and so is a branch merged without a PR: its last head
   reached the trunk or a branch a PR of the repo went into (a push whose
   tip it is, at any time: a fast-forward, or a branch cut from there with no
   commit of its own; after its last push, one that lists it or whose commit
   names it a parent; the merge commit is a push's tip, never hidden by the
   five-commit cap). Only pushes, PRs and merges before the instant judged
   count: a branch pushed after a closed period's end was silent at it.
-  Hints; `branch_open` lasting, held since 14 days after the first push.
+  Hints; `branch_open` lasting, held since 14 days after its run's first
+  push.
 - `bot_loop`: a bot branch failing `bot_loop_failures` (10) builds in a
   row, an aborted build neither breaking nor extending it: CI time wasted,
   a hint, never a quality finding. The build section's line is

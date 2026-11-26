@@ -2,6 +2,7 @@ package dataset_test
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -94,6 +95,15 @@ func TestDatasetApprovalSpans(t *testing.T) {
 	ev("pr:comment:added", 3, "dev-ben", 3, nil)
 	// #4: approved by its author and by a bot only: no person's approval.
 	ev("pr:reviewer:approved", 4, "dev-anna", 1, map[string]string{"dev-anna": "APPROVED"})
+	// #5: payloads without reviewer lists: Ben approves day 1, Carl sets
+	// needs work day 2 and takes it back day 4.
+	ev("pr:reviewer:approved", 5, "dev-ben", 1, nil)
+	ev("pr:reviewer:needs_work", 5, "dev-carl", 2, nil)
+	ev("pr:reviewer:unapproved", 5, "dev-carl", 4, nil)
+	// #6: approved day 1, declined day 2, reopened day 4.
+	ev("pr:reviewer:approved", 6, "dev-ben", 1, map[string]string{"dev-ben": "APPROVED"})
+	ev("pr:declined", 6, "dev-anna", 2, nil)
+	ev("pr:reopened", 6, "dev-anna", 4, nil)
 	sh, err := st.Shared(context.Background(), dataset.SharedParams{Team: team, From: t0, ClassEnds: []time.Time{days(10)},
 		Now: days(28), States: true, ApprovalsFrom: t0, Automated: automated(t)})
 	if err != nil {
@@ -126,6 +136,21 @@ func TestDatasetApprovalSpans(t *testing.T) {
 	}
 	if a := by[2]; !same(a.Spans, []dataset.ApprovalSpan{span(1, nil)}) {
 		t.Errorf("#2 spans %+v, want Ben's from day 1 on", a.Spans)
+	}
+	// Carl's needs work holds #2 from day 2 on (not ready to merge), though
+	// Ben's approval stands; on #5 (no reviewer list in the payloads) from
+	// day 2 until Carl takes it back on day 4.
+	four := 4.0
+	if a := by[2]; !same(a.NeedsWork, []dataset.ApprovalSpan{span(2, nil)}) || a.NeedsWorkAt(days(1.5)) ||
+		!a.NeedsWorkAt(days(3)) {
+		t.Errorf("#2 needs work %+v, want from day 2 on", a.NeedsWork)
+	}
+	if a := by[5]; !same(a.NeedsWork, []dataset.ApprovalSpan{span(2, &four)}) || !same(a.Spans, []dataset.ApprovalSpan{span(1, nil)}) {
+		t.Errorf("#5 needs work %+v spans %+v, want Carl's from day 2 to 4, Ben's approval standing", a.NeedsWork, a.Spans)
+	}
+	// #6 declined on day 2, reopened on day 4: closed in between only.
+	if a := by[6]; a.ClosedAt != nil || !a.ClosedBy(days(3)) || a.ClosedBy(days(5)) || a.ClosedBy(days(1.5)) {
+		t.Errorf("#6 closed %v, closes %v reopens %v, want closed on day 3 only", a.ClosedAt, a.Closes, a.Reopens)
 	}
 	if a := by[3]; !same(a.Spans, []dataset.ApprovalSpan{span(1, &two)}) || a.ApprovedSince(days(5)) != nil ||
 		!a.LastActivity(days(5)).Equal(days(3)) {
@@ -164,7 +189,7 @@ func TestDatasetLeanWindow(t *testing.T) {
 }
 
 // A tool's branch (its head commits by an .invalid identity) is a bot's on
-// every read, the states' or not: its builds are a bot's (#8).
+// every read, the states' or not: its builds are a bot's.
 func TestDatasetToolBranchRunsAreBots(t *testing.T) {
 	st, pool := migrated(t)
 	s := &seeder{t: t, pool: pool}
@@ -184,6 +209,36 @@ func TestDatasetToolBranchRunsAreBots(t *testing.T) {
 	}
 	if len(bots) != 3 || !bots["feature/describe-repo"] || !bots["PR-7"] || bots["feature/kas-1"] {
 		t.Errorf("bot runs %v, want the tool's branch's and its PR's builds a bot's, the person's not", bots)
+	}
+}
+
+// A branch is a bot's only when every push is: a person's branch stays the
+// person's though automation pushes to it last, a tool's branch becomes a
+// person's once the person pushes to it, and a branch pushed only by an
+// account the ingest flagged is a bot's though no prefix names it.
+func TestDatasetBotBranchesNeedEveryPush(t *testing.T) {
+	st, pool := migrated(t)
+	s := &seeder{t: t, pool: pool}
+	for i, at := range []float64{1, 2, 3} {
+		s.push(kasseAPI, "feature/kas-9", days(at), commit{sha: sha(fmt.Sprintf("a%d", i)), authored: days(at)})
+	}
+	s.push(kasseAPI, "feature/kas-9", days(4), commit{sha: sha("a9"), authored: days(4), author: "ci-helper"})
+	s.run(run{pipeline: "kasse-api/feature%2Fkas-9", runID: "1", commit: sha("a0"), status: "FAILURE", started: days(1.5)})
+	s.push(kasseAPI, "feature/kas-10", days(1), commit{sha: sha("b1"), authored: days(1), author: "Describer",
+		email: "describer@tool.invalid"})
+	s.push(kasseAPI, "feature/kas-10", days(2), commit{sha: sha("b2"), authored: days(2)})
+	s.run(run{pipeline: "kasse-api/feature%2Fkas-10", runID: "2", commit: sha("b2"), status: "FAILURE", started: days(2.5)})
+	s.push(kasseAPI, "feature/auto-bump", days(1), commit{sha: sha("c1"), authored: days(1)})
+	s.exec(`UPDATE bitbucket_events SET automation_source = 'service-account', author = 'svc-bumper'
+		WHERE branch_name = 'feature/auto-bump'`)
+	s.run(run{pipeline: "kasse-api/feature%2Fauto-bump", runID: "3", commit: sha("c1"), status: "FAILURE", started: days(1.5)})
+	d := load(t, st, t0, days(10))
+	bots := map[string]bool{}
+	for _, r := range d.Runs {
+		bots[r.RunID] = r.Bot
+	}
+	if bots["1"] || bots["2"] || !bots["3"] {
+		t.Errorf("bot runs %v, want the person's branches' builds people's, the flagged account's a bot's", bots)
 	}
 }
 
@@ -211,6 +266,12 @@ func TestDatasetBranches(t *testing.T) {
 	s.push(kasseAPI, "master", days(3), commit{sha: sha("3"), authored: days(2)})
 	// Cut from master's tip after it got there, no commit of its own.
 	s.push(kasseAPI, "feature/kas-6", days(5), commit{sha: sha("3"), authored: days(2)})
+	// An epic branch: a feature PR into it, later its own PR to master.
+	s.push(kasseAPI, "epic/kas-big", days(5), commit{sha: sha("4"), authored: days(5)})
+	s.pr(prEvent{event: "pr:opened", repo: kasseAPI, id: 21, author: "dev-anna", branch: "feature/kas-21", target: "epic/kas-big",
+		at: days(6)})
+	s.pr(prEvent{event: "pr:opened", repo: kasseAPI, id: 22, author: "dev-anna", branch: "epic/kas-big", target: "master",
+		at: days(8)})
 	sh, err := st.Shared(context.Background(), dataset.SharedParams{Team: team, From: t0, ClassEnds: []time.Time{days(10)},
 		Now: days(28), States: true, Automated: automated(t)})
 	if err != nil {
@@ -226,7 +287,7 @@ func TestDatasetBranches(t *testing.T) {
 		by[b.Branch] = b
 	}
 	if b := by["feature/kas-1"]; !b.FirstAt.Equal(days(1)) || !b.LastAt.Equal(days(4)) || b.Pushes != 2 || b.PRAt != nil ||
-		b.Target || b.Bot || b.MergedAt != nil || len(b.PushTimes) != 2 || !b.PushTimes[1].Equal(days(4)) {
+		b.TargetAt != nil || b.Bot || b.MergedAt != nil || len(b.PushTimes) != 2 || !b.PushTimes[1].Equal(days(4)) {
 		t.Errorf("kas-1 = %+v, want pushed days 1 and 4, no PR, not merged", b)
 	}
 	for _, name := range []string{"feature/kas-3", "feature/kas-4"} {
@@ -242,8 +303,13 @@ func TestDatasetBranches(t *testing.T) {
 	if b := by["feature/kas-2"]; b.PRAt == nil || !b.PRAt.Equal(days(3)) {
 		t.Errorf("kas-2 = %+v, want its PR on day 3", b)
 	}
-	if b := by["develop"]; !b.Target {
-		t.Errorf("develop = %+v, want a PR's target", b)
+	if b := by["develop"]; b.TargetAt == nil || !b.TargetAt.Equal(days(3)) {
+		t.Errorf("develop = %+v, want a PR's target since day 3", b)
+	}
+	// An epic branch: a PR's target from day 6 on, though a PR came from it
+	// on day 8.
+	if b := by["epic/kas-big"]; b.TargetAt == nil || !b.TargetAt.Equal(days(6)) || b.PRAt == nil || !b.PRAt.Equal(days(8)) {
+		t.Errorf("epic = %+v, want a target since day 6 and its own PR on day 8", b)
 	}
 	if b := by["feature/describe-repo"]; !b.Bot {
 		t.Errorf("describe-repo = %+v, want a tool's branch", b)

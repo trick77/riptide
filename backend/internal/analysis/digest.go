@@ -325,7 +325,7 @@ func buildDigest(a metrics.Assessment) ([]byte, *aliases, error) {
 		Team: a.Team, Focus: focus, Active: a.Active, Calm: a.Calm, Unjudged: a.Unjudged, Idle: a.Idle,
 		Question: a.Question, Quiet: a.Quiet, QuietReasons: a.QuietReasons, NotMeasurable: a.NotMeasurable,
 		LibrariesOnly: a.LibrariesOnly, Limits: a.Limits,
-		Labels: labels, Levers: leverText, States: states,
+		Labels: labels, Levers: leverText, States: stateGlosses(a.ProductionStage),
 	}
 	for _, s := range a.Signals {
 		d.Signals = append(d.Signals, digestSignal{Signal: al.hideSignal(s), Means: kinds[s.Kind].means, Levers: leversFor(s),

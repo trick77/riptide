@@ -492,27 +492,31 @@ function unitValue(c: StateData, v: number): string {
 
 // The grammar of a span in a state's words: minutes, working days or
 // days, the dative where the sentence needs it ("nach mehr als 10
-// Arbeitstagen"). Wording only; the span's value is the backend's.
-type Span = "minutes" | "wd" | "wdDat" | "daysDat";
-
-const WITHIN_SPAN: Partial<Record<StateData["key"], Span>> = {
-  fast_approval: "minutes",
-  late_decline: "wdDat",
-  branch_open: "wdDat",
-  branch_failing: "wd",
-  merge_pause: "wd",
-  builds_silent: "daysDat",
-};
+// Arbeitstagen"). Wording only; the span's value and unit are the
+// backend's.
+type Span = "minutes" | "wd" | "wdDat" | "days" | "daysDat";
 
 function span(t: TFunction, kind: Span, v: number): string {
   return t(`overview.assess.state.span.${kind}`, { count: v, n: bare(v) });
 }
 
-// The threshold's span a case must lie in, in the state's words; "" where
-// the state has none.
-function withinText(t: TFunction, c: StateData): string {
-  const kind = WITHIN_SPAN[c.key];
+// The threshold's span a case must lie in, in its unit (the backend's),
+// as the subject or object of a sentence, or in the dative; "" where the
+// state has none.
+function withinText(t: TFunction, c: StateData, dative = false): string {
   const v = c.threshold?.within;
+  let kind: Span | null = null;
+  switch (c.threshold?.within_unit) {
+    case "minutes":
+      kind = "minutes";
+      break;
+    case "working_days":
+      kind = dative ? "wdDat" : "wd";
+      break;
+    case "days":
+      kind = dative ? "daysDat" : "days";
+      break;
+  }
   return kind && v != null ? span(t, kind, v) : "";
 }
 
@@ -565,13 +569,20 @@ export function stateUnitText(
       : "",
     lines: c.threshold?.min != null ? num(c.threshold.min) : "",
     within: withinText(t, c),
+    withinDat: withinText(t, c, true),
     // A unit's value as a span of working days, in the dative ("seit 3
     // Arbeitstagen") or not ("3 Arbeitstage lang").
     days: span(t, "wd", u.value),
     daysDat: span(t, "wdDat", u.value),
     prod,
   });
-  return u.held ? `${text} ${t("overview.assess.state.held")}` : text;
+  // Held within the hysteresis, or held two sprints (what turned the card
+  // red): the backend's, said after the unit.
+  const marks = [
+    u.held ? t("overview.assess.state.held") : "",
+    u.two_sprints ? t("overview.assess.state.twoSprints") : "",
+  ].filter((m) => m !== "");
+  return [text, ...marks].join(" ");
 }
 
 // The threshold a state measured against, in the team's words: the
@@ -590,7 +601,17 @@ export function thresholdText(
     count: th.value,
     n: th.unit === "share" ? pct(th.value) : bare(th.value),
     min: th.min != null ? num(th.min) : "",
+    // The second threshold with its noun, singular for one ("ab 1 PR").
+    minN:
+      th.min != null
+        ? t(`overview.assess.state.${c.key}.min`, {
+            count: th.min,
+            n: num(th.min),
+            defaultValue: num(th.min),
+          })
+        : "",
     within: withinText(t, c),
+    withinDat: withinText(t, c, true),
     prod,
   });
 }
