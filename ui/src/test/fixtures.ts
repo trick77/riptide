@@ -403,7 +403,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       starts_inside: false,
       gap_weeks: 0,
       unattributed: 0,
-      bot_runs: { runs: 0, ci_seconds: 0 },
+      bot_runs: { runs: 0, ci_seconds: 0, failed: 0, failed_seconds: 0 },
       agent_wait_share: 0.5,
       agent_wait_min_s: 120,
       // the backend's order: feature first
@@ -1104,7 +1104,7 @@ export function analysisStatus(
         },
       ],
       also: [],
-      tally: { good: 1, done: 1, bad: 4, talk: 1 },
+      tally: { good: 1, done: 1, bad: 4, hint: 0, limit: 0, talk: 1 },
     },
     analysis: null,
     failure: null,
@@ -1155,7 +1155,7 @@ export function analysedStatus(
           lever: "platform_agents",
         },
       ],
-      tally: { good: 1, done: 1, bad: 4, talk: 1 },
+      tally: { good: 1, done: 1, bad: 4, hint: 0, limit: 0, talk: 1 },
     },
     analysis: {
       id: 7,

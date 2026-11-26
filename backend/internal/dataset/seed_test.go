@@ -209,6 +209,8 @@ type commit struct {
 	sha, author, kind, message string
 	authored                   time.Time
 	merge                      bool
+	// email is the git identity's e-mail address; none when empty.
+	email string
 }
 
 // push inserts a repo:refs_changed whose tip is the last commit.
@@ -228,9 +230,13 @@ func (s *seeder) push(repo, branch string, at time.Time, commits ...commit) {
 			kind = "NORMAL"
 		}
 		ms := c.authored.UnixMilli()
+		who := map[string]any{"name": author, "displayName": author, "type": kind}
+		if c.email != "" {
+			who["emailAddress"] = c.email
+		}
 		cs[i] = map[string]any{
 			"id": c.sha, "message": c.message, "authorTimestamp": ms, "committerTimestamp": ms,
-			"author": map[string]any{"name": author, "displayName": author, "type": kind}, "parents": parents,
+			"author": who, "parents": parents,
 		}
 	}
 	payload := jsonString(map[string]any{"eventKey": "repo:refs_changed", "commits": cs})

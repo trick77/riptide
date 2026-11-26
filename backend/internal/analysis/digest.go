@@ -65,6 +65,32 @@ type digestSignal struct {
 	// Series shadows the signal's weeks, always nil (omitted): the weeks
 	// are the page's picture, the model words the facts.
 	Series *struct{} `json:"series,omitempty"`
+	// State shadows the signal's state card without its units: their names
+	// (projects, Apps, branches) are the page's, the model words the counts
+	// through the facts.
+	State *digestState `json:"state"`
+}
+
+// digestState is a state card as the model reads it: no unit named.
+type digestState struct {
+	Key       string                 `json:"key"`
+	Unit      string                 `json:"unit"`
+	Count     int                    `json:"count"`
+	Judged    int                    `json:"judged"`
+	Unjudged  int                    `json:"unjudged"`
+	Idle      int                    `json:"idle"`
+	More      int                    `json:"more"`
+	Threshold metrics.StateThreshold `json:"threshold"`
+	// Was is the state an unmeasurable card was.
+	Was *string `json:"was"`
+}
+
+func newDigestState(c *metrics.StateCard) *digestState {
+	if c == nil {
+		return nil
+	}
+	return &digestState{Key: c.Key, Unit: c.Unit, Count: c.Count, Judged: c.Judged, Unjudged: c.Unjudged, Idle: c.Idle,
+		More: c.More, Threshold: c.Threshold, Was: c.Was}
 }
 
 // Digest is what the model reads: the assessment, every repo under an
@@ -95,6 +121,8 @@ type Digest struct {
 	Limits        []metrics.Limit   `json:"limits"`
 	Labels        map[string]string `json:"labels"`
 	Levers        map[string]string `json:"levers"`
+	// States are the state keys' meanings and the page's words for them.
+	States map[string]StateGloss `json:"states"`
 }
 
 // MandatoryTop is how many of the ranked signals, gates aside, the answer
@@ -297,10 +325,11 @@ func buildDigest(a metrics.Assessment) ([]byte, *aliases, error) {
 		Team: a.Team, Focus: focus, Active: a.Active, Calm: a.Calm, Unjudged: a.Unjudged, Idle: a.Idle,
 		Question: a.Question, Quiet: a.Quiet, QuietReasons: a.QuietReasons, NotMeasurable: a.NotMeasurable,
 		LibrariesOnly: a.LibrariesOnly, Limits: a.Limits,
-		Labels: labels, Levers: leverText,
+		Labels: labels, Levers: leverText, States: states,
 	}
 	for _, s := range a.Signals {
-		d.Signals = append(d.Signals, digestSignal{Signal: al.hideSignal(s), Means: kinds[s.Kind].means, Levers: leversFor(s)})
+		d.Signals = append(d.Signals, digestSignal{Signal: al.hideSignal(s), Means: kinds[s.Kind].means, Levers: leversFor(s),
+			State: newDigestState(s.State)})
 	}
 	raw, err := json.Marshal(d)
 	return raw, al, err

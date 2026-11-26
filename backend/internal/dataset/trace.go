@@ -212,6 +212,22 @@ type trace struct {
 	stretches map[string][]Stretch
 	repos     map[string]*RepoTrace
 	traced    map[int64]bool
+	// releases are every App's releases per environment, oldest first.
+	releases []AppRelease
+}
+
+// AppRelease is an App's deploy to an environment that ran other images
+// than its deploy there before, or its first deploy naming images (First):
+// what the sprint rule counts, over all history (dataset.Releases). A
+// re-sync of the same images is none.
+type AppRelease struct {
+	App         string
+	Environment string
+	At          time.Time
+	// First: the App's first deploy to the environment riptide holds. Inside
+	// FirstDeployGrace it is no release anywhere else (the App may have run
+	// those images long before): the last release was then, or earlier.
+	First bool
 }
 
 // head is a deployed image's run commit where it reached the trunk: the
@@ -653,6 +669,7 @@ func buildTrace(in *traceInput, silences []Silence) *trace {
 		}
 		if isRelease {
 			releases = append(releases, rel)
+			t.releases = append(t.releases, AppRelease{App: d.App, Environment: d.Environment, At: d.At.UTC(), First: !seen})
 		}
 	}
 

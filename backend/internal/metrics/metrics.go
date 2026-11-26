@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/trick77/riptide/internal/config"
 	"github.com/trick77/riptide/internal/dataset"
 )
 
@@ -30,6 +31,13 @@ type Params struct {
 	// BitbucketURL is BACKEND_BITBUCKET_URL: a PR link elsewhere is dropped.
 	// Empty: any http(s) link.
 	BitbucketURL string
+	// Thresholds are the team's (config's `thresholds`) the assessment's
+	// states measure against; nil: the starting values.
+	Thresholds *config.Thresholds
+	// Earlier is the dataset over StatePeriod, before Previous, that the
+	// assessment's states look back into (a project's last work, a PR
+	// still before production, a typical week); nil: none read.
+	Earlier *dataset.Dataset
 }
 
 // filter is the product selection, resolved against the dataset. Bots'

@@ -53,6 +53,9 @@ type Config struct {
 	// JiraBaseURL is `jira.base_url` without a trailing slash; a key links
 	// to <JiraBaseURL>/browse/<KEY>. Empty: keys are shown, not linked.
 	JiraBaseURL string
+	// Thresholds are the `thresholds` block over its starting values: the
+	// team's agreements the assessment's states measure against.
+	Thresholds Thresholds
 }
 
 // ExcludedProject reports whether the metrics leave the project key out.
@@ -169,6 +172,10 @@ func Parse(data []byte) (*Config, error) {
 		return nil, err
 	}
 	cfg.JiraBaseURL = jira
+
+	if cfg.Thresholds, err = parseThresholds(top["thresholds"]); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 

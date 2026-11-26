@@ -46,17 +46,26 @@ type Layout struct {
 type Tally struct {
 	Good int `json:"good"`
 	Done int `json:"done"`
-	Bad  int `json:"bad"`
+	// Bad are the red findings (tone attention) alone.
+	Bad int `json:"bad"`
+	// Hint are the hints, a neutral group of their own (owner, 2026-11:
+	// never red under "Hakt"); Limit the data-honesty states, what the rules
+	// could not judge: no finding.
+	Hint  int `json:"hint"`
+	Limit int `json:"limit"`
 	// Talk is the question, 1 when there is one: a number that moved
 	// notably stands out, though it has no better direction.
 	Talk int `json:"talk"`
 }
 
-// Card slots of the good and done columns, on top of MaxCards: ranked
-// last, a gain would otherwise never get past the worries.
+// Card slots of the good, done, hint and limit columns, on top of MaxCards:
+// ranked after the red ones, a gain or a hint would otherwise never get
+// past the worries. Data honesty gets one slot, always shown when present.
 const (
-	GoodCards = 2
-	DoneCards = 1
+	GoodCards  = 2
+	DoneCards  = 1
+	HintCards  = 3
+	LimitCards = 1
 )
 
 // LayoutFocus is a focus repo as shown: its lever (the model's, else the
@@ -74,11 +83,15 @@ type LayoutCard struct {
 	Lever  string `json:"lever"`
 }
 
-// Columns of the team-wide cards.
+// Columns of the team-wide cards: what runs (good), what is resolved
+// (done), what is stuck (bad, red), hints (neutral), what could not be
+// judged (limit, "nicht beurteilbar").
 const (
-	ColumnGood = "good"
-	ColumnBad  = "bad"
-	ColumnDone = "done"
+	ColumnGood  = "good"
+	ColumnBad   = "bad"
+	ColumnDone  = "done"
+	ColumnHint  = "hint"
+	ColumnLimit = "limit"
 )
 
 func column(s metrics.Signal) string {
@@ -87,6 +100,10 @@ func column(s metrics.Signal) string {
 		return ColumnDone
 	case s.Tone == metrics.ToneGood:
 		return ColumnGood
+	case s.Tone == metrics.ToneHint:
+		return ColumnHint
+	case s.Tone == metrics.ToneLimit:
+		return ColumnLimit
 	}
 	return ColumnBad
 }
@@ -102,8 +119,10 @@ func ruleLever(s metrics.Signal) string {
 // tab is the facts table a repo's signal links to: runs for a build, PRs
 // otherwise.
 func tab(s metrics.Signal) string {
-	switch s.Kind {
-	case metrics.SignalSlower, metrics.SignalFailingMore:
+	switch {
+	case s.State != nil && s.State.Facts != "":
+		return s.State.Facts
+	case s.Kind == metrics.SignalSlower, s.Kind == metrics.SignalFailingMore:
 		return "runs"
 	}
 	return "prs"
@@ -149,7 +168,8 @@ func layout(a metrics.Assessment, text *Text) Layout {
 	// where a focus repo carries its signal: the model's words are never
 	// dropped. An unworded one takes a free slot of its column (take), and
 	// none a focus already covers.
-	slots := map[string]int{ColumnBad: MaxCards, ColumnGood: GoodCards, ColumnDone: DoneCards}
+	slots := map[string]int{ColumnBad: MaxCards, ColumnGood: GoodCards, ColumnDone: DoneCards, ColumnHint: HintCards,
+		ColumnLimit: LimitCards}
 	shown := map[string]bool{}
 	addCard := func(id, lever string, worded, take bool) {
 		s, ok := byID[id]
@@ -241,6 +261,10 @@ func tally(a metrics.Assessment) Tally {
 			t.Good++
 		case ColumnDone:
 			t.Done++
+		case ColumnHint:
+			t.Hint++
+		case ColumnLimit:
+			t.Limit++
 		default:
 			t.Bad++
 		}

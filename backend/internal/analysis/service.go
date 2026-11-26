@@ -14,6 +14,7 @@ import (
 
 	"github.com/trick77/ship/kit/logging"
 
+	"github.com/trick77/riptide/internal/config"
 	"github.com/trick77/riptide/internal/dataset"
 	"github.com/trick77/riptide/internal/metrics"
 	"github.com/trick77/riptide/internal/store"
@@ -85,6 +86,9 @@ type Service struct {
 	Loc *time.Location
 	Log *slog.Logger
 	Now func() time.Time
+	// Thresholds are the team's thresholds as the config has them now (its
+	// `thresholds` block); nil: the starting values.
+	Thresholds func() config.Thresholds
 
 	// base is the context manual runs outlive their request on.
 	base context.Context
@@ -126,11 +130,23 @@ func (s *Service) periods(weeks int) (cur, prev metrics.Period) {
 	return metrics.ClosedPeriod(weeks, n, s.Loc), metrics.ClosedPrevious(weeks, n, s.Loc)
 }
 
+// reads are the periods a view's assessment reads: its closed weeks, the
+// ones before, and the states' look-back before those (StatePeriod) when
+// they do not reach that far.
+func (s *Service) reads(weeks int) []metrics.Period {
+	cur, prev := s.periods(weeks)
+	ps := []metrics.Period{cur, prev}
+	if earlier := metrics.StatePeriod(cur, prev); earlier != nil {
+		ps = append(ps, *earlier)
+	}
+	return ps
+}
+
 // assess is the view's assessment over its closed weeks, with what the
 // analyses before period's end raised.
 func (s *Service) assess(ctx context.Context, v View) (metrics.Assessment, error) {
 	cur, prev := s.periods(v.Weeks)
-	ds, err := s.load(ctx, v.Team, cur, prev)
+	ds, err := s.load(ctx, v.Team, s.reads(v.Weeks)...)
 	if err != nil {
 		return metrics.Assessment{}, err
 	}
@@ -138,7 +154,15 @@ func (s *Service) assess(ctx context.Context, v View) (metrics.Assessment, error
 	if err != nil {
 		return metrics.Assessment{}, err
 	}
-	return metrics.Assess(ds[0], ds[1], metrics.Params{Period: cur, Previous: prev, Product: v.Product}, h), nil
+	p := metrics.Params{Period: cur, Previous: prev, Product: v.Product}
+	if len(ds) > 2 {
+		p.Earlier = ds[2]
+	}
+	if s.Thresholds != nil {
+		th := s.Thresholds()
+		p.Thresholds = &th
+	}
+	return metrics.Assess(ds[0], ds[1], p, h), nil
 }
 
 // history reads the view's done analyses before to: the latest one's
@@ -148,7 +172,8 @@ func (s *Service) assess(ctx context.Context, v View) (metrics.Assessment, error
 // problem was raised can be one today's counting never reaches again, and
 // a streak across the change is two things.
 func (s *Service) history(ctx context.Context, v View, to time.Time) (metrics.History, error) {
-	h := metrics.History{Seen: map[string]int{}, Latest: map[string]string{}, Open: map[string]metrics.Problem{}}
+	h := metrics.History{Seen: map[string]int{}, Latest: map[string]string{}, Open: map[string]metrics.Problem{},
+		StateUnits: map[string][]string{}}
 	// Weeks, not rows: a week holds its scheduled run and any number of
 	// clicks, counted as one in the query, else enough of them fill the
 	// limit. The current week's own reruns are no history. A week whose
@@ -162,6 +187,8 @@ func (s *Service) history(ctx context.Context, v View, to time.Time) (metrics.Hi
 		ids map[string]string
 		// before is each signal's hero number in the previous period.
 		before map[string]*float64
+		// units are each state's units it named.
+		units map[string][]string
 	}
 	var runs []run
 	for _, r := range rows {
@@ -169,19 +196,24 @@ func (s *Service) history(ctx context.Context, v View, to time.Time) (metrics.Hi
 		if outdated(r) || json.Unmarshal(r.Assessment, &a) != nil {
 			continue
 		}
-		ids, before := map[string]string{}, map[string]*float64{}
+		ids, before, units := map[string]string{}, map[string]*float64{}, map[string][]string{}
 		for _, sg := range a.Signals {
 			ids[sg.ID] = sg.Tone
 			if len(sg.Facts) > 0 {
 				before[sg.ID] = sg.Facts[0].Prev
 			}
+			if sg.State != nil {
+				for _, u := range sg.State.Units {
+					units[sg.ID] = append(units[sg.ID], u.Name)
+				}
+			}
 		}
-		runs = append(runs, run{r.PeriodTo, ids, before})
+		runs = append(runs, run{r.PeriodTo, ids, before, units})
 	}
 	if len(runs) == 0 {
 		return h, nil
 	}
-	h.Latest, h.Runs = runs[0].ids, len(runs)
+	h.Latest, h.Runs, h.StateUnits = runs[0].ids, len(runs), runs[0].units
 	// Open: newest first, a problem counts from the earliest run that raised
 	// it after its last resolution; that run's previous period is the value
 	// before it was raised. Runs that skipped it (no longer notable against a

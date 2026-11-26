@@ -58,6 +58,25 @@ func FeatureBranch(branch string) bool {
 	return ok && known && !docsPrefixes[p]
 }
 
+// ticketBranchRE is a branch named after its ticket without a prefix:
+// `<KEY>-<n>` alone or followed by a dash (KAS-12-login, kas-12).
+var ticketBranchRE = regexp.MustCompile(`(?i)^([a-z][a-z0-9]*)-[0-9]+(-|$)`)
+
+// notTicketStems are dash schemes of a number that name no ticket: a
+// release line, a dependency bot's branch, a long-lived integration branch.
+var notTicketStems = map[string]bool{
+	"release": true, "releases": true, "renovate": true, "dependabot": true, "snyk": true, "develop": true,
+	"development": true, "nightly": true, "hotfix": true, "v": true, "version": true, "pr": true,
+}
+
+// TicketBranch tells whether branch is named after a ticket key without a
+// prefix (KAS-12-login): a developer's work in progress like a feature/
+// branch. release-12, renovate-3 and the like are none.
+func TicketBranch(branch string) bool {
+	m := ticketBranchRE.FindStringSubmatch(strings.TrimLeft(branch, "/"))
+	return m != nil && !notTicketStems[strings.ToLower(m[1])]
+}
+
 // DocsBranch tells whether branch starts with docs/ or doc/, a leading '/'
 // aside; a dash scheme (DOC-123-x, a Jira key) is none.
 func DocsBranch(branch string) bool {

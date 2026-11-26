@@ -28,6 +28,18 @@ func TestChangeType(t *testing.T) {
 	}
 }
 
+func TestTicketBranch(t *testing.T) {
+	for branch, want := range map[string]bool{
+		"KAS-12-login": true, "kas-12": true, "kas-12-x": true, "/KAS-7-y": true, "DOC-123-login": true,
+		"release-12": false, "renovate-3": false, "develop-2": false, "kas-12x": false, "release-1.2": false,
+		"feature/KAS-1": false, "kas": false, "": false, "12-kas": false,
+	} {
+		if got := TicketBranch(branch); got != want {
+			t.Errorf("TicketBranch(%q) = %v, want %v", branch, got, want)
+		}
+	}
+}
+
 func TestFeatureBranch(t *testing.T) {
 	for _, c := range []struct {
 		branch       string

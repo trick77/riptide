@@ -566,8 +566,10 @@ func TestJudgeableRepos(t *testing.T) {
 		}))
 	}
 	a := Assess(quietData(cur, 12, open, scanner), quietData(prev, 12), Params{Period: cur, Previous: prev}, History{})
-	// kasse-api: twelve merged PRs in both periods; portal-web: open PRs only.
-	if a.Active != 2 || a.Calm != 1 || a.Unjudged != 1 {
+	// kasse-api: twelve merged PRs in both periods; portal-web: open PRs only,
+	// waiting for a first review: that state's finding, neither calm nor
+	// unjudged.
+	if a.Active != 2 || a.Calm != 1 || a.Unjudged != 0 {
 		t.Errorf("active %d, calm %d, unjudged %d", a.Active, a.Calm, a.Unjudged)
 	}
 	lost := func(ds *dataset.Dataset) {

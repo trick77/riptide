@@ -213,8 +213,7 @@ func (s *Service) productsFor(ctx context.Context, team string, weeks int, w, n 
 	}
 	// Both periods, as every view's assessment reads them: the tick's cache
 	// then serves them all.
-	cur, prev := s.periods(weeks)
-	dss, err := s.load(ctx, team, cur, prev)
+	dss, err := s.load(ctx, team, s.reads(weeks)...)
 	if err != nil {
 		if sched {
 			s.Log.ErrorContext(ctx, "analysis_failed", "stage", "products", "team", team, "weeks", weeks,

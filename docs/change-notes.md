@@ -7,6 +7,32 @@ repository.
 Real account handles, hostnames and tokens belong in the mounted
 `riptide.json` / team-keys Secret, never in this file: the repository is public.
 
+## 2026-11-26 — states: findings judged against the team's thresholds
+
+**`riptide.json` takes an optional top-level `thresholds` block**: the
+values the assessment's states fire at (`release_breach_days`,
+`not_on_prod_days`, `approved_wait_days`, `bot_loop_failures` and the rest;
+the list with the starting values is in [metrics.md](metrics.md), "States").
+Absent, the starting values apply; an unknown key, a value of 0 or below, a
+share over 1 or a fractional count refuses the config (hot reload keeps the
+old one). Each card prints the value it measured against.
+
+**Rules version 3**: analyses stored under version 2 are outdated and not
+shown until assessed again. The assessment reads more per request: the
+weeks before the compared periods back to 26 weeks before the period's end
+(PRs and deploys, in parallel with the compared periods), the approvals
+since 30 days before the period, and the branches' pushes (trunk and bots'
+pushes left out before their payloads are read); no migration, no new
+index. On a small database the planner scans `bitbucket_events`; with more
+rows the existing `(team, occurred_at)` and `(repo_full_name, branch_name,
+occurred_at)` indexes serve them. Watch `GET /api/analysis` durations after
+the deploy.
+
+**A branch named after its ticket without a prefix** (`KAS-12-login`) is a
+feature branch now: its builds count as feature builds, its PRs (stored as
+change type "other") as features, on read, past periods too. `release-12`,
+`renovate-3`, `PR-7` and the like are not.
+
 ## 2026-11-26 — lead time per PR, traced to production
 
 **Migration 0017** adds the view `repo_trunks` and redefines

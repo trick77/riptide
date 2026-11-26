@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/trick77/riptide/internal/analysis"
+	"github.com/trick77/riptide/internal/config"
 	"github.com/trick77/riptide/internal/dataset"
 	"github.com/trick77/riptide/internal/httpapi"
 	"github.com/trick77/riptide/internal/metrics"
@@ -24,9 +25,13 @@ type Analyst interface {
 // first period's end classing them all, the reads they share done once:
 // the analysis' loader.
 func (d Deps) Datasets(ctx context.Context, team string, ps ...metrics.Period) ([]*dataset.Dataset, error) {
-	ds, _, err := d.periods(ctx, view{team: team, now: d.now().UTC().Truncate(time.Second), cfg: d.Runtime.Config()}, ps, nil)
+	ds, _, err := d.periods(ctx, view{team: team, now: d.now().UTC().Truncate(time.Second), cfg: d.Runtime.Config()}, ps, nil,
+		true)
 	return ds, err
 }
+
+// Thresholds are the config's thresholds as it is now: the analysis'.
+func (d Deps) Thresholds() config.Thresholds { return d.Runtime.Config().Thresholds }
 
 // TeamNames are the configured teams, sorted: the schedule's.
 func (d Deps) TeamNames() []string { return d.Runtime.Config().TeamNames() }

@@ -387,7 +387,12 @@ export type Build = {
   unattributed: number;
   // Runs of bots' branches: in no other build number, their count and CI
   // time apart.
-  bot_runs: { runs: number; ci_seconds: number };
+  bot_runs: {
+    runs: number;
+    ci_seconds: number;
+    failed: number;
+    failed_seconds: number;
+  };
   // The agent-wait hint's rule: the share of the typical build spent
   // waiting, and the least wait in seconds.
   agent_wait_share: number;
@@ -761,9 +766,87 @@ export type SignalKind =
   | "change"
   | "agent_wait"
   | "resolved"
-  | "question";
+  | "question"
+  | "state";
 
-export type SignalTone = "gate" | "attention" | "hint" | "good" | "talk";
+// limit: a data-honesty state, what the data cannot judge; no finding.
+export type SignalTone =
+  "gate" | "attention" | "hint" | "limit" | "good" | "talk";
+
+// A state's key; one the page does not know yet still renders, untitled.
+export type StateKey =
+  | "no_release"
+  | "release_due"
+  | "not_on_prod"
+  | "slow_to_prod"
+  | "merge_pause"
+  | "approved_waiting"
+  | "bot_loop"
+  | "untraced"
+  | "unattributed"
+  | "no_prod_stage"
+  | "unmeasurable"
+  | "deploy_failing"
+  | "deploy_failures"
+  | "first_review_wait"
+  | "trunk_failing"
+  | "branch_failing"
+  | "flaky_builds"
+  | "long_builds"
+  | "release_failing"
+  | "builds_silent"
+  | "big_prs"
+  | "fast_approval"
+  | "unapproved"
+  | "late_decline"
+  | "branch_life"
+  | "branch_open"
+  | "branch_silent";
+
+// One unit a state names: its number in the threshold's unit, the cases it
+// rests on, since when.
+export type StateUnit = {
+  name: string;
+  project: string | null;
+  value: number;
+  count: number | null;
+  of: number | null;
+  typical: number | null;
+  since: string | null;
+  lower_bound: boolean;
+  week: Week | null;
+  names: string[];
+  held: boolean;
+  reason: string | null;
+  ci_seconds: number | null;
+};
+
+// A state's card: k of n units, the worst three, since when, the team's
+// threshold. Every count, the ranking and the worst three are the
+// backend's.
+export type StateCard = {
+  key: StateKey;
+  unit: "project" | "repo" | "app" | "branch" | "team";
+  count: number;
+  judged: number;
+  unjudged: number;
+  idle: number;
+  worst: StateUnit[];
+  more: number;
+  units: StateUnit[];
+  since: string | null;
+  since_lower_bound: boolean;
+  threshold: {
+    key: string;
+    value: number;
+    unit: "days" | "working_days" | "count" | "share" | "minutes";
+    min_key: string | null;
+    min: number | null;
+  };
+  at: string;
+  was: string | null;
+  facts: "prs" | "deploys" | "runs" | "";
+};
 
 export type Driver = {
   repo: string;
@@ -789,13 +872,16 @@ export type Signal = {
   // (deploy frequency, build success); absent otherwise and in an analysis
   // stored before the field.
   series?: { prev: (number | null)[]; cur: (number | null)[] };
+  // A state's card (kind state); null otherwise, absent in older rows.
+  state?: StateCard | null;
 };
 
 // A team-wide signal as the page shows it: its column and lever are the
-// backend's.
+// backend's. bad is red, hint a neutral group, limit what could not be
+// judged.
 export type LayoutCard = {
   signal: string;
-  column: "good" | "bad" | "done";
+  column: "good" | "bad" | "done" | "hint" | "limit";
   lever: string;
 };
 
@@ -846,7 +932,7 @@ export type Assessment = {
 };
 
 export type QuietReason =
-  "no_baseline" | "source_gap" | "not_measurable" | "findings";
+  "no_baseline" | "source_gap" | "not_measurable" | "unjudged" | "findings";
 
 export type NotMeasurable =
   "bitbucket" | "argocd" | "no_merged" | "no_release" | "to_prod";
@@ -914,6 +1000,8 @@ export type AnalysisStatus = {
       good: number;
       done: number;
       bad: number;
+      hint: number;
+      limit: number;
       talk: number;
     };
   };

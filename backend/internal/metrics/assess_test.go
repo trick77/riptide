@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/trick77/riptide/internal/config"
 	"github.com/trick77/riptide/internal/dataset"
 )
 
@@ -116,7 +117,11 @@ func assessFixture(t *testing.T, h History) Assessment {
 			ds.PRs = slices.Concat(prs(p.To, "kasse/kasse-api", review, 12), prs(p.To, "portal/portal-web", 2*time.Hour, 12))
 		})
 	}
-	return Assess(mk(cur, 20*time.Hour), mk(prev, 2*time.Hour), Params{Period: cur, Previous: prev}, h)
+	// The fixture is about changes against the previous period: thresholds
+	// no state of it reaches (states_test.go judges those).
+	th := config.DefaultThresholds()
+	th.FirstReviewWaiting, th.BuildMinutes = 100, 600
+	return Assess(mk(cur, 20*time.Hour), mk(prev, 2*time.Hour), Params{Period: cur, Previous: prev, Thresholds: &th}, h)
 }
 
 func signal(a Assessment, id string) *Signal {
