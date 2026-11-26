@@ -73,7 +73,9 @@ func (a *assessor) branchStates() {
 	openSince := end.AddDate(0, 0, -th.BranchOpenDays)
 	silentFrom, silentTo := end.AddDate(0, 0, -th.BranchSilentMaxDays), end.AddDate(0, 0, -th.BranchSilentDays)
 	for _, b := range a.ds.Branches {
-		if b.Bot || b.HasPR || longLived(b) || !a.f.inKey(b.Project) || !b.FirstAt.Before(end) {
+		// Merged onto the trunk without a PR: done work, not one "without a
+		// PR" still worked on or left lying.
+		if b.Bot || b.HasPR || b.Merged || longLived(b) || !a.f.inKey(b.Project) || !b.FirstAt.Before(end) {
 			continue
 		}
 		r := by[b.Repo]
@@ -99,11 +101,12 @@ func (a *assessor) branchStates() {
 			}
 		}
 	}
+	// A branch without a PR is a row of no facts table: no link.
 	open := stateEval{key: StateBranchOpen, unit: UnitRepo, source: dataset.SourceBitbucket, tone: ToneHint,
-		facts: "prs", tier: tierLasting, lasting: true,
+		tier: tierLasting, lasting: true,
 		threshold: StateThreshold{Key: "branch_open_days", Value: float64(th.BranchOpenDays), Unit: ThresholdDays}}
 	silent := stateEval{key: StateBranchSilent, unit: UnitRepo, source: dataset.SourceBitbucket, tone: ToneHint,
-		facts: "prs", tier: tierLasting, valueUnit: UnitCount,
+		tier: tierLasting, valueUnit: UnitCount,
 		threshold: StateThreshold{Key: "branch_silent_days", Value: float64(th.BranchSilentDays), Unit: ThresholdDays,
 			MinKey: ptr("branch_silent_min"), Min: ptr(th.BranchSilentMin)}}
 	for _, repo := range slices.Sorted(mapsKeys(by)) {

@@ -39,7 +39,7 @@ func TestDigestStateWithoutNames(t *testing.T) {
 	if strings.Contains(d, "lager") {
 		t.Errorf("a unit's name reached the digest: %s", d)
 	}
-	for _, want := range []string{`"key":"no_release"`, `"count":1`, `"Kein Release nach PROD"`, `"state:no_release.count"`} {
+	for _, want := range []string{`"key":"no_release"`, `"count":1`, `"Lange kein Release nach PROD"`, `"state:no_release.count"`} {
 		if !strings.Contains(d, want) {
 			t.Errorf("digest lacks %s", want)
 		}

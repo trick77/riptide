@@ -139,6 +139,7 @@ func (a *assessor) firstReviewState() {
 		project string
 		n       int
 		oldest  float64
+		since   *time.Time
 		pickups []float64
 	}
 	by := map[string]*acc{}
@@ -156,7 +157,9 @@ func (a *assessor) firstReviewState() {
 		r := get(pr.Repo, pr.Project)
 		if w := workingDays(*pr.ReadySince, end, loc); w > th.FirstReviewDays {
 			r.n++
-			r.oldest = max(r.oldest, w)
+			if w > r.oldest {
+				r.oldest, r.since = w, pr.ReadySince
+			}
 		}
 	}
 	for _, pr := range mergedPRs(a.ds, a.p.Period, a.f) {
@@ -174,9 +177,12 @@ func (a *assessor) firstReviewState() {
 		u := stateUnit{StateUnit: StateUnit{Name: repo, Project: ptr(r.project), Names: []string{}}, status: unitClear}
 		switch {
 		case r.n >= th.FirstReviewWaiting:
+			// Since the oldest waiting PR was ready, as an approved PR's wait
+			// counts from its approval (approvedWaitingState).
 			u.Value, u.Count, u.status = round1(r.oldest), ptr(r.n), unitFires
+			u.Since, u.Measure = ptr(*r.since), ptr(MeasureOldest)
 		case len(r.pickups) >= th.FirstReviewMinPRs:
-			u.Value, u.Count = round1(*Median(r.pickups)), ptr(len(r.pickups))
+			u.Value, u.Count, u.Measure = round1(*Median(r.pickups)), ptr(len(r.pickups)), ptr(MeasureTypical)
 			if u.Value > th.FirstReviewDays {
 				u.status = unitFires
 			}
@@ -276,8 +282,8 @@ func (a *assessor) branchFailingState() {
 		threshold: StateThreshold{Key: "branch_failing_builds", Value: float64(th.BranchFailingBuilds), Unit: ThresholdCount}}
 	for _, key := range slices.Sorted(mapsKeys(by)) {
 		rs := by[key]
-		u := stateUnit{StateUnit: StateUnit{Name: key, Project: rs[0].Project, Count: ptr(len(rs)), Names: []string{}},
-			status: unitClear}
+		u := stateUnit{StateUnit: StateUnit{Name: key, Project: rs[0].Project, Count: ptr(len(rs)), Names: []string{},
+			Query: ptr(rs[len(rs)-1].PipelineName)}, status: unitClear}
 		var first, last *time.Time
 		n := 0
 		for _, r := range rs {

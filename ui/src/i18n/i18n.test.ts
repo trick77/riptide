@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Signal, StateCard, StateUnit } from "../api";
+import { signalTitle, stateUnitText, thresholdText } from "../Assessment";
 import { dur, num } from "../format";
 import { de } from "./de";
 import { en } from "./en";
@@ -87,6 +89,90 @@ describe("language", () => {
     expect(i18n.t("open.unknown", { count: 1234 })).toMatch(
       new RegExp(`^${swiss}`),
     );
+  });
+});
+
+// Every state's card in both languages: its title, each unit's line (both
+// of first_review_wait's measures, held, a build kind), its threshold. A
+// placeholder the page does not fill would show raw, and only on the one
+// state that fires in production.
+describe("state cards", () => {
+  const keys = Object.entries(en.overview.assess.state)
+    .filter(([, v]) => typeof v === "object" && "title" in v)
+    .map(([k]) => k as StateCard["key"]);
+  const unit = (o: Partial<StateUnit> = {}): StateUnit => ({
+    name: "kasse/kasse-api",
+    project: "kasse",
+    value: 3,
+    count: 2,
+    of: 9,
+    typical: 7.5,
+    since: "2026-10-02T09:00:00Z",
+    lower_bound: false,
+    week: {
+      kw: 45,
+      start: "2026-11-02T00:00:00Z",
+      end: "2026-11-09T00:00:00Z",
+    },
+    names: ["feature"],
+    held: false,
+    reason: "in_silence",
+    ci_seconds: 3600,
+    query: "kasse/kasse-api",
+    measure: null,
+    ...o,
+  });
+  const card = (key: StateCard["key"]): StateCard => ({
+    key,
+    unit: "repo",
+    count: 1,
+    judged: 4,
+    unjudged: 0,
+    idle: 0,
+    worst: [unit()],
+    more: 0,
+    units: [unit()],
+    since: null,
+    since_lower_bound: false,
+    threshold: {
+      key: key === "untraced" ? "" : "some_key",
+      value: 2,
+      unit: "days",
+      min_key: "some_min",
+      min: 5,
+    },
+    at: "2026-11-09T00:00:00Z",
+    was: key === "unmeasurable" ? "no_release" : null,
+    facts: "prs",
+  });
+  const honest = ["untraced", "unattributed", "no_prod_stage", "unmeasurable"];
+  it.each(["de", "en"] as const)("fill every placeholder in %s", (lng) => {
+    const t = i18n.getFixedT(lng);
+    expect(keys.length).toBeGreaterThan(20);
+    for (const key of keys) {
+      const c = card(key);
+      const signal = {
+        kind: "state",
+        state: c,
+        facts: [],
+      } as unknown as Signal;
+      const texts = [
+        signalTitle(t, signal, "PROD"),
+        ...[
+          unit(),
+          unit({ held: true }),
+          unit({ measure: "oldest" }),
+          unit({ measure: "typical" }),
+        ].map((u) => stateUnitText(t, c, u, "PROD")),
+      ];
+      const threshold = thresholdText(t, c, "PROD");
+      if (!honest.includes(key)) texts.push(threshold);
+      for (const s of texts) {
+        expect([key, s.includes("{{")]).toEqual([key, false]);
+        if (key !== "unmeasurable")
+          expect([key, s.trim()]).not.toEqual([key, ""]);
+      }
+    }
   });
 });
 

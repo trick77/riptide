@@ -817,8 +817,13 @@ export type StateUnit = {
   week: Week | null;
   names: string[];
   held: boolean;
-  reason: string | null;
+  reason: TraceReason | null;
   ci_seconds: number | null;
+  // The facts search listing the unit's rows in the card's facts table;
+  // null where none finds them.
+  query: string | null;
+  // What value measured where a state judges two ways (first_review_wait).
+  measure: "oldest" | "typical" | null;
 };
 
 // A state's card: k of n units, the worst three, since when, the team's

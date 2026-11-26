@@ -5,6 +5,7 @@
 import { useTranslation } from "react-i18next";
 import type { Metrics, Query } from "./api";
 import { Assessment } from "./Assessment";
+import { traceLines } from "./Flow";
 import { dur, durParts, fullDate, num, pct, stage } from "./format";
 import type { Tab } from "./state";
 import { Strip } from "./strip";
@@ -114,15 +115,14 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
       def: t("overview.lead.def", { prod }),
       basis: t("overview.lead.basis", { count: lt.human.n, prod }),
       filters: [t("overview.lead.filterBots"), `environment = ${prod}`],
-      coverage:
+      coverage: [
         t("overview.lead.coverage", {
           prod,
           traced: m.coverage.on_prod,
           count: m.coverage.merged,
-        }) +
-        (m.coverage.not_yet > 0
-          ? " " + t("overview.lead.notYet", { count: m.coverage.not_yet, prod })
-          : ""),
+        }),
+        ...traceLines(t, m, prod),
+      ].join(" "),
       query: "docs/dora-lead-time.md",
     },
     dsucc: {
@@ -197,12 +197,27 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
             lt.human.p50 == null ? "" : t("common.typical", { unit: lead.unit })
           }
           note={
-            lt.human.n === 0
-              ? t("overview.lead.noHuman", { prod })
-              : t("overview.lead.slowest", {
-                  p90: dur(lt.human.p90),
-                  count: lt.human.n,
-                })
+            <>
+              {lt.human.n === 0
+                ? t("overview.lead.noHuman", { prod })
+                : t("overview.lead.slowest", {
+                    p90: dur(lt.human.p90),
+                    count: lt.human.n,
+                  })}
+              {/* Of how many merged PRs, and how many are not there yet:
+                  the number reads only with its base (owner, 2026-11). */}
+              {m.coverage.merged > 0 && (
+                <span className="block">
+                  {t("overview.lead.traced", {
+                    traced: m.coverage.on_prod,
+                    count: m.coverage.merged,
+                    prod,
+                  })}
+                  {m.coverage.not_yet > 0 &&
+                    ` · ${t("overview.lead.notYet", { count: m.coverage.not_yet, prod })}`}
+                </span>
+              )}
+            </>
           }
           direction={
             <Direction

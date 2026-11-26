@@ -791,10 +791,20 @@ export function Build({
           {t("build.unattributed", { count: b.unattributed })}
         </p>
       )}
-      {/* Bots' branches: in no number of this section, said once. */}
+      {/* Bots' branches: in no number of this section, said once, as
+          what they cost: CI time, never a finding (owner, 2026-11). */}
       {b.bot_runs.runs > 0 && (
         <p className="mt-2 mb-0 text-[13px] text-muted">
-          {t("build.botRuns", { count: b.bot_runs.runs })}
+          {t("build.botRuns", {
+            count: b.bot_runs.runs,
+            h: ciHours(b.bot_runs.ci_seconds),
+          })}
+          {b.bot_runs.failed > 0 &&
+            t("build.botRunsFailed", {
+              count: b.bot_runs.failed,
+              h: ciHours(b.bot_runs.failed_seconds),
+            })}
+          {t("build.botRunsRest")}
         </p>
       )}
       {stats.length === 0 ? (

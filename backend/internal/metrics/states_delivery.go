@@ -74,8 +74,10 @@ func (a *assessor) releaseStates() {
 			}
 		}
 		slices.Sort(apps[p])
+		// The deploy table holds no project: its last release's App finds that
+		// release and the App's deploys around it.
 		u := stateUnit{StateUnit: StateUnit{Name: p, Project: ptr(p), Value: days, Count: ptr(merged), Since: ptr(since),
-			LowerBound: lower, Names: apps[p]}}
+			LowerBound: lower, Names: apps[p], Query: ptr(r.App)}}
 		switch {
 		case !active:
 			u.status = unitIdle

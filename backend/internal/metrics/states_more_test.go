@@ -59,6 +59,21 @@ func TestFirstReviewWait(t *testing.T) {
 	if x == nil || x.State.Units[0].Name != "kasse/kasse-api" || *x.State.Units[0].Count != 3 || x.State.Units[0].Value != 5 {
 		t.Fatalf("first review = %+v, want kasse-api with 3 PRs, the oldest 5 working days", x)
 	}
+	// Since the oldest was ready, measured on the PRs waiting now, found in
+	// the PR table by the repo; a hint while that is under two sprints.
+	u := x.State.Units[0]
+	if u.Since == nil || !u.Since.Equal(endAgo(7)) || u.Measure == nil || *u.Measure != MeasureOldest ||
+		u.Query == nil || *u.Query != "kasse/kasse-api" || x.Tone != ToneHint {
+		t.Errorf("first review unit = %+v, tone %s", u, x.Tone)
+	}
+	// Ready and untouched for two sprints, still active: it lasted, red.
+	long := stateData(func(d *dataset.Dataset) {
+		d.OpenPRs = []dataset.OpenPR{waiting(1, 30, func(o *dataset.OpenPR) { o.LastEventAt = endAgo(1) }), waiting(2, 6),
+			waiting(3, 5)}
+	})
+	if x := stateSignal(assessStates(t, long, nil, History{}), StateFirstReviewWait); x == nil || x.Tone != ToneAttention {
+		t.Errorf("waiting two sprints = %+v, want red", x)
+	}
 	// Two waiting are no finding.
 	ds.OpenPRs = ds.OpenPRs[1:]
 	if x := stateSignal(assessStates(t, ds, nil, History{}), StateFirstReviewWait); x != nil {
@@ -107,7 +122,11 @@ func TestBranchFailing(t *testing.T) {
 	a := assessStates(t, ds, nil, History{})
 	x := stateSignal(a, StateBranchFailing)
 	if x == nil || x.State.Count != 1 || x.State.Units[0].Name != "kasse/kasse-api:feature/KAS-7" || x.State.Units[0].Value != 6 {
-		t.Errorf("branch = %+v, want the person's feature branch, 6 in a row", x)
+		t.Fatalf("branch = %+v, want the person's feature branch, 6 in a row", x)
+	}
+	// The runs table finds its builds by the pipeline, not by "<repo>:<branch>".
+	if q := x.State.Units[0].Query; q == nil || *q != "kasse-api/feature%2FKAS-7" {
+		t.Errorf("branch query = %v", q)
 	}
 }
 
@@ -238,6 +257,10 @@ func TestBranchStates(t *testing.T) {
 			branchLife("release/1.x", 100, 1),
 			branchLife("renovate/lib-1.x", 100, 1, func(b *dataset.BranchLife) { b.Bot = true }),
 			branchLife("feature/kas-5", 30, 1, func(b *dataset.BranchLife) { b.HasPR = true }),
+			// Merged onto the trunk without a PR: done, neither in work nor
+			// lying silent.
+			branchLife("feature/kas-6", 30, 1, func(b *dataset.BranchLife) { b.Merged = true }),
+			branchLife("feature/kas-7", 50, 25, func(b *dataset.BranchLife) { b.Merged = true }),
 		}
 		for i := range 5 {
 			d.PRs = append(d.PRs, merged(int64(i+1), 3, func(p *dataset.PR) { p.FirstCommitAt = endAgoP(14) }))
@@ -249,6 +272,10 @@ func TestBranchStates(t *testing.T) {
 	}
 	if x := stateSignal(a, StateBranchSilent); x == nil || *x.State.Units[0].Count != 3 {
 		t.Errorf("silent = %+v, want 3 branches silent", x)
+	}
+	// A branch without a PR is a row of no facts table: no link.
+	if x := stateSignal(a, StateBranchOpen); x != nil && (x.State.Facts != "" || x.State.Units[0].Query != nil) {
+		t.Errorf("open links to %q %v", x.State.Facts, x.State.Units[0].Query)
 	}
 	if x := stateSignal(a, StateBranchLife); x == nil || x.State.Units[0].Value < 5 {
 		t.Errorf("life = %+v, want branches living past 5 working days", x)

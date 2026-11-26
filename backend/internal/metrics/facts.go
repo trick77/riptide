@@ -97,6 +97,32 @@ var (
 	infraTerm       = uiTerm{"Infrastruktur, nicht gezählt", "Infrastructure, not counted"}
 )
 
+// prodStateTerm is where a merged PR stands on production, the words of the
+// PR table's column to production; prodReasonTerm why tracing cannot place
+// one; atMostTerm the mark on the time to production of a PR placed through
+// a lower bound (it may have gone out earlier, so the time is at most
+// that). StageWord stands for the production stage as the UI writes it.
+var (
+	prodStateTerm = map[string]uiTerm{
+		ProdOnProd:       {"auf " + StageWord, "on " + StageWord},
+		ProdNotYet:       {"noch nicht auf " + StageWord, "not on " + StageWord + " yet"},
+		ProdNotPlaceable: {"nicht zuordenbar", "not placeable"},
+	}
+	prodReasonTerm = map[string]uiTerm{
+		TraceNoMergeCommit:     {"Bitbucket nannte keinen Merge-Commit", "Bitbucket named no merge commit"},
+		TraceReleaseUnresolved: {"ein späteres Release lässt sich keinen PRs zuordnen", "a later release cannot be tied to PRs"},
+		TraceRepoUntraced:      {"kein Deploy des Repos bekannt", "no deploy of the repo known"},
+		TraceInSilence:         {"eine Lücke in den Daten", "a gap in the data"},
+	}
+	atMostTerm = uiTerm{"höchstens", "at most"}
+)
+
+// StageWord is the placeholder a term holds for the production stage.
+const StageWord = "{{prod}}"
+
+// stageTerm is t with the production stage as the UI writes it: upper case.
+func stageTerm(t, prod string) string { return strings.ReplaceAll(t, StageWord, strings.ToUpper(prod)) }
+
 // prMarks are a PR row's marks: why a merged PR is no merged work, whether
 // one counted came in through an umbrella branch, whether it is a
 // library's.
@@ -536,6 +562,51 @@ type factPR struct {
 	idle    *float64
 	// unknown: open at the end, its state unknown (no waiting, no age).
 	unknown bool
+	// pl is where it stands on production, placed on first use (place).
+	pl     *placement
+	placed bool
+}
+
+// place is where x stands on production at the facts' end, its row's
+// column and its search words: a merged PR's of people, neither a
+// promotion nor a library's (never rolled out); nil for every other.
+func (x *factPR) place(ds *dataset.Dataset) *placement {
+	if !x.placed {
+		x.placed = true
+		if pr := x.pr; pr.State == "merged" && !pr.GitOps && !pr.Bot && !pr.Library {
+			pl := prodPlacement(ds, pr, ds.Meta.To)
+			x.pl = &pl
+		}
+	}
+	return x.pl
+}
+
+// placeTerms are a placement's search words: where it stands, why it
+// cannot be placed, the at-most mark.
+func placeTerms(pl *placement, prod string) string {
+	if pl == nil {
+		return ""
+	}
+	t := stageTerm(prodStateTerm[pl.state].both(), prod)
+	if pl.reason != "" {
+		t += " " + prodReasonTerm[pl.reason].both()
+	}
+	if pl.lowerBound {
+		t += " " + atMostTerm.both()
+	}
+	return t
+}
+
+// exactPlacement is the placement a search for exactly its words asks for
+// (either language, any case), "" for any other search: "auf PROD" is part
+// of "noch nicht auf PROD", so a substring would find both.
+func exactPlacement(m matcher, prod string) string {
+	for state, t := range prodStateTerm {
+		if string(m) == strings.ToLower(stageTerm(t.De, prod)) || string(m) == strings.ToLower(stageTerm(t.En, prod)) {
+			return state
+		}
+	}
+	return ""
 }
 
 // PRStateUnknown is the PR table's state of a PR open at the dataset's end
@@ -679,6 +750,8 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 	// The mark's own word as the whole search lists exactly the marked rows:
 	// a title saying "this week" is no row of the running week.
 	onlyRunning := m != "" && (string(m) == strings.ToLower(runningTerm.De) || string(m) == strings.ToLower(runningTerm.En))
+	// The same for a placement's words: exactly the PRs standing there.
+	onlyPlaced := exactPlacement(m, prod)
 
 	return Facts{
 		ProductionStage: prod,
@@ -694,7 +767,14 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 			if m == "" || onlyRunning {
 				return m == "" || prRunning(x)
 			}
+			if onlyPlaced != "" {
+				pl := x.place(ds)
+				return pl != nil && pl.state == onlyPlaced
+			}
 			term, typ := prStateTerms(pr.State), prTypeTerm(pr)
+			if t := placeTerms(x.place(ds), prod); t != "" {
+				term += " " + t
+			}
 			if x.waiting != nil {
 				term += " " + waitTerm[*x.waiting].both()
 			}
@@ -721,8 +801,7 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 			uncounted, via, library := prMarks(pr)
 			var state, reason, route *string
 			lowerBound := false
-			if pr.State == "merged" && !pr.GitOps && !pr.Bot && !library {
-				pl := prodPlacement(ds, pr, ds.Meta.To)
+			if pl := x.place(ds); pl != nil {
 				state, lowerBound = ptr(pl.state), pl.lowerBound
 				if pl.reason != "" {
 					reason = ptr(pl.reason)

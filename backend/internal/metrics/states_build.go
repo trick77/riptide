@@ -54,8 +54,10 @@ func (a *assessor) botLoopState() {
 				n = 0
 			}
 		}
+		// The runs table finds a branch's builds by their pipeline's name.
 		u := stateUnit{StateUnit: StateUnit{Name: key, Project: project[key], Value: float64(best), Count: ptr(len(rs)),
-			Since: bestFirst, CISeconds: ptr(bestSecs), Names: []string{}}, status: unitClear}
+			Since: bestFirst, CISeconds: ptr(bestSecs), Names: []string{}, Query: ptr(rs[len(rs)-1].PipelineName)},
+			status: unitClear}
 		if best >= th.BotLoopFailures {
 			u.status = unitFires
 		}

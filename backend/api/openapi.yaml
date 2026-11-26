@@ -401,7 +401,13 @@ paths:
         - name: q
           in: query
           required: false
-          description: Search text; empty matches everything.
+          description: |
+            Search text, case-insensitive, over a row's names and the words the
+            UI shows for it in either language (ui/src/i18n/terms.json); empty
+            matches everything. A search for exactly the words of the running
+            week's mark, or of a PR's place on production ("auf PROD", "noch
+            nicht auf PROD", "nicht zuordenbar" and their English), lists
+            exactly those rows: "auf PROD" is part of "noch nicht auf PROD".
           schema: { type: string }
       responses:
         "200":
@@ -2959,13 +2965,14 @@ components:
             min: { type: [integer, "null"] }
         at: { $ref: "#/components/schemas/Instant" }
         was: { type: [string, "null"], description: "The state an `unmeasurable` card was; null otherwise." }
-        facts: { type: string, enum: [prs, deploys, runs, ""], description: The facts table its units are rows of. }
+        facts: { type: string, enum: [prs, deploys, runs, ""], description: "The facts table its units are rows of; empty where none holds them (branches without a PR)." }
 
     StateUnit:
       type: object
       description: One unit a state names, its number in the threshold's unit and what it rests on.
       additionalProperties: false
-      required: [name, project, value, count, of, typical, since, lower_bound, week, names, held, reason, ci_seconds]
+      required: [name, project, value, count, of, typical, since, lower_bound, week, names, held, reason, ci_seconds,
+                 query, measure]
       properties:
         name: { type: string, description: "A project key, a repo, an App, a bot branch as `<repo>:<branch>`; empty for the team." }
         project: { type: [string, "null"] }
@@ -2988,6 +2995,22 @@ components:
           enum: [no_merge_commit, release_unresolved, repo_untraced, in_silence, null]
           description: A data-honesty unit's reason.
         ci_seconds: { $ref: "#/components/schemas/NullableNumber" }
+        query:
+          type: [string, "null"]
+          description: |
+            The `/api/facts` search (`q`) listing the unit's rows in the
+            card's `facts` table: a repo's or an App's name, the App of a
+            project's last release, `<project>/` for a project's PRs, a
+            branch's pipeline name. Null where no search finds them (a
+            team-wide unit, branches without a PR).
+        measure:
+          type: [string, "null"]
+          enum: [oldest, typical, null]
+          description: |
+            What `value` measured where a state judges a unit two ways
+            (`first_review_wait`): `oldest` the oldest case waiting at the
+            period's end, `typical` the period's typical case. Null for every
+            other state.
 
     Fact:
       type: object

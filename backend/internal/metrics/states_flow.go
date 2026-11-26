@@ -207,7 +207,9 @@ func (a *assessor) mergePauseState() {
 		if !a.f.inKey(p) {
 			continue
 		}
-		u := stateUnit{StateUnit: StateUnit{Name: p, Project: ptr(p), Names: []string{}}, status: unitIdle}
+		// A project's PRs are its repos' ("<project>/<repo>").
+		u := stateUnit{StateUnit: StateUnit{Name: p, Project: ptr(p), Names: []string{}, Query: ptr(p + "/")},
+			status: unitIdle}
 		unjudged := false
 		for i, w := range a.p.Period.Weeks {
 			start, end := w.Start.In(loc), w.End.In(loc)

@@ -102,6 +102,59 @@ function PRNumber({ pr }: { pr: PRFact }) {
   );
 }
 
+// Where a merged PR stands on production now, as the backend placed it: the
+// time from merge to its first deploy there ("at most" when that deploy was
+// placed through a lower bound: it may have gone out earlier), the route in
+// the tooltip; not there yet; or not placeable and why. A library's PR is
+// never rolled out: no "not yet". The words are terms.json's, so a search
+// for them finds the row.
+function ToProd({ p, prod }: { p: PRFact; prod: string }) {
+  const { t } = useTranslation();
+  if (!p.merged_at) return "–";
+  if (p.library) return t("facts.library");
+  switch (p.prod_state) {
+    case "on_prod":
+      return (
+        <span
+          title={[
+            p.prod_at &&
+              t("facts.onProdAt", { prod, date: dateTime(p.prod_at) }),
+            p.prod_route && t(`facts.route.${p.prod_route}`),
+            p.prod_lower_bound && t("facts.atMostTitle", { prod }),
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
+          {p.prod_lower_bound && (
+            <span className="text-muted">{t("facts.atMost")} </span>
+          )}
+          {dur(p.to_prod_s)}
+        </span>
+      );
+    case "not_yet":
+      return (
+        <span className="text-ochre">
+          {t("facts.prodState.not_yet", { prod })}
+        </span>
+      );
+    case "not_placeable":
+      return (
+        <span className="inline-flex flex-col items-end">
+          <span className="text-muted">
+            {t("facts.prodState.not_placeable")}
+          </span>
+          {p.prod_reason && (
+            <span className="max-w-[220px] text-[12px] whitespace-normal text-faint">
+              {t(`facts.prodReason.${p.prod_reason}`)}
+            </span>
+          )}
+        </span>
+      );
+  }
+  // A promotion's or an older backend's row: the time where there is one.
+  return p.prod_at ? dur(p.to_prod_s) : "–";
+}
+
 type Col = { label: string; right?: boolean };
 
 // dim fades a row's content, not its border: stage promotions are listed but
@@ -294,14 +347,7 @@ function FactsTables({
           <span className="text-muted">{prType(p)}</span>,
           dur(p.review_s),
           dur(p.cycle_s),
-          // A library's PR is never rolled out: no "no".
-          p.merged_at
-            ? p.prod_at
-              ? dur(p.to_prod_s)
-              : p.library
-                ? t("facts.library")
-                : t("facts.notOnProd")
-            : "–",
+          <ToProd p={p} prod={prod} />,
           <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5">
             <Pill tone={PR_STATE_TONE[p.state]}>
               {t(`facts.prState.${p.state}`)}

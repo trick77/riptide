@@ -251,6 +251,9 @@ type BranchLife struct {
 	HeadDisplayName   string `db:"head_display_name"`
 	HasPR             bool   `db:"has_pr"`
 	Target            bool   `db:"target"`
+	// Merged: its last head reached the repo's trunk without a PR (pushed
+	// or merged onto it): done work, no branch "without a PR".
+	Merged bool `db:"merged"`
 }
 
 // ApprovalLookback is how far before the earliest window an approval is
