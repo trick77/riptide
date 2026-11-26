@@ -45,7 +45,6 @@ pr_events AS MATERIALIZED (
          upper(x.pr->>'state') AS state,
          coalesce(x.pr->>'draft', 'false') = 'true' AS draft,
          x.pr->>'createdDate' AS created_ms,
-         x.pr->'author'->'user'->>'name' AS pr_author,
          EXISTS (SELECT 1 FROM non_human_identities n
                   WHERE n.handle IN (lower(e.author), lower(e.author_display_name))) AS declared_non_human
   FROM bitbucket_events e
@@ -74,15 +73,12 @@ status AS (
          (array_agg(event_type ORDER BY occurred_at, id) FILTER (WHERE NOT before))[1] AS next_type,
          (array_agg(state ORDER BY occurred_at, id) FILTER (WHERE NOT before))[1] AS next_state,
          max(CASE WHEN created_ms ~ '^\d{1,15}$' THEN to_timestamp(created_ms::bigint / 1000.0) END) AS created_at,
-         -- Ingest-time automation as prs.sql reads it, on pr:opened; a PR
-         -- opened before ingestion has none, so then on what its side sends
-         -- (pushes, edits), never the reviewers'.
-         coalesce(bool_or(is_automated) FILTER (WHERE event_type = 'pr:opened'),
-                  bool_or(is_automated) FILTER (WHERE event_type IN
-                      ('pr:modified', 'pr:ready_for_review', 'pr:back_to_draft', 'pr:from_ref_updated', 'pr:merged')),
-                  false) AS automated,
-         coalesce(max(author) FILTER (WHERE event_type = 'pr:opened'), max(pr_author)) AS opener
-  FROM pr_events
+         -- Ingest-time automation and the opener as prs.sql reads them, on
+         -- pr:opened, else on what its author's side sends (pushes, a
+         -- close), never the reviewers'.
+         /*{{pr_flagged}}*/ AS automated,
+         /*{{pr_opener}}*/ AS opener
+  FROM pr_events e
   GROUP BY repo_full_name, pr_id
 ),
 open_keys AS (
@@ -199,7 +195,9 @@ SELECT p.repo_full_name AS repo,
                  CASE WHEN jsonb_typeof(p.pull->'participants') = 'array' THEN p.pull->'participants' ELSE '[]'::jsonb END) r
          WHERE lower(r->'user'->>'name') IS DISTINCT FROM lower(coalesce(p.opened_author, p.pull->'author'->'user'->>'name'))
            AND NOT EXISTS (SELECT 1 FROM non_human_identities n
-                            WHERE n.handle IN (lower(r->'user'->>'name'), lower(r->'user'->>'displayName'))))
+                            WHERE n.handle IN (lower(r->'user'->>'name'), lower(r->'user'->>'displayName')))
+           -- an account the git host marks SERVICE is no reviewer either
+           AND upper(coalesce(r->'user'->>'type', '')) <> 'SERVICE')
        END AS reviewers,
        coalesce(p.opened_author, p.pull->'author'->'user'->>'name', '') AS opener,
        coalesce(p.opened_display_name, p.pull->'author'->'user'->>'displayName', '') AS opener_display_name

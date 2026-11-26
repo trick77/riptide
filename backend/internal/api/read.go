@@ -168,15 +168,15 @@ func (d Deps) load(ctx context.Context, v view, from, to time.Time, kind readKin
 		// PR by the same bot agree, plus the name rule only read applies. A
 		// commit on master has no branch to match a prefix against, and the
 		// SERVICE flag is the view's.
-		Automated:  cfg.AutomatedAtRead,
-		BotBranch:  cfg.BotBranch,
-		Excluded:   cfg.ExcludedProject,
-		Now:        v.now,
-		FactsOnly:  kind != readFull,
-		CountsOnly: kind == readRunning,
-		Lean:       kind == readEarlier,
-		Shared:     sh,
-		ClassAt:    classAt,
+		Automated:   cfg.AutomatedAtRead,
+		BotPrefixes: cfg.BotPrefixes(),
+		Excluded:    cfg.ExcludedProject,
+		Now:         v.now,
+		FactsOnly:   kind != readFull,
+		CountsOnly:  kind == readRunning,
+		Lean:        kind == readEarlier,
+		Shared:      sh,
+		ClassAt:     classAt,
 	})
 }
 
@@ -205,7 +205,8 @@ func (d Deps) periods(ctx context.Context, v view, ps []metrics.Period, running 
 	// view's length: an approved PR still open is judged alike in every view.
 	look := metrics.StateLookbackFrom(ps[0])
 	sh, err := d.Reader.Shared(ctx, dataset.SharedParams{Team: v.team, From: from, ClassEnds: ends, Now: v.now, Libraries: true,
-		Trace: true, States: states, ApprovalsFrom: look, BranchesFrom: look, Automated: v.cfg.AutomatedAtRead})
+		Trace: true, States: states, ApprovalsFrom: look, BranchesFrom: look, Automated: v.cfg.AutomatedAtRead,
+		BotPrefixes: v.cfg.BotPrefixes()})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -322,7 +323,8 @@ func (d Deps) facts(w http.ResponseWriter, r *http.Request) {
 	// listed, marked, counted nowhere.
 	// The shared reads first, the tracing beside the rest, then the window.
 	sh, err := d.Reader.Shared(r.Context(), dataset.SharedParams{Team: v.team, From: v.params.Period.From,
-		ClassEnds: []time.Time{v.now}, Now: v.now, Libraries: true, Trace: true})
+		ClassEnds: []time.Time{v.now}, Now: v.now, Libraries: true, Trace: true, Automated: v.cfg.AutomatedAtRead,
+		BotPrefixes: v.cfg.BotPrefixes()})
 	var ds *dataset.Dataset
 	if err == nil {
 		ds, err = d.load(r.Context(), v, v.params.Period.From, v.now, readFacts, sh, v.now)

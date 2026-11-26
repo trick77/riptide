@@ -120,6 +120,9 @@ type prEvent struct {
 	// Display names of the PR author and the people above (login →
 	// display name); the login when none.
 	displays map[string]string
+	// Bitbucket's account type of the people above (login → SERVICE);
+	// none when empty.
+	types map[string]string
 }
 
 func (s *seeder) pr(e prEvent) {
@@ -169,7 +172,11 @@ func (s *seeder) pr(e prEvent) {
 	people := func(m map[string]string) []any {
 		var rs []any
 		for _, login := range slices.Sorted(maps.Keys(m)) {
-			rs = append(rs, map[string]any{"user": map[string]any{"name": login, "displayName": displayOf(login)}, "status": m[login]})
+			user := map[string]any{"name": login, "displayName": displayOf(login)}
+			if k := e.types[login]; k != "" {
+				user["type"] = k
+			}
+			rs = append(rs, map[string]any{"user": user, "status": m[login]})
 		}
 		return rs
 	}

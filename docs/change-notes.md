@@ -18,8 +18,12 @@ branch's earlier PR's close to its own). A person: an account the team's
 history shows opening a PR from an ordinary branch, never declared, never a
 service account (metrics.md, "Human vs automated split"). An account that
 only ever opens PRs from bots' branches stays a bot without a config entry.
-Read time only: no migration, no config change, stored rows unchanged; past
-periods' numbers move once. Every page reads the team's PR openings once
+Read time only: no migration, no config change, stored rows unchanged. Who
+is a person is read over all history at every request, so a closed
+period's numbers move with it: when an account opens its first PR from an
+ordinary branch, its earlier PRs from bots' branches become its own in
+every period, and when a prefix is added to the config, openings from such
+branches no longer make anyone a person. Every page reads the team's PR openings once
 more per request (one scan of its `pr:opened` rows) and the people's PRs from
 bots' branches; watch `GET /api/metrics` and `/api/analysis` durations.
 
