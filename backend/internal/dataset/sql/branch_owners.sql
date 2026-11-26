@@ -6,7 +6,8 @@
 -- resolve nowhere: the identity behind housekeeping commits). Go decides
 -- from it which branches are a bot's (BranchOwner.bot): every push a bot's,
 -- by any of these, never the last one alone. A bot's branch's builds are a
--- bot's (Run.Bot) in every number.
+-- bot's (Run.Bot) in every number, but for those a person's PR from it owns
+-- (sql/people_prs.sql).
 --
 -- $1 team, $2 since, $3 the GitOps repos (sql/gitops.sql).
 WITH pushes AS (

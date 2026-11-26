@@ -7,6 +7,27 @@ repository.
 Real account handles, hostnames and tokens belong in the mounted
 `riptide.json` / team-keys Secret, never in this file: the repository is public.
 
+## 2026-11-26 — a person's PR from a bot's branch
+
+**Who opened a PR decides, not its branch** (owner): the ingest flags every
+event on a branch an automation source's `branch_prefixes` names, whoever
+authored it. On read, a PR a person opened from such a branch is the
+person's: it counts as merged work, its reviews and approvals count, and its
+builds are the team's (its `PR-<n>` builds, and its branch's from the
+branch's earlier PR's close to its own). A person: an account the team's
+history shows opening a PR from an ordinary branch, never declared, never a
+service account (metrics.md, "Human vs automated split"). An account that
+only ever opens PRs from bots' branches stays a bot without a config entry.
+Read time only: no migration, no config change, stored rows unchanged; past
+periods' numbers move once. Every page reads the team's PR openings once
+more per request (one scan of its `pr:opened` rows) and the people's PRs from
+bots' branches; watch `GET /api/metrics` and `/api/analysis` durations.
+
+**Rules version 5**: the same data raises other findings (such a PR's
+approval counts, its builds judge). Analyses stored under version 4 are
+outdated and not shown until assessed again: one model call per team, at
+the next Monday run or on "Neu einschätzen".
+
 ## 2026-11-26 — the page's words, numbers per repo
 
 **Rules version 4**: the state titles, the words and the levers the model
@@ -411,7 +432,10 @@ config entry.
   declares it. Add **both** the login handle and the display name to
   `automation.renovate.authors`; matching is case-insensitive and covers either
   field. Without it, only its `renovate/` branches are recognised and its
-  pushes to the integration branch count as human activity.
+  pushes to the integration branch count as human activity. (Since
+  2026-11-26 a `renovate/` branch makes a PR a bot's only when its opener
+  never opens one from an ordinary branch: a person's PR from it is the
+  person's, on read.)
 - **The Bitbucket system user** — no entry needed. The server marks it
   `type: SERVICE` and riptide tags it `service-account` on its own.
 - **The CI account** — no entry needed once the pipeline sender reports

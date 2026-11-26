@@ -28,8 +28,9 @@ const (
 	// data honesty in groups of their own, judged against the team's
 	// thresholds and re-derived a week back from the same data. 4: the
 	// page's vocabulary (state titles, the words, the levers the model is
-	// told).
-	RulesVersion = 4
+	// told). 5: a person's PR from a bot's branch is the person's, its
+	// reviews and builds too: the same data raises other findings.
+	RulesVersion = 5
 	// FocusMinWeight is the weight a repo's signals need for it to be a
 	// focus candidate: one attention signal, or a hint and a notable change.
 	FocusMinWeight = 3
