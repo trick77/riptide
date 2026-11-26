@@ -110,8 +110,8 @@ var (
 	}
 	prodReasonTerm = map[string]uiTerm{
 		TraceNoMergeCommit: {"Bitbucket nannte keinen Merge-Commit", "Bitbucket named no merge commit"},
-		TraceOffTrunk: {"in einen Branch gemerged, der noch nicht im Hauptbranch ist",
-			"merged into a branch that is not on the main branch yet"},
+		TraceOffTrunk: {"in einen Branch gemerged, der bis zum Periodenende nicht im Hauptbranch ankam",
+			"merged into a branch that did not reach the main branch by the period's end"},
 		TraceReleaseUnresolved: {"ein späteres Release lässt sich keinen PRs zuordnen", "a later release cannot be tied to PRs"},
 		TraceRepoUntraced:      {"kein Deploy des Repos bekannt", "no deploy of the repo known"},
 		TraceInSilence:         {"eine Lücke in den Daten", "a gap in the data"},

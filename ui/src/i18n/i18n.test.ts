@@ -116,6 +116,7 @@ describe("state cards", () => {
     },
     names: ["feature"],
     held: false,
+    two_sprints: false,
     reason: "in_silence",
     ci_seconds: 3600,
     query: "kasse/kasse-api",
@@ -145,6 +146,7 @@ describe("state cards", () => {
           min: 5,
           within_key: "some_span",
           within: 10,
+          within_unit: "working_days",
         },
     at: "2026-11-09T00:00:00Z",
     was: key === "unmeasurable" ? "no_release" : null,
@@ -180,6 +182,7 @@ describe("state cards", () => {
         ...[
           unit(),
           unit({ held: true }),
+          unit({ two_sprints: true }),
           unit({ measure: "oldest" }),
           unit({ measure: "typical" }),
         ].map((u) => stateUnitText(t, c, u, "PROD")),
@@ -216,6 +219,7 @@ describe("state wording", () => {
     week: null,
     names: [],
     held: false,
+    two_sprints: false,
     reason: null,
     ci_seconds: null,
     query: null,
@@ -246,6 +250,7 @@ describe("state wording", () => {
       min: 400,
       within_key: null,
       within: null,
+      within_unit: null,
       ...o,
     },
     at: "2026-11-09T00:00:00Z",
@@ -255,21 +260,106 @@ describe("state wording", () => {
     names_kind: "",
     ...c,
   });
+  // The span's unit is the backend's (within_unit): the page words it, in
+  // the case the sentence needs.
   it("prints the team's spans", () => {
-    const fast = card("fast_approval", { within: 7 });
+    const fast = card("fast_approval", { within: 7, within_unit: "minutes" });
     expect(stateUnitText(t, fast, unit(), "PROD")).toBe(
       "3 grosse PRs innert 7 Minuten freigegeben, ohne Kommentar davor",
     );
     expect(thresholdText(t, fast, "PROD")).toBe(
       "Gemeldet ab 3 PRs über 400 Zeilen, innert 7 Minuten freigegeben.",
     );
+    const late = card("late_decline", {
+      within: 12,
+      within_unit: "working_days",
+    });
+    expect(stateUnitText(t, late, unit(), "PROD")).toBe(
+      "3 PRs nach mehr als 12 Arbeitstagen abgelehnt ()",
+    );
     expect(
-      stateUnitText(t, card("late_decline", { within: 12 }), unit(), "PROD"),
-    ).toBe("3 PRs nach mehr als 12 Arbeitstagen abgelehnt ()");
-    expect(
-      thresholdText(t, card("branch_open", { value: 14, within: 1 }), "PROD"),
+      thresholdText(
+        t,
+        card("branch_open", {
+          value: 14,
+          within: 1,
+          within_unit: "working_days",
+        }),
+        "PROD",
+      ),
     ).toBe(
-      "Gemeldet ab einem Branch ohne PR, zuerst vor mehr als 14 Tagen gepusht und zuletzt vor höchstens 1 Arbeitstag.",
+      "Gemeldet ab einem Branch ohne PR, an dem seit mehr als 14 Tagen gearbeitet wird, zuletzt vor höchstens 1 Arbeitstag gepusht.",
+    );
+    expect(
+      thresholdText(
+        t,
+        card("branch_failing", {
+          value: 5,
+          within: 2,
+          within_unit: "working_days",
+        }),
+        "PROD",
+      ),
+    ).toBe(
+      "Gemeldet ab 5 fehlgeschlagenen Builds in Folge über mindestens 2 Arbeitstage.",
+    );
+    // A span in calendar days, as the backend says.
+    const silent = card("builds_silent", {
+      value: 10,
+      min: 3,
+      within: 28,
+      within_unit: "days",
+    });
+    expect(stateUnitText(t, silent, unit({ count: 12 }), "PROD")).toBe(
+      "3 PRs gemerged, kein Build gemeldet; in den 28 Tagen davor 12 Builds",
+    );
+  });
+  // A configured one is singular, in the second threshold too.
+  it("counts a threshold of one in the singular", () => {
+    expect(
+      thresholdText(
+        t,
+        card("branch_silent", { value: 14, min: 1, unit: "days" }),
+        "PROD",
+      ),
+    ).toBe(
+      "Gemeldet ab 1 Branch ohne PR pro Repo, seit mehr als 14 Tagen nicht gepusht.",
+    );
+    expect(
+      thresholdText(t, card("bot_loop", { value: 1, min: null }), "PROD"),
+    ).toBe("Gemeldet ab 1 fehlgeschlagenen Build in Folge.");
+    expect(
+      thresholdText(
+        t,
+        card("approved_waiting", { value: 1, min: 1, unit: "working_days" }),
+        "PROD",
+      ),
+    ).toBe(
+      "Gemeldet ab 1 PR pro Repo mit mehr als 1 Arbeitstag Wartezeit auf den Merge.",
+    );
+    expect(
+      thresholdText(
+        t,
+        card("merge_pause", { value: 0.2, min: 3, unit: "share" }),
+        "PROD",
+      ),
+    ).toBe(
+      "Gemeldet, wenn eine Woche höchstens 20 % der typischen Merges hat, während am Ende der Woche 3 freigegebene PRs oder mehr offen waren.",
+    );
+  });
+  // The unit that held a lasting state two sprints says so: one such unit
+  // turns the whole card red.
+  it("marks the unit held two sprints", () => {
+    const c = card("approved_waiting", { value: 1, min: 2 });
+    expect(
+      stateUnitText(
+        t,
+        c,
+        unit({ value: 12, count: 2, two_sprints: true }),
+        "PROD",
+      ),
+    ).toBe(
+      "2 freigegebene PRs warten auf den Merge, der älteste seit 12 Arbeitstagen (seit zwei Sprints oder länger)",
     );
   });
   it("counts one in the singular", () => {

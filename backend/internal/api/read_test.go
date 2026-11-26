@@ -337,8 +337,8 @@ func ptrTo[T any](v T) *T { return &v }
 
 // The assessment's read: the period and the previous one in full, the
 // states' look-back past them lean (PRs and deploys only); its shared read
-// takes the approvals from the period's start and the branches from
-// StateLookbackWeeks before its end.
+// takes the approvals and the branches from StateLookbackWeeks before its
+// end, in every view alike.
 func TestDatasetsStatesRead(t *testing.T) {
 	h := newHarness(t, nil)
 	var shared []dataset.SharedParams
@@ -359,9 +359,23 @@ func TestDatasetsStatesRead(t *testing.T) {
 				p.Lean, p.FactsOnly, p.ClassAt)
 		}
 	}
-	if len(shared) != 1 || !shared[0].States || !shared[0].ApprovalsFrom.Equal(cur.From) ||
+	if len(shared) != 1 || !shared[0].States || !shared[0].ApprovalsFrom.Equal(metrics.StateLookbackFrom(cur)) ||
 		!shared[0].BranchesFrom.Equal(metrics.StateLookbackFrom(cur)) || !shared[0].From.Equal(ps[2].From) {
 		t.Errorf("shared %+v, want the states' read", shared)
+	}
+	// A longer view reads the same approvals: what is judged does not
+	// depend on the view's length.
+	shared = nil
+	cur12, prev12 := metrics.ClosedPeriod(12, fixedNow, time.UTC), metrics.ClosedPrevious(12, fixedNow, time.UTC)
+	ps12 := []metrics.Period{cur12, prev12}
+	if look := metrics.StatePeriod(cur12, prev12); look != nil {
+		ps12 = append(ps12, *look)
+	}
+	if _, err := d.Datasets(context.Background(), "checkout", ps12...); err != nil {
+		t.Fatal(err)
+	}
+	if len(shared) != 1 || !shared[0].ApprovalsFrom.Equal(metrics.StateLookbackFrom(cur)) {
+		t.Errorf("12-week view's approvals from %v, want the 4-week view's %v", shared, metrics.StateLookbackFrom(cur))
 	}
 }
 
@@ -380,10 +394,10 @@ func (s sharedSpy) Shared(ctx context.Context, p dataset.SharedParams) (*dataset
 // unmeasurable one (no threshold either) match the contract.
 func TestStateCardsMatchOpenAPISpec(t *testing.T) {
 	cur, prev := metrics.ClosedPeriod(4, fixedNow, time.UTC), metrics.ClosedPrevious(4, fixedNow, time.UTC)
-	since := cur.To.Add(-34 * 24 * time.Hour)
+	since := cur.To.Add(-31 * 24 * time.Hour)
 	week := cur.Weeks[3]
 	unit := func(name string, mod func(*metrics.StateUnit)) metrics.StateUnit {
-		u := metrics.StateUnit{Name: name, Project: ptrTo("kasse"), Value: 34, Count: ptrTo(3), Names: []string{}}
+		u := metrics.StateUnit{Name: name, Project: ptrTo("kasse"), Value: 31, Count: ptrTo(3), Names: []string{}}
 		if mod != nil {
 			mod(&u)
 		}
@@ -405,8 +419,13 @@ func TestStateCardsMatchOpenAPISpec(t *testing.T) {
 	release.Since = &since
 	pause := card(metrics.StateMergePause, metrics.UnitProject,
 		&metrics.StateThreshold{Key: "merge_pause_share", Value: 0.2, Unit: metrics.ThresholdShare,
-			MinKey: ptrTo("merge_pause_waiting"), Min: ptrTo(3), WithinKey: ptrTo("merge_pause_wait_days"), Within: ptrTo(0.5)},
+			MinKey: ptrTo("merge_pause_waiting"), Min: ptrTo(3)},
 		unit("kasse", func(u *metrics.StateUnit) { u.Week, u.Typical, u.Held = &week, ptrTo(7.5), true }))
+	// A lasting state red for the unit that held it two sprints, with a span.
+	branches := card(metrics.StateBranchOpen, metrics.UnitRepo,
+		&metrics.StateThreshold{Key: "branch_open_days", Value: 14, Unit: metrics.ThresholdDays,
+			WithinKey: ptrTo("branch_active_days"), Within: ptrTo(5.0), WithinUnit: ptrTo(metrics.ThresholdWorkingDays)},
+		unit("kasse/kasse-api", func(u *metrics.StateUnit) { u.TwoSprints = true }))
 	untraced := card(metrics.StateUntraced, metrics.UnitRepo, nil,
 		unit("kasse/kasse-api", func(u *metrics.StateUnit) { u.Reason, u.Of = ptrTo(metrics.TraceInSilence), ptrTo(9) }))
 	gone := card(metrics.StateUnmeasurable, metrics.UnitRepo, nil, unit("kasse/kasse-api", nil))
@@ -416,6 +435,7 @@ func TestStateCardsMatchOpenAPISpec(t *testing.T) {
 		Signals: []metrics.Signal{
 			signal("state:no_release", metrics.ToneAttention, release),
 			signal("state:merge_pause", metrics.ToneAttention, pause),
+			signal("state:branch_open", metrics.ToneAttention, branches),
 			signal("state:untraced", metrics.ToneLimit, untraced),
 			signal("state:unmeasurable:approved_waiting", metrics.ToneLimit, gone),
 		},
@@ -428,8 +448,8 @@ func TestStateCardsMatchOpenAPISpec(t *testing.T) {
 	w := h.serveUI(newRequest(http.MethodGet, "/api/analysis?team=checkout", nil))
 	expectStatus(t, w, http.StatusOK)
 	validateResponse(t, specRouter(t), http.MethodGet, "/api/analysis", w)
-	for _, want := range []string{`"key":"no_release"`, `"threshold":null`, `"within":0.5`, `"was":"approved_waiting"`,
-		`"reason":"in_silence"`} {
+	for _, want := range []string{`"key":"no_release"`, `"threshold":null`, `"within":5`, `"within_unit":"working_days"`,
+		`"two_sprints":true`, `"was":"approved_waiting"`, `"reason":"in_silence"`} {
 		if !strings.Contains(w.Body.String(), want) {
 			t.Errorf("no %s in %s", want, w.Body)
 		}

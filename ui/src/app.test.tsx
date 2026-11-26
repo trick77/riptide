@@ -1349,7 +1349,7 @@ describe("App", () => {
     expect(panel).not.toMatch(/overview\.assess/);
     expect(panel).toMatch(/Ohne Freigabe gemerged: erledigt/);
     expect(panel).toMatch(
-      /Vor einer Woche hat riptide es hier festgestellt; jetzt liegt jede damals genannte Einheit wieder klar unter der Grenze\./,
+      /Vor einer Woche hat riptide es hier festgestellt; jetzt gilt es für keine damals genannte Einheit mehr: wieder klar unter der Grenze, oder vorbei wie eine Merge-Pause/,
     );
     // Hints and what cannot be judged say they are no finding.
     expect(

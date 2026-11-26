@@ -25,10 +25,11 @@ const (
 	// TraceNoMergeCommit: the payload names no merge commit, and no umbrella
 	// brought it in: nothing marks where it reached the trunk.
 	TraceNoMergeCommit = "no_merge_commit"
-	// TraceOffTrunk: merged into another branch than the trunk, and no PR
-	// merged that branch into the trunk by the instant: it may be waiting
-	// there, or have gone on some other way (a push, a hotfix branch
-	// deployed as it is).
+	// TraceOffTrunk: merged into a branch no PR had merged on into the main
+	// branch by the instant: another branch than the trunk, or a develop
+	// trunk while releases went out from master. It may be waiting there,
+	// or have gone on some other way (a push, a hotfix branch deployed as it
+	// is).
 	TraceOffTrunk = "off_trunk"
 	// TraceRepoUntraced: no deploy ever showed an App deploys its repo (no
 	// compare link names it, no image of its runs, none named after it).
@@ -94,7 +95,11 @@ func prodPlacement(ds *dataset.Dataset, pr dataset.PR, cutoff time.Time) placeme
 	if pr.OnwardAt != nil && pr.OnwardAt.Before(cutoff) {
 		at = append(at, position{*pr.OnwardAt, deref(pr.OnwardBranch)})
 	}
-	earlier, silent, unresolved := false, false, false
+	// On a trunk other than master or main (develop), not merged on by a PR
+	// by the cutoff: a release built from master that tracing resolved there
+	// holds none of the PRs only on develop, as far as any PR tells.
+	waiting := len(at) == 1 && at[0].branch != "" && dataset.BranchKind(at[0].branch) != dataset.BranchMain
+	earlier, silent, unresolved, elsewhere := false, false, false, false
 	for _, r := range rt.Releases {
 		// Evidence only when a deploy before the cutoff had shown its App
 		// deploys the repo: a later one must not move a closed period.
@@ -108,6 +113,8 @@ func prodPlacement(ds *dataset.Dataset, pr dataset.PR, cutoff time.Time) placeme
 		}
 		switch {
 		case resolved:
+		case waiting && resolvedElsewhere(r, at[0].branch, *pr.TrunkAt):
+			elsewhere = true
 		case r.Silence:
 			silent = true
 		default:
@@ -123,8 +130,21 @@ func prodPlacement(ds *dataset.Dataset, pr dataset.PR, cutoff time.Time) placeme
 		return notPlaceable(TraceReleaseUnresolved)
 	case silent:
 		return notPlaceable(TraceInSilence)
+	case elsewhere:
+		// Releases went out from the main branch, which no PR had brought it
+		// to: merged into a branch that did not reach it by the cutoff.
+		return notPlaceable(TraceOffTrunk)
 	}
 	return placement{state: ProdNotYet}
+}
+
+// resolvedElsewhere reports whether release r shipped only stretches of
+// branches other than branch, each from a known old end or ending before
+// at: what it held of the repo came from another trunk branch, exactly.
+func resolvedElsewhere(r dataset.TraceRelease, branch string, at time.Time) bool {
+	return len(r.Stretches) > 0 && !slices.ContainsFunc(r.Stretches, func(s dataset.Stretch) bool {
+		return s.Branch == branch || (s.LowerBound && !s.To.Before(at))
+	})
 }
 
 // deref is *s, "" for nil.

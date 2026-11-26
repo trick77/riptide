@@ -3,6 +3,8 @@ package analysis
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -20,7 +22,7 @@ func stateSig(key, tone string, units ...string) metrics.Signal {
 		Worst: []metrics.StateUnit{}, Units: []metrics.StateUnit{},
 		Threshold: &metrics.StateThreshold{Key: "release_breach_days", Value: 28, Unit: metrics.ThresholdDays}}
 	for _, u := range units {
-		c.Units = append(c.Units, metrics.StateUnit{Name: u, Value: 37, Names: []string{u + "-prod"}})
+		c.Units = append(c.Units, metrics.StateUnit{Name: u, Value: 31, Names: []string{u + "-prod"}})
 	}
 	c.Worst = c.Units[:min(3, len(c.Units))]
 	id := metrics.SignalState + ":" + key
@@ -78,6 +80,44 @@ func TestDigestStateWithoutNames(t *testing.T) {
 		}
 		if _, ok := labels["state_"+k]; !ok && k != metrics.StateUnmeasurable {
 			t.Errorf("state %s has no fact label", k)
+		}
+	}
+}
+
+// The model's words for a state are the page's: its titles name the
+// production stage the team configured, as the page writes it.
+func TestDigestStateTitlesNameTheStage(t *testing.T) {
+	for _, c := range []struct{ stage, want string }{{"prd", "Lange kein Release nach PRD"}, {"", "Lange kein Release nach PROD"}} {
+		a := metrics.Assessment{ProductionStage: c.stage,
+			Signals: []metrics.Signal{stateSig(metrics.StateNoRelease, metrics.ToneAttention, "lager")}}
+		raw, _, err := buildDigest(a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d := string(raw); !strings.Contains(d, `"`+c.want+`"`) || strings.Contains(d, metrics.StageWord) {
+			t.Errorf("stage %q: digest lacks %q or keeps the placeholder", c.stage, c.want)
+		}
+	}
+}
+
+// Every state's title the model is told is the page's own, in both
+// languages (ui/src/i18n: overview.assess.state.<key>.title).
+func TestStateTitlesAreThePages(t *testing.T) {
+	for _, lang := range []string{"de", "en"} {
+		raw, err := os.ReadFile("../../../ui/src/i18n/" + lang + ".ts")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for k, g := range states {
+			if k == metrics.StateUnmeasurable {
+				// The page's title names the state it was.
+				continue
+			}
+			m := regexp.MustCompile(`(?m)^\s+` + k + `: \{\n\s+title: "([^"]*)"`).FindSubmatch(raw)
+			want := map[string]string{"de": g.DE, "en": g.EN}[lang]
+			if m == nil || string(m[1]) != want {
+				t.Errorf("%s %s: page title %q, glossary %q", lang, k, m, want)
+			}
 		}
 	}
 }

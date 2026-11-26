@@ -8,9 +8,9 @@
 --   start  each trunk branch's first push of the team: when riptide's data
 --          of it begins, and the push's fromHash, the tip before it, which
 --          nothing riptide holds lists (a compare link's old end may be it)
--- One push moves one ref (Bitbucket sends an event per ref), so a push's
--- branch_name is the trunk it moved. Over all history, read once per page
--- request.
+-- A push's branch_name is the first ref it moved; one push may move
+-- several (start reads the change of its own branch). Over all history,
+-- read once per page request.
 --
 -- $1 team, $2 the SHAs, lowercased.
 WITH repos AS MATERIALIZED (

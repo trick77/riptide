@@ -257,12 +257,12 @@ SELECT c.repo_full_name AS repo,
        -- a PR an umbrella's merge marked merged by the umbrella's.
        u.trunk_at,
        u.trunk_branch,
-       -- A PR into a trunk other than master or main (develop) reaches
-       -- master or main onward, by the first PR merged from its trunk into
-       -- one of them at or after it, alike: releases built from master hold
-       -- it there. Behind a CASE: a join would cost every PR's read.
-       CASE WHEN c.merged_at IS NOT NULL AND c.merge_commit IS NOT NULL
-                 AND c.target_branch NOT IN ('master', 'main') AND NOT c.off_trunk THEN
+       -- A PR that reached a trunk other than master or main (develop),
+       -- itself or through its umbrella, reaches master or main onward, by
+       -- the first PR merged from that trunk into one of them at or after it
+       -- got there, alike: releases built from master hold it there. Behind
+       -- a CASE: a join would cost every PR's read.
+       CASE WHEN u.trunk_branch NOT IN ('master', 'main') THEN
          (SELECT coalesce((SELECT min(e.occurred_at) FILTER (WHERE e.branch_name = m.target)
                              FROM bitbucket_events e
                             WHERE e.commit_sha = lower(m.merge_commit) AND e.repo_full_name = c.repo_full_name
@@ -271,20 +271,21 @@ SELECT c.repo_full_name AS repo,
                          x.payload->'pullRequest'->'properties'->'mergeCommit'->>'id' AS merge_commit,
                          lower(x.payload->'pullRequest'->'toRef'->>'displayId') AS target
                     FROM bitbucket_events x
-                   WHERE x.repo_full_name = c.repo_full_name AND x.branch_name = c.target_branch
-                     AND x.event_type = 'pr:merged' AND x.pr_id <> c.pr_id AND x.occurred_at >= c.merged_at
+                   WHERE x.repo_full_name = c.repo_full_name AND x.branch_name = u.trunk_branch
+                     AND x.event_type = 'pr:merged' AND x.pr_id <> c.pr_id
+                     AND x.occurred_at >= CASE WHEN c.off_trunk THEN u.trunk_at ELSE c.merged_at END
                      AND x.payload->'pullRequest'->'properties'->'mergeCommit'->>'id' IS NOT NULL
                      AND lower(x.payload->'pullRequest'->'toRef'->>'displayId') IN ('master', 'main')
                    ORDER BY x.occurred_at, x.id
                    LIMIT 1) m)
        END AS onward_at,
        -- the same PR's target
-       CASE WHEN c.merged_at IS NOT NULL AND c.merge_commit IS NOT NULL
-                 AND c.target_branch NOT IN ('master', 'main') AND NOT c.off_trunk THEN
+       CASE WHEN u.trunk_branch NOT IN ('master', 'main') THEN
          (SELECT lower(x.payload->'pullRequest'->'toRef'->>'displayId')
             FROM bitbucket_events x
-           WHERE x.repo_full_name = c.repo_full_name AND x.branch_name = c.target_branch
-             AND x.event_type = 'pr:merged' AND x.pr_id <> c.pr_id AND x.occurred_at >= c.merged_at
+           WHERE x.repo_full_name = c.repo_full_name AND x.branch_name = u.trunk_branch
+             AND x.event_type = 'pr:merged' AND x.pr_id <> c.pr_id
+             AND x.occurred_at >= CASE WHEN c.off_trunk THEN u.trunk_at ELSE c.merged_at END
              AND x.payload->'pullRequest'->'properties'->'mergeCommit'->>'id' IS NOT NULL
              AND lower(x.payload->'pullRequest'->'toRef'->>'displayId') IN ('master', 'main')
            ORDER BY x.occurred_at, x.id

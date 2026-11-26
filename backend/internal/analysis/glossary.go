@@ -1,6 +1,11 @@
 package analysis
 
-import "github.com/trick77/riptide/internal/metrics"
+import (
+	"strings"
+
+	"github.com/trick77/riptide/internal/config"
+	"github.com/trick77/riptide/internal/metrics"
+)
 
 // The glossary is what the model is told a signal and a number mean, and
 // the only levers it may pick. A lever names a step, never a cause riptide
@@ -59,7 +64,7 @@ var kinds = map[string]kindGloss{
 		[]string{LeverPlatformAgents},
 	},
 	metrics.SignalResolved: {
-		"A problem an earlier assessment of this window raised is back at or better than its value before it was raised (a jam: clearly below four long-open PRs; a state: judged clear again). metric names the signal it was. No step: say what is back, do not recommend.",
+		"A problem an earlier assessment of this window raised is back at or better than its value before it was raised (a jam: clearly below four long-open PRs; a state: judged clear again, or its dated episode over, a merge pause or a run of failed builds, which its card may still show with its date). metric names the signal it was. No step: say what is back, do not recommend.",
 		nil,
 	},
 	metrics.SignalState: {
@@ -78,38 +83,39 @@ type StateGloss struct {
 }
 
 // states are the state keys' glosses; the titles are the page's (de.ts,
-// en.ts overview.assess.state.<key>.title).
+// en.ts overview.assess.state.<key>.title), the production stage as
+// metrics.StageWord (stateGlosses puts in the view's).
 var states = map[string]StateGloss{
 	metrics.StateNoRelease: {"A project rolled out, with merged work, released to production longer ago than the team's rule allows (at least one release per two-week sprint). value: days since its last release.",
-		"Lange kein Release nach PROD", "No release to PROD for long"},
+		"Lange kein Release nach {{prod}}", "No release to {{prod}} for long"},
 	metrics.StateReleaseDue: {"A project's last release to production lies more than a sprint back, not yet past the rule's limit. A hint.",
-		"Release nach PROD bald fällig", "Release to PROD due soon"},
+		"Release nach {{prod}} bald fällig", "Release to {{prod}} due soon"},
 	metrics.StateNotOnProd: {"A repo's merged PRs are not on production yet, the oldest longer than the team's rule allows. value: days since the oldest reached the trunk.",
-		"Gemergte PRs warten lange auf PROD", "Merged PRs wait long for PROD"},
+		"Gemergte PRs warten lange auf {{prod}}", "Merged PRs wait long for {{prod}}"},
 	metrics.StateSlowToProd: {"A repo's merged PRs typically take longer from merge to production than the team's rule allows.",
-		"Lange Wartezeit vom Merge bis PROD", "Long wait from merge to PROD"},
-	metrics.StateMergePause: {"A project's week in which hardly any PR was merged against its typical week, while approved PRs waited. Why is not in the data (a freeze, a release date).",
+		"Lange Wartezeit vom Merge bis {{prod}}", "Long wait from merge to {{prod}}"},
+	metrics.StateMergePause: {"A project's week in which hardly any PR was merged against its typical week, while at the week's end several PRs were open with a person's approval. value: those PRs. Why is not in the data (a freeze, a release date).",
 		"Kaum gemerged, obwohl freigegebene PRs warteten", "Hardly merged while approved PRs waited"},
 	metrics.StateApprovedWaiting: {"A repo's approved PRs wait for their merge longer than the team's threshold, at the period's end.",
 		"Freigegeben, aber nicht gemerged", "Approved, but not merged"},
 	metrics.StateBotLoop: {"A bot branch's builds failed again and again in a row: CI time wasted. Never a problem of the team's code.",
 		"Bot-Branch verbraucht CI-Zeit mit fehlgeschlagenen Builds", "Bot branch burning CI time on failed builds"},
 	metrics.StateUntraced: {"A repo's merged PRs cannot be placed on production: its delivery cannot be judged.",
-		"Nicht messbar, ob gemergte PRs auf PROD sind", "Not measurable whether merged PRs are on PROD"},
+		"Nicht messbar, ob gemergte PRs auf {{prod}} sind", "Not measurable whether merged PRs are on {{prod}}"},
 	metrics.StateUnattributed: {"Releases to production that belong to no project: the release rule cannot be judged for the projects they belong to.",
-		"Releases nach PROD ohne Projekt", "Releases to PROD without a project"},
+		"Releases nach {{prod}} ohne Projekt", "Releases to {{prod}} without a project"},
 	metrics.StateNoProdStage: {"Argo CD reports deploys, but none to the production stage: the stage configuration or the notification is off.",
-		"Argo CD meldet nichts nach PROD", "Argo CD reports nothing to PROD"},
+		"Argo CD meldet nichts nach {{prod}}", "Argo CD reports nothing to {{prod}}"},
 	metrics.StateUnmeasurable: {"A state (state.was) the assessment a week before raised can no longer be judged for units it named: the data no longer tells. It has no numbers to word. Never call it solved, never a problem of the team.",
 		"Nicht mehr messbar", "No longer measurable"},
 	metrics.StateDeployFailing: {"An App's last deploy to production failed and none succeeded since, for longer than the threshold.",
-		"Letztes Deploy nach PROD fehlgeschlagen", "Last deploy to PROD failed"},
+		"Letztes Deploy nach {{prod}} fehlgeschlagen", "Last deploy to {{prod}} failed"},
 	metrics.StateDeployFailures: {"An App's deploys to production failed again and again in the period, each time succeeding later. A hint.",
-		"Deploys nach PROD scheitern immer wieder", "Deploys to PROD fail again and again"},
+		"Deploys nach {{prod}} scheitern immer wieder", "Deploys to {{prod}} fail again and again"},
 	metrics.StateFirstReviewWait: {"A repo's ready PRs wait for their first review longer than the threshold, or its PRs typically do.",
 		"PRs warten auf ein erstes Review", "PRs wait for a first review"},
 	metrics.StateTrunkFailing: {"A repo's trunk builds failed for longer than the threshold, with several failed builds.",
-		"Builds auf dem Default-Branch lange fehlgeschlagen", "Builds on the default branch failing for long"},
+		"Builds auf dem Hauptbranch lange fehlgeschlagen", "Builds on the main branch failing for long"},
 	metrics.StateBranchFailing: {"A person's feature branch whose builds failed many times in a row.",
 		"Builds eines Branches scheitern immer wieder", "A branch's builds fail again and again"},
 	metrics.StateFlakyBuilds: {"A repo's builds of a kind are red mostly for no code change: a rerun on the same commit succeeded.",
@@ -134,6 +140,21 @@ var states = map[string]StateGloss{
 		"Branches ohne PR, lange in Arbeit", "Branches without a PR, worked on for long"},
 	metrics.StateBranchSilent: {"Branches without a PR not pushed for weeks. Whether they still exist Bitbucket does not report.",
 		"Branches ohne PR, lange still", "Branches without a PR, silent for long"},
+}
+
+// stateGlosses are the states' glosses with the production stage as the
+// page writes it (upper case) in their titles.
+func stateGlosses(stage string) map[string]StateGloss {
+	if stage == "" {
+		stage = config.DefaultProductionStage
+	}
+	word := strings.ToUpper(stage)
+	out := make(map[string]StateGloss, len(states))
+	for k, g := range states {
+		g.DE, g.EN = strings.ReplaceAll(g.DE, metrics.StageWord, word), strings.ReplaceAll(g.EN, metrics.StageWord, word)
+		out[k] = g
+	}
+	return out
 }
 
 // stateLevers are each state's levers: only where a step follows from what
@@ -192,14 +213,14 @@ var labels = map[string]string{
 	"state_release_due":       "days since the worst project's last release to production",
 	"state_not_on_prod":       "days the worst repo's oldest merged PR has waited for production",
 	"state_slow_to_prod":      "typical days from merge to production in the worst repo",
-	"state_merge_pause":       "approved PRs that waited in the worst project's paused week",
+	"state_merge_pause":       "PRs open with a person's approval at the end of the worst project's paused week",
 	"state_approved_waiting":  "working days the worst repo's oldest approved PR has waited for its merge",
 	"state_bot_loop":          "failed builds in a row on the worst bot branch",
 	"state_untraced":          "merged PRs of the worst repo that cannot be placed on production",
 	"state_unattributed":      "releases to production that belong to no project",
 	"state_no_prod_stage":     "stages Argo CD reported deploys to, none of them production",
 	"state_deploy_failing":    "working days the worst App's production deploy has stood on a failure",
-	"state_deploy_failures":   "runs of failed production deploys of the worst App",
+	"state_deploy_failures":   "times the worst App's production deploys failed in a row, each time until one succeeded",
 	"state_first_review_wait": "working days the worst repo's oldest ready PR waits for its first review, or its typical pickup",
 	"state_trunk_failing":     "working days the worst repo's trunk builds failed in a row",
 	"state_branch_failing":    "failed builds in a row on the worst feature branch",
@@ -212,7 +233,7 @@ var labels = map[string]string{
 	"state_unapproved":        "share of the worst repo's merged PRs without a person's approval",
 	"state_late_decline":      "PRs declined after long work",
 	"state_branch_life":       "typical working days from a branch's first commit to its PR being ready, worst repo",
-	"state_branch_open":       "days the worst repo's oldest branch without a PR has run",
+	"state_branch_open":       "days the worst repo's oldest branch without a PR has been worked on since its last long silence",
 	"state_branch_silent":     "branches without a PR not pushed for weeks, worst repo",
 }
 

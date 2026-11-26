@@ -736,7 +736,7 @@ func TestTickWordsEveryProduct(t *testing.T) {
 	}
 }
 
-// A window's views read its two datasets once; a product with data but no
+// A window's views read its datasets once; a product with data but no
 // repo active in it is left out, and promised nothing.
 func TestTickLoadsOnceSkipsQuiet(t *testing.T) {
 	llm := &fakeLLM{answer: goodAnswer}

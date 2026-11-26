@@ -16,7 +16,7 @@ import (
 // failing BotLoopFailures builds in a row is a loop, a hint about wasted CI
 // time. A build without a verdict (aborted) neither breaks nor extends a
 // run of failures; a success ends it. The unit is the branch, named
-// "<repo>:<branch>".
+// "<repo>:<branch>"; the loop an episode, over once the branch builds green.
 func (a *assessor) botLoopState(at stateAt) []stateEval {
 	th := a.states.th
 	by := map[string][]dataset.Run{}
@@ -30,7 +30,7 @@ func (a *assessor) botLoopState(at stateAt) []stateEval {
 		project[key] = r.Project
 	}
 	e := stateEval{key: StateBotLoop, unit: UnitBranch, source: dataset.SourcePipeline, tone: ToneHint,
-		facts: "runs", tier: tierLasting, valueUnit: UnitCount,
+		facts: "runs", tier: tierLasting, valueUnit: UnitCount, episodic: true,
 		threshold: StateThreshold{Key: "bot_loop_failures", Value: float64(th.BotLoopFailures), Unit: ThresholdCount}}
 	for _, key := range slices.Sorted(mapsKeys(by)) {
 		rs := by[key]
@@ -60,6 +60,8 @@ func (a *assessor) botLoopState(at stateAt) []stateEval {
 		if best >= th.BotLoopFailures {
 			u.status = unitFires
 		}
+		// Still failing at the instant: the loop runs on.
+		u.ongoing = n >= th.BotLoopFailures
 		e.units = append(e.units, u)
 	}
 	return []stateEval{e}

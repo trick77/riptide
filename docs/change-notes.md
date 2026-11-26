@@ -15,17 +15,19 @@ values the assessment's states fire at (`release_breach_days`,
 the list with the starting values is in [metrics.md](metrics.md), "States").
 Absent, the starting values apply; an unknown key, a value of 0 or below, a
 share over 1, a fractional count, or a value past what the states' 26-week
-look-back holds (182 days, 130 working days, 26 weeks; 1440 minutes)
-refuses the config (hot reload keeps the old one). Each card prints the
-value it measured against. `merge_pause_wait_days` (0.5) is the wait a merge
-pause counts, measured to the week's end.
+look-back holds (182 days, 130 working days, 26 weeks; 1440 minutes;
+`silent_builds_days` 15) refuses the config (hot reload keeps the old one).
+Each card prints the value it measured against. A merge pause counts the
+PRs open with a person's approval at the week's end, however long they
+waited: there is no `merge_pause_wait_days`.
 
 **Rules version 3**: analyses stored under version 2 are outdated and not
 shown until assessed again. The assessment reads more per request: the
 weeks before the compared periods back to 26 weeks before the period's end
 (PRs and deploys, in parallel with the compared periods), the approvals
-since 30 days before the period, and the branches' pushes (trunk and bots'
-pushes left out before their payloads are read); no migration, no new
+since 30 days before that look-back in every view, and the branches'
+pushes (trunk and bots' pushes left out before their payloads are read),
+with the first PR into each branch; no migration, no new
 index. On a small database the planner scans `bitbucket_events`; with more
 rows the existing `(team, occurred_at)` and `(repo_full_name, branch_name,
 occurred_at)` indexes serve them. Watch `GET /api/analysis` durations after
@@ -38,12 +40,13 @@ that branch's last push on, once per request; a branch cut from the trunk
 is found by its head's SHA index. Watch `GET /api/analysis` on a database
 with many release-tooling pushes to the trunk.
 
-**A tool's branch's builds are bots' builds on every page** (a branch whose
-every push's head commit is by an `.invalid` e-mail identity, or one the
-config's automation `authors` names): the build numbers of past periods
-drop them once with this change, and the bot CI-time line takes them. Every
-page reads these branches' owners once per request (pushes off the trunk,
-bots' left out before their payloads are read).
+**A bot's branch's builds are bots' builds on every page** (a branch whose
+every push is a bot's: flagged at ingest, its head commit by an `.invalid`
+e-mail identity, or its pusher or head commit automation, the config's
+automation `authors` included; never by its last push alone): the build
+numbers of past periods drop them once with this change, and the bot
+CI-time line takes them. Every page reads the branches' pushers once per
+request (pushes off the trunk; a flagged push's payload is not read).
 
 **A branch named after its ticket without a prefix** (`KAS-12-login`) is a
 feature branch now: its builds count as feature builds, its PRs (stored as
@@ -71,8 +74,9 @@ change; stored analyses keep their wording until assessed again.
 
 **`coverage.reasons` and `prod_reason` take a fifth reason, `off_trunk`**:
 a PR merged into a branch no PR had merged into the trunk by the cutoff
-is not placeable, no longer "not on production yet". A client that lists
-the reasons by a fixed set has to add it.
+is not placeable, no longer "not on production yet"; so is a PR on a
+develop trunk not merged on to master by then while master's releases went
+out resolved. A client that lists the reasons by a fixed set has to add it.
 
 ## 2026-11-25 — counting as it happened, and saying what is missing
 

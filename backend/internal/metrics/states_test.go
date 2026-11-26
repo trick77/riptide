@@ -248,6 +248,15 @@ func withdrawn(a dataset.Approval, days float64) dataset.Approval {
 	return a
 }
 
+// needsWork has another reviewer set needs work on a days before the
+// period's end, still standing: a's approval stands too.
+func needsWork(a dataset.Approval, days float64) dataset.Approval {
+	a.NeedsWork = []dataset.ApprovalSpan{{From: endAgo(days)}}
+	a.Activity = append(slices.Clone(a.Activity), endAgo(days))
+	slices.SortFunc(a.Activity, func(x, y time.Time) int { return x.Compare(y) })
+	return a
+}
+
 // touched adds an event days before the period's end to a.
 func touched(a dataset.Approval, days float64) dataset.Approval {
 	a.Activity = append(slices.Clone(a.Activity), endAgo(days))
@@ -298,10 +307,19 @@ func TestApprovedWaiting(t *testing.T) {
 	if x := stateSignal(assessStates(t, ds, nil, History{}), StateApprovedWaiting); x == nil || x.Tone != ToneAttention {
 		t.Errorf("held two sprints = %+v, want red", x)
 	}
-	// Approved 40 days back and untouched since: inactive, no wait.
+	// Approved 40 days back and untouched since: still open, still approved,
+	// still waiting (the forgotten PR is what the state is for), and red.
 	ds.Approvals[0] = approval("kasse/kasse-api", 10, 40, nil)
+	if x := stateSignal(assessStates(t, ds, nil, History{}), StateApprovedWaiting); x == nil || x.Tone != ToneAttention ||
+		*x.State.Units[0].Count != 2 {
+		t.Errorf("an untouched approved PR = %+v, want it still waiting, red", x)
+	}
+	ds.Approvals = old
+	// Another reviewer's needs work: the approval stands, but the PR is not
+	// ready to merge. Not waiting, not done: no card at all.
+	ds.Approvals[1] = needsWork(ds.Approvals[1], 2)
 	if x := stateSignal(assessStates(t, ds, nil, History{}), StateApprovedWaiting); x != nil {
-		t.Errorf("an untouched PR waits for nothing: %+v", x.State.Units)
+		t.Errorf("a PR held by needs work waits for its merge: %+v", x.State.Units)
 	}
 	ds.Approvals = old
 	// An approval withdrawn (needs work, unapproved, reset by a push) waits
@@ -375,16 +393,33 @@ func TestMergePause(t *testing.T) {
 	if x := stateSignal(assessStates(t, ds, nil, History{}), StateMergePause); x != nil {
 		t.Errorf("a lost week judges nothing: %+v", x.State.Units)
 	}
-	// Approvals withdrawn on Wednesday (needs work, reset by a push) wait
-	// no more after it: their wait counts to then, a day and a half.
+	// Approvals withdrawn on Wednesday (needs work by the approver, reset by
+	// a push) no longer stand at the week's end.
 	ds = pauseData(3)
 	for i := range ds.Approvals {
 		ds.Approvals[i] = withdrawn(ds.Approvals[i], 4.5)
 	}
-	th := config.DefaultThresholds()
-	th.MergePauseWaitDays = 2
-	if x := stateSignal(assessStates(t, ds, &th, History{}), StateMergePause); x != nil {
+	if x := stateSignal(assessStates(t, ds, nil, History{}), StateMergePause); x != nil {
 		t.Errorf("withdrawn approvals waited: %+v", x.State.Units)
+	}
+	// Another reviewer's needs work standing at the week's end: approved,
+	// but not ready to merge.
+	ds = pauseData(3)
+	ds.Approvals[0] = needsWork(ds.Approvals[0], 3)
+	if x := stateSignal(assessStates(t, ds, nil, History{}), StateMergePause); x != nil {
+		t.Errorf("a PR held by needs work waited: %+v", x.State.Units)
+	}
+	// An approval given up long ago (untouched for OpenInactiveDays by the
+	// week's end) waits for nothing.
+	ds = pauseData(2)
+	ds.Approvals = append(ds.Approvals, approval("kasse/kasse-api", 199, 45, nil))
+	if x := stateSignal(assessStates(t, ds, nil, History{}), StateMergePause); x != nil {
+		t.Errorf("an abandoned approval made a pause: %+v", x.State.Units)
+	}
+	// The card counts the approved PRs open at the week's end.
+	if x := stateSignal(assessStates(t, pauseData(4), nil, History{}), StateMergePause); x == nil ||
+		x.State.Units[0].Value != 4 || x.State.Threshold.Within != nil {
+		t.Errorf("pause of 4 = %+v, want 4 approved PRs open and no span threshold", x)
 	}
 	// A silence lost since the approvals: their merges may be in it, so
 	// they wait for nothing, though no silence began after them.
@@ -395,9 +430,9 @@ func TestMergePause(t *testing.T) {
 	}
 }
 
-// A merge pause's waits end with the week: approved Friday afternoon,
-// merged Monday, a PR waited a quarter of a working day in the week, read
-// on whatever day.
+// A merge pause reads the week as of its end, whenever it is read: PRs
+// approved Friday afternoon and merged Monday were open and approved at the
+// week's end, however short their wait; merged on Sunday, they were not.
 func TestMergePauseFrozenAtWeekEnd(t *testing.T) {
 	ds := pauseData(0)
 	for i := range 3 {
@@ -405,17 +440,16 @@ func TestMergePauseFrozenAtWeekEnd(t *testing.T) {
 		ds.Approvals = append(ds.Approvals, approval("kasse/kasse-api", int64(200+i), 2.375, ptr(-0.6667)))
 	}
 	ds.Meta.GeneratedAt = endAgo(-10)
-	if x := stateSignal(assessStates(t, ds, nil, History{}), StateMergePause); x != nil {
-		t.Errorf("Friday approvals made a pause: %+v", x.State.Units)
+	if x := stateSignal(assessStates(t, ds, nil, History{}), StateMergePause); x == nil || x.State.Units[0].Value != 3 {
+		t.Errorf("Friday approvals open at the week's end = %+v, want a pause with 3", x)
 	}
-	// Approved Thursday 10:00, still open well after: 1.6 working days by the
-	// week's end, past the half day.
+	// Merged on Sunday: closed by the week's end.
 	ds = pauseData(0)
 	for i := range 3 {
-		ds.Approvals = append(ds.Approvals, approval("kasse/kasse-api", int64(300+i), 3.5833, nil))
+		ds.Approvals = append(ds.Approvals, approval("kasse/kasse-api", int64(300+i), 2.375, ptr(0.5)))
 	}
-	if x := stateSignal(assessStates(t, ds, nil, History{}), StateMergePause); x == nil || x.State.Units[0].Value != 3 {
-		t.Errorf("Thursday approvals = %+v, want a pause with 3 waiting", x)
+	if x := stateSignal(assessStates(t, ds, nil, History{}), StateMergePause); x != nil {
+		t.Errorf("PRs merged before the week's end made a pause: %+v", x.State.Units)
 	}
 }
 
@@ -638,7 +672,7 @@ func TestStateUnjudgedUnitIsUnmeasurable(t *testing.T) {
 // before is not "gelöst" beside the red card.
 func TestReleaseEscalationIsNoResolution(t *testing.T) {
 	ds := stateData(func(d *dataset.Dataset) {
-		d.Releases = []dataset.AppRelease{release("kasse-prod", 34, false)}
+		d.Releases = []dataset.AppRelease{release("kasse-prod", 31, false)}
 		d.PRs = []dataset.PR{merged(1, 3)}
 	})
 	a := assessStates(t, ds, nil, History{})

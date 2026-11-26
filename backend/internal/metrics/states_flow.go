@@ -44,34 +44,34 @@ func lostBetween(lost []dataset.Silence, from, to time.Time) bool {
 	return slices.ContainsFunc(lost, func(s dataset.Silence) bool { return s.To.After(from) && s.From.Before(to) })
 }
 
-// waitingSince is when ap's approval waiting at t began: a person's
-// approval standing then (one withdrawn, set to needs work or reset by a
-// push waits no more; given again, it waits from then), the PR neither
-// merged nor closed before t, nor untouched for OpenInactiveDays (a PR
-// whose close riptide never heard of piles up for good otherwise). Nil when
-// not waiting.
-func waitingSince(ap dataset.Approval, t time.Time) *time.Time {
-	if (ap.MergedAt != nil && ap.MergedAt.Before(t)) || (ap.ClosedAt != nil && ap.ClosedAt.Before(t)) {
-		return nil
+// approvalAt is ap's approval at t: since when the approval of a person
+// standing then stood (one withdrawn, set to needs work by its approver or
+// reset by a push stands no more; given again, it stands from then), nil
+// when none stood or the PR was merged or closed by then; and whether a
+// person's needs work, any reviewer's, held the PR then: approved, but not
+// ready to merge.
+func approvalAt(ap dataset.Approval, t time.Time) (since *time.Time, needsWork bool) {
+	if ap.ClosedBy(t) {
+		return nil, false
 	}
-	since := ap.ApprovedSince(t)
-	if since == nil {
-		return nil
+	if since = ap.ApprovedSince(t); since == nil {
+		return nil, false
 	}
-	if last := ap.LastActivity(t); last == nil || t.Sub(*last) >= OpenInactiveDays*24*time.Hour {
-		return nil
-	}
-	return since
+	return since, ap.NeedsWorkAt(t)
 }
 
 // approvedWaitingState judges each repo at the instant: approved PRs (a
 // person's approval, not the author's, standing then) waiting for their
 // merge longer than ApprovedWaitDays working days, at least
-// ApprovedWaitingPRs of them. A PR whose merge may lie in a lost Bitbucket
-// silence since its approval is of unknown state: it counts for nothing,
-// and makes its repo unjudged where it could have decided it. The state
-// holds since the ApprovedWaitingPRs-th of the PRs waiting had waited past
-// the threshold. A lasting state: a hint until a unit has held it two
+// ApprovedWaitingPRs of them. An approved PR stays counted while it is open
+// and its approval stands, touched or not: the forgotten one is what the
+// state is for. A PR whose merge may lie in a lost Bitbucket silence since
+// its approval is of unknown state: it counts for nothing, and makes its
+// repo unjudged where it could have decided it. One a reviewer's needs work
+// holds is no PR waiting for its merge, nor done: where it could have
+// decided the repo, the repo is not judged at all (idle: no "gelöst"). The
+// state holds since the ApprovedWaitingPRs-th of the PRs waiting had waited
+// past the threshold. A lasting state: a hint until a unit has held it two
 // sprints.
 func (a *assessor) approvedWaitingState(at stateAt) []stateEval {
 	th, end, loc := a.states.th, at.end, a.states.loc
@@ -80,6 +80,7 @@ func (a *assessor) approvedWaitingState(at stateAt) []stateEval {
 		project   string
 		n         int
 		unknown   int
+		held      int
 		wait      float64
 		crossings []time.Time
 	}
@@ -88,7 +89,7 @@ func (a *assessor) approvedWaitingState(at stateAt) []stateEval {
 		by[repo] = &acc{project: projectOf(repo)}
 	}
 	for _, ap := range a.approvals() {
-		since := waitingSince(ap, end)
+		since, needsWork := approvalAt(ap, end)
 		if since == nil {
 			continue
 		}
@@ -98,11 +99,14 @@ func (a *assessor) approvedWaitingState(at stateAt) []stateEval {
 			r = &acc{project: ap.Project}
 			by[ap.Repo] = r
 		}
-		if w <= th.ApprovedWaitDays {
+		switch {
+		case w <= th.ApprovedWaitDays:
 			continue
-		}
-		if lostBetween(lost, *since, end) {
+		case lostBetween(lost, *since, end):
 			r.unknown++
+			continue
+		case needsWork:
+			r.held++
 			continue
 		}
 		r.n++
@@ -125,6 +129,9 @@ func (a *assessor) approvedWaitingState(at stateAt) []stateEval {
 		case r.n+r.unknown >= th.ApprovedWaitingPRs:
 			// The PRs of unknown state could make it: no telling.
 			u.status = unitUnjudged
+		case r.n+r.unknown+r.held >= th.ApprovedWaitingPRs:
+			// Held by needs work: not waiting for the merge, not done either.
+			u.status = unitIdle
 		}
 		e.units = append(e.units, u)
 	}
@@ -161,18 +168,19 @@ const minBaselineWeeks = 3
 // mergePauseState judges each project's weeks of the instant's period: a
 // week whose people's merges fell to MergePauseShare of the project's
 // typical week (the median of the MergePauseWeeks weeks before it Bitbucket
-// covered, at least MergePauseMinTypical) while MergePauseWaiting approved
-// PRs waited MergePauseWaitDays working days or longer by the week's end.
-// Not "no merge": one hotfix let through a freeze would hide it; not one or
-// two approved PRs: a holiday week. A lost Bitbucket silence takes its
-// working time out of the week (its merges are not there, nor can the
-// typical week expect them); a baseline week it covers by more than a
-// fifth, or one before the look-back, is no baseline. A PR's wait counts
-// from its approval standing in the week to its merge, its close, the
-// approval's end or the week's end, whichever comes first: a closed week
-// reads the same whenever it is read. A PR whose merge may lie in a lost
-// silence since its approval counts for nothing. The latest pause of a
-// project is its unit; one in the period's last week is held up now.
+// covered, at least MergePauseMinTypical) while at the week's end
+// MergePauseWaiting PRs or more were open with a person's approval standing
+// (approvalAt), however long they had waited. Not "no merge": one hotfix
+// let through a freeze would hide it; not one or two approved PRs: a
+// holiday week. Not an approval a reviewer's needs work holds (not ready to
+// merge), nor one on a PR untouched for OpenInactiveDays by then (given up
+// long ago), nor one whose merge may lie in a lost silence since it. A lost
+// Bitbucket silence takes its working time out of the week (its merges are
+// not there, nor can the typical week expect them); a baseline week it
+// covers by more than a fifth, or one before the look-back, is no baseline.
+// Read as of the week's end: a closed week reads the same whenever it is
+// read. The latest pause of a project is its unit, an episode; one in the
+// period's last week is held up now, over once the week after merges again.
 func (a *assessor) mergePauseState(at stateAt) []stateEval {
 	th, loc := a.states.th, a.states.loc
 	lost := a.lostSilences()
@@ -232,10 +240,9 @@ func (a *assessor) mergePauseState(at stateAt) []stateEval {
 	}
 	last := len(at.period.Weeks) - 1
 	e := stateEval{key: StateMergePause, unit: UnitProject, source: dataset.SourceBitbucket, tone: ToneAttention,
-		facts: "prs", tier: tierLasting, valueUnit: UnitCount,
+		facts: "prs", tier: tierLasting, valueUnit: UnitCount, episodic: true,
 		threshold: StateThreshold{Key: "merge_pause_share", Value: th.MergePauseShare, Unit: ThresholdShare,
-			MinKey: ptr("merge_pause_waiting"), Min: ptr(th.MergePauseWaiting),
-			WithinKey: ptr("merge_pause_wait_days"), Within: ptr(th.MergePauseWaitDays)}}
+			MinKey: ptr("merge_pause_waiting"), Min: ptr(th.MergePauseWaiting)}}
 	for _, p := range slices.Sorted(mapsKeys(projects)) {
 		if !a.f.inKey(p) {
 			continue
@@ -256,10 +263,17 @@ func (a *assessor) mergePauseState(at stateAt) []stateEval {
 			f := covered(start, end)
 			if len(base) < minBaselineWeeks || f < 0.2 {
 				unjudged = true
+				if i == last {
+					// Whether a pause before it went on, the last week cannot tell.
+					u.after = afterUnknown
+				}
 				continue
 			}
 			typical := *Median(base)
 			if typical < th.MergePauseMinTypical {
+				if i == last {
+					u.after = afterQuiet
+				}
 				continue
 			}
 			if u.status == unitIdle {
@@ -272,29 +286,16 @@ func (a *assessor) mergePauseState(at stateAt) []stateEval {
 			var held []string
 			waiting := 0
 			for _, ap := range waits[p] {
-				// A span of a person's approval standing in the week, the PR not
-				// merged or closed before the week began.
-				if (ap.MergedAt != nil && ap.MergedAt.Before(start)) || (ap.ClosedAt != nil && ap.ClosedAt.Before(start)) {
+				since, needsWork := approvalAt(ap, end)
+				if since == nil || needsWork || lostBetween(lost, *since, end) {
 					continue
 				}
-				for _, s := range ap.Spans {
-					if !s.From.Before(end) || (s.To != nil && !s.To.After(start)) {
-						continue
-					}
-					until := end
-					for _, t := range []*time.Time{ap.MergedAt, ap.ClosedAt, s.To} {
-						if t != nil && t.Before(until) {
-							until = *t
-						}
-					}
-					if workingDays(s.From, until, loc) < th.MergePauseWaitDays || lostBetween(lost, s.From, until) {
-						continue
-					}
-					waiting++
-					if !slices.Contains(held, ap.Repo) {
-						held = append(held, ap.Repo)
-					}
-					break
+				if touched := ap.LastActivity(end); touched == nil || end.Sub(*touched) >= OpenInactiveDays*24*time.Hour {
+					continue
+				}
+				waiting++
+				if !slices.Contains(held, ap.Repo) {
+					held = append(held, ap.Repo)
 				}
 			}
 			if waiting < th.MergePauseWaiting {
@@ -304,6 +305,7 @@ func (a *assessor) mergePauseState(at stateAt) []stateEval {
 			week := w
 			u.status, u.Value, u.Count, u.Typical = unitFires, float64(waiting), ptr(n), ptr(typical)
 			u.Since, u.Week, u.Names = ptr(w.Start), &week, held
+			u.ongoing = i == last
 			if i == last {
 				e.tier = tierNow
 			}

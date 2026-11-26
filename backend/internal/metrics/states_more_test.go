@@ -271,7 +271,7 @@ func TestBranchStates(t *testing.T) {
 			// Silent for 20 to 40 days: three of them.
 			branchLife("feature/kas-1", 50, 20), branchLife("feature/kas-2", 50, 30), branchLife("kas-3-old", 50, 40),
 			// Long-lived by design, a bot's, one with a PR: none.
-			branchLife("develop", 100, 1, func(b *dataset.BranchLife) { b.Target = true }),
+			branchLife("develop", 100, 1, func(b *dataset.BranchLife) { b.TargetAt = endAgoP(99) }),
 			branchLife("release/1.x", 100, 1),
 			branchLife("renovate/lib-1.x", 100, 1, func(b *dataset.BranchLife) { b.Bot = true }),
 			branchLife("feature/kas-5", 30, 1, func(b *dataset.BranchLife) { b.PRAt = endAgoP(29) }),

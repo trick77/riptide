@@ -68,7 +68,7 @@ func init() {
 // ---- Deploys on failure ----------------------------------------------------
 
 // deployFailingStates judge each App's production deploys as of the
-// instant (states-catalogue A-7): its last one failed and none succeeded
+// instant: its last one failed and none succeeded
 // for DeployFailingDays working days (red, held up now), the failures
 // counted from the first of the run, read back over the look-back, not only
 // the period (a lower bound where the data starts in it);
@@ -141,8 +141,8 @@ func (a *assessor) deployFailingStates(at stateAt) []stateEval {
 
 // ---- Waiting for the first review ------------------------------------------
 
-// firstReviewState judges each repo with people's work at the instant
-// (states-catalogue B-1): FirstReviewWaiting ready PRs waiting longer than
+// firstReviewState judges each repo with people's work at the instant:
+// FirstReviewWaiting ready PRs waiting longer than
 // FirstReviewDays working days for anyone's first touch (known at the
 // period's end only: its open PRs), or its typical pickup (ready to first
 // review) over it on FirstReviewMinPRs merged PRs. Drafts, bots' PRs,
@@ -269,19 +269,21 @@ func (a *assessor) teamRunsAt(at stateAt, trunk map[string]string, kinds ...stri
 	return out
 }
 
-// trunkFailingState judges each repo's trunk builds (states-catalogue D-1;
-// the trunk: master, main, or the branch most of its PRs arrive on): a run
-// of failed builds from the first failure to the next success, or to the
-// instant while still failing, longer than TrunkFailingDays working days
-// with TrunkFailedBuilds failures or more, ending in the period or still
-// running. A run is counted from its first failure in the runs read, before
-// the period too (a lower bound where the run data starts). A single red
-// build a rerun turned green is flaky, no episode. Release builds are their
-// own state (StateReleaseFailing).
+// trunkFailingState judges each repo's trunk builds (the trunk: master,
+// main, or the branch most of its PRs arrive on): a run of failed builds
+// from the first failure to the next success, or to the instant while still
+// failing, longer than TrunkFailingDays working days with TrunkFailedBuilds
+// failures or more, ending in the period or still running. Each trunk branch
+// is a sequence of its own: a repo whose PRs go to develop builds master
+// too, and a green master build says nothing of develop. A run is counted
+// from its first failure in the runs read, before the period too (a lower
+// bound where the run data starts). A single red build a rerun turned green
+// is flaky, no episode. Release builds are their own state
+// (StateReleaseFailing). An episode: over once the trunk builds green again.
 func (a *assessor) trunkFailingState(at stateAt) []stateEval {
 	th, end, loc := a.states.th, at.end, a.states.loc
 	e := stateEval{key: StateTrunkFailing, unit: UnitRepo, source: dataset.SourcePipeline, tone: ToneAttention,
-		facts: "runs", tier: tierLasting,
+		facts: "runs", tier: tierLasting, episodic: true,
 		threshold: StateThreshold{Key: "trunk_failing_days", Value: th.TrunkFailingDays, Unit: ThresholdWorkingDays,
 			MinKey: ptr("trunk_failed_builds"), Min: ptr(th.TrunkFailedBuilds)}}
 	runs := a.teamRunsAt(at, a.trunks(), KindMain)
@@ -291,34 +293,45 @@ func (a *assessor) trunkFailingState(at stateAt) []stateEval {
 			continue
 		}
 		u := stateUnit{StateUnit: StateUnit{Name: repo, Project: rs[0].Project, Names: []string{}}, status: unitClear}
-		var first *time.Time
-		n := 0
-		check := func(until time.Time, now bool) {
-			if first == nil || until.Before(at.period.From) {
-				return
-			}
-			w := round1(workingDays(*first, until, loc))
-			if n >= th.TrunkFailedBuilds && w > th.TrunkFailingDays && w > u.Value {
-				u.Value, u.Count, u.Since, u.status = w, ptr(n), first, unitFires
-				u.LowerBound = first.Equal(*runAt(rs[0]))
-				if now {
-					e.tier = tierNow
-				}
-			}
-		}
+		branches := map[string][]dataset.Run{}
 		for _, r := range rs {
-			switch verdict(r) {
-			case VerdictFailure:
-				if first == nil {
-					first = runAt(r)
-				}
-				n++
-			case VerdictSuccess:
-				check(*runAt(r), false)
-				first, n = nil, 0
-			}
+			b := strings.ToLower(r.Branch)
+			branches[b] = append(branches[b], r)
 		}
-		check(end, true)
+		for _, b := range slices.Sorted(mapsKeys(branches)) {
+			seq := branches[b]
+			var first *time.Time
+			n := 0
+			check := func(until time.Time, now bool) {
+				if first == nil || until.Before(at.period.From) {
+					return
+				}
+				w := round1(workingDays(*first, until, loc))
+				if n < th.TrunkFailedBuilds || w <= th.TrunkFailingDays {
+					return
+				}
+				if now {
+					u.ongoing, e.tier = true, tierNow
+				}
+				if w > u.Value {
+					u.Value, u.Count, u.Since, u.status = w, ptr(n), first, unitFires
+					u.LowerBound = first.Equal(*runAt(seq[0]))
+				}
+			}
+			for _, r := range seq {
+				switch verdict(r) {
+				case VerdictFailure:
+					if first == nil {
+						first = runAt(r)
+					}
+					n++
+				case VerdictSuccess:
+					check(*runAt(r), false)
+					first, n = nil, 0
+				}
+			}
+			check(end, true)
+		}
 		e.units = append(e.units, u)
 	}
 	return []stateEval{e}
@@ -327,7 +340,8 @@ func (a *assessor) trunkFailingState(at stateAt) []stateEval {
 // branchFailingState judges each person's feature or bugfix branch: its
 // builds in the period failing BranchFailingBuilds times in a row over at
 // least BranchFailingDays working days. A bot's branch never, a tool's
-// neither (dataset.Run.Bot): its loop is StateBotLoop, CI time only.
+// neither (dataset.Run.Bot): its loop is StateBotLoop, CI time only. An
+// episode: over once the branch builds green.
 func (a *assessor) branchFailingState(at stateAt) []stateEval {
 	th, loc := a.states.th, a.states.loc
 	by := map[string][]dataset.Run{}
@@ -339,9 +353,9 @@ func (a *assessor) branchFailingState(at stateAt) []stateEval {
 		}
 	}
 	e := stateEval{key: StateBranchFailing, unit: UnitBranch, source: dataset.SourcePipeline, tone: ToneHint,
-		facts: "runs", tier: tierLasting, valueUnit: UnitCount,
+		facts: "runs", tier: tierLasting, valueUnit: UnitCount, episodic: true,
 		threshold: StateThreshold{Key: "branch_failing_builds", Value: float64(th.BranchFailingBuilds), Unit: ThresholdCount,
-			WithinKey: ptr("branch_failing_days"), Within: ptr(th.BranchFailingDays)}}
+			WithinKey: ptr("branch_failing_days"), Within: ptr(th.BranchFailingDays), WithinUnit: ptr(ThresholdWorkingDays)}}
 	for _, key := range slices.Sorted(mapsKeys(by)) {
 		rs := by[key]
 		u := stateUnit{StateUnit: StateUnit{Name: key, Project: rs[0].Project, Count: ptr(len(rs)), Names: []string{},
@@ -362,6 +376,8 @@ func (a *assessor) branchFailingState(at stateAt) []stateEval {
 				n = 0
 			}
 		}
+		// Still failing at the instant: the run is not over.
+		u.ongoing = n >= th.BranchFailingBuilds && workingDays(*first, *last, loc) >= th.BranchFailingDays
 		e.units = append(e.units, u)
 	}
 	return []stateEval{e}
@@ -378,7 +394,7 @@ func (a *assessor) hotspotsAt(at stateAt) Hotspots {
 }
 
 // buildStates judge each repo's builds from the hotspots, per kind and
-// never across kinds (states-catalogue D-2, D-4, D-5), one unit per repo,
+// never across kinds, one unit per repo,
 // its worst kind: red mostly for no code change (flaky: FlakyBuilds and
 // FlakyShare of the failed on FlakyMinRuns builds), a typical successful
 // feature or trunk build longer than BuildMinutes on BuildMinRuns, release
@@ -457,8 +473,8 @@ func (a *assessor) buildStates(at stateAt) []stateEval {
 	return []stateEval{flaky, long, release}
 }
 
-// buildsSilentState judges each repo the CI reported for (states-catalogue
-// C-3): SilentBuildsMerges people's merges in the last SilentBuildsDays
+// buildsSilentState judges each repo the CI reported for:
+// SilentBuildsMerges people's merges in the last SilentBuildsDays
 // working days before the instant, no build of it in them, after
 // SilentBuildsBefore builds in the silentBuildsBeforeDays before. Worded
 // "meldet nicht": the CI may have moved, the job been renamed. Data
@@ -474,6 +490,10 @@ func (a *assessor) buildsSilentState(at stateAt) []stateEval {
 		from = prev
 	}
 	before := from.AddDate(0, 0, -silentBuildsBeforeDays)
+	// The runs read reach back to the previous period's start: a span
+	// before it (a long SilentBuildsDays in a short view) is not read, so
+	// no repo can be judged.
+	readable := !before.Before(a.p.Previous.From)
 	type acc struct {
 		project       string
 		inSpan, prior int
@@ -511,9 +531,14 @@ func (a *assessor) buildsSilentState(at stateAt) []stateEval {
 		facts: "runs", tier: tierLimit, valueUnit: UnitCount,
 		threshold: StateThreshold{Key: "silent_builds_days", Value: th.SilentBuildsDays, Unit: ThresholdWorkingDays,
 			MinKey: ptr("silent_builds_merges"), Min: ptr(th.SilentBuildsMerges),
-			Within: ptr(float64(silentBuildsBeforeDays))}}
+			Within: ptr(float64(silentBuildsBeforeDays)), WithinUnit: ptr(ThresholdDays)}}
 	for _, repo := range slices.Sorted(mapsKeys(by)) {
 		x := by[repo]
+		if !readable {
+			e.units = append(e.units, stateUnit{StateUnit: StateUnit{Name: repo, Project: ptr(x.project), Names: []string{}},
+				status: unitUnjudged})
+			continue
+		}
 		if x.prior < th.SilentBuildsBefore {
 			continue
 		}
@@ -530,7 +555,7 @@ func (a *assessor) buildsSilentState(at stateAt) []stateEval {
 // ---- Review and size -------------------------------------------------------
 
 // reviewStates judge the PRs of the instant's period per repo
-// (states-catalogue B-6, B-7, B-13, B-10), hints until a unit held one two
+// as hints until a unit held one two
 // sprints: big PRs (BigPRShare of the sized ones over BigPRLines lines, on
 // BigPRMin), big PRs approved within FastApprovalMinutes of being ready
 // without a person's touch before (FastApprovalPRs), merged without a
@@ -602,7 +627,7 @@ func (a *assessor) reviewStates(at stateAt) []stateEval {
 		facts: "prs", tier: tierLasting, lasting: true, valueUnit: UnitCount,
 		threshold: StateThreshold{Key: "fast_approval_prs", Value: float64(th.FastApprovalPRs), Unit: ThresholdCount,
 			MinKey: ptr("big_pr_lines"), Min: ptr(th.BigPRLines),
-			WithinKey: ptr("fast_approval_minutes"), Within: ptr(th.FastApprovalMinutes)}}
+			WithinKey: ptr("fast_approval_minutes"), Within: ptr(th.FastApprovalMinutes), WithinUnit: ptr(ThresholdMinutes)}}
 	unapproved := stateEval{key: StateUnapproved, unit: UnitRepo, source: dataset.SourceBitbucket, tone: ToneHint,
 		facts: "prs", tier: tierLasting, lasting: true, valueUnit: UnitShare, judges: true,
 		threshold: StateThreshold{Key: "unapproved_share", Value: th.UnapprovedShare, Unit: ThresholdShare,
@@ -610,7 +635,7 @@ func (a *assessor) reviewStates(at stateAt) []stateEval {
 	late := stateEval{key: StateLateDecline, unit: UnitTeam, source: dataset.SourceBitbucket, tone: ToneHint,
 		facts: "prs", tier: tierLasting, lasting: true, valueUnit: UnitCount,
 		threshold: StateThreshold{Key: "declined_prs", Value: float64(th.DeclinedPRs), Unit: ThresholdCount,
-			WithinKey: ptr("declined_days"), Within: ptr(th.DeclinedDays)}}
+			WithinKey: ptr("declined_days"), Within: ptr(th.DeclinedDays), WithinUnit: ptr(ThresholdWorkingDays)}}
 	// Declined after long work: team-wide, the repos named.
 	teamLate, lateRepos := 0, []string{}
 	for _, repo := range slices.Sorted(mapsKeys(by)) {

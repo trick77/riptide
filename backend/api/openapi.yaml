@@ -1439,9 +1439,10 @@ components:
         off_trunk:
           type: integer
           description: |
-            Merged into another branch than the trunk, and no PR merged that
-            branch into the trunk by the period's end: its work may wait there
-            or have gone on some other way.
+            Merged into a branch no PR had merged on into the main branch by
+            the period's end: another branch than the trunk, or a develop
+            trunk while releases went out from master. Its work may wait
+            there or have gone on some other way.
         release_unresolved:
           type: integer
           description: A release of its repo's Apps since it reached the trunk could not be resolved; it may have shipped it.
@@ -2939,7 +2940,7 @@ components:
             production, the oldest past `not_on_prod_days`; `slow_to_prod`
             its typical wait from merge to production past it;
             `merge_pause` a project's week of hardly any merge while approved
-            PRs waited; `approved_waiting` a repo's approved PRs waiting for
+            PRs were open at its end; `approved_waiting` a repo's approved PRs waiting for
             their merge; `bot_loop` a bot branch failing builds in a row (CI
             time, no quality finding); `untraced`, `unattributed`,
             `no_prod_stage` what cannot be judged; `unmeasurable` a state
@@ -2977,7 +2978,7 @@ components:
             - type: "null"
             - type: object
               additionalProperties: false
-              required: [key, value, unit, min_key, min, within_key, within]
+              required: [key, value, unit, min_key, min, within_key, within, within_unit]
               properties:
                 key: { type: string, minLength: 1, description: "The config key (`thresholds.<key>`)." }
                 value: { type: number }
@@ -2990,12 +2991,16 @@ components:
                     A third threshold's key, a span a case must lie in, where
                     the state has one: `fast_approval_minutes`,
                     `declined_days`, `branch_active_days`,
-                    `branch_failing_days`, `merge_pause_wait_days`; null with
-                    a `within` that is the rule's own (the 28 days before a
-                    repo's silent span, `builds_silent`).
+                    `branch_failing_days`; null with a `within` that is the
+                    rule's own (the 28 days before a repo's silent span,
+                    `builds_silent`).
                 within:
                   $ref: "#/components/schemas/NullableNumber"
-                  description: "The span: minutes for `fast_approval`, days (working days but for `builds_silent`) otherwise."
+                  description: "The span, in `within_unit`."
+                within_unit:
+                  type: [string, "null"]
+                  enum: [minutes, working_days, days, null]
+                  description: "The span's unit; null without a span."
         at: { $ref: "#/components/schemas/Instant" }
         was: { type: [string, "null"], description: "The state an `unmeasurable` card was; null otherwise." }
         facts: { type: string, enum: [prs, deploys, runs, ""], description: "The facts table its units are rows of; empty where none holds them (branches without a PR)." }
@@ -3009,8 +3014,8 @@ components:
       type: object
       description: One unit a state names, its number in the threshold's unit and what it rests on.
       additionalProperties: false
-      required: [name, project, value, count, of, typical, since, lower_bound, week, names, held, reason, ci_seconds,
-                 query, measure]
+      required: [name, project, value, count, of, typical, since, lower_bound, week, names, held, two_sprints, reason,
+                 ci_seconds, query, measure]
       properties:
         name: { type: string, description: "A project key, a repo, an App, a bot branch as `<repo>:<branch>`; empty for the team." }
         project: { type: [string, "null"] }
@@ -3033,6 +3038,7 @@ components:
             - type: "null"
         names: { type: array, items: { type: string }, description: "What it holds: a project's Apps, the repos of a paused week's waiting PRs." }
         held: { type: boolean, description: "Below the threshold now, kept while above its hysteresis share because it fired a week before the period's end (judged again from the data)." }
+        two_sprints: { type: boolean, description: "A lasting state's unit that has held it two sprints: what turns its card red (the card's other units may be fresh)." }
         reason:
           type: [string, "null"]
           enum: [no_merge_commit, off_trunk, release_unresolved, repo_untraced, in_silence, null]

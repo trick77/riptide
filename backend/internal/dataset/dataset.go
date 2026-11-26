@@ -221,7 +221,7 @@ type Dataset struct {
 	// (AppRelease), oldest first, whatever the window: since when a project
 	// has not released. Empty for a read without tracing (CountsOnly).
 	Releases []AppRelease `json:"-"`
-	// Approvals are the PRs approved since SharedParams.From less
+	// Approvals are the PRs approved since SharedParams.ApprovalsFrom less
 	// ApprovalLookback, whenever opened or merged (sql/approvals.sql);
 	// empty unless the shared read was asked for them (SharedParams.States).
 	Approvals []Approval `json:"-"`
@@ -249,9 +249,10 @@ type BranchLife struct {
 	// PRAt is the first PR event from it at or after its first push; nil:
 	// no PR came from it.
 	PRAt *time.Time `db:"pr_at"`
-	// Target: a PR of the repo went into it (develop, a release line). Told
-	// for a branch without a PR only.
-	Target bool `db:"target"`
+	// TargetAt is the first PR of the repo into it (develop, a release line,
+	// an epic): long-lived by design from then on, whether or not a PR came
+	// from it later. Nil: no PR went into it.
+	TargetAt *time.Time `db:"target_at"`
 	// MergedAt: when its last head reached the repo's trunk or a PR's target
 	// without a PR (pushed or merged onto it, or the branch cut from it with
 	// no commit of its own): done work, no branch "without a PR". Nil: not,
@@ -260,29 +261,41 @@ type BranchLife struct {
 }
 
 // BranchOwner is whose a branch is, as its pushes show it
-// (sql/branch_owners.sql): its last pusher, its last head commit's git
-// identity, and whether every push's head commit was a tool's.
+// (sql/branch_owners.sql): whether the ingest flagged every push, and each
+// distinct pusher and head commit of the pushes it did not flag.
 type BranchOwner struct {
-	Repo   string `db:"repo"`
-	Branch string `db:"branch"`
-	// Tool: every push's head commit authored by a git identity of the
-	// .invalid e-mail domain, a tool's (the housekeeping commits' author).
-	Tool              bool   `db:"tool"`
-	Author            string `db:"author"`
-	AuthorDisplayName string `db:"author_display_name"`
-	HeadName          string `db:"head_name"`
-	HeadDisplayName   string `db:"head_display_name"`
+	Repo    string       `db:"repo"`
+	Branch  string       `db:"branch"`
+	Flagged bool         `db:"flagged"`
+	Pushers []branchPush `db:"pushers"`
 }
 
-// bot reports whether o is a bot's branch: a tool's, or its last pusher's
-// or head commit's identity is automation by riptide's detection.
+// branchPush is who made a push to a branch the ingest did not flag: the
+// pusher, its head commit's git identity, and whether the head commit was a
+// tool's (an identity of the .invalid e-mail domain, the housekeeping
+// commits' author).
+type branchPush struct {
+	Tool              bool   `json:"tool"`
+	Author            string `json:"author"`
+	AuthorDisplayName string `json:"author_display_name"`
+	HeadName          string `json:"head_name"`
+	HeadDisplayName   string `json:"head_display_name"`
+}
+
+// bot reports whether o is a bot's branch: every push a bot's, flagged at
+// ingest, a tool's commit, or its pusher's or head commit's identity
+// automation by riptide's detection. A person's branch stays the person's
+// when a bot pushes to it last, a tool's when a person pushes to it once.
 func (o BranchOwner) bot(automated func(login, displayName string) bool) bool {
-	return o.Tool || automated(o.Author, o.AuthorDisplayName) || automated(o.HeadName, o.HeadDisplayName)
+	return o.Flagged || !slices.ContainsFunc(o.Pushers, func(p branchPush) bool {
+		return !p.Tool && !automated(p.Author, p.AuthorDisplayName) && !automated(p.HeadName, p.HeadDisplayName)
+	})
 }
 
-// ApprovalLookback is how far before the earliest window an approval is
-// read: a PR approved then and still waiting into the window counts; one
-// waiting longer is as inactive as an open PR (metrics.OpenInactiveDays).
+// ApprovalLookback is how far before SharedParams.ApprovalsFrom an
+// approval is read: a PR approved then and still waiting there counts. One
+// approved before is not read at all, whether or not it still waits: the
+// states look back no further.
 const ApprovalLookback = 30 * 24 * time.Hour
 
 // Approval is a PR with a person's approval (sql/approvals.sql): its author,
@@ -306,10 +319,19 @@ type Approval struct {
 	// approval withdrawn, needs work set, reset by a push); the last one's
 	// To nil while it stands.
 	Spans []ApprovalSpan `db:"-"`
+	// NeedsWork are the times a person's needs work stood on it, any
+	// reviewer's, oldest first. Another reviewer's needs work leaves an
+	// approval standing in Bitbucket, but the PR is not ready to merge then
+	// (metrics: approved and waiting).
+	NeedsWork []ApprovalSpan `db:"-"`
 	// Activity are its events' times, any kind, oldest first: a PR whose
 	// last event lies long back is one nobody touches.
 	Activity []time.Time     `db:"activity"`
 	Timeline []approvalEvent `db:"timeline"`
+	// Closes are its declines and deletes, Reopens its reopenings, oldest
+	// first: whether it was closed at an instant (ClosedBy).
+	Closes  []time.Time `db:"closes"`
+	Reopens []time.Time `db:"reopens"`
 }
 
 // ApprovalSpan is a time a person's approval stood on a PR; To nil while it
@@ -331,16 +353,19 @@ type approvalEvent struct {
 	Approvers   *[]approver `json:"approvers"`
 }
 
-// approver is a person a PR event lists as approving.
+// approver is a person a PR event lists as approving, or (NeedsWork) as
+// asking for work.
 type approver struct {
 	Author      string `json:"author"`
 	DisplayName string `json:"display_name"`
+	NeedsWork   bool   `json:"needs_work"`
 	Bot         bool   `json:"bot"`
 }
 
-// approved sets each approval's bot flag, its first person's approval and
-// the spans a person's approval stood, the author's own and a bot's aside,
-// by the same detection as every other row.
+// approved sets each approval's bot flag, its first person's approval, the
+// spans a person's approval stood and those a person's needs work stood,
+// the author's own and a bot's aside, by the same detection as every other
+// row.
 func approved(as []Approval, automated func(login, displayName string) bool) {
 	for i := range as {
 		a := &as[i]
@@ -348,42 +373,92 @@ func approved(as []Approval, automated func(login, displayName string) bool) {
 		person := func(login, display string, bot bool) bool {
 			return !bot && !strings.EqualFold(login, a.Opener) && !automated(login, display)
 		}
-		standing := map[string]bool{}
-		var open *time.Time
-		a.Spans = []ApprovalSpan{}
+		standing, needs := map[string]bool{}, map[string]bool{}
+		var open, blocked *time.Time
+		a.Spans, a.NeedsWork = []ApprovalSpan{}, []ApprovalSpan{}
 		for _, e := range a.Timeline {
 			at := e.At.UTC()
+			who := strings.ToLower(e.Author)
 			if e.Event == "pr:reviewer:approved" && a.ApprovedAt == nil && person(e.Author, e.DisplayName, e.Bot) {
 				a.ApprovedAt = ptr(at)
 			}
 			switch {
 			case e.Approvers != nil:
-				standing = map[string]bool{}
+				standing, needs = map[string]bool{}, map[string]bool{}
 				for _, p := range *e.Approvers {
-					if person(p.Author, p.DisplayName, p.Bot) {
+					switch {
+					case !person(p.Author, p.DisplayName, p.Bot):
+					case p.NeedsWork:
+						needs[strings.ToLower(p.Author)] = true
+					default:
 						standing[strings.ToLower(p.Author)] = true
 					}
 				}
 			case e.Event == "pr:reviewer:approved" && person(e.Author, e.DisplayName, e.Bot):
-				standing[strings.ToLower(e.Author)] = true
-			case e.Event == "pr:reviewer:unapproved" || e.Event == "pr:reviewer:needs_work":
-				delete(standing, strings.ToLower(e.Author))
+				standing[who] = true
+				delete(needs, who)
+			case e.Event == "pr:reviewer:unapproved":
+				delete(standing, who)
+				delete(needs, who)
+			case e.Event == "pr:reviewer:needs_work":
+				delete(standing, who)
+				if person(e.Author, e.DisplayName, e.Bot) {
+					needs[who] = true
+				}
 			}
-			switch {
-			case len(standing) > 0 && open == nil:
-				open = ptr(at)
-			case len(standing) == 0 && open != nil:
-				a.Spans = append(a.Spans, ApprovalSpan{From: *open, To: ptr(at)})
-				open = nil
-			}
+			a.Spans, open = spanned(a.Spans, open, len(standing) > 0, at)
+			a.NeedsWork, blocked = spanned(a.NeedsWork, blocked, len(needs) > 0, at)
 		}
 		if open != nil {
 			a.Spans = append(a.Spans, ApprovalSpan{From: *open})
 		}
-		for j := range a.Activity {
-			a.Activity[j] = a.Activity[j].UTC()
+		if blocked != nil {
+			a.NeedsWork = append(a.NeedsWork, ApprovalSpan{From: *blocked})
+		}
+		for _, ts := range [][]time.Time{a.Activity, a.Closes, a.Reopens} {
+			for j := range ts {
+				ts[j] = ts[j].UTC()
+			}
 		}
 	}
+}
+
+// spanned opens a span at at when on and none is open, closes the open one
+// when not: spans and the open span's start after the event.
+func spanned(spans []ApprovalSpan, open *time.Time, on bool, at time.Time) ([]ApprovalSpan, *time.Time) {
+	switch {
+	case on && open == nil:
+		return spans, ptr(at)
+	case !on && open != nil:
+		return append(spans, ApprovalSpan{From: *open, To: ptr(at)}), nil
+	}
+	return spans, open
+}
+
+// NeedsWorkAt reports whether a person's needs work stood on a at t.
+func (a Approval) NeedsWorkAt(t time.Time) bool {
+	return slices.ContainsFunc(a.NeedsWork, func(s ApprovalSpan) bool {
+		return s.From.Before(t) && (s.To == nil || !s.To.Before(t))
+	})
+}
+
+// ClosedBy reports whether a was closed at t: merged, deleted, or declined
+// and not reopened by then, as the events before t tell.
+func (a Approval) ClosedBy(t time.Time) bool {
+	if a.MergedAt != nil && a.MergedAt.Before(t) {
+		return true
+	}
+	if len(a.Closes) == 0 {
+		// Built without its events (a test's row): its close as of now.
+		return a.ClosedAt != nil && a.ClosedAt.Before(t)
+	}
+	var closed *time.Time
+	for _, c := range a.Closes {
+		if c.Before(t) {
+			closed = ptr(c)
+		}
+	}
+	return closed != nil && !slices.ContainsFunc(a.Reopens, func(r time.Time) bool { return r.After(*closed) && r.Before(t) })
 }
 
 // ApprovedSince is when the approval standing on a at t began: the span

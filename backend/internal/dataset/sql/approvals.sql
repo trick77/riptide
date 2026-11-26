@@ -10,10 +10,10 @@
 -- Bitbucket resets it when the source branch moves. Every PR event carries
 -- the reviewers and other participants with their status, Bitbucket's own
 -- view: `timeline` holds, for each event that may change it, the people
--- approving after it (null when the payload carries neither list; Go then
--- reads the event itself). Go keeps the people other than the author
--- (dataset.Approval.Spans). `activity` are every PR event's times: what
--- tells a PR nobody touches.
+-- approving after it and those whose status is needs work (null when the
+-- payload carries neither list; Go then reads the event itself). Go keeps
+-- the people other than the author (dataset.Approval.Spans, NeedsWork).
+-- `activity` are every PR event's times: what tells a PR nobody touches.
 --
 -- $1 team, $2 approvals since, $3 the GitOps repos (sql/gitops.sql).
 WITH non_human_identities AS (
@@ -42,13 +42,14 @@ ev AS MATERIALIZED (
            (SELECT coalesce(jsonb_agg(jsonb_build_object(
                      'author', coalesce(r->'user'->>'name', ''),
                      'display_name', coalesce(r->'user'->>'displayName', ''),
+                     'needs_work', upper(r->>'status') = 'NEEDS_WORK',
                      'bot', EXISTS (SELECT 1 FROM non_human_identities n
                                      WHERE n.handle IN (lower(r->'user'->>'name'), lower(r->'user'->>'displayName'))))),
                      '[]'::jsonb)
               FROM jsonb_array_elements(
                      CASE WHEN jsonb_typeof(x.pr->'reviewers') = 'array' THEN x.pr->'reviewers' ELSE '[]'::jsonb END ||
                      CASE WHEN jsonb_typeof(x.pr->'participants') = 'array' THEN x.pr->'participants' ELSE '[]'::jsonb END) r
-             WHERE upper(r->>'status') = 'APPROVED')
+             WHERE upper(r->>'status') IN ('APPROVED', 'NEEDS_WORK'))
          END AS approvers
   FROM bitbucket_events e
   JOIN firsts a ON a.repo_full_name = e.repo_full_name AND a.pr_id = e.pr_id
@@ -82,7 +83,11 @@ prs AS (
                   ORDER BY e.occurred_at, e.id) FILTER (WHERE e.approvers IS NOT NULL OR e.event_type IN
                     ('pr:reviewer:approved', 'pr:reviewer:unapproved', 'pr:reviewer:needs_work')), '[]'::jsonb)
            AS timeline,
-         array_agg(e.occurred_at ORDER BY e.occurred_at) AS activity
+         array_agg(e.occurred_at ORDER BY e.occurred_at) AS activity,
+         coalesce(array_agg(e.occurred_at ORDER BY e.occurred_at)
+                    FILTER (WHERE e.event_type IN ('pr:declined', 'pr:deleted')), '{}') AS closes,
+         coalesce(array_agg(e.occurred_at ORDER BY e.occurred_at) FILTER (WHERE e.event_type = 'pr:reopened'), '{}')
+           AS reopens
   FROM ev e
   GROUP BY e.repo_full_name, e.pr_id
 )
@@ -102,6 +107,10 @@ SELECT p.repo_full_name AS repo,
          WHEN p.declined_at IS NOT NULL AND p.declined_at >= coalesce(p.last_opened_at, '-infinity') THEN p.declined_at
        END AS closed_at,
        p.timeline,
-       p.activity
+       p.activity,
+       -- every decline or delete and every reopen: what an earlier instant
+       -- reads as closed then (dataset.Approval.ClosedBy)
+       p.closes,
+       p.reopens
 FROM prs p
 ORDER BY p.repo_full_name, p.pr_id

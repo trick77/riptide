@@ -92,7 +92,7 @@ const (
 	ThresholdMinutes     = "minutes"
 )
 
-// Tiers rank the states (states-catalogue section 4): a team rule broken
+// Tiers rank the states: a team rule broken
 // first, then what is held up now, then what lasts; data honesty in its own
 // slot. A Signal's Weight.
 const (
@@ -127,12 +127,15 @@ type StateThreshold struct {
 	// MinKey and Min: a second threshold, a count, when the state has one.
 	MinKey *string `json:"min_key"`
 	Min    *int    `json:"min"`
-	// WithinKey and Within: a third, a span (minutes or days, the state's
-	// own): approved within so many minutes, declined after so many working
-	// days, pushed within so many working days. WithinKey null where the
-	// span is the rule's own, no threshold of the team's.
-	WithinKey *string  `json:"within_key"`
-	Within    *float64 `json:"within"`
+	// WithinKey and Within: a third, a span: approved within so many
+	// minutes, declined after so many working days, pushed within so many
+	// working days. WithinKey null where the span is the rule's own, no
+	// threshold of the team's. WithinUnit is the span's unit
+	// (ThresholdMinutes, ThresholdWorkingDays, ThresholdDays); null without
+	// a span.
+	WithinKey  *string  `json:"within_key"`
+	Within     *float64 `json:"within"`
+	WithinUnit *string  `json:"within_unit"`
 }
 
 // StateUnit is one unit a state names: its number against the threshold,
@@ -166,6 +169,9 @@ type StateUnit struct {
 	// before named it and its number has not fallen below HysteresisShare
 	// of it.
 	Held bool `json:"held"`
+	// TwoSprints: a lasting state's unit that has held it two sprints, what
+	// turns its card red (the card's other units may be fresh).
+	TwoSprints bool `json:"two_sprints"`
 	// Reason is a data-honesty unit's reason (a TraceReasons key).
 	Reason *string `json:"reason"`
 	// CISeconds is a bot loop's CI time.
@@ -249,12 +255,26 @@ const (
 
 // stateUnit is a unit being judged: its card row, its status, and when the
 // state began to hold for it where the data tells (began; nil: a sampled
-// state, whose two sprints the earlier instants show).
+// state, whose two sprints the earlier instants show). ongoing: an episodic
+// state's episode still runs at the instant (stateEval.episodic).
 type stateUnit struct {
 	StateUnit
-	status int
-	began  *time.Time
+	status  int
+	began   *time.Time
+	ongoing bool
+	// after is what the instant tells of an episodic unit's episode beyond
+	// its status: afterKnown (whether it runs on), afterUnknown (its latest
+	// stretch could not be judged: no telling whether it is over),
+	// afterQuiet (nothing to judge then: no news).
+	after int
 }
+
+// What an instant tells of an episode (stateUnit.after).
+const (
+	afterKnown = iota
+	afterUnknown
+	afterQuiet
+)
 
 // stateEval is one state judged over its units at an instant.
 type stateEval struct {
@@ -276,6 +296,12 @@ type stateEval struct {
 	judges bool
 	// namesKind is the card's NamesKind.
 	namesKind string
+	// episodic: a unit fires for a dated episode in the period (a week's
+	// merge pause, a run of failed builds), shown while the episode lies in
+	// the view; it is over once the episode no longer runs at the instant
+	// (stateUnit.ongoing). "Gelöst" follows the instant after it ended, not
+	// the week it leaves the view, whatever the view's length.
+	episodic bool
 }
 
 // thresholds are p's, or the starting values.
@@ -482,11 +508,28 @@ func (a *assessor) stateSignals() {
 	}
 	for _, r := range a.rules() {
 		for _, key := range r.keys {
-			if p, ok := back[0][key]; ok {
+			p, ok := back[0][key]
+			switch {
+			case !ok:
+			case p.episodic:
+				a.settled(p, ongoing(p), cur[key])
+			default:
 				a.settled(p, named(back, key), cur[key])
 			}
 		}
 	}
+}
+
+// ongoing are the units of an episodic state e whose episode ran at its
+// instant: what it raised as held up then.
+func ongoing(e stateEval) map[string]bool {
+	out := map[string]bool{}
+	for _, u := range e.units {
+		if u.status == unitFires && u.ongoing {
+			out[u.Name] = true
+		}
+	}
+	return out
 }
 
 // named are the units of state key the assessment a week before named:
@@ -517,15 +560,10 @@ func inBand(e stateEval, u stateUnit) bool {
 	return e.lower > 0 && u.status == unitClear && u.Value >= e.lower
 }
 
-// heldAt reports whether unit name fired in e, or stood within e.lower of
-// the threshold (held, had it fired before).
-func heldAt(e stateEval, name string) bool {
-	for _, u := range e.units {
-		if u.Name == name {
-			return u.status == unitFires || inBand(e, u)
-		}
-	}
-	return false
+// firedAt reports whether unit name fired in e: past the threshold itself,
+// not merely within its hysteresis.
+func firedAt(e stateEval, name string) bool {
+	return slices.ContainsFunc(e.units, func(u stateUnit) bool { return u.Name == name && u.status == unitFires })
 }
 
 // judge turns e into its signal: a unit the week before named and still
@@ -556,10 +594,14 @@ func (a *assessor) judge(e stateEval, named map[string]bool, back []map[string]s
 			if u.Names == nil {
 				u.Names = []string{}
 			}
-			fire = append(fire, u.StateUnit)
-			if e.lasting && a.heldTwoSprints(e.key, u, end, back) {
+			// Only a unit past the threshold itself, not one held within the
+			// hysteresis, has held a lasting state two sprints: the card names
+			// which (TwoSprints) and turns red.
+			if e.lasting && !u.Held && a.heldTwoSprints(e.key, u, end, back) {
+				u.TwoSprints = true
 				tone = ToneAttention
 			}
+			fire = append(fire, u.StateUnit)
 		case unitClear, unitEscalated:
 			card.Judged++
 		case unitUnjudged:
@@ -613,7 +655,9 @@ func (a *assessor) judge(e stateEval, named map[string]bool, back []map[string]s
 
 // heldTwoSprints reports whether a lasting state's firing unit u has held
 // two sprints by end: from its onset where the data tells it (began), else
-// fired, or stood within its hysteresis, at every week back over them.
+// fired at every week back over them. A week its number stood only within
+// the hysteresis counts for nothing: a unit first past the threshold now is
+// a hint, whatever it stood at before.
 func (a *assessor) heldTwoSprints(key string, u stateUnit, end time.Time, back []map[string]stateEval) bool {
 	if u.began != nil {
 		return end.Sub(*u.began) >= 2*SprintDays*24*time.Hour
@@ -623,7 +667,7 @@ func (a *assessor) heldTwoSprints(key string, u stateUnit, end time.Time, back [
 	}
 	for _, evals := range back {
 		e, ok := evals[key]
-		if !ok || !heldAt(e, u.Name) {
+		if !ok || !firedAt(e, u.Name) {
 			return false
 		}
 	}
@@ -670,9 +714,14 @@ func (a *assessor) calmLine(e stateEval, fire []StateUnit) {
 // where every unit it named is clear on evidence, "nicht
 // mehr messbar" where one of them cannot be judged now, nothing where one
 // fell idle, went, or escalated into a sibling state. Once: a week on, the
-// instant before no longer raised it.
+// instant before no longer raised it. An episodic state is judged by its
+// running episodes (ongoing): over on every unit now, it is "gelöst" though
+// an ended episode still shows on its card.
 func (a *assessor) settled(prev stateEval, named map[string]bool, cur stateEval) {
-	if len(named) == 0 || len(firing(cur)) > 0 || a.gaps[prev.source] {
+	if len(named) == 0 || a.gaps[prev.source] {
+		return
+	}
+	if (prev.episodic && len(ongoing(cur)) > 0) || (!prev.episodic && len(firing(cur)) > 0) {
 		return
 	}
 	// Held now: still raised.
@@ -684,6 +733,16 @@ func (a *assessor) settled(prev stateEval, named map[string]bool, cur stateEval)
 	status := map[string]int{}
 	for _, u := range cur.units {
 		status[u.Name] = u.status
+		switch {
+		case !prev.episodic:
+		case u.after == afterUnknown:
+			status[u.Name] = unitUnjudged
+		case u.after == afterQuiet:
+			status[u.Name] = unitIdle
+		case u.status == unitFires:
+			// Fires for an ended episode (none runs now).
+			status[u.Name] = unitClear
+		}
 	}
 	var unjudged []string
 	clear := 0
@@ -753,8 +812,8 @@ func compareSince(x, y *time.Time) int {
 func mapsKeys[V any](m map[string]V) iter.Seq[string] { return maps.Keys(m) }
 
 // coveringStates are the states that speak for a team number: its notable
-// worsening is a fact on their card, not a card of its own (states-catalogue
-// section 4: worsened changes only where no state covers them). Only states
+// worsening is a fact on their card, not a card of its own (worsened
+// changes only where no state covers them). Only states
 // that can be red cover: a hint never takes a red change's place.
 var coveringStates = map[string][]string{
 	"deploy_frequency":             {StateNoRelease, StateReleaseDue},

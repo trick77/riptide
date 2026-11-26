@@ -31,18 +31,15 @@ type Thresholds struct {
 	NotOnProdMinPRs int `json:"not_on_prod_min_prs"`
 	// MergePauseShare: a week whose merges are at most this share of the
 	// project's typical week (median of MergePauseWeeks weeks before, at
-	// least MergePauseMinTypical) while MergePauseWaiting approved PRs
-	// waited ApprovedWaitDays working days or longer is a merge pause.
+	// least MergePauseMinTypical) while at the week's end MergePauseWaiting
+	// PRs or more were open with a person's approval standing is a merge
+	// pause, however long they had waited: a wait cut at the week's end is
+	// short for a PR approved late in it, and no span tells a blocked week
+	// from a slow one.
 	MergePauseShare      float64 `json:"merge_pause_share"`
 	MergePauseWeeks      int     `json:"merge_pause_weeks"`
 	MergePauseMinTypical float64 `json:"merge_pause_min_typical"`
 	MergePauseWaiting    int     `json:"merge_pause_waiting"`
-	// MergePauseWaitDays is the working days an approved PR must have
-	// waited by the week's end to count as waiting in a merge pause: frozen
-	// at the week's end, so a PR approved late in the week has little of it
-	// left. Below ApprovedWaitDays on purpose: a week blocked from Thursday
-	// on would need its PRs approved by Wednesday to count at a whole day.
-	MergePauseWaitDays float64 `json:"merge_pause_wait_days"`
 	// ApprovedWaitDays is the working days an approved PR may wait for its
 	// merge; ApprovedWaitingPRs approved PRs of a repo waiting longer at the
 	// period's end are a finding.
@@ -136,7 +133,7 @@ func DefaultThresholds() Thresholds {
 	return Thresholds{
 		ReleaseBreachDays: 28, ReleaseHintDays: 14,
 		NotOnProdDays: 14, NotOnProdMinPRs: 5,
-		MergePauseShare: 0.2, MergePauseWeeks: 8, MergePauseMinTypical: 3, MergePauseWaiting: 3, MergePauseWaitDays: 0.5,
+		MergePauseShare: 0.2, MergePauseWeeks: 8, MergePauseMinTypical: 3, MergePauseWaiting: 3,
 		ApprovedWaitDays: 1, ApprovedWaitingPRs: 2,
 		FirstReviewDays: 2, FirstReviewWaiting: 3, FirstReviewMinPRs: 5,
 		DeployFailingDays: 1, DeployFailureStreaks: 3,
@@ -168,6 +165,11 @@ const (
 	maxWorkingDays = 5 * StateLookbackWeeks
 	maxMinutes     = 24 * 60
 	maxCount       = 10000
+	// maxSilentBuildsDays: the builds a repo's silence is judged on are the
+	// runs read, the view's and its previous period's, eight weeks in the
+	// shortest view. Four of them are the weeks before the silent span, one
+	// the week back a resolution reads: three weeks of working days left.
+	maxSilentBuildsDays = 15
 )
 
 // thresholdBounds are the thresholds that are no plain count, by key: a
@@ -178,9 +180,9 @@ var thresholdBounds = map[string]float64{
 	"unapproved_share": 1, "hysteresis_share": 1,
 	"release_breach_days": maxDays, "release_hint_days": maxDays, "not_on_prod_days": maxDays,
 	"branch_open_days": maxDays, "branch_silent_days": maxDays, "branch_silent_max_days": maxDays,
-	"approved_wait_days": maxWorkingDays, "merge_pause_wait_days": maxWorkingDays, "first_review_days": maxWorkingDays,
+	"approved_wait_days": maxWorkingDays, "first_review_days": maxWorkingDays,
 	"deploy_failing_days": maxWorkingDays, "trunk_failing_days": maxWorkingDays, "branch_failing_days": maxWorkingDays,
-	"silent_builds_days": maxWorkingDays, "branch_life_days": maxWorkingDays, "branch_active_days": maxWorkingDays,
+	"silent_builds_days": maxSilentBuildsDays, "branch_life_days": maxWorkingDays, "branch_active_days": maxWorkingDays,
 	"declined_days": maxWorkingDays,
 	"build_minutes": maxMinutes, "fast_approval_minutes": maxMinutes,
 	"merge_pause_weeks": StateLookbackWeeks,

@@ -94,6 +94,28 @@ func TestLayoutSlots(t *testing.T) {
 		t.Errorf("cards with lesser gains worded = %v", got)
 	}
 
+	// Red states the model did not word take the red slots it left free, in
+	// the backend's rank, up to MaxCards; a red change it did not word stays
+	// a chip.
+	reds := metrics.Assessment{Signals: []metrics.Signal{
+		stateSig(metrics.StateNoRelease, metrics.ToneAttention, "kasse"),
+		stateSig(metrics.StateNotOnProd, metrics.ToneAttention, "kasse/kasse-api"),
+		sig("change:lead_time", metrics.ToneAttention),
+		stateSig(metrics.StateMergePause, metrics.ToneAttention, "kasse"),
+		stateSig(metrics.StateTrunkFailing, metrics.ToneAttention, "kasse/kasse-api"),
+		stateSig(metrics.StateDeployFailing, metrics.ToneAttention, "kasse-prod"),
+		stateSig(metrics.StateBotLoop, metrics.ToneHint, "kasse/kasse-api:renovate/x"),
+	}}
+	l := layout(reds, &Text{Cards: []CardText{{Signal: "state:merge_pause"}, {Signal: "state:bot_loop"}}})
+	got = columns(l.Cards)
+	if !slices.Equal(got[ColumnBad], []string{"state:merge_pause", "state:no_release", "state:not_on_prod", "state:trunk_failing"}) ||
+		!slices.Equal(got[ColumnHint], []string{"state:bot_loop"}) {
+		t.Errorf("cards with one red worded = %v, want three more red states in rank", got)
+	}
+	if also := columns(l.Also); !slices.Equal(also[ColumnBad], []string{"change:lead_time", "state:deploy_failing"}) {
+		t.Errorf("also = %v, want the red change and the red state past the slots", also)
+	}
+
 	// An analysis stored before small gains were signals: nothing good, no
 	// comparison, the page says "unremarkable".
 	old := metrics.Assessment{Signals: []metrics.Signal{sig("b1", metrics.ToneAttention)},

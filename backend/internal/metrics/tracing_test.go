@@ -103,9 +103,12 @@ func TestProdPlacement(t *testing.T) {
 		{"a release of an App known before the cutoff", func(*dataset.PR) {},
 			traced(release(ago(2), knownAt(ago(60)))), ProdNotPlaceable, TraceReleaseUnresolved},
 		// Into develop, a trunk: master's releases hold it once a PR merged
-		// develop into master, and tell nothing before.
+		// develop into master. Before, an exactly resolved master release
+		// went out without it as far as any PR tells: merged into a branch
+		// that did not reach the main branch, never a release riptide cannot
+		// resolve.
 		{"into develop, a master release, not onward yet", develop,
-			traced(release(ago(2), onBranch("master", ago(9), ago(3)))), ProdNotPlaceable, TraceReleaseUnresolved},
+			traced(release(ago(2), onBranch("master", ago(9), ago(3)))), ProdNotPlaceable, TraceOffTrunk},
 		{"into develop, onward on master after the release", func(p *dataset.PR) {
 			develop(p)
 			p.OnwardAt, p.OnwardBranch = agoP(1), ptr("master")
@@ -113,7 +116,12 @@ func TestProdPlacement(t *testing.T) {
 		{"into develop, onward only after the cutoff", func(p *dataset.PR) {
 			develop(p)
 			p.OnwardAt, p.OnwardBranch = ptr(cutoff.Add(time.Hour)), ptr("master")
-		}, traced(release(ago(2), onBranch("master", ago(9), ago(3)))), ProdNotPlaceable, TraceReleaseUnresolved},
+		}, traced(release(ago(2), onBranch("master", ago(9), ago(3)))), ProdNotPlaceable, TraceOffTrunk},
+		// A master release tracing could not resolve stays one: it may hold
+		// develop's work brought over by a push.
+		{"into develop, a master release unresolved", develop,
+			traced(release(ago(2), stretch(ago(4), ago(3), true))), ProdNotPlaceable, TraceReleaseUnresolved},
+		{"into develop, no release since", develop, traced(), ProdNotYet, ""},
 		{"a lower bound starting after the merge may have it", func(*dataset.PR) {},
 			traced(release(ago(2), stretch(ago(4), ago(3), true))), ProdNotPlaceable, TraceReleaseUnresolved},
 		{"a release that shipped nothing of the repo", func(*dataset.PR) {},
