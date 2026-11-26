@@ -333,14 +333,21 @@ func (c *Config) AutomatedAtRead(author, displayName string) bool {
 // source's branch_prefixes: a bot's branch, whose CI runs are no build of
 // the team's.
 func (c *Config) BotBranch(branch string) bool {
+	return slices.ContainsFunc(c.BotPrefixes(), func(p string) bool { return strings.HasPrefix(branch, p) })
+}
+
+// BotPrefixes are every configured source's non-empty branch_prefixes,
+// lowercased as loaded: the read path's bot branches (dataset.Params).
+func (c *Config) BotPrefixes() []string {
+	out := []string{}
 	for _, src := range c.Automation {
 		for _, p := range src.BranchPrefixes {
-			if p != "" && strings.HasPrefix(branch, p) {
-				return true
+			if p != "" {
+				out = append(out, p)
 			}
 		}
 	}
-	return false
+	return out
 }
 
 // MinSourceNameLetters is the fewest letters a source name needs to name a

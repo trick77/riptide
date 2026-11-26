@@ -17,6 +17,13 @@ yet at the period's end ("n gemergte PRs noch nicht auf PROD").
 
 - **Bots' PRs are in no number**, neither are their pushes: dependency updates
   ship, but the number describes the team's work.
+- **A person's PR from a bot's branch** (metrics.md, "Human vs automated
+  split") starts at the oldest commit of a push of its own life by no bot
+  (declared, a SERVICE account, or a bot by riptide's automation detection),
+  else at its opening: the bot pushed its commits to the branch for days
+  before the person took it over, and they are no work of the person's
+  (owner, 2026-11). Every other PR keeps the oldest commit pushed to its
+  branch, whoever pushed it.
 - **Library repos' PRs are outside the base**: libraries are work, but never
   rolled out, so never "not traced" either.
 - **A closed period is frozen at its end.** Only deploys before the end count:

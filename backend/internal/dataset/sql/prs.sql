@@ -51,10 +51,13 @@ prs AS (
          coalesce(max(e.pr->'fromRef'->>'displayId') FILTER (WHERE e.event_type = 'pr:opened'),
                   max(e.pr->'fromRef'->>'displayId') FILTER (WHERE e.event_type = 'pr:merged'))
              AS source_ref,
-         coalesce(max(e.author) FILTER (WHERE e.event_type = 'pr:opened'),
-                  max(e.author) FILTER (WHERE e.event_type = 'pr:merged')) AS pr_opener,
-         coalesce(max(e.author_display_name) FILTER (WHERE e.event_type = 'pr:opened'),
-                  max(e.author_display_name) FILTER (WHERE e.event_type = 'pr:merged')) AS pr_opener_display_name,
+         -- The opener and the ingest flag of a PR, one definition in every
+         -- query (sql/fragments/pr_opener.sql, pr_flagged.sql): pr:opened's,
+         -- else its author's other events' (every PR event but a reviewer's
+         -- and a draft flip names the PR's author), so a PR opened before
+         -- ingestion started has them too.
+         /*{{pr_opener}}*/ AS pr_opener,
+         /*{{pr_opener_display_name}}*/ AS pr_opener_display_name,
          -- The title as last seen: every PR event carries the PR, and the
          -- author may have edited it since opening.
          (array_agg(e.pr->>'title' ORDER BY e.occurred_at DESC, e.id DESC)
@@ -64,7 +67,7 @@ prs AS (
          -- The PR's page as Bitbucket links it; Go keeps only an http(s) URL.
          (array_agg(e.pr->'links'->'self'->0->>'href' ORDER BY e.occurred_at DESC, e.id DESC)
              FILTER (WHERE e.pr->'links'->'self'->0->>'href' IS NOT NULL))[1] AS url,
-         bool_or(e.is_automated) FILTER (WHERE e.event_type IN ('pr:opened', 'pr:merged')) AS automated,
+         /*{{pr_flagged}}*/ AS automated,
          -- change_type means something only on these two (docs/metrics.md).
          coalesce(max(e.change_type) FILTER (WHERE e.event_type = 'pr:opened'),
                   max(e.change_type) FILTER (WHERE e.event_type = 'pr:merged')) AS change_type,
@@ -153,8 +156,9 @@ bounded AS (
 ),
 branch_pushes AS MATERIALIZED (
   -- Each push to a PR branch expanded once, however many PRs share the
-  -- branch: its oldest commit.
-  SELECT e.repo_full_name, e.branch_name, e.occurred_at AS pushed_at,
+  -- branch: its oldest commit, and who pushed it.
+  SELECT e.id, e.repo_full_name, e.branch_name, e.occurred_at AS pushed_at,
+         coalesce(e.author, '') AS author, coalesce(e.author_display_name, '') AS author_display_name,
          (SELECT min((c->>'authorTimestamp')::bigint)
             FROM jsonb_array_elements(e.payload->'commits') c) AS first_ms
   FROM bitbucket_events e
@@ -195,7 +199,30 @@ chain AS (
                   OR (pb.person_on_bot_branch AND upper(coalesce(e.payload->'actor'->>'type', '')) <> 'SERVICE'))
              AND NOT EXISTS (SELECT 1 FROM non_human_identities n
                               WHERE n.handle IN (lower(e.author), lower(e.author_display_name)))
-             AND e.occurred_at >= p.ready_at) AS touches
+             AND e.occurred_at >= p.ready_at) AS touches,
+         -- A person's PR from a bot's branch: the pushes of its own life
+         -- (bounded) and who pushed them, oldest first; NULL for any other
+         -- PR. Go starts its coding time at the first commit a person pushed,
+         -- else at its opening (dataset.ownFirstCommit): the bot's commits on
+         -- the branch before are no work of theirs (owner, 2026-11). A pusher
+         -- is a bot by its account: declared, a SERVICE one (the branch's
+         -- flag hid it at ingest, its payload read for that alone), the rest
+         -- in Go.
+         CASE WHEN pb.person_on_bot_branch THEN
+           (SELECT coalesce(jsonb_agg(jsonb_build_object(
+                     'first', to_timestamp(bp.first_ms / 1000.0),
+                     'author', bp.author, 'display_name', bp.author_display_name,
+                     'bot', EXISTS (SELECT 1 FROM non_human_identities n
+                                     WHERE n.handle IN (lower(bp.author), lower(bp.author_display_name)))
+                            OR (SELECT upper(coalesce(x.payload->'actor'->>'type', '')) = 'SERVICE'
+                                  FROM bitbucket_events x WHERE x.id = bp.id))
+                   ORDER BY bp.pushed_at, bp.id), '[]'::jsonb)
+              FROM bounded b
+              JOIN branch_pushes bp ON bp.repo_full_name = b.repo_full_name AND bp.branch_name = b.source_branch
+             WHERE b.repo_full_name = p.repo_full_name AND b.pr_id = p.pr_id
+               AND bp.pushed_at > coalesce(b.previous_closed_at, '-infinity')
+               AND bp.pushed_at <= coalesce(b.until_at, 'infinity'))
+         END AS person_pushes
   FROM prs p
   LEFT JOIN first_commits fc
     ON fc.repo_full_name = p.repo_full_name AND fc.pr_id = p.pr_id
@@ -241,6 +268,7 @@ SELECT c.repo_full_name AS repo,
        c.touches,
        c.merged_at,
        c.first_commit_at,
+       c.person_pushes,
        -- lowercased like every SHA column riptide stores; the payload keeps
        -- the sender's casing
        lower(c.merge_commit) AS merge_commit,

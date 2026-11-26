@@ -170,10 +170,11 @@ type Params struct {
 	// project key are dropped, so neither a number nor the product list
 	// sees them; a row without a project stays. nil excludes nothing.
 	Excluded func(project string) bool
-	// BotBranch is config's automation branch_prefixes: a CI run of such a
-	// branch (lowercased) is a bot's (Run.Bot), but for a person's PR's
-	// (peoplesPR). nil knows none.
-	BotBranch func(branch string) bool
+	// BotPrefixes are config's automation branch_prefixes, lowercased: a CI
+	// run of such a branch (lowercased) is a bot's (Run.Bot), but for a
+	// person's PR's (peoplesPR); and who is a person is read against them
+	// (sql/people.sql). nil knows none.
+	BotPrefixes []string
 	// Now stamps meta.generated_at.
 	Now time.Time
 	// FactsOnly skips the reviews: the facts tables read none, and a
@@ -727,6 +728,9 @@ type PR struct {
 	OpenerDisplayName string  `json:"-" db:"opener_display_name"`
 	// SourceRef is the source branch as the sender spelled it.
 	SourceRef string `json:"-" db:"source_ref"`
+	// PersonPushes are the pushes of a person's PR from a bot's branch, its
+	// own life's, oldest first (ownFirstCommit); nil for any other PR.
+	PersonPushes *[]ownPush `json:"-" db:"person_pushes"`
 	// UmbrellaOpeners open the other merged PRs into its source branch.
 	UmbrellaOpeners []opening `json:"-" db:"umbrella_openers"`
 	// Siblings are its title's openings within HousekeepingWindow of its own,
@@ -794,6 +798,40 @@ type reviewerStatus struct {
 	Author      string `json:"author"`
 	DisplayName string `json:"display_name"`
 	Status      string `json:"status"`
+}
+
+// ownPush is a push to the branch of a person's PR from a bot's branch, as
+// sql/prs.sql reads it: its oldest commit (nil: it listed none), its pusher,
+// and whether the pusher is declared or a SERVICE account.
+type ownPush struct {
+	First       *time.Time `json:"first"`
+	Author      string     `json:"author"`
+	DisplayName string     `json:"display_name"`
+	Bot         bool       `json:"bot"`
+}
+
+// ownFirstCommit starts a person's PR from a bot's branch (PersonPushes set)
+// at the oldest commit of a push by no bot (pr.PersonPushes' flag, or the
+// automation detection on the pusher), else at its opening: the bot's
+// commits on the branch before are no work of the person's (owner,
+// 2026-11). Any other PR keeps sql/prs.sql's first commit.
+func ownFirstCommit(pr *PR, automated func(login, displayName string) bool) {
+	if pr.PersonPushes == nil {
+		return
+	}
+	pr.FirstCommitAt = pr.OpenedAt
+	var first *time.Time
+	for _, p := range *pr.PersonPushes {
+		if p.Bot || p.First == nil || automated(p.Author, p.DisplayName) {
+			continue
+		}
+		if first == nil || p.First.Before(*first) {
+			first = ptr(p.First.UTC())
+		}
+	}
+	if first != nil {
+		pr.FirstCommitAt = first
+	}
 }
 
 // touch is a reviewer's event on a PR, as sql/fragments/touches.sql builds it.
@@ -880,7 +918,7 @@ type Run struct {
 	// GitOps: a run in a GitOps repo, a stage promotion's check.
 	GitOps bool `json:"gitops" db:"gitops"`
 	// Bot: a bot's branch built, by the config's automation branch_prefixes
-	// (Params.BotBranch), or a bot PR's PR-<n>; never a build a person's PR
+	// (Params.BotPrefixes), or a bot PR's PR-<n>; never a build a person's PR
 	// from a bot's branch owns (peoplesPR). In no build number: a bot's
 	// failed build is no quality problem of the team's (owner, 2026-11).
 	Bot bool `json:"bot" db:"-"`
@@ -924,6 +962,8 @@ type SharedParams struct {
 	BranchesFrom  time.Time
 	// Automated is Params.Automated, for the approvals read here.
 	Automated func(author, displayName string) bool
+	// BotPrefixes are Params.BotPrefixes, for who is a person (sql/people.sql).
+	BotPrefixes []string
 }
 
 // Shared are the reads every window of one page request uses alike, read
@@ -974,7 +1014,7 @@ func LoadShared(ctx context.Context, db DB, p SharedParams) (*Shared, error) {
 			defer func() { _ = tx.Rollback(ctx) }()
 			sh, err = loadShared(ctx, tx, SharedParams{Team: p.Team, From: p.From, ClassEnds: p.ClassEnds, Now: p.Now,
 				Libraries: p.Libraries, States: p.States, ApprovalsFrom: p.ApprovalsFrom, BranchesFrom: p.BranchesFrom,
-				Automated: p.Automated})
+				Automated: p.Automated, BotPrefixes: p.BotPrefixes})
 		}
 		if errs[0] = err; err != nil {
 			cancel()
@@ -1043,7 +1083,11 @@ func loadShared(ctx context.Context, tx pgx.Tx, p SharedParams) (*Shared, error)
 	}
 	sh.gitops = gitops
 	var people []string
-	if err := tx.QueryRow(ctx, peopleSQL, p.Team).Scan(&people); err != nil {
+	prefixes := p.BotPrefixes
+	if prefixes == nil {
+		prefixes = []string{}
+	}
+	if err := tx.QueryRow(ctx, peopleSQL, p.Team, prefixes).Scan(&people); err != nil {
 		return nil, fmt.Errorf("dataset people: %w", err)
 	}
 	sh.people = people
@@ -1165,7 +1209,7 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 	sh := p.Shared
 	if sh == nil {
 		if sh, err = loadShared(ctx, tx, SharedParams{Team: p.Team, From: p.From, ClassEnds: []time.Time{classAt}, Now: p.Now,
-			Libraries: !p.CountsOnly, Trace: !p.CountsOnly}); err != nil {
+			Libraries: !p.CountsOnly, Trace: !p.CountsOnly, Automated: p.Automated, BotPrefixes: p.BotPrefixes}); err != nil {
 			return nil, err
 		}
 	}
@@ -1242,6 +1286,7 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 	}
 	for i := range d.PRs {
 		reviewed(&d.PRs[i], automated)
+		ownFirstCommit(&d.PRs[i], automated)
 		// A branch named after its ticket (KAS-12-login) is a feature's, on
 		// read: change_type is stored at ingest as "other".
 		if pr := &d.PRs[i]; pr.ChangeType != nil && *pr.ChangeType == "other" && parse.TicketBranch(pr.SourceRef) {
@@ -1262,7 +1307,7 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 		d.Runs[i].Branch = Branch(d.Runs[i].PipelineName)
 		d.Runs[i].BranchKind = BranchKind(d.Runs[i].Branch)
 	}
-	markBotRuns(d, p.BotBranch, sh.botBranches(automated), sh.persons(automated))
+	markBotRuns(d, p.BotPrefixes, sh.botBranches(automated), sh.persons(automated))
 	if !p.FactsOnly {
 		d.Meta.RepoStarts = repoStarts(d, sh.repoStarts)
 	}
@@ -1572,15 +1617,16 @@ func (d *Dataset) Classified(apps []App) *Dataset {
 	return &cp
 }
 
-// markBotRuns flags the runs of a bot's branch (botBranch, the config's
-// prefixes; bots, the branches whose pushes show a bot's or a tool's,
-// branchKey) and the PR-<n> builds of the dataset's bot PRs: a Jenkins PR
-// build names its PR, not the bot's branch. Builds follow the PR (owner,
-// 2026-11): a person's PR from a bot's branch (people) owns its PR-<n>
-// builds and its branch's builds over its life, started before its opening
-// too; the same branch's builds for the bot's PRs before or after it stay
-// the bot's.
-func markBotRuns(d *Dataset, botBranch func(string) bool, bots map[string]bool, people peoples) {
+// markBotRuns flags the runs of a bot's branch (prefixes, the config's;
+// bots, the branches whose pushes show a bot's or a tool's, branchKey) and
+// the PR-<n> builds of the dataset's bot PRs: a Jenkins PR build names its
+// PR, not the bot's branch. Builds follow the PR (owner, 2026-11): a
+// person's PR from a bot's branch (people) owns its PR-<n> builds and its
+// branch's builds over its life, started before its opening too; the same
+// branch's builds for the bot's PRs before or after it stay the bot's. A
+// run whose repository is unknown (runRepos, pipelineRepos found none)
+// cannot be matched to a PR and stays the bot's by its prefix.
+func markBotRuns(d *Dataset, prefixes []string, bots map[string]bool, people peoples) {
 	botPRs := map[string]bool{}
 	for _, pr := range d.PRs {
 		// A PR from a bot's or a tool's branch is built as PR-<n> too.
@@ -1596,7 +1642,7 @@ func markBotRuns(d *Dataset, botBranch func(string) bool, bots map[string]bool, 
 	for i := range d.Runs {
 		r := &d.Runs[i]
 		branch := strings.ToLower(r.Branch)
-		r.Bot = (botBranch != nil && branch != "" && botBranch(branch)) ||
+		r.Bot = (branch != "" && slices.ContainsFunc(prefixes, func(p string) bool { return strings.HasPrefix(branch, p) })) ||
 			(r.Repo != nil && botPRs[*r.Repo+"\x00"+branch]) || (r.Repo != nil && branch != "" && bots[branchKey(*r.Repo, branch)])
 		if r.Bot && r.Repo != nil && people.built(*r.Repo, branch, runStart(*r)) {
 			r.Bot = false
