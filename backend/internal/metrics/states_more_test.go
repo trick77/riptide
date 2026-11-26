@@ -1,8 +1,10 @@
 package metrics
 
 import (
+	"slices"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/trick77/riptide/internal/dataset"
 )
@@ -59,20 +61,36 @@ func TestFirstReviewWait(t *testing.T) {
 	if x == nil || x.State.Units[0].Name != "kasse/kasse-api" || *x.State.Units[0].Count != 3 || x.State.Units[0].Value != 5 {
 		t.Fatalf("first review = %+v, want kasse-api with 3 PRs, the oldest 5 working days", x)
 	}
-	// Since the oldest was ready, measured on the PRs waiting now, found in
-	// the PR table by the repo; a hint while that is under two sprints.
+	// Since the third waiting PR had waited past 2 working days (the youngest,
+	// ready 5 days before the end), found in the PR table by the repo; a
+	// hint while that is under two sprints.
 	u := x.State.Units[0]
-	if u.Since == nil || !u.Since.Equal(endAgo(7)) || u.Measure == nil || *u.Measure != MeasureOldest ||
-		u.Query == nil || *u.Query != "kasse/kasse-api" || x.Tone != ToneHint {
+	if u.Since == nil || !u.Since.Equal(afterWorkingDays(endAgo(5), 2, zurich)) || u.Measure == nil ||
+		*u.Measure != MeasureOldest || u.Query == nil || *u.Query != "kasse/kasse-api" || x.Tone != ToneHint {
 		t.Errorf("first review unit = %+v, tone %s", u, x.Tone)
 	}
-	// Ready and untouched for two sprints, still active: it lasted, red.
+	// One PR ready for 30 days and two for a week: three waiting began a few
+	// days ago, a hint, not red.
+	young := stateData(func(d *dataset.Dataset) {
+		active := func(o *dataset.OpenPR) { o.LastEventAt = endAgo(1) }
+		d.OpenPRs = []dataset.OpenPR{waiting(1, 30, active), waiting(2, 6), waiting(3, 5)}
+	})
+	if x := stateSignal(assessStates(t, young, nil, History{}), StateFirstReviewWait); x == nil || x.Tone != ToneHint {
+		t.Errorf("three waiting for days = %+v, want a hint", x)
+	}
+	// Three waiting for over a month, still active: it lasted, red.
 	long := stateData(func(d *dataset.Dataset) {
-		d.OpenPRs = []dataset.OpenPR{waiting(1, 30, func(o *dataset.OpenPR) { o.LastEventAt = endAgo(1) }), waiting(2, 6),
-			waiting(3, 5)}
+		active := func(o *dataset.OpenPR) { o.LastEventAt = endAgo(1) }
+		d.OpenPRs = []dataset.OpenPR{waiting(1, 40, active), waiting(2, 36, active), waiting(3, 33, active)}
 	})
 	if x := stateSignal(assessStates(t, long, nil, History{}), StateFirstReviewWait); x == nil || x.Tone != ToneAttention {
 		t.Errorf("waiting two sprints = %+v, want red", x)
+	}
+	// One or two waiting and too few pickups: not judged, never calm.
+	few := stateData(func(d *dataset.Dataset) { d.OpenPRs = []dataset.OpenPR{waiting(1, 7)} })
+	a := assessStates(t, few, nil, History{})
+	if x := stateSignal(a, StateFirstReviewWait); x != nil || a.Calm != 0 {
+		t.Errorf("one waiting = %+v, calm %d, want no card and no calm repo on no sample", x, a.Calm)
 	}
 	// Two waiting are no finding.
 	ds.OpenPRs = ds.OpenPRs[1:]
@@ -238,7 +256,7 @@ func TestReviewStates(t *testing.T) {
 
 func branchLife(name string, first, last float64, mod ...func(*dataset.BranchLife)) dataset.BranchLife {
 	b := dataset.BranchLife{Repo: "kasse/kasse-api", Project: "kasse", Branch: name, FirstAt: endAgo(first), LastAt: endAgo(last),
-		Pushes: 3}
+		Pushes: 3, PushTimes: []time.Time{endAgo(first), endAgo((first + last) / 2), endAgo(last)}}
 	for _, m := range mod {
 		m(&b)
 	}
@@ -256,11 +274,16 @@ func TestBranchStates(t *testing.T) {
 			branchLife("develop", 100, 1, func(b *dataset.BranchLife) { b.Target = true }),
 			branchLife("release/1.x", 100, 1),
 			branchLife("renovate/lib-1.x", 100, 1, func(b *dataset.BranchLife) { b.Bot = true }),
-			branchLife("feature/kas-5", 30, 1, func(b *dataset.BranchLife) { b.HasPR = true }),
+			branchLife("feature/kas-5", 30, 1, func(b *dataset.BranchLife) { b.PRAt = endAgoP(29) }),
 			// Merged onto the trunk without a PR: done, neither in work nor
 			// lying silent.
-			branchLife("feature/kas-6", 30, 1, func(b *dataset.BranchLife) { b.Merged = true }),
-			branchLife("feature/kas-7", 50, 25, func(b *dataset.BranchLife) { b.Merged = true }),
+			branchLife("feature/kas-6", 30, 1, func(b *dataset.BranchLife) { b.MergedAt = endAgoP(0.5) }),
+			branchLife("feature/kas-7", 50, 25, func(b *dataset.BranchLife) { b.MergedAt = endAgoP(24) }),
+			// Pushed again only after the period's end: silent at it (its
+			// later pushes are no part of a closed period).
+			branchLife("feature/kas-8", 50, -2, func(b *dataset.BranchLife) {
+				b.PushTimes = []time.Time{endAgo(50), endAgo(20), endAgo(-2)}
+			}),
 		}
 		for i := range 5 {
 			d.PRs = append(d.PRs, merged(int64(i+1), 3, func(p *dataset.PR) { p.FirstCommitAt = endAgoP(14) }))
@@ -270,8 +293,15 @@ func TestBranchStates(t *testing.T) {
 	if x := stateSignal(a, StateBranchOpen); x == nil || *x.State.Units[0].Count != 1 || x.State.Units[0].Names[0] != "feature/kas-9-big" {
 		t.Errorf("open = %+v, want the one branch worked on past a sprint", x)
 	}
-	if x := stateSignal(a, StateBranchSilent); x == nil || *x.State.Units[0].Count != 3 {
-		t.Errorf("silent = %+v, want 3 branches silent", x)
+	if x := stateSignal(a, StateBranchSilent); x == nil || *x.State.Units[0].Count != 4 ||
+		!slices.Contains(x.State.Units[0].Names, "feature/kas-8") {
+		t.Errorf("silent = %+v, want 4 branches silent, the one pushed after the end among them", x)
+	}
+	// Worked on past a sprint since its first push and 14 days on: a hint
+	// while that is under two sprints; the state holds since then.
+	if x := stateSignal(a, StateBranchOpen); x == nil || x.Tone != ToneHint || x.State.Since == nil ||
+		!x.State.Since.Equal(endAgo(20).AddDate(0, 0, 14)) {
+		t.Errorf("open = %+v, want a hint since 14 days after the first push", x)
 	}
 	// A branch without a PR is a row of no facts table: no link.
 	if x := stateSignal(a, StateBranchOpen); x != nil && (x.State.Facts != "" || x.State.Units[0].Query != nil) {

@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"reflect"
+	"slices"
 )
 
 // Thresholds is the `thresholds` block: the team's own agreements and the
@@ -35,6 +37,12 @@ type Thresholds struct {
 	MergePauseWeeks      int     `json:"merge_pause_weeks"`
 	MergePauseMinTypical float64 `json:"merge_pause_min_typical"`
 	MergePauseWaiting    int     `json:"merge_pause_waiting"`
+	// MergePauseWaitDays is the working days an approved PR must have
+	// waited by the week's end to count as waiting in a merge pause: frozen
+	// at the week's end, so a PR approved late in the week has little of it
+	// left. Below ApprovedWaitDays on purpose: a week blocked from Thursday
+	// on would need its PRs approved by Wednesday to count at a whole day.
+	MergePauseWaitDays float64 `json:"merge_pause_wait_days"`
 	// ApprovedWaitDays is the working days an approved PR may wait for its
 	// merge; ApprovedWaitingPRs approved PRs of a repo waiting longer at the
 	// period's end are a finding.
@@ -128,7 +136,7 @@ func DefaultThresholds() Thresholds {
 	return Thresholds{
 		ReleaseBreachDays: 28, ReleaseHintDays: 14,
 		NotOnProdDays: 14, NotOnProdMinPRs: 5,
-		MergePauseShare: 0.2, MergePauseWeeks: 8, MergePauseMinTypical: 3, MergePauseWaiting: 3,
+		MergePauseShare: 0.2, MergePauseWeeks: 8, MergePauseMinTypical: 3, MergePauseWaiting: 3, MergePauseWaitDays: 0.5,
 		ApprovedWaitDays: 1, ApprovedWaitingPRs: 2,
 		FirstReviewDays: 2, FirstReviewWaiting: 3, FirstReviewMinPRs: 5,
 		DeployFailingDays: 1, DeployFailureStreaks: 3,
@@ -149,15 +157,40 @@ func DefaultThresholds() Thresholds {
 	}
 }
 
-// shareKeys are the thresholds that are a share: above 0, at most 1.
-var shareKeys = map[string]bool{
-	"merge_pause_share": true, "flaky_share": true, "release_builds_share": true, "big_pr_share": true,
-	"unapproved_share": true, "hysteresis_share": true,
+// StateLookbackWeeks bounds every state's look back (metrics): older data
+// is read by no state, so a threshold reaching past it could never fire.
+const StateLookbackWeeks = 26
+
+// The most a threshold of a kind may be: what the look-back holds, a day of
+// minutes, a whole count.
+const (
+	maxDays        = 7 * StateLookbackWeeks
+	maxWorkingDays = 5 * StateLookbackWeeks
+	maxMinutes     = 24 * 60
+	maxCount       = 10000
+)
+
+// thresholdBounds are the thresholds that are no plain count, by key: a
+// share at most 1, calendar or working days within the look-back, minutes
+// within a day, weeks of baseline within it. A key not listed is a count.
+var thresholdBounds = map[string]float64{
+	"merge_pause_share": 1, "flaky_share": 1, "release_builds_share": 1, "big_pr_share": 1,
+	"unapproved_share": 1, "hysteresis_share": 1,
+	"release_breach_days": maxDays, "release_hint_days": maxDays, "not_on_prod_days": maxDays,
+	"branch_open_days": maxDays, "branch_silent_days": maxDays, "branch_silent_max_days": maxDays,
+	"approved_wait_days": maxWorkingDays, "merge_pause_wait_days": maxWorkingDays, "first_review_days": maxWorkingDays,
+	"deploy_failing_days": maxWorkingDays, "trunk_failing_days": maxWorkingDays, "branch_failing_days": maxWorkingDays,
+	"silent_builds_days": maxWorkingDays, "branch_life_days": maxWorkingDays, "branch_active_days": maxWorkingDays,
+	"declined_days": maxWorkingDays,
+	"build_minutes": maxMinutes, "fast_approval_minutes": maxMinutes,
+	"merge_pause_weeks": StateLookbackWeeks,
 }
 
 // parseThresholds reads the optional `thresholds` block over the defaults:
 // an unknown key is refused (a typo would silently keep the default), every
-// value must be a positive number, a share at most 1, a count whole.
+// value must be a positive number within its bound (thresholdBounds), a
+// count whole. Keys are checked in name order, so of two bad keys the same
+// one is named every time.
 func parseThresholds(raw json.RawMessage) (Thresholds, error) {
 	th := DefaultThresholds()
 	if raw == nil || isNull(raw) {
@@ -172,7 +205,8 @@ func parseThresholds(raw json.RawMessage) (Thresholds, error) {
 	for i := range v.NumField() {
 		fields[v.Type().Field(i).Tag.Get("json")] = v.Field(i)
 	}
-	for key, val := range obj {
+	for _, key := range slices.Sorted(maps.Keys(obj)) {
+		val := obj[key]
 		f, ok := fields[key]
 		if !ok {
 			return th, fmt.Errorf("`thresholds.%s` is not a known threshold", key)
@@ -182,16 +216,20 @@ func parseThresholds(raw json.RawMessage) (Thresholds, error) {
 		if err := dec.Decode(&n); err != nil || isNull(val) || n <= 0 || math.IsInf(n, 0) {
 			return th, fmt.Errorf("`thresholds.%s` must be a number above 0", key)
 		}
+		limit, bounded := thresholdBounds[key]
+		if !bounded {
+			limit = maxCount
+		}
+		if n > limit {
+			return th, fmt.Errorf("`thresholds.%s` must be at most %g", key, limit)
+		}
 		switch f.Kind() {
 		case reflect.Int:
-			if n != math.Trunc(n) || n > 10000 {
-				return th, fmt.Errorf("`thresholds.%s` must be a whole number up to 10000", key)
+			if n != math.Trunc(n) {
+				return th, fmt.Errorf("`thresholds.%s` must be a whole number", key)
 			}
 			f.SetInt(int64(n))
 		default:
-			if shareKeys[key] && n > 1 {
-				return th, fmt.Errorf("`thresholds.%s` is a share: at most 1", key)
-			}
 			f.SetFloat(n)
 		}
 	}

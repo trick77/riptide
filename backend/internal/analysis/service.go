@@ -172,8 +172,7 @@ func (s *Service) assess(ctx context.Context, v View) (metrics.Assessment, error
 // problem was raised can be one today's counting never reaches again, and
 // a streak across the change is two things.
 func (s *Service) history(ctx context.Context, v View, to time.Time) (metrics.History, error) {
-	h := metrics.History{Seen: map[string]int{}, Latest: map[string]string{}, Open: map[string]metrics.Problem{},
-		StateUnits: map[string][]string{}}
+	h := metrics.History{Seen: map[string]int{}, Latest: map[string]string{}, Open: map[string]metrics.Problem{}}
 	// Weeks, not rows: a week holds its scheduled run and any number of
 	// clicks, counted as one in the query, else enough of them fill the
 	// limit. The current week's own reruns are no history. A week whose
@@ -187,8 +186,6 @@ func (s *Service) history(ctx context.Context, v View, to time.Time) (metrics.Hi
 		ids map[string]string
 		// before is each signal's hero number in the previous period.
 		before map[string]*float64
-		// units are each state's units it named.
-		units map[string][]string
 	}
 	var runs []run
 	for _, r := range rows {
@@ -196,24 +193,19 @@ func (s *Service) history(ctx context.Context, v View, to time.Time) (metrics.Hi
 		if outdated(r) || json.Unmarshal(r.Assessment, &a) != nil {
 			continue
 		}
-		ids, before, units := map[string]string{}, map[string]*float64{}, map[string][]string{}
+		ids, before := map[string]string{}, map[string]*float64{}
 		for _, sg := range a.Signals {
 			ids[sg.ID] = sg.Tone
 			if len(sg.Facts) > 0 {
 				before[sg.ID] = sg.Facts[0].Prev
 			}
-			if sg.State != nil {
-				for _, u := range sg.State.Units {
-					units[sg.ID] = append(units[sg.ID], u.Name)
-				}
-			}
 		}
-		runs = append(runs, run{r.PeriodTo, ids, before, units})
+		runs = append(runs, run{r.PeriodTo, ids, before})
 	}
 	if len(runs) == 0 {
 		return h, nil
 	}
-	h.Latest, h.Runs, h.StateUnits = runs[0].ids, len(runs), runs[0].units
+	h.Latest, h.Runs = runs[0].ids, len(runs)
 	// Open: newest first, a problem counts from the earliest run that raised
 	// it after its last resolution; that run's previous period is the value
 	// before it was raised. Runs that skipped it (no longer notable against a

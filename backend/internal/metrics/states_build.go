@@ -10,23 +10,22 @@ import (
 
 // ---- Bot builds ------------------------------------------------------------
 
-// botLoopState judges each bot branch's builds in the period (owner,
-// 2026-11: a bot's failed build is never a quality finding, only the CI
-// time it burns counts): a branch failing BotLoopFailures builds in a row
-// is a loop, a hint about wasted CI time. A build without a verdict
-// (aborted) neither breaks nor extends a run of failures; a success ends
-// it. The unit is the branch, named "<repo>:<branch>".
-func (a *assessor) botLoopState() {
+// botLoopState judges each bot branch's builds in the instant's period
+// (owner, 2026-11: a bot's failed build is never a quality finding, only
+// the CI time it burns counts; a tool's branch is a bot's): a branch
+// failing BotLoopFailures builds in a row is a loop, a hint about wasted CI
+// time. A build without a verdict (aborted) neither breaks nor extends a
+// run of failures; a success ends it. The unit is the branch, named
+// "<repo>:<branch>".
+func (a *assessor) botLoopState(at stateAt) []stateEval {
 	th := a.states.th
-	names := newRepoNamer(a.ds.Runs)
-	gitops := gitopsRun(a.ds)
 	by := map[string][]dataset.Run{}
 	project := map[string]*string{}
-	for _, r := range a.ds.Runs {
-		if !r.Bot || r.Status == nil || gitops(r) || !a.f.in(r.Project) || !a.p.Period.In(runAt(r)) {
+	for _, r := range a.states.runs {
+		if !r.Bot || r.Status == nil || a.states.gitops(r) || !a.f.in(r.Project) || !at.period.In(runAt(r)) {
 			continue
 		}
-		key := names(r) + ":" + r.Branch
+		key := a.states.names(r) + ":" + r.Branch
 		by[key] = append(by[key], r)
 		project[key] = r.Project
 	}
@@ -63,5 +62,5 @@ func (a *assessor) botLoopState() {
 		}
 		e.units = append(e.units, u)
 	}
-	a.judge(e)
+	return []stateEval{e}
 }

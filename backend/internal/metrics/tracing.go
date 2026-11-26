@@ -25,12 +25,18 @@ const (
 	// TraceNoMergeCommit: the payload names no merge commit, and no umbrella
 	// brought it in: nothing marks where it reached the trunk.
 	TraceNoMergeCommit = "no_merge_commit"
+	// TraceOffTrunk: merged into another branch than the trunk, and no PR
+	// merged that branch into the trunk by the instant: it may be waiting
+	// there, or have gone on some other way (a push, a hotfix branch
+	// deployed as it is).
+	TraceOffTrunk = "off_trunk"
 	// TraceRepoUntraced: no deploy ever showed an App deploys its repo (no
 	// compare link names it, no image of its runs, none named after it).
 	TraceRepoUntraced = "repo_untraced"
 	// TraceInSilence: a release that may have shipped it lay in or just
-	// after a lost Bitbucket silence, or Argo CD did not report yet when it
-	// reached the trunk.
+	// after a lost Bitbucket silence, Argo CD did not report yet when it
+	// reached the trunk, or a release shows it went out with a deploy
+	// riptide did not see (TraceRelease.ShippedBefore).
 	TraceInSilence = "in_silence"
 	// TraceReleaseUnresolved: a release of its repo's Apps since it reached
 	// the trunk could not be resolved: it may have shipped it.
@@ -60,9 +66,12 @@ func prodPlacement(ds *dataset.Dataset, pr dataset.PR, cutoff time.Time) placeme
 	}
 	notPlaceable := func(reason string) placement { return placement{state: ProdNotPlaceable, reason: reason} }
 	switch {
-	case pr.TrunkAt == nil && pr.OffTrunk:
-		// Merged into a branch that has not gone on to the trunk.
-		return placement{state: ProdNotYet}
+	case pr.OffTrunk && (pr.TrunkAt == nil || !pr.TrunkAt.Before(cutoff)):
+		// Merged into a branch no PR had merged on into the trunk by the
+		// cutoff: whether its work waits there or went on otherwise, nothing
+		// tells. The same before and after its umbrella merges later, so a
+		// closed period stays as it was.
+		return notPlaceable(TraceOffTrunk)
 	case pr.TrunkAt == nil:
 		return notPlaceable(TraceNoMergeCommit)
 	case !pr.TrunkAt.Before(cutoff):
@@ -75,22 +84,41 @@ func prodPlacement(ds *dataset.Dataset, pr dataset.PR, cutoff time.Time) placeme
 	if argo := ds.Meta.DataStart.ArgoCD; argo == nil || argo.After(*pr.TrunkAt) {
 		return notPlaceable(TraceInSilence)
 	}
-	branch := ""
-	if pr.TrunkBranch != nil {
-		branch = *pr.TrunkBranch
+	// Where it stood on a trunk branch: where it reached its trunk, and
+	// onward on master or main when it got there before the cutoff.
+	type position struct {
+		at     time.Time
+		branch string
 	}
-	silent, unresolved := false, false
+	at := []position{{*pr.TrunkAt, deref(pr.TrunkBranch)}}
+	if pr.OnwardAt != nil && pr.OnwardAt.Before(cutoff) {
+		at = append(at, position{*pr.OnwardAt, deref(pr.OnwardBranch)})
+	}
+	earlier, silent, unresolved := false, false, false
 	for _, r := range rt.Releases {
-		if r.Environment != prod || !r.At.After(*pr.TrunkAt) || !r.At.Before(cutoff) || r.Resolved(*pr.TrunkAt, branch) {
+		// Evidence only when a deploy before the cutoff had shown its App
+		// deploys the repo: a later one must not move a closed period.
+		if r.Environment != prod || !r.At.After(*pr.TrunkAt) || !r.At.Before(cutoff) || !r.Known.Before(cutoff) {
 			continue
 		}
-		if r.Silence {
+		resolved := r.Unchanged
+		for _, p := range at {
+			earlier = earlier || r.ShippedBefore(p.at, p.branch)
+			resolved = resolved || r.Resolved(p.at, p.branch)
+		}
+		switch {
+		case resolved:
+		case r.Silence:
 			silent = true
-		} else {
+		default:
 			unresolved = true
 		}
 	}
 	switch {
+	case earlier:
+		// On production, but since a deploy riptide did not see: when, no
+		// one can tell.
+		return notPlaceable(TraceInSilence)
 	case unresolved:
 		return notPlaceable(TraceReleaseUnresolved)
 	case silent:
@@ -99,9 +127,18 @@ func prodPlacement(ds *dataset.Dataset, pr dataset.PR, cutoff time.Time) placeme
 	return placement{state: ProdNotYet}
 }
 
+// deref is *s, "" for nil.
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 // TraceReasons counts the PRs tracing could not place, by reason.
 type TraceReasons struct {
 	NoMergeCommit     int `json:"no_merge_commit"`
+	OffTrunk          int `json:"off_trunk"`
 	ReleaseUnresolved int `json:"release_unresolved"`
 	RepoUntraced      int `json:"repo_untraced"`
 	InSilence         int `json:"in_silence"`
@@ -111,6 +148,8 @@ func (r *TraceReasons) add(reason string) {
 	switch reason {
 	case TraceNoMergeCommit:
 		r.NoMergeCommit++
+	case TraceOffTrunk:
+		r.OffTrunk++
 	case TraceReleaseUnresolved:
 		r.ReleaseUnresolved++
 	case TraceRepoUntraced:

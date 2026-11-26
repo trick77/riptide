@@ -257,8 +257,8 @@ type DeployFrequency struct {
 	// going live.
 	FirstReleases int `json:"first_releases"`
 	// ReleasesUnresolved are the Releases tracing resolved no stretch of
-	// any repo for (dataset.Deploy.Traced): what they shipped no one can
-	// name ("n Releases ohne zuordenbare PRs").
+	// any repo for, and that changed an image of one (dataset.Deploy.Traced):
+	// what they shipped no one can name ("n Releases ohne zuordenbare PRs").
 	ReleasesUnresolved int `json:"releases_unresolved"`
 	Syncs              int `json:"syncs"`
 	// FirstSeen are the App's first deploys within dataset.FirstDeployGrace
@@ -545,6 +545,11 @@ type LeadTimes struct {
 	// LowerBound are Human's PRs placed by a stretch whose start was a lower
 	// bound: they may have gone out earlier, their time reads long.
 	LowerBound int `json:"lower_bound"`
+	// Unmeasured reached the environment by the end too, but have no start
+	// (no pushed commit, no opening: opened before Bitbucket reported, or in
+	// a lost silence): in no time. Human.N + Unmeasured are the PRs traced
+	// there (for production Coverage.OnProd).
+	Unmeasured int `json:"unmeasured"`
 	// LowSample: fewer than 10 PRs, but some.
 	LowSample bool `json:"low_sample"`
 }
@@ -554,7 +559,7 @@ type LeadTimes struct {
 // rolled out.
 func leadTime(humans []dataset.PR, env string, cutoff time.Time) LeadTimes {
 	var waits []float64
-	lower := 0
+	lower, unmeasured := 0, 0
 	for _, pr := range humans {
 		if pr.Library {
 			continue
@@ -563,15 +568,19 @@ func leadTime(humans []dataset.PR, env string, cutoff time.Time) LeadTimes {
 		if e == nil {
 			continue
 		}
-		if w := wait(leadStart(pr), &e.FirstDeployedAt); w != nil {
-			waits = append(waits, *w)
-			if e.LowerBound {
-				lower++
-			}
+		w := wait(leadStart(pr), &e.FirstDeployedAt)
+		if w == nil {
+			unmeasured++
+			continue
+		}
+		waits = append(waits, *w)
+		if e.LowerBound {
+			lower++
 		}
 	}
 	h := spread(waits)
-	return LeadTimes{Environment: env, Human: h, LowerBound: lower, LowSample: h.N > 0 && h.N < lowSample}
+	return LeadTimes{Environment: env, Human: h, LowerBound: lower, Unmeasured: unmeasured,
+		LowSample: h.N > 0 && h.N < lowSample}
 }
 
 // Delivery is the DORA section.
@@ -1117,9 +1126,10 @@ type Throughput struct {
 // PR that took no time.
 type PRCoverage struct {
 	// ToProd: a production deploy before the period's end shipped it
-	// (Coverage.OnProd), so it is in the time to production. Of Merged
-	// less Throughput.Library (Coverage.Merged): a library's PR is never
-	// rolled out, so never one not traced.
+	// (Coverage.OnProd), so it is in the time to production unless it has
+	// no start (Delivery.LeadTime.Unmeasured). Of Merged less
+	// Throughput.Library (Coverage.Merged): a library's PR is never rolled
+	// out, so never one not traced.
 	ToProd Share `json:"to_prod"`
 	// Sized: noergler's rollup gives its size (prSize), so it is in the
 	// batch size.

@@ -223,8 +223,31 @@ export const de = {
       // A state's card. Every number comes from the backend: the units'
       // values and the team's thresholds (riptide.json), never written into
       // a text. "Abmachung" is the team's own agreement (owner, 2026-11);
-      // "Gezählt ab" a threshold that is no agreement.
+      // "Gemeldet ab" a threshold that is no agreement.
       state: {
+        // A span in a state's words: {{n}} is the backend's value.
+        span: {
+          minutes_one: "{{n}} Minute",
+          minutes_other: "{{n}} Minuten",
+          wd_one: "{{n}} Arbeitstag",
+          wd_other: "{{n}} Arbeitstage",
+          wdDat_one: "{{n}} Arbeitstag",
+          wdDat_other: "{{n}} Arbeitstagen",
+          daysDat_one: "{{n}} Tag",
+          daysDat_other: "{{n}} Tagen",
+        },
+        unitWord: {
+          project_one: "Projekt",
+          project_other: "Projekte",
+          repo_one: "Repo",
+          repo_other: "Repos",
+          app_one: "App",
+          app_other: "Apps",
+          branch_one: "Branch",
+          branch_other: "Branches",
+          botBranch_one: "Bot-Branch",
+          botBranch_other: "Bot-Branches",
+        },
         of: {
           project_one: "{{k}} von {{n}} Projekt",
           project_other: "{{k}} von {{n}} Projekten",
@@ -237,19 +260,19 @@ export const de = {
           botBranch_one: "{{k}} von {{n}} Bot-Branch",
           botBranch_other: "{{k}} von {{n}} Bot-Branches",
         },
-        more_one: "+{{count}} weiteres",
-        more_other: "+{{count}} weitere",
+        more_one: "{{count}} mehr anzeigen",
+        more_other: "{{count}} mehr anzeigen",
         less: "weniger zeigen",
         since: "seit dem {{date}}",
-        sinceAtLeast: "seit mindestens dem {{date}}",
+        sinceAtLeast: "spätestens seit dem {{date}}",
         asOf: "Stand {{date}}",
-        unjudged_one: "{{n}} mit zu wenig Daten",
-        unjudged_other: "{{n}} mit zu wenig Daten",
+        unjudged_one: "{{n}} {{unit}} mit zu wenig Daten",
+        unjudged_other: "{{n}} {{unit}} mit zu wenig Daten",
         held: "(knapp unter der Grenze, darum noch genannt)",
         folded:
           "{{label}}: {{value}}, deutlich schlechter als in der Vorperiode",
-        unitFacts: "{{name}} in den Daten ansehen",
-        facts: "«{{term}}» in den Daten ansehen →",
+        unitFacts: "{{name}} in den heutigen Daten ansehen",
+        facts: "Heute «{{term}}» in den Daten ansehen →",
         no_release: {
           title: "Lange kein Release nach {{prod}}",
           unit_one:
@@ -257,22 +280,22 @@ export const de = {
           unit_other:
             "letztes Release vor {{n}} Tagen ({{names}}), seither {{count}} PRs gemerged",
           threshold_one:
-            "Abmachung: mindestens ein Release nach {{prod}} pro Sprint. Gezählt ab mehr als {{n}} Tag ohne Release.",
+            "Abmachung: mindestens ein Release nach {{prod}} pro Sprint. Gemeldet, wenn mehr als {{n}} Tag kein Release kam.",
           threshold_other:
-            "Abmachung: mindestens ein Release nach {{prod}} pro Sprint. Gezählt ab mehr als {{n}} Tagen ohne Release.",
+            "Abmachung: mindestens ein Release nach {{prod}} pro Sprint. Gemeldet, wenn mehr als {{n}} Tage kein Release kam.",
           rule: "Gezählt werden Projekte, die ausgerollt werden und an denen gearbeitet wird. Das erste bekannte Deploy einer App zählt als Release.",
         },
         release_due: {
           title: "Release nach {{prod}} bald fällig",
           unit: "letztes Release vor {{n}} Tagen ({{names}})",
           threshold_one:
-            "Abmachung: mindestens ein Release nach {{prod}} pro Sprint. Hinweis ab mehr als {{n}} Tag ohne Release.",
+            "Abmachung: mindestens ein Release nach {{prod}} pro Sprint. Ein Hinweis, wenn mehr als {{n}} Tag kein Release kam.",
           threshold_other:
-            "Abmachung: mindestens ein Release nach {{prod}} pro Sprint. Hinweis ab mehr als {{n}} Tagen ohne Release.",
+            "Abmachung: mindestens ein Release nach {{prod}} pro Sprint. Ein Hinweis, wenn mehr als {{n}} Tage kein Release kam.",
           rule: "Noch innerhalb der Abmachung: ein Hinweis, bevor sie verletzt ist.",
         },
         not_on_prod: {
-          title: "Gemergte PRs liegen lange vor {{prod}}",
+          title: "Gemergte PRs warten lange auf {{prod}}",
           unit_one:
             "{{count}} gemergter PR noch nicht auf {{prod}}, seit {{n}} Tagen",
           unit_other:
@@ -290,9 +313,9 @@ export const de = {
           unit_other:
             "typisch {{n}} Tage vom Merge bis {{prod}}, aus {{count}} PRs",
           threshold_one:
-            "Abmachung: höchstens {{n}} Tag vom Merge bis {{prod}}. Typischer Wert ab {{min}} PRs.",
+            "Abmachung: höchstens {{n}} Tag vom Merge bis {{prod}}. Beurteilt ab {{min}} PRs.",
           threshold_other:
-            "Abmachung: höchstens {{n}} Tage vom Merge bis {{prod}}. Typischer Wert ab {{min}} PRs.",
+            "Abmachung: höchstens {{n}} Tage vom Merge bis {{prod}}. Beurteilt ab {{min}} PRs.",
           rule: "Typischer Wert über die PRs, die im Zeitraum gemerged wurden und bis zu seinem Ende auf {{prod}} kamen.",
         },
         merge_pause: {
@@ -302,7 +325,7 @@ export const de = {
           unit_other:
             "KW {{week}}: {{count}} PRs gemerged statt typisch {{typical}}, während {{n}} freigegebene PRs warteten ({{names}})",
           threshold:
-            "Gezählt, wenn eine Woche höchstens {{n}} der typischen Merges hat, während mindestens {{min}} freigegebene PRs warten.",
+            "Gemeldet, wenn eine Woche höchstens {{n}} der typischen Merges hat, während mindestens {{min}} freigegebene PRs bis zum Wochenende {{within}} oder länger warteten.",
           rule: "Verglichen mit der typischen Woche des Projekts. Warum nicht gemerged wurde, zeigen die Daten nicht.",
         },
         approved_waiting: {
@@ -312,25 +335,29 @@ export const de = {
           unit_other:
             "{{count}} freigegebene PRs warten auf den Merge, der älteste seit {{n}} Arbeitstagen",
           threshold_one:
-            "Gezählt ab {{min}} PRs pro Repo, die länger als {{n}} Arbeitstag warten.",
+            "Gemeldet ab {{min}} PRs pro Repo, die länger als {{n}} Arbeitstag warten.",
           threshold_other:
-            "Gezählt ab {{min}} PRs pro Repo, die länger als {{n}} Arbeitstage warten.",
-          rule: "Freigegeben heisst: mindestens ein Approval einer Person, nicht des Autors.",
+            "Gemeldet ab {{min}} PRs pro Repo, die länger als {{n}} Arbeitstage warten.",
+          rule: "Freigegeben heisst: Eine Person, nicht der Autor, hat den PR freigegeben, und die Freigabe gilt noch.",
         },
         bot_loop: {
-          title: "Bot-Branch scheitert immer wieder",
+          title: "Bot-Branch verbraucht CI-Zeit mit fehlgeschlagenen Builds",
           unit: "{{n}} fehlgeschlagene Builds in Folge, {{ci}} CI-Zeit",
-          threshold: "Gezählt ab {{n}} fehlgeschlagenen Builds in Folge.",
+          threshold: "Gemeldet ab {{n}} fehlgeschlagenen Builds in Folge.",
           rule: "Verbrauchte CI-Zeit, kein Befund über den Code des Teams.",
         },
         untraced: {
           title: "Nicht messbar, ob gemergte PRs auf {{prod}} sind",
-          unit: "{{n}} von {{of}} gemergten PRs nicht zuordenbar: {{reason}}",
+          unit_one:
+            "{{n}} von {{of}} gemergten PRs nicht zuordenbar: {{reason}}",
+          unit_other:
+            "{{n}} von {{of}} gemergten PRs nicht zuordenbar, meist: {{reason}}",
           rule: "Für diese PRs lässt sich nicht sagen, ob und wann sie auf {{prod}} kamen. Die Abmachung zur Zeit bis {{prod}} ist dort nicht messbar.",
         },
         unattributed: {
           title: "Releases nach {{prod}} ohne Projekt",
-          unit: "{{n}} Releases nach {{prod}} keinem Projekt zuordenbar",
+          unit_one: "{{n}} Release nach {{prod}} keinem Projekt zuordenbar",
+          unit_other: "{{n}} Releases nach {{prod}} keinem Projekt zuordenbar",
           rule: "Ihr GitOps-Commit ist Bitbucket nicht bekannt. Für ihre Projekte ist die Abmachung «ein Release pro Sprint» nicht messbar.",
         },
         no_prod_stage: {
@@ -340,17 +367,20 @@ export const de = {
         },
         deploy_failing: {
           title: "Letztes Deploy nach {{prod}} fehlgeschlagen",
-          unit: "seit {{n}} Arbeitstagen kein Deploy erfolgreich, {{count}} Versuche",
+          unit_one:
+            "seit {{daysDat}} kein erfolgreiches Deploy, {{count}} Versuch",
+          unit_other:
+            "seit {{daysDat}} kein erfolgreiches Deploy, {{count}} Versuche",
           threshold_one:
-            "Gezählt ab {{n}} Arbeitstag ohne erfolgreiches Deploy.",
+            "Gemeldet ab {{n}} Arbeitstag ohne erfolgreiches Deploy.",
           threshold_other:
-            "Gezählt ab {{n}} Arbeitstagen ohne erfolgreiches Deploy.",
+            "Gemeldet ab {{n}} Arbeitstagen ohne erfolgreiches Deploy.",
           rule: "Das letzte Deploy der App nach {{prod}} schlug fehl, und seither ist keines gelungen.",
         },
         deploy_failures: {
           title: "Deploys nach {{prod}} scheitern immer wieder",
-          unit: "{{n}}-mal scheiterten Deploys, bevor wieder eines gelang; {{count}} Deploys im Zeitraum",
-          threshold: "Gezählt ab {{n}}-mal im Zeitraum.",
+          unit: "{{n}}-mal scheiterte das Deploy, bis wieder eines gelang; {{count}} Deploys im Zeitraum",
+          threshold: "Gemeldet ab {{n}}-mal im Zeitraum.",
           rule: "Mehrere Versuche hintereinander zählen einmal.",
         },
         first_review_wait: {
@@ -364,34 +394,35 @@ export const de = {
           unitTypical_other:
             "erstes Review typisch nach {{n}} Arbeitstagen, aus {{count}} PRs",
           threshold_one:
-            "Gezählt ab {{min}} PRs, die länger als {{n}} Arbeitstag warten, oder wenn das erste Review typisch so lange dauert.",
+            "Gemeldet ab {{min}} PRs, die länger als {{n}} Arbeitstag warten, oder wenn das erste Review typisch so lange dauert.",
           threshold_other:
-            "Gezählt ab {{min}} PRs, die länger als {{n}} Arbeitstage warten, oder wenn das erste Review typisch so lange dauert.",
-          rule: "Bereite PRs ohne Reaktion einer Person. Entwürfe und PRs von Bots nicht gezählt.",
+            "Gemeldet ab {{min}} PRs, die länger als {{n}} Arbeitstage warten, oder wenn das erste Review typisch so lange dauert.",
+          rule: "PRs, die keine Entwürfe mehr sind und noch keine Reaktion einer Person haben. PRs von Bots nicht gezählt.",
         },
         trunk_failing: {
           title: "Builds auf dem Default-Branch lange fehlgeschlagen",
           unit_one:
-            "{{n}} Arbeitstage fehlgeschlagen, {{count}} fehlgeschlagener Build",
+            "{{days}} lang fehlgeschlagen, {{count}} fehlgeschlagener Build",
           unit_other:
-            "{{n}} Arbeitstage fehlgeschlagen, {{count}} fehlgeschlagene Builds",
+            "{{days}} lang fehlgeschlagen, {{count}} fehlgeschlagene Builds",
           threshold_one:
-            "Gezählt ab {{min}} fehlgeschlagenen Builds über mehr als {{n}} Arbeitstag.",
+            "Gemeldet ab {{min}} fehlgeschlagenen Builds über mehr als {{n}} Arbeitstag.",
           threshold_other:
-            "Gezählt ab {{min}} fehlgeschlagenen Builds über mehr als {{n}} Arbeitstage.",
+            "Gemeldet ab {{min}} fehlgeschlagenen Builds über mehr als {{n}} Arbeitstage.",
           rule: "Vom ersten fehlgeschlagenen Build bis zum nächsten erfolgreichen. Release-Builds nicht gezählt.",
         },
         branch_failing: {
           title: "Builds eines Branches scheitern immer wieder",
           unit: "{{n}} fehlgeschlagene Builds in Folge",
-          threshold: "Gezählt ab {{n}} fehlgeschlagenen Builds in Folge.",
+          threshold:
+            "Gemeldet ab {{n}} fehlgeschlagenen Builds in Folge über mindestens {{within}}.",
           rule: "Ein Feature- oder Bugfix-Branch einer Person. Branches von Bots nicht gezählt.",
         },
         flaky_builds: {
           title: "Unzuverlässige Builds",
           unit: "{{kind}}: {{n}} von {{of}} fehlgeschlagenen Builds liefen beim nächsten Versuch ohne Änderung durch",
           threshold:
-            "Gezählt ab {{min}} solchen Builds, wenn sie mindestens {{n}} der fehlgeschlagenen sind.",
+            "Gemeldet ab {{min}} solchen Builds, wenn sie mindestens {{n}} aller fehlgeschlagenen Builds ausmachen.",
           rule: "Fehlgeschlagen, dann erfolgreich auf demselben Commit. Eine Untergrenze: Wiederholungen innerhalb eines Builds sieht riptide nicht.",
         },
         long_builds: {
@@ -401,53 +432,61 @@ export const de = {
           unit_other:
             "{{kind}}: typisch {{n}} Minuten, aus {{count}} erfolgreichen Builds",
           threshold_one:
-            "Gezählt, wenn ein erfolgreicher Build typisch länger als {{n}} Minute dauert, aus mindestens {{min}} Builds.",
+            "Gemeldet, wenn ein erfolgreicher Build typisch länger als {{n}} Minute dauert, aus mindestens {{min}} Builds.",
           threshold_other:
-            "Gezählt, wenn ein erfolgreicher Build typisch länger als {{n}} Minuten dauert, aus mindestens {{min}} Builds.",
+            "Gemeldet, wenn ein erfolgreicher Build typisch länger als {{n}} Minuten dauert, aus mindestens {{min}} Builds.",
           rule: "Typische Dauer der erfolgreichen Builds, pro Repo und Build-Art.",
         },
         release_failing: {
           title: "Release-Builds scheitern",
           unit: "{{count}} von {{of}} Release-Builds fehlgeschlagen ({{n}})",
           threshold:
-            "Gezählt ab {{min}} fehlgeschlagenen Release-Builds, wenn sie mindestens {{n}} sind.",
+            "Gemeldet ab {{min}} fehlgeschlagenen Release-Builds, wenn sie mindestens {{n}} aller Release-Builds ausmachen.",
           rule: "Fehlgeschlagene Release-Builds, pro Repo.",
         },
         builds_silent: {
           title: "CI meldet für ein Repo keine Builds mehr",
-          unit: "{{n}} PRs gemerged, kein Build gemeldet; davor {{count}} Builds in vier Wochen",
+          unit_one:
+            "{{n}} PRs gemerged, kein Build gemeldet; in den {{within}} davor {{count}} Build",
+          unit_other:
+            "{{n}} PRs gemerged, kein Build gemeldet; in den {{within}} davor {{count}} Builds",
           threshold_one:
-            "Gezählt ab {{min}} gemergten PRs im letzten {{n}} Arbeitstag ohne gemeldeten Build.",
+            "Gemeldet ab {{min}} gemergten PRs im letzten {{n}} Arbeitstag ohne gemeldeten Build.",
           threshold_other:
-            "Gezählt ab {{min}} gemergten PRs in den letzten {{n}} Arbeitstagen ohne gemeldeten Build.",
+            "Gemeldet ab {{min}} gemergten PRs in den letzten {{n}} Arbeitstagen ohne gemeldeten Build.",
           rule: "Ob dort gebaut wird, zeigen die Daten nicht: Vielleicht meldet die CI nur nicht mehr.",
         },
         big_prs: {
           title: "Viele grosse PRs",
           unit: "{{count}} von {{of}} PRs ändern mehr als {{lines}} Zeilen ({{n}})",
           threshold:
-            "Gezählt, wenn mindestens {{n}} der PRs mehr als {{min}} Zeilen ändern.",
+            "Gemeldet, wenn mindestens {{n}} der PRs mehr als {{min}} Zeilen ändern.",
           rule: "Anteil an den gemergten PRs mit bekannter Grösse.",
         },
         fast_approval: {
           title: "Grosse PRs schnell freigegeben",
-          unit: "{{n}} grosse PRs innert Minuten freigegeben, ohne Kommentar davor",
+          unit_one:
+            "{{n}} grosser PR innert {{within}} freigegeben, ohne Kommentar davor",
+          unit_other:
+            "{{n}} grosse PRs innert {{within}} freigegeben, ohne Kommentar davor",
           threshold:
-            "Gezählt ab {{n}} PRs über {{min}} Zeilen, innert Minuten freigegeben.",
+            "Gemeldet ab {{n}} PRs über {{min}} Zeilen, innert {{within}} freigegeben.",
           rule: "Ohne Kommentar einer Person davor. Die Daten zeigen die Zeit, nicht wie geprüft wurde.",
         },
         unapproved: {
           title: "Ohne Freigabe gemerged",
           unit: "{{count}} von {{of}} gemergten PRs ohne Freigabe einer Person ({{n}})",
           threshold:
-            "Gezählt ab {{min}} gemergten PRs pro Repo, wenn mindestens {{n}} ohne Freigabe sind.",
+            "Gemeldet ab {{min}} gemergten PRs pro Repo, wenn mindestens {{n}} ohne Freigabe sind.",
           rule: "Aufräum-PRs und PRs von Bots nicht gezählt.",
         },
         late_decline: {
           title: "PRs nach langer Arbeit abgelehnt",
-          unit: "{{n}} PRs nach langer Arbeit abgelehnt ({{names}})",
-          threshold: "Gezählt ab {{n}} solchen PRs im Team.",
-          rule: "Arbeit, die nicht ankam.",
+          unit_one: "{{n}} PR nach mehr als {{within}} abgelehnt ({{names}})",
+          unit_other:
+            "{{n}} PRs nach mehr als {{within}} abgelehnt ({{names}})",
+          threshold: "Gemeldet ab {{n}} solchen PRs im Team.",
+          rule: "Arbeit, die nicht ankam. Nicht gezählt, wenn ein späterer PR vom selben Branch sie weiterführt.",
         },
         branch_life: {
           title: "Branches leben lange, bevor der PR bereit ist",
@@ -456,9 +495,9 @@ export const de = {
           unit_other:
             "typisch {{n}} Arbeitstage vom ersten Commit, bis der PR bereit ist, aus {{count}} PRs",
           threshold_one:
-            "Gezählt ab typisch mehr als {{n}} Arbeitstag, aus mindestens {{min}} PRs.",
+            "Gemeldet ab typisch mehr als {{n}} Arbeitstag, aus mindestens {{min}} PRs.",
           threshold_other:
-            "Gezählt ab typisch mehr als {{n}} Arbeitstagen, aus mindestens {{min}} PRs.",
+            "Gemeldet ab typisch mehr als {{n}} Arbeitstagen, aus mindestens {{min}} PRs.",
           rule: "Eine Untergrenze: Ein Rebase setzt den ersten Commit neu.",
         },
         branch_open: {
@@ -468,24 +507,26 @@ export const de = {
           unit_other:
             "{{count}} Branches ohne PR in Arbeit, der älteste seit {{n}} Tagen ({{names}})",
           threshold_one:
-            "Gezählt ab einem Branch ohne PR, zuerst vor mehr als {{n}} Tag gepusht und kürzlich wieder.",
+            "Gemeldet ab einem Branch ohne PR, zuerst vor mehr als {{n}} Tag gepusht und zuletzt vor höchstens {{within}}.",
           threshold_other:
-            "Gezählt ab einem Branch ohne PR, zuerst vor mehr als {{n}} Tagen gepusht und kürzlich wieder.",
+            "Gemeldet ab einem Branch ohne PR, zuerst vor mehr als {{n}} Tagen gepusht und zuletzt vor höchstens {{within}}.",
           rule: "Branches, die Ziel von PRs sind, und Branches von Bots nicht gezählt.",
         },
         branch_silent: {
           title: "Branches ohne PR, lange still",
-          unit: "{{count}} Branches ohne PR nicht mehr gepusht ({{names}})",
+          unit_one: "{{count}} Branch ohne PR nicht mehr gepusht ({{names}})",
+          unit_other:
+            "{{count}} Branches ohne PR nicht mehr gepusht ({{names}})",
           threshold_one:
-            "Gezählt ab {{min}} Branches ohne PR pro Repo, seit mehr als {{n}} Tag nicht gepusht.",
+            "Gemeldet ab {{min}} Branches ohne PR pro Repo, seit mehr als {{n}} Tag nicht gepusht.",
           threshold_other:
-            "Gezählt ab {{min}} Branches ohne PR pro Repo, seit mehr als {{n}} Tagen nicht gepusht.",
+            "Gemeldet ab {{min}} Branches ohne PR pro Repo, seit mehr als {{n}} Tagen nicht gepusht.",
           rule: "Ob sie noch existieren, meldet Bitbucket nicht.",
         },
         unmeasurable: {
           title: "{{was}}: nicht mehr messbar",
           unit: "",
-          rule: "Eine frühere Einschätzung hat es aufgeworfen; jetzt fehlen die Daten, um es zu beurteilen. Nicht gelöst.",
+          rule: "Vor einer Woche hat riptide es hier festgestellt; jetzt reichen die Daten nicht, um es zu beurteilen. Das heisst nicht, dass es gelöst ist.",
         },
       },
       tallyLabel: "Bilanz",
@@ -559,6 +600,8 @@ export const de = {
           "{{share}} der typischen Build-Zeit oder mehr, und mindestens {{minutes}} Minuten, ist Warten auf einen Agent: die Kapazität der Plattform, nicht der Build.",
         resolved:
           "Die letzte Einschätzung hat es aufgeworfen; jetzt ist der Wert zurück auf dem Stand davor oder besser.",
+        resolvedState:
+          "Vor einer Woche hat riptide es hier festgestellt; jetzt liegt jede damals genannte Einheit wieder klar unter der Grenze.",
       },
       factsOf: "Fakten zu {{repo}} ansehen →",
       driver: "Treiber: {{repo}} trägt {{share}} der Zunahme",
@@ -592,7 +635,9 @@ export const de = {
         name_what_helped: "benennen, was geholfen hat, damit es bleibt",
         check_source: "die Anbindung der Quelle prüfen",
         plan_release:
-          "das nächste Release nach PROD planen oder benennen, was es aufhält",
+          "das nächste Release nach {{prod}} planen oder benennen, was es aufhält",
+        inspect_deploys:
+          "die fehlgeschlagenen Deploys in Argo CD ansehen: jedes Mal derselbe Fehler oder ein anderer?",
         stop_bot_loop:
           "den Bot-Branch ansehen: beheben, woran seine Builds scheitern, oder ihn schliessen",
         walk_branches:
@@ -631,14 +676,14 @@ export const de = {
         state_no_release: "Tage seit dem letzten Release",
         state_release_due: "Tage seit dem letzten Release",
         state_not_on_prod: "Tage, die der älteste PR wartet",
-        state_slow_to_prod: "typische Tage bis PROD",
+        state_slow_to_prod: "typische Tage bis {{prod}}",
         state_merge_pause: "freigegebene PRs, die warteten",
         state_approved_waiting: "Arbeitstage, die der älteste PR wartet",
         state_bot_loop: "fehlgeschlagene Builds in Folge",
         state_untraced: "PRs nicht zuordenbar",
         state_unattributed: "Releases ohne Projekt",
         state_no_prod_stage: "gemeldete Stages",
-        state_deploy_failing: "Arbeitstage auf Fehler",
+        state_deploy_failing: "Arbeitstage ohne erfolgreiches Deploy",
         state_deploy_failures: "Folgen fehlgeschlagener Deploys",
         state_first_review_wait: "Arbeitstage ohne erstes Review",
         state_trunk_failing: "Arbeitstage fehlgeschlagen",
@@ -745,6 +790,10 @@ export const de = {
         "{{traced, num}} von {{count, num}} gemergten PRs bis {{prod}} verfolgt",
       notYet_one: "{{count, num}} noch nicht auf {{prod}}",
       notYet_other: "{{count, num}} noch nicht auf {{prod}}",
+      unmeasured_one:
+        "{{count, num}} davon ohne bekannten Start, nicht in der Zeit",
+      unmeasured_other:
+        "{{count, num}} davon ohne bekannten Start, nicht in der Zeit",
     },
     dsucc: {
       label: "Deploy-Erfolg",
@@ -821,9 +870,9 @@ export const de = {
       "{{count, num}} gemergte PRs nicht zuordenbar: {{reasons}}.",
     reasonPart: "{{reason}} ({{count, num}})",
     lowerBound_one:
-      "Bei {{count, num}} der verfolgten PRs ist die Zeit bis {{prod}} höchstens so lang: Er kam vielleicht schon mit einem früheren Deploy, das sich keinen PRs zuordnen lässt.",
+      "{{count, num}} verfolgter PR kam vielleicht schon mit einem früheren Deploy auf {{prod}}, das sich keinem PR zuordnen lässt: Seine Zeit bis {{prod}} ist ein Höchstwert.",
     lowerBound_other:
-      "Bei {{count, num}} der verfolgten PRs ist die Zeit bis {{prod}} höchstens so lang: Sie kamen vielleicht schon mit einem früheren Deploy, das sich keinen PRs zuordnen lässt.",
+      "{{count, num}} verfolgte PRs kamen vielleicht schon mit einem früheren Deploy auf {{prod}}, das sich keinem PR zuordnen lässt: Ihre Zeit bis {{prod}} ist ein Höchstwert.",
     library_one:
       "{{count, num}} PR in Bibliotheken, werden nicht ausgerollt: in keiner Zählung bis {{prod}}.",
     library_other:
@@ -836,7 +885,7 @@ export const de = {
     colNotYet: "Noch nicht auf {{prod}}",
     colNotPlaceable: "Nicht zuordenbar",
     colLibrary: "Bibliothek",
-    oldestSince: "ältester vom {{date}}",
+    oldestSince: "ältester gemerged am {{date}}",
     ridge: {
       title: "Wie die Zeit in jedem Abschnitt verteilt ist",
       sub: "Dieselben PRs wie oben, Zeitachse logarithmisch. Strich: typischer Wert, gestrichelt: ab da die langsamsten 10 %.",

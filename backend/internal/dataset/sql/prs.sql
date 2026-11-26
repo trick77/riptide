@@ -109,7 +109,9 @@ target_counts AS (
 -- PRs went into, over its whole history, so a window holding one PR into
 -- an umbrella branch does not make that branch the trunk. Branches tied
 -- for most are all trunk: nothing tells one of them apart, least of all
--- its name.
+-- its name. View repo_trunks' rule (trace_positions.sql reads the view),
+-- here over targets, read anyway: the view would read the events again,
+-- measurably slower.
 trunks AS (
   SELECT t.repo_full_name, t.target AS trunk
   FROM target_counts t
@@ -246,14 +248,48 @@ SELECT c.repo_full_name AS repo,
        -- When its work reached the trunk, and which trunk branch (NULL: the
        -- payload names none), what Go places it on production by
        -- (dataset.trace): a PR into the trunk by its merge commit's first
-       -- push (Bitbucket's merge pushes it in the same second; its merge when
-       -- that push was not seen); a PR into another branch by the first PR
-       -- merged from that branch into a trunk at or after it (its umbrella),
-       -- by that one's merge commit alike, one level deep. NULL without a
-       -- merge commit: Go places a PR an umbrella's merge marked merged by
-       -- the umbrella's.
+       -- push to that branch (Bitbucket's merge pushes it in the same second;
+       -- its merge when that push was not seen; a fast-forward merge's
+       -- commit was pushed to the source branch first); a PR into another
+       -- branch by the first PR with a merge commit merged from that branch
+       -- into a trunk at or after it (its umbrella), by that one's merge
+       -- commit alike, one level deep. NULL without a merge commit: Go places
+       -- a PR an umbrella's merge marked merged by the umbrella's.
        u.trunk_at,
        u.trunk_branch,
+       -- A PR into a trunk other than master or main (develop) reaches
+       -- master or main onward, by the first PR merged from its trunk into
+       -- one of them at or after it, alike: releases built from master hold
+       -- it there. Behind a CASE: a join would cost every PR's read.
+       CASE WHEN c.merged_at IS NOT NULL AND c.merge_commit IS NOT NULL
+                 AND c.target_branch NOT IN ('master', 'main') AND NOT c.off_trunk THEN
+         (SELECT coalesce((SELECT min(e.occurred_at) FILTER (WHERE e.branch_name = m.target)
+                             FROM bitbucket_events e
+                            WHERE e.commit_sha = lower(m.merge_commit) AND e.repo_full_name = c.repo_full_name
+                              AND e.event_type = 'repo:refs_changed'), m.merged_at)
+            FROM (SELECT x.occurred_at AS merged_at,
+                         x.payload->'pullRequest'->'properties'->'mergeCommit'->>'id' AS merge_commit,
+                         lower(x.payload->'pullRequest'->'toRef'->>'displayId') AS target
+                    FROM bitbucket_events x
+                   WHERE x.repo_full_name = c.repo_full_name AND x.branch_name = c.target_branch
+                     AND x.event_type = 'pr:merged' AND x.pr_id <> c.pr_id AND x.occurred_at >= c.merged_at
+                     AND x.payload->'pullRequest'->'properties'->'mergeCommit'->>'id' IS NOT NULL
+                     AND lower(x.payload->'pullRequest'->'toRef'->>'displayId') IN ('master', 'main')
+                   ORDER BY x.occurred_at, x.id
+                   LIMIT 1) m)
+       END AS onward_at,
+       -- the same PR's target
+       CASE WHEN c.merged_at IS NOT NULL AND c.merge_commit IS NOT NULL
+                 AND c.target_branch NOT IN ('master', 'main') AND NOT c.off_trunk THEN
+         (SELECT lower(x.payload->'pullRequest'->'toRef'->>'displayId')
+            FROM bitbucket_events x
+           WHERE x.repo_full_name = c.repo_full_name AND x.branch_name = c.target_branch
+             AND x.event_type = 'pr:merged' AND x.pr_id <> c.pr_id AND x.occurred_at >= c.merged_at
+             AND x.payload->'pullRequest'->'properties'->'mergeCommit'->>'id' IS NOT NULL
+             AND lower(x.payload->'pullRequest'->'toRef'->>'displayId') IN ('master', 'main')
+           ORDER BY x.occurred_at, x.id
+           LIMIT 1)
+       END AS onward_branch,
        -- The openers of the other merged PRs of the repo into this one's
        -- source branch: Go makes it an umbrella when one is a person's. It
        -- carries their work, which they count; it is none of its own.
@@ -285,15 +321,19 @@ SELECT c.repo_full_name AS repo,
                  = lower(regexp_replace(btrim(c.opened_title), '\s+', ' ', 'g')))
        ELSE '[]'::jsonb END AS siblings
 FROM chain c
+-- The pushes of a merge commit: found by the commit (an index probe), then
+-- the target branch's taken (a FILTER, so the planner keeps the probe
+-- rather than walking the branch's pushes).
 LEFT JOIN LATERAL (
-  SELECT coalesce((SELECT min(e.occurred_at)
+  SELECT coalesce((SELECT min(e.occurred_at) FILTER (WHERE e.branch_name = c.target_branch)
                      FROM bitbucket_events e
                     WHERE e.commit_sha = lower(c.merge_commit) AND e.repo_full_name = c.repo_full_name
-                      AND e.event_type = 'repo:refs_changed'), c.merged_at) AS trunk_at,
+                      AND e.event_type = 'repo:refs_changed'),
+                  c.merged_at) AS trunk_at,
          c.target_branch AS trunk_branch
   WHERE c.merged_at IS NOT NULL AND c.merge_commit IS NOT NULL AND NOT c.off_trunk
   UNION ALL
-  SELECT coalesce((SELECT min(e.occurred_at)
+  SELECT coalesce((SELECT min(e.occurred_at) FILTER (WHERE e.branch_name = m.target)
                      FROM bitbucket_events e
                     WHERE e.commit_sha = lower(m.merge_commit) AND e.repo_full_name = c.repo_full_name
                       AND e.event_type = 'repo:refs_changed'), m.merged_at),
@@ -305,11 +345,16 @@ LEFT JOIN LATERAL (
          -- PR events store the source branch, lowercased, as branch_name.
          WHERE x.repo_full_name = c.repo_full_name AND x.branch_name = c.target_branch
            AND x.event_type = 'pr:merged' AND x.pr_id <> c.pr_id AND x.occurred_at >= c.merged_at
+           -- the first into a trunk: one into another branch first moves
+           -- the work no closer
+           AND x.payload->'pullRequest'->'properties'->'mergeCommit'->>'id' IS NOT NULL
+           AND (lower(x.payload->'pullRequest'->'toRef'->>'displayId') IN ('master', 'main')
+                OR EXISTS (SELECT 1 FROM trunks t
+                            WHERE t.repo_full_name = c.repo_full_name
+                              AND t.trunk = lower(x.payload->'pullRequest'->'toRef'->>'displayId')))
          ORDER BY x.occurred_at, x.id
          LIMIT 1) m
-  WHERE c.merged_at IS NOT NULL AND c.off_trunk AND m.merge_commit IS NOT NULL
-    AND (m.target IN ('master', 'main')
-         OR EXISTS (SELECT 1 FROM trunks t WHERE t.repo_full_name = c.repo_full_name AND t.trunk = m.target))
+  WHERE c.merged_at IS NOT NULL AND c.off_trunk
 ) u ON true
 -- pr_key is '<repo_full_name>#<pr_id>', lowercased at ingest.
 LEFT JOIN noergler_pr_rollups r

@@ -1,9 +1,11 @@
 -- repo_trunks: a repo's trunk besides master and main, the branch most of
 -- its merged PRs went into over all history (several when tied: nothing
 -- tells one of them apart, least of all its name). A repo whose PRs go to
--- master has master here too. Every trunk rule reads it: master, main, and
--- these. Derived on read, nothing stored: a repo whose PRs move to another
--- branch moves its trunk with them.
+-- master has master here too. A trunk is master, main, or one of these:
+-- commit_sightings and the tracing's positions read the view; the PR read
+-- applies the same rule to the merged PRs it reads anyway. Derived on read,
+-- nothing stored: a repo whose PRs move to another branch moves its trunk
+-- with them.
 CREATE VIEW repo_trunks AS
 SELECT repo_full_name, target AS trunk
 FROM (

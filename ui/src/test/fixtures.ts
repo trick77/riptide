@@ -300,12 +300,14 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
         environment: "prod",
         human: spread(1, 2 * 86400),
         lower_bound: 0,
+        unmeasured: 0,
         low_sample: true,
       },
       lead_time_pre: {
         environment: "intg",
         human: spread(1, 3 * 3600),
         lower_bound: 0,
+        unmeasured: 0,
         low_sample: true,
       },
     },
@@ -318,6 +320,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       not_placeable: 0,
       reasons: {
         no_merge_commit: 0,
+        off_trunk: 0,
         release_unresolved: 0,
         repo_untraced: 0,
         in_silence: 0,
@@ -335,6 +338,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
           not_placeable: 0,
           reasons: {
             no_merge_commit: 0,
+            off_trunk: 0,
             release_unresolved: 0,
             repo_untraced: 0,
             in_silence: 0,

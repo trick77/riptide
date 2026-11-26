@@ -49,6 +49,8 @@ var (
 	librariesSQL  = query("libraries.sql")
 	approvalsSQL  = query("approvals.sql")
 	branchesSQL   = query("branches.sql")
+	// branchOwnersSQL is read on every page (Shared.owners).
+	branchOwnersSQL = query("branch_owners.sql")
 
 	traceDeploysSQL   = query("trace_deploys.sql")
 	traceReleasesSQL  = query("trace_releases.sql")
@@ -223,14 +225,14 @@ type Dataset struct {
 	// ApprovalLookback, whenever opened or merged (sql/approvals.sql);
 	// empty unless the shared read was asked for them (SharedParams.States).
 	Approvals []Approval `json:"-"`
-	// Branches are every branch pushed to since SharedParams.From
+	// Branches are every branch pushed to since SharedParams.BranchesFrom
 	// (sql/branches.sql); empty unless SharedParams.States.
 	Branches []BranchLife `json:"-"`
 }
 
-// BranchLife is a branch as its pushes show it (sql/branches.sql): when it
-// was first and last pushed, whether a PR came from it, whether it is a
-// PR's target. Its deletion is never stored.
+// BranchLife is a branch as its pushes show it (sql/branches.sql): every
+// push, when a PR came from it, whether it is a PR's target, when its last
+// head reached the trunk without a PR. Its deletion is never stored.
 type BranchLife struct {
 	Repo    string    `db:"repo"`
 	Project string    `db:"project"`
@@ -238,10 +240,31 @@ type BranchLife struct {
 	FirstAt time.Time `db:"first_at"`
 	LastAt  time.Time `db:"last_at"`
 	Pushes  int64     `db:"pushes"`
-	// Bot: a bot's branch, by riptide's automation detection on its last
-	// pusher or its head commit's git identity, or Tool. Bots' pushes
-	// (the ingest flag) are not read at all.
+	// PushTimes are its pushes, oldest first: what a state judging at an
+	// earlier instant sees of it.
+	PushTimes []time.Time `db:"push_times"`
+	// Bot: a bot's branch (BranchOwner.Bot). Bots' pushes (the ingest flag)
+	// are not read at all.
 	Bot bool `db:"-"`
+	// PRAt is the first PR event from it at or after its first push; nil:
+	// no PR came from it.
+	PRAt *time.Time `db:"pr_at"`
+	// Target: a PR of the repo went into it (develop, a release line). Told
+	// for a branch without a PR only.
+	Target bool `db:"target"`
+	// MergedAt: when its last head reached the repo's trunk or a PR's target
+	// without a PR (pushed or merged onto it, or the branch cut from it with
+	// no commit of its own): done work, no branch "without a PR". Nil: not,
+	// or a PR came from it.
+	MergedAt *time.Time `db:"merged_at"`
+}
+
+// BranchOwner is whose a branch is, as its pushes show it
+// (sql/branch_owners.sql): its last pusher, its last head commit's git
+// identity, and whether every push's head commit was a tool's.
+type BranchOwner struct {
+	Repo   string `db:"repo"`
+	Branch string `db:"branch"`
 	// Tool: every push's head commit authored by a git identity of the
 	// .invalid e-mail domain, a tool's (the housekeeping commits' author).
 	Tool              bool   `db:"tool"`
@@ -249,11 +272,12 @@ type BranchLife struct {
 	AuthorDisplayName string `db:"author_display_name"`
 	HeadName          string `db:"head_name"`
 	HeadDisplayName   string `db:"head_display_name"`
-	HasPR             bool   `db:"has_pr"`
-	Target            bool   `db:"target"`
-	// Merged: its last head reached the repo's trunk without a PR (pushed
-	// or merged onto it): done work, no branch "without a PR".
-	Merged bool `db:"merged"`
+}
+
+// bot reports whether o is a bot's branch: a tool's, or its last pusher's
+// or head commit's identity is automation by riptide's detection.
+func (o BranchOwner) bot(automated func(login, displayName string) bool) bool {
+	return o.Tool || automated(o.Author, o.AuthorDisplayName) || automated(o.HeadName, o.HeadDisplayName)
 }
 
 // ApprovalLookback is how far before the earliest window an approval is
@@ -262,7 +286,8 @@ type BranchLife struct {
 const ApprovalLookback = 30 * 24 * time.Hour
 
 // Approval is a PR with a person's approval (sql/approvals.sql): its author,
-// merge or close, and its first approval by someone else, a person.
+// merge or close, when a person other than the author approved it, and the
+// spans a person's approval stood on it.
 type Approval struct {
 	Repo    string `db:"repo"`
 	Project string `db:"project"`
@@ -275,32 +300,112 @@ type Approval struct {
 	MergedAt          *time.Time `db:"merged_at"`
 	ClosedAt          *time.Time `db:"closed_at"`
 	// ApprovedAt is the first approval by a person other than the author.
-	ApprovedAt *time.Time  `db:"-"`
-	Approvals  []approving `db:"approvals"`
+	ApprovedAt *time.Time `db:"-"`
+	// Spans are the times a person's approval stood on it, oldest first:
+	// from the event that showed one to the event that showed none (the
+	// approval withdrawn, needs work set, reset by a push); the last one's
+	// To nil while it stands.
+	Spans []ApprovalSpan `db:"-"`
+	// Activity are its events' times, any kind, oldest first: a PR whose
+	// last event lies long back is one nobody touches.
+	Activity []time.Time     `db:"activity"`
+	Timeline []approvalEvent `db:"timeline"`
 }
 
-// approving is one approval event of sql/approvals.sql.
-type approving struct {
-	At          time.Time `json:"at"`
-	Author      string    `json:"author"`
-	DisplayName string    `json:"display_name"`
-	Bot         bool      `json:"bot"`
+// ApprovalSpan is a time a person's approval stood on a PR; To nil while it
+// stands.
+type ApprovalSpan struct {
+	From time.Time
+	To   *time.Time
 }
 
-// approved sets each approval's bot flag and first person's approval, the
-// author's own aside, by the same detection as every other row.
+// approvalEvent is one event of sql/approvals.sql that may change who
+// approves a PR, and the people approving after it as its payload carries
+// them (nil: the payload carries none, the event itself tells).
+type approvalEvent struct {
+	At          time.Time   `json:"at"`
+	Event       string      `json:"event"`
+	Author      string      `json:"author"`
+	DisplayName string      `json:"display_name"`
+	Bot         bool        `json:"bot"`
+	Approvers   *[]approver `json:"approvers"`
+}
+
+// approver is a person a PR event lists as approving.
+type approver struct {
+	Author      string `json:"author"`
+	DisplayName string `json:"display_name"`
+	Bot         bool   `json:"bot"`
+}
+
+// approved sets each approval's bot flag, its first person's approval and
+// the spans a person's approval stood, the author's own and a bot's aside,
+// by the same detection as every other row.
 func approved(as []Approval, automated func(login, displayName string) bool) {
 	for i := range as {
 		a := &as[i]
 		a.Bot = a.Bot || automated(a.Opener, a.OpenerDisplayName)
-		for _, e := range a.Approvals {
-			if e.Bot || strings.EqualFold(e.Author, a.Opener) || automated(e.Author, e.DisplayName) {
-				continue
+		person := func(login, display string, bot bool) bool {
+			return !bot && !strings.EqualFold(login, a.Opener) && !automated(login, display)
+		}
+		standing := map[string]bool{}
+		var open *time.Time
+		a.Spans = []ApprovalSpan{}
+		for _, e := range a.Timeline {
+			at := e.At.UTC()
+			if e.Event == "pr:reviewer:approved" && a.ApprovedAt == nil && person(e.Author, e.DisplayName, e.Bot) {
+				a.ApprovedAt = ptr(at)
 			}
-			a.ApprovedAt = ptr(e.At.UTC())
-			break
+			switch {
+			case e.Approvers != nil:
+				standing = map[string]bool{}
+				for _, p := range *e.Approvers {
+					if person(p.Author, p.DisplayName, p.Bot) {
+						standing[strings.ToLower(p.Author)] = true
+					}
+				}
+			case e.Event == "pr:reviewer:approved" && person(e.Author, e.DisplayName, e.Bot):
+				standing[strings.ToLower(e.Author)] = true
+			case e.Event == "pr:reviewer:unapproved" || e.Event == "pr:reviewer:needs_work":
+				delete(standing, strings.ToLower(e.Author))
+			}
+			switch {
+			case len(standing) > 0 && open == nil:
+				open = ptr(at)
+			case len(standing) == 0 && open != nil:
+				a.Spans = append(a.Spans, ApprovalSpan{From: *open, To: ptr(at)})
+				open = nil
+			}
+		}
+		if open != nil {
+			a.Spans = append(a.Spans, ApprovalSpan{From: *open})
+		}
+		for j := range a.Activity {
+			a.Activity[j] = a.Activity[j].UTC()
 		}
 	}
+}
+
+// ApprovedSince is when the approval standing on a at t began: the span
+// holding t, nil when no person's approval stood then.
+func (a Approval) ApprovedSince(t time.Time) *time.Time {
+	for _, s := range a.Spans {
+		if s.From.Before(t) && (s.To == nil || !s.To.Before(t)) {
+			return ptr(s.From)
+		}
+	}
+	return nil
+}
+
+// LastActivity is a's latest event before t; nil when none.
+func (a Approval) LastActivity(t time.Time) *time.Time {
+	var out *time.Time
+	for _, at := range a.Activity {
+		if at.Before(t) {
+			out = ptr(at)
+		}
+	}
+	return out
 }
 
 // App is one of the team's Apps as its deploys over AppHistory show it.
@@ -439,8 +544,15 @@ type PR struct {
 	// TrunkBranch is the trunk branch, nil when the payload names none.
 	TrunkAt     *time.Time `json:"trunk_at" db:"trunk_at"`
 	TrunkBranch *string    `json:"trunk_branch" db:"trunk_branch"`
+	// OnwardAt and OnwardBranch: a PR into a trunk other than master or main
+	// (develop, as most PRs go there) reaches master or main with the first
+	// PR merged from that trunk into it at or after its own, by that one's
+	// merge commit (sql/prs.sql); nil before. Releases built from master
+	// hold it there.
+	OnwardAt     *time.Time `json:"onward_at" db:"onward_at"`
+	OnwardBranch *string    `json:"onward_branch" db:"onward_branch"`
 	// Environments are its first deploy per environment whose stretch holds
-	// TrunkAt (trace.go), earliest first, with no window end: a closed
+	// TrunkAt or OnwardAt (trace.go), earliest first, with no window end: a closed
 	// period reads only those before its end. A list, not intg/prod fields:
 	// the stages are whatever namespaces the team deploys to, and only
 	// production_stage is configured.
@@ -606,7 +718,9 @@ type Deploy struct {
 	// 2026-11). Project, where the revision names none, is the App's.
 	Infra bool `json:"infra" db:"-"`
 	// Traced: tracing resolved a stretch of some repo for it (trace.go),
-	// maybe empty; a release without one shipped PRs no one can name.
+	// maybe empty, or it shipped nothing of any repo its App deploys (a
+	// sidecar's new tag); a release without either shipped PRs no one can
+	// name.
 	Traced bool `json:"-" db:"-"`
 }
 
@@ -676,9 +790,11 @@ type SharedParams struct {
 	Trace bool
 	// States reads what only the assessment's states need: the approvals
 	// since ApprovalsFrom (zero: From) less ApprovalLookback
-	// (Dataset.Approvals).
+	// (Dataset.Approvals), the branches since BranchesFrom (zero: From;
+	// Dataset.Branches).
 	States        bool
 	ApprovalsFrom time.Time
+	BranchesFrom  time.Time
 	// Automated is Params.Automated, for the approvals read here.
 	Automated func(author, displayName string) bool
 }
@@ -702,6 +818,10 @@ type Shared struct {
 	// Dataset.Branches).
 	approvals []Approval
 	branches  []BranchLife
+	// owners are whose each branch pushed to since From is
+	// (sql/branch_owners.sql), read on every page: a bot's branch's builds
+	// are a bot's in every number (markBotRuns).
+	owners []BranchOwner
 }
 
 // LoadShared reads a page request's Shared: the tracing input side by side
@@ -719,7 +839,8 @@ func LoadShared(ctx context.Context, db DB, p SharedParams) (*Shared, error) {
 		if err == nil {
 			defer func() { _ = tx.Rollback(ctx) }()
 			sh, err = loadShared(ctx, tx, SharedParams{Team: p.Team, From: p.From, ClassEnds: p.ClassEnds, Now: p.Now,
-				Libraries: p.Libraries, States: p.States, ApprovalsFrom: p.ApprovalsFrom, Automated: p.Automated})
+				Libraries: p.Libraries, States: p.States, ApprovalsFrom: p.ApprovalsFrom, BranchesFrom: p.BranchesFrom,
+				Automated: p.Automated})
 		}
 		if errs[0] = err; err != nil {
 			cancel()
@@ -835,6 +956,9 @@ func loadShared(ctx context.Context, tx pgx.Tx, p SharedParams) (*Shared, error)
 	for _, r := range starts {
 		sh.repoStarts[r.Repo] = r.Noergler
 	}
+	if sh.owners, err = all[BranchOwner](ctx, tx, "branch_owners", branchOwnersSQL, p.Team, p.From, sh.gitops); err != nil {
+		return nil, err
+	}
 	sh.approvals, sh.branches = []Approval{}, []BranchLife{}
 	if p.States {
 		since := p.ApprovalsFrom
@@ -849,15 +973,39 @@ func loadShared(ctx context.Context, tx pgx.Tx, p SharedParams) (*Shared, error)
 			return p.Automated != nil && p.Automated(login, displayName)
 		}
 		approved(sh.approvals, automated)
-		if sh.branches, err = all[BranchLife](ctx, tx, "branches", branchesSQL, p.Team, p.From, sh.gitops); err != nil {
+		bfrom := p.BranchesFrom
+		if bfrom.IsZero() {
+			bfrom = p.From
+		}
+		if sh.branches, err = all[BranchLife](ctx, tx, "branches", branchesSQL, p.Team, bfrom, sh.gitops); err != nil {
 			return nil, err
 		}
+		bots := sh.botBranches(automated)
 		for i := range sh.branches {
 			b := &sh.branches[i]
-			b.Bot = b.Tool || automated(b.Author, b.AuthorDisplayName) || automated(b.HeadName, b.HeadDisplayName)
+			b.Bot = bots[branchKey(b.Repo, b.Branch)]
+			for j := range b.PushTimes {
+				b.PushTimes[j] = b.PushTimes[j].UTC()
+			}
 		}
 	}
 	return sh, nil
+}
+
+// branchKey keys a repo's branch, lowercased: Bitbucket's events store the
+// branch so, a run's pipeline name may not.
+func branchKey(repo, branch string) string { return repo + "\x00" + strings.ToLower(branch) }
+
+// botBranches are the branches of sh.owners that are a bot's, by
+// branchKey.
+func (sh *Shared) botBranches(automated func(login, displayName string) bool) map[string]bool {
+	out := map[string]bool{}
+	for _, o := range sh.owners {
+		if o.bot(automated) {
+			out[branchKey(o.Repo, o.Branch)] = true
+		}
+	}
+	return out
 }
 
 // Load reads the dataset in one read-only snapshot, so the sections agree
@@ -971,7 +1119,7 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 		d.Runs[i].Branch = Branch(d.Runs[i].PipelineName)
 		d.Runs[i].BranchKind = BranchKind(d.Runs[i].Branch)
 	}
-	markBotRuns(d, p.BotBranch)
+	markBotRuns(d, p.BotBranch, sh.botBranches(automated))
 	if !p.FactsOnly {
 		d.Meta.RepoStarts = repoStarts(d, sh.repoStarts)
 	}
@@ -1282,13 +1430,15 @@ func (d *Dataset) Classified(apps []App) *Dataset {
 }
 
 // markBotRuns flags the runs of a bot's branch (botBranch, the config's
-// prefixes) and the PR-<n> builds of the dataset's bot PRs: a Jenkins PR
+// prefixes; bots, the branches whose pushes show a bot's or a tool's,
+// branchKey) and the PR-<n> builds of the dataset's bot PRs: a Jenkins PR
 // build names its PR, not the bot's branch.
-func markBotRuns(d *Dataset, botBranch func(string) bool) {
+func markBotRuns(d *Dataset, botBranch func(string) bool, bots map[string]bool) {
 	key := func(repo string, id int64) string { return repo + "\x00pr-" + strconv.FormatInt(id, 10) }
 	botPRs := map[string]bool{}
 	for _, pr := range d.PRs {
-		if pr.Bot {
+		// A PR from a bot's or a tool's branch is built as PR-<n> too.
+		if pr.Bot || (pr.SourceRef != "" && bots[branchKey(pr.Repo, pr.SourceRef)]) {
 			botPRs[key(pr.Repo, pr.PRID)] = true
 		}
 	}
@@ -1301,7 +1451,7 @@ func markBotRuns(d *Dataset, botBranch func(string) bool) {
 		r := &d.Runs[i]
 		branch := strings.ToLower(r.Branch)
 		r.Bot = (botBranch != nil && branch != "" && botBranch(branch)) ||
-			(r.Repo != nil && botPRs[*r.Repo+"\x00"+branch])
+			(r.Repo != nil && botPRs[*r.Repo+"\x00"+branch]) || (r.Repo != nil && branch != "" && bots[branchKey(*r.Repo, branch)])
 	}
 }
 
@@ -1363,12 +1513,13 @@ func (e *libraryEvidence) library(repo string) bool {
 }
 
 // markLibraries flags the merged PRs of library repos (libraryEvidence). A
-// repo one of whose PRs in the window reached any stage is none, whatever
-// the evidence: its merge commit was rolled out. After place.
+// repo one of whose PRs in the window reached any stage by the window's end
+// is none, whatever the evidence: its merge commit was rolled out. A deploy
+// after the end does not reclass a closed period. After place.
 func markLibraries(d *Dataset, e *libraryEvidence) {
 	traced := map[string]bool{}
 	for _, pr := range d.PRs {
-		if len(pr.Environments) > 0 {
+		if slices.ContainsFunc(pr.Environments, func(e EnvironmentDeploy) bool { return e.FirstDeployedAt.Before(d.Meta.To) }) {
 			traced[pr.Repo] = true
 		}
 	}
@@ -1446,6 +1597,7 @@ func markImplicitMerges(prs []PR) {
 				// It reached the trunk with the merge that brought it in.
 				if i != keep && keep >= 0 && prs[i].TrunkAt == nil {
 					prs[i].TrunkAt, prs[i].TrunkBranch = prs[keep].TrunkAt, prs[keep].TrunkBranch
+					prs[i].OnwardAt, prs[i].OnwardBranch = prs[keep].OnwardAt, prs[keep].OnwardBranch
 				}
 			}
 			if keep >= 0 && !prs[keep].Bot && slices.ContainsFunc(group, func(i int) bool { return i != keep && !prs[i].Bot }) {
@@ -1557,7 +1709,7 @@ func (d *Dataset) utc() {
 	for i := range d.PRs {
 		p := &d.PRs[i]
 		ptrs = append(ptrs, p.ClosedAt, p.OpenedAt, p.ReadyAt, p.FirstReviewAt, p.ApprovedAt, p.MergedAt, p.FirstCommitAt,
-			p.TrunkAt)
+			p.TrunkAt, p.OnwardAt)
 		for j := range p.Environments {
 			ptrs = append(ptrs, &p.Environments[j].FirstDeployedAt)
 		}

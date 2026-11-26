@@ -119,7 +119,8 @@ function ToProd({ p, prod }: { p: PRFact; prod: string }) {
           title={[
             p.prod_at &&
               t("facts.onProdAt", { prod, date: dateTime(p.prod_at) }),
-            p.prod_route && t(`facts.route.${p.prod_route}`),
+            p.prod_route &&
+              t(`facts.route.${p.prod_route}`, { defaultValue: "" }),
             p.prod_lower_bound && t("facts.atMostTitle", { prod }),
           ]
             .filter(Boolean)
@@ -145,7 +146,10 @@ function ToProd({ p, prod }: { p: PRFact; prod: string }) {
           </span>
           {p.prod_reason && (
             <span className="max-w-[220px] text-[12px] whitespace-normal text-faint">
-              {t(`facts.prodReason.${p.prod_reason}`)}
+              {t(`facts.prodReason.${p.prod_reason}`, {
+                defaultValue: p.prod_reason,
+                prod,
+              })}
             </span>
           )}
         </span>

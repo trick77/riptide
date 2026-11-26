@@ -61,9 +61,9 @@ places each merged PR on the first deploy whose stretch holds it
   started (a UI job pushes its own release commit minutes into the run);
 - the stretch starts at the newest head of the same image repository's tags the
   App ran before, compared as tag sets per image repository (an App may run
-  two tags of one image side by side); without one, at the deploy that ran
-  them, or for an App's first deploy at the repo's first trunk push: a lower
-  bound;
+  two tags of one image side by side); without one, at the deploy that first
+  ran them (a re-sync of the same tags is no new start), or for an App's first
+  deploy at the repo's first trunk push: a lower bound;
 - the references are compared as identical strings: no normalisation of
   registry, tag or digest. A deploy whose reference no run published is not
   resolved by this route (CI not reporting, or the image built before CI
@@ -112,7 +112,8 @@ through the release-PR path — a direct version-bump commit carries no links.
 It is the route that reaches back before CI reported images; the image
 reference is the contract for everything collected from now on, and where both
 resolve, a known image head caps the link's new end (the release tool's commit
-the link names may be pushed after the build started).
+the link names may be pushed after the build started), and the App's next link
+from that commit starts at the cap.
 
 ## What not to do
 

@@ -24,6 +24,7 @@ const (
 	LeverPlanRelease     = "plan_release"
 	LeverStopBotLoop     = "stop_bot_loop"
 	LeverWalkBranches    = "walk_branches"
+	LeverInspectDeploys  = "inspect_deploys"
 )
 
 // kindGloss is a signal kind: what it means, and its levers.
@@ -62,7 +63,7 @@ var kinds = map[string]kindGloss{
 		nil,
 	},
 	metrics.SignalState: {
-		"A state: a finding that stands without a previous period, judged per unit (project, repo, App, branch) against the team's own threshold, never pooled. state.key says which (states lists their meaning and the page's words); state.count units of state.judged fire, state.unjudged could not be judged, state.threshold is what they were measured against, state.since when it began. tone attention: red; hint: a hint; limit: what the data cannot judge, never a finding about the team.",
+		"A state: a finding that stands without a previous period, judged per unit (project, repo, App, branch) against the team's own threshold, never pooled. state.key says which (states lists their meaning and the page's words); state.count units of state.judged fire, state.unjudged could not be judged, state.threshold is what they were measured against (null for what the data cannot judge: it measures against no agreement). tone attention: red; hint: a hint; limit: what the data cannot judge, never a finding about the team.",
 		nil,
 	},
 }
@@ -84,7 +85,7 @@ var states = map[string]StateGloss{
 	metrics.StateReleaseDue: {"A project's last release to production lies more than a sprint back, not yet past the rule's limit. A hint.",
 		"Release nach PROD bald fällig", "Release to PROD due soon"},
 	metrics.StateNotOnProd: {"A repo's merged PRs are not on production yet, the oldest longer than the team's rule allows. value: days since the oldest reached the trunk.",
-		"Gemergte PRs liegen lange vor PROD", "Merged PRs wait long before PROD"},
+		"Gemergte PRs warten lange auf PROD", "Merged PRs wait long for PROD"},
 	metrics.StateSlowToProd: {"A repo's merged PRs typically take longer from merge to production than the team's rule allows.",
 		"Lange Wartezeit vom Merge bis PROD", "Long wait from merge to PROD"},
 	metrics.StateMergePause: {"A project's week in which hardly any PR was merged against its typical week, while approved PRs waited. Why is not in the data (a freeze, a release date).",
@@ -92,14 +93,14 @@ var states = map[string]StateGloss{
 	metrics.StateApprovedWaiting: {"A repo's approved PRs wait for their merge longer than the team's threshold, at the period's end.",
 		"Freigegeben, aber nicht gemerged", "Approved, but not merged"},
 	metrics.StateBotLoop: {"A bot branch's builds failed again and again in a row: CI time wasted. Never a problem of the team's code.",
-		"Bot-Branch scheitert immer wieder", "Bot branch failing again and again"},
-	metrics.StateUntraced: {"A repo's merged PRs cannot be placed on production (the reason says why): its delivery cannot be judged.",
+		"Bot-Branch verbraucht CI-Zeit mit fehlgeschlagenen Builds", "Bot branch burning CI time on failed builds"},
+	metrics.StateUntraced: {"A repo's merged PRs cannot be placed on production: its delivery cannot be judged.",
 		"Nicht messbar, ob gemergte PRs auf PROD sind", "Not measurable whether merged PRs are on PROD"},
 	metrics.StateUnattributed: {"Releases to production that belong to no project: the release rule cannot be judged for the projects they belong to.",
 		"Releases nach PROD ohne Projekt", "Releases to PROD without a project"},
 	metrics.StateNoProdStage: {"Argo CD reports deploys, but none to the production stage: the stage configuration or the notification is off.",
 		"Argo CD meldet nichts nach PROD", "Argo CD reports nothing to PROD"},
-	metrics.StateUnmeasurable: {"A state an earlier assessment raised can no longer be judged (the data is missing): never call it solved.",
+	metrics.StateUnmeasurable: {"A state (state.was) the assessment a week before raised can no longer be judged for units it named: the data no longer tells. It has no numbers to word. Never call it solved, never a problem of the team.",
 		"Nicht mehr messbar", "No longer measurable"},
 	metrics.StateDeployFailing: {"An App's last deploy to production failed and none succeeded since, for longer than the threshold.",
 		"Letztes Deploy nach PROD fehlgeschlagen", "Last deploy to PROD failed"},
@@ -143,8 +144,10 @@ var stateLevers = map[string][]string{
 	metrics.StateMergePause: {LeverAskWhyWaiting}, metrics.StateApprovedWaiting: {LeverWalkPRs, LeverAskWhyWaiting},
 	metrics.StateBotLoop:  {LeverStopBotLoop},
 	metrics.StateUntraced: {LeverCheckSource}, metrics.StateUnattributed: {LeverCheckSource},
-	metrics.StateNoProdStage: {LeverCheckSource}, metrics.StateUnmeasurable: {LeverCheckSource},
-	metrics.StateDeployFailing: {LeverInspectFailures}, metrics.StateDeployFailures: {LeverInspectFailures},
+	// Nothing to do about a unit the data no longer judges: no step.
+	metrics.StateNoProdStage: {LeverCheckSource}, metrics.StateUnmeasurable: {},
+	// A failed sync says nothing of a build: look at the deploys.
+	metrics.StateDeployFailing: {LeverInspectDeploys}, metrics.StateDeployFailures: {LeverInspectDeploys},
 	metrics.StateFirstReviewWait: {LeverWalkPRs, LeverAskWhyWaiting},
 	metrics.StateTrunkFailing:    {LeverInspectFailures}, metrics.StateBranchFailing: {LeverInspectFailures},
 	metrics.StateFlakyBuilds: {LeverInspectFailures}, metrics.StateLongBuilds: {LeverInspectBuildLog},
@@ -226,6 +229,7 @@ var leverText = map[string]string{
 	LeverPlanRelease:     "plan the next release to production, or name what holds it",
 	LeverStopBotLoop:     "look at the bot branch: fix what its builds trip over, or close it",
 	LeverWalkBranches:    "go through the branches: delete the finished ones, open a PR or park the rest on purpose",
+	LeverInspectDeploys:  "look at the failed deploys in Argo CD: the same error each time, or a different one",
 }
 
 // leversFor are the levers a signal may carry, never nil; a worse change

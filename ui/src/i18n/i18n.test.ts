@@ -122,6 +122,7 @@ describe("state cards", () => {
     measure: null,
     ...o,
   });
+  const honest = ["untraced", "unattributed", "no_prod_stage", "unmeasurable"];
   const card = (key: StateCard["key"]): StateCard => ({
     key,
     unit: "repo",
@@ -134,18 +135,36 @@ describe("state cards", () => {
     units: [unit()],
     since: null,
     since_lower_bound: false,
-    threshold: {
-      key: key === "untraced" ? "" : "some_key",
-      value: 2,
-      unit: "days",
-      min_key: "some_min",
-      min: 5,
-    },
+    threshold: honest.includes(key)
+      ? null
+      : {
+          key: "some_key",
+          value: 2,
+          unit: "days",
+          min_key: "some_min",
+          min: 5,
+          within_key: "some_span",
+          within: 10,
+        },
     at: "2026-11-09T00:00:00Z",
     was: key === "unmeasurable" ? "no_release" : null,
     facts: "prs",
+    value_unit: "count",
+    names_kind: "",
   });
-  const honest = ["untraced", "unattributed", "no_prod_stage", "unmeasurable"];
+  // Every nullable field null, as the backend sends a unit that rests on
+  // less: nothing raw shows.
+  const sparse = unit({
+    count: null,
+    of: null,
+    typical: null,
+    since: null,
+    week: null,
+    names: [],
+    reason: null,
+    ci_seconds: null,
+    query: null,
+  });
   it.each(["de", "en"] as const)("fill every placeholder in %s", (lng) => {
     const t = i18n.getFixedT(lng);
     expect(keys.length).toBeGreaterThan(20);
@@ -172,7 +191,141 @@ describe("state cards", () => {
         if (key !== "unmeasurable")
           expect([key, s.trim()]).not.toEqual([key, ""]);
       }
+      for (const s of [
+        stateUnitText(t, c, sparse, "PROD"),
+        stateUnitText(t, { ...c, threshold: null }, sparse, "PROD"),
+      ])
+        expect([key, /\{\{|undefined|null|NaN/.test(s)]).toEqual([key, false]);
     }
+  });
+});
+
+// The configured spans print, not words standing for them; one case or
+// one day reads singular; an unknown code shows as sent, never as a key.
+describe("state wording", () => {
+  const t = i18n.getFixedT("de");
+  const unit = (o: Partial<StateUnit> = {}): StateUnit => ({
+    name: "kasse/kasse-api",
+    project: "kasse",
+    value: 3,
+    count: 3,
+    of: null,
+    typical: null,
+    since: null,
+    lower_bound: false,
+    week: null,
+    names: [],
+    held: false,
+    reason: null,
+    ci_seconds: null,
+    query: null,
+    measure: null,
+    ...o,
+  });
+  const card = (
+    key: StateCard["key"],
+    o: Partial<NonNullable<StateCard["threshold"]>> = {},
+    c: Partial<StateCard> = {},
+  ): StateCard => ({
+    key,
+    unit: "repo",
+    count: 1,
+    judged: 2,
+    unjudged: 0,
+    idle: 0,
+    worst: [],
+    more: 0,
+    units: [],
+    since: null,
+    since_lower_bound: false,
+    threshold: {
+      key: "k",
+      value: 3,
+      unit: "count",
+      min_key: null,
+      min: 400,
+      within_key: null,
+      within: null,
+      ...o,
+    },
+    at: "2026-11-09T00:00:00Z",
+    was: null,
+    facts: "prs",
+    value_unit: "count",
+    names_kind: "",
+    ...c,
+  });
+  it("prints the team's spans", () => {
+    const fast = card("fast_approval", { within: 7 });
+    expect(stateUnitText(t, fast, unit(), "PROD")).toBe(
+      "3 grosse PRs innert 7 Minuten freigegeben, ohne Kommentar davor",
+    );
+    expect(thresholdText(t, fast, "PROD")).toBe(
+      "Gemeldet ab 3 PRs über 400 Zeilen, innert 7 Minuten freigegeben.",
+    );
+    expect(
+      stateUnitText(t, card("late_decline", { within: 12 }), unit(), "PROD"),
+    ).toBe("3 PRs nach mehr als 12 Arbeitstagen abgelehnt ()");
+    expect(
+      thresholdText(t, card("branch_open", { value: 14, within: 1 }), "PROD"),
+    ).toBe(
+      "Gemeldet ab einem Branch ohne PR, zuerst vor mehr als 14 Tagen gepusht und zuletzt vor höchstens 1 Arbeitstag.",
+    );
+  });
+  it("counts one in the singular", () => {
+    const failing = card("deploy_failing", {}, { unit: "app" });
+    expect(
+      stateUnitText(t, failing, unit({ value: 1, count: 1 }), "PROD"),
+    ).toBe("seit 1 Arbeitstag kein erfolgreiches Deploy, 1 Versuch");
+    expect(
+      stateUnitText(t, failing, unit({ value: 2.5, count: 4 }), "PROD"),
+    ).toBe("seit 2.5 Arbeitstagen kein erfolgreiches Deploy, 4 Versuche");
+    expect(
+      stateUnitText(
+        t,
+        card("unattributed", {}, { unit: "team" }),
+        unit({ value: 1, count: 1 }),
+        "PROD",
+      ),
+    ).toBe("1 Release nach PROD keinem Projekt zuordenbar");
+  });
+  it("names a resolved state by its title", () => {
+    const title = signalTitle(
+      t,
+      {
+        kind: "resolved",
+        metric: "state:unapproved",
+        repo: null,
+        run_kind: null,
+        source: "bitbucket",
+        facts: [{ label: "state_units", unit: "count", value: 1 }],
+      } as unknown as Signal,
+      "PROD",
+    );
+    expect(title).toContain("Ohne Freigabe gemerged");
+    expect(title).not.toContain("genannt");
+  });
+  it("shows an unknown code as sent", () => {
+    const untraced = card("untraced", {}, { threshold: null });
+    expect(
+      stateUnitText(
+        t,
+        untraced,
+        unit({ value: 1, count: 1, of: 3, reason: "future_reason" as never }),
+        "PROD",
+      ),
+    ).toBe("1 von 3 gemergten PRs nicht zuordenbar: future_reason");
+    expect(thresholdText(t, untraced, "PROD")).toBe("");
+    const title = signalTitle(
+      t,
+      {
+        kind: "state",
+        state: card("future_state" as never, {}, { unit: "pipeline" as never }),
+        facts: [],
+      } as unknown as Signal,
+      "PROD",
+    );
+    expect(title.includes("overview.")).toBe(false);
   });
 });
 

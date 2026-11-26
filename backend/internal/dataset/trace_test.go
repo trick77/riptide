@@ -272,8 +272,369 @@ func TestTraceLinkCappedByTheBuild(t *testing.T) {
 	s.push(shopAPI, "master", days(2).Add(3*time.Minute), commit{sha: strings.Repeat("a9", 20), authored: days(2)})
 	s.release(sha("1"), days(3).Add(-time.Hour), compare(shopAPI, sha("a"), strings.Repeat("a9", 20)))
 	s.deploy(team, "shop-prod", "prod", sha("1"), "Succeeded", days(3), "reg/shop-api:1.0")
+	// The next release links on from the release tool's commit a9: it starts
+	// where the build cut the one before, so #2, merged between the head and
+	// a9, is in it and in no gap.
+	s.merged(shopAPI, 3, strings.Repeat("a3", 20), days(4))
+	s.run(run{pipeline: "shop-api/master", runID: "2", status: "SUCCESS", commit: strings.Repeat("a3", 20),
+		buildType: "release", started: days(4).Add(time.Minute), images: []string{"reg/shop-api:1.1"}})
+	s.push(shopAPI, "master", days(4).Add(3*time.Minute), commit{sha: strings.Repeat("a8", 20), authored: days(4)})
+	s.release(sha("2"), days(5).Add(-time.Hour), compare(shopAPI, strings.Repeat("a9", 20), strings.Repeat("a8", 20)))
+	s.deploy(team, "shop-prod", "prod", sha("2"), "Succeeded", days(5), "reg/shop-api:1.1")
 	d := load(t, st, t0, days(28))
-	expectProd(t, d, shopAPI, map[int64]string{1: "72h0m0s/compare", 2: "-"})
+	expectProd(t, d, shopAPI, map[int64]string{1: "72h0m0s/compare", 2: "120h0m0s/compare", 3: "120h0m0s/compare"})
+}
+
+// A release whose exact stretch starts after a PR reached the trunk proves
+// the App ran it before, with a deploy riptide did not see: on production,
+// when unknown; never "not yet".
+func TestTraceShippedWithAnUnseenDeploy(t *testing.T) {
+	st, pool := migrated(t)
+	s := &seeder{t: t, pool: pool}
+	s.deploy(team, "shop-prod", "prod", sha("0"), "Failed", days(0.5))
+	s.push(shopAPI, "master", days(1), commit{sha: sha("a"), authored: days(1)})
+	s.merged(shopAPI, 1, strings.Repeat("a1", 20), days(2))
+	// Its next release's old end, pushed after #1: the deploy that shipped
+	// a7 (and #1) went unseen.
+	s.push(shopAPI, "master", days(3), commit{sha: strings.Repeat("a7", 20), authored: days(3)})
+	s.merged(shopAPI, 2, strings.Repeat("a2", 20), days(3).Add(time.Hour))
+	s.release(sha("1"), days(4).Add(-time.Hour), compare(shopAPI, strings.Repeat("a7", 20), strings.Repeat("a2", 20)))
+	s.deploy(team, "shop-prod", "prod", sha("1"), "Succeeded", days(4), "reg/shop-api:1.0")
+	period := metrics.NewPeriod(1, days(5), time.UTC)
+	d := load(t, st, period.From, period.To)
+	expectProd(t, d, shopAPI, map[int64]string{1: "-", 2: "96h0m0s/compare"})
+	c := metrics.Compute(d, &dataset.Dataset{Meta: d.Meta}, nil, metrics.Params{Period: period}).Coverage
+	if c.OnProd != 1 || c.NotYet != 0 || c.NotPlaceable != 1 || c.Reasons.InSilence != 1 {
+		t.Errorf("coverage = %+v", c.TraceCounts)
+	}
+}
+
+// A closed period reads the evidence that an App deploys a repo only as it
+// stood at its end: a run after it that shows an App ships the repo's
+// images does not make the App's releases in the period unresolved.
+func TestTraceClosedPeriodEvidenceFrozen(t *testing.T) {
+	st, pool := migrated(t)
+	s := &seeder{t: t, pool: pool}
+	s.deploy(team, "shop-prod", "prod", sha("0"), "Failed", days(0.5))
+	s.push(shopAPI, "master", days(1), commit{sha: sha("a"), authored: days(1)})
+	s.merged(shopAPI, 1, strings.Repeat("a1", 20), days(2))
+	s.deploy(team, "shop-worker", "prod", sha("5"), "Succeeded", days(2.5), "reg/wrk:1.0")
+	s.release(sha("1"), days(3).Add(-time.Hour), compare(shopAPI, sha("a"), strings.Repeat("a1", 20)))
+	s.deploy(team, "shop-prod", "prod", sha("1"), "Succeeded", days(3), "reg/shop-api:1.0")
+	s.merged(shopAPI, 2, strings.Repeat("a2", 20), days(3.5))
+	s.deploy(team, "shop-worker", "prod", sha("6"), "Succeeded", days(4), "reg/wrk:1.1")
+	period := metrics.NewPeriod(1, days(5), time.UTC)
+	compute := func() metrics.Coverage {
+		d := load(t, st, period.From, period.To)
+		return metrics.Compute(d, &dataset.Dataset{Meta: d.Meta}, nil, metrics.Params{Period: period}).Coverage
+	}
+	before := compute()
+	if before.NotYet != 1 || before.NotPlaceable != 0 {
+		t.Fatalf("coverage = %+v", before.TraceCounts)
+	}
+	// After the period: a run of shop-api publishes the worker's image, the
+	// worker deploys it.
+	s.run(run{pipeline: "shop-api/master", runID: "9", status: "SUCCESS", commit: strings.Repeat("a2", 20),
+		buildType: "release", started: days(6), images: []string{"reg/wrk:1.2"}})
+	s.deploy(team, "shop-worker", "prod", sha("7"), "Succeeded", days(6.5), "reg/wrk:1.2")
+	if a, b := jsonString(compute()), jsonString(before); a != b {
+		t.Errorf("closed period moved:\n%s\n%s", b, a)
+	}
+	// The worker is known to deploy shop-api since then.
+	d := load(t, st, t0, days(28))
+	if got := d.Traces[shopAPI].Apps["shop-worker"]; !got.Equal(days(6.5)) {
+		t.Errorf("shop-worker known since %v", got)
+	}
+}
+
+// A fast-forward merge pushes the source branch's head to the trunk: the
+// PR is on the trunk from that push, not from the earlier push of the same
+// commit to its feature branch.
+func TestTraceFastForwardMerge(t *testing.T) {
+	st, pool := migrated(t)
+	s := &seeder{t: t, pool: pool}
+	s.push(shopAPI, "master", days(1), commit{sha: sha("a"), authored: days(1)})
+	s.push(shopAPI, "feature/shop-1", days(2), commit{sha: strings.Repeat("f1", 20), authored: days(2)})
+	s.push(shopAPI, "master", days(2).Add(time.Hour), commit{sha: strings.Repeat("a0", 20), authored: days(2)})
+	s.release(sha("1"), days(2.5).Add(-time.Hour), compare(shopAPI, sha("a"), strings.Repeat("a0", 20)))
+	s.deploy(team, "shop-prod", "prod", sha("1"), "Succeeded", days(2.5), "reg/shop-api:1.0")
+	s.pr(prEvent{event: "pr:opened", repo: shopAPI, id: 1, author: "dev-anna", branch: "feature/shop-1", target: "master",
+		at: days(1.5)})
+	s.pr(prEvent{event: "pr:merged", repo: shopAPI, id: 1, author: "dev-anna", branch: "feature/shop-1", target: "master",
+		mergeCommit: strings.Repeat("f1", 20), at: days(3)})
+	s.push(shopAPI, "master", days(3), commit{sha: strings.Repeat("f1", 20), authored: days(2)})
+	d := load(t, st, t0, days(28))
+	for _, p := range d.PRs {
+		if p.PRID == 1 && (p.TrunkAt == nil || !p.TrunkAt.Equal(days(3))) {
+			t.Errorf("#1 on the trunk at %v, want its merge", p.TrunkAt)
+		}
+	}
+	expectProd(t, d, shopAPI, map[int64]string{1: "-"})
+}
+
+// An umbrella branch merged first into another branch, then into the
+// trunk: its PRs reach the trunk with the second.
+func TestTraceUmbrellaIntoTheTrunkSecond(t *testing.T) {
+	st, pool := migrated(t)
+	s := &seeder{t: t, pool: pool}
+	s.push(shopAPI, "master", days(1), commit{sha: sha("a"), authored: days(1)})
+	s.merged(shopAPI, 1, strings.Repeat("a1", 20), days(1).Add(time.Hour))
+	s.merged(shopAPI, 5, strings.Repeat("a5", 20), days(1).Add(2*time.Hour))
+	s.merged(shopAPI, 6, strings.Repeat("a6", 20), days(1).Add(3*time.Hour))
+	s.pr(prEvent{event: "pr:merged", repo: shopAPI, id: 2, author: "dev-anna", branch: "feature/shop-2",
+		target: "feature/umbau", mergeCommit: strings.Repeat("b2", 20), at: days(2)})
+	s.pr(prEvent{event: "pr:merged", repo: shopAPI, id: 3, author: "dev-otto", branch: "feature/umbau",
+		target: "release/x", mergeCommit: strings.Repeat("b3", 20), at: days(3)})
+	s.pr(prEvent{event: "pr:merged", repo: shopAPI, id: 4, author: "dev-otto", branch: "feature/umbau",
+		target: "master", mergeCommit: strings.Repeat("b4", 20), at: days(4)})
+	s.push(shopAPI, "master", days(4), commit{sha: strings.Repeat("b4", 20), authored: days(4), merge: true})
+	d := load(t, st, t0, days(28))
+	for _, p := range d.PRs {
+		if p.PRID == 2 && (p.TrunkAt == nil || !p.TrunkAt.Equal(days(4)) || deref(p.TrunkBranch) != "master") {
+			t.Errorf("#2 on the trunk at %v (%s), want the merge into master", p.TrunkAt, deref(p.TrunkBranch))
+		}
+	}
+}
+
+// A re-sync of the same tags is no new start: the next tag's stretch starts
+// where the set first ran, so a PR merged between that and the re-sync is
+// in it.
+func TestTraceResyncKeepsTheStart(t *testing.T) {
+	st, pool := migrated(t)
+	s := &seeder{t: t, pool: pool}
+	s.push(shopAPI, "master", days(1), commit{sha: sha("a"), authored: days(1)})
+	s.deploy(team, "shop-prod", "prod", sha("1"), "Succeeded", days(3), "reg/shop-api:1.0")
+	s.merged(shopAPI, 2, strings.Repeat("a2", 20), days(4))
+	s.run(run{pipeline: "shop-api/master", runID: "2", status: "SUCCESS", commit: strings.Repeat("a2", 20),
+		buildType: "release", started: days(4).Add(10 * time.Minute), images: []string{"reg/shop-api:1.1"}})
+	s.deploy(team, "shop-prod", "prod", sha("1"), "Succeeded", days(5), "reg/shop-api:1.0")
+	s.deploy(team, "shop-prod", "prod", sha("2"), "Succeeded", days(6), "reg/shop-api:1.1")
+	d := load(t, st, t0, days(28))
+	expectProd(t, d, shopAPI, map[int64]string{2: "144h0m0s/image~"})
+	rel := d.Traces[shopAPI].Releases
+	if len(rel) != 2 || !rel[1].Resolved(days(4), "master") {
+		t.Errorf("releases = %+v", rel)
+	}
+}
+
+// PRs into develop, the trunk most PRs go into, reach master with the PR
+// that merges develop into it; a release built from master ships them.
+func TestTraceDevelopTrunk(t *testing.T) {
+	st, pool := migrated(t)
+	s := &seeder{t: t, pool: pool}
+	s.push(shopAPI, "master", days(1), commit{sha: sha("a"), authored: days(1)})
+	s.push(shopAPI, "develop", days(1), commit{sha: sha("d"), authored: days(1)})
+	for i, id := range []int64{1, 2, 3} {
+		at := days(2).Add(time.Duration(i) * time.Hour)
+		mc := strings.Repeat(fmt.Sprintf("d%d", id), 20)
+		s.pr(prEvent{event: "pr:merged", repo: shopAPI, id: id, author: "dev-anna", branch: fmt.Sprintf("feature/f-%d", id),
+			target: "develop", mergeCommit: mc, at: at})
+		s.push(shopAPI, "develop", at, commit{sha: mc, authored: at, merge: true})
+	}
+	// #4 merged into develop after the release PR: not on master yet.
+	s.pr(prEvent{event: "pr:merged", repo: shopAPI, id: 9, author: "dev-otto", branch: "develop",
+		target: "master", mergeCommit: strings.Repeat("e9", 20), at: days(3)})
+	s.push(shopAPI, "master", days(3), commit{sha: strings.Repeat("e9", 20), authored: days(3), merge: true})
+	s.pr(prEvent{event: "pr:merged", repo: shopAPI, id: 4, author: "dev-anna", branch: "feature/f-4",
+		target: "develop", mergeCommit: strings.Repeat("d4", 20), at: days(3.5)})
+	s.push(shopAPI, "develop", days(3.5), commit{sha: strings.Repeat("d4", 20), authored: days(3.5), merge: true})
+	s.release(sha("1"), days(4).Add(-time.Hour), compare(shopAPI, sha("a"), strings.Repeat("e9", 20)))
+	s.deploy(team, "shop-prod", "prod", sha("1"), "Succeeded", days(4), "reg/shop-api:1.0")
+	d := load(t, st, t0, days(28))
+	expectProd(t, d, shopAPI, map[int64]string{1: "96h0m0s/compare", 2: "96h0m0s/compare", 3: "96h0m0s/compare",
+		4: "-"})
+}
+
+// A release that changed only an image none of its App's repos publishes
+// (a sidecar's new tag) shipped nothing of them: resolved, no release
+// without PRs to tie it to.
+func TestTraceSidecarOnlyRelease(t *testing.T) {
+	st, pool := migrated(t)
+	s := &seeder{t: t, pool: pool}
+	s.push(shopAPI, "master", days(1), commit{sha: sha("a"), authored: days(1)})
+	s.merged(shopAPI, 1, strings.Repeat("a1", 20), days(2))
+	s.release(sha("1"), days(3).Add(-time.Hour), compare(shopAPI, sha("a"), strings.Repeat("a1", 20)))
+	s.deploy(team, "shop-prod", "prod", sha("1"), "Succeeded", days(3), "reg/shop-api:1.0", "reg/proxy:1")
+	s.release(sha("2"), days(4).Add(-time.Hour))
+	s.deploy(team, "shop-prod", "prod", sha("2"), "Succeeded", days(4), "reg/shop-api:1.0", "reg/proxy:2")
+	d := load(t, st, t0, days(28))
+	for _, dep := range d.Deploys {
+		if !dep.Traced {
+			t.Errorf("deploy %s at %v not traced", dep.Revision, dep.At.Sub(t0))
+		}
+	}
+	// After the period a run of shop-ui turns out to build the proxy: the
+	// period's release stays resolved, as it read at the period's end.
+	period := metrics.NewPeriod(1, days(5), time.UTC)
+	unresolved := func() int {
+		d := load(t, st, period.From, period.To)
+		return metrics.Compute(d, &dataset.Dataset{Meta: d.Meta}, nil, metrics.Params{Period: period}).Delivery.Frequency.
+			ReleasesUnresolved
+	}
+	if n := unresolved(); n != 0 {
+		t.Fatalf("releases unresolved = %d", n)
+	}
+	s.push(shopUI, "master", days(5.5), commit{sha: strings.Repeat("b1", 20), authored: days(5.5)})
+	s.run(run{pipeline: "shop-ui/master", runID: "1", status: "SUCCESS", commit: strings.Repeat("b1", 20),
+		buildType: "release", started: days(6), images: []string{"reg/proxy:3"}})
+	s.deploy(team, "shop-prod", "prod", sha("3"), "Succeeded", days(6.5), "reg/shop-api:1.0", "reg/proxy:3")
+	if n := unresolved(); n != 0 {
+		t.Errorf("closed period's releases unresolved = %d after a later run", n)
+	}
+}
+
+// A push that moved several refs at once: the trunk's own change names the
+// tip before the data, so a link from it is exact.
+func TestTraceFirstPushOfSeveralRefs(t *testing.T) {
+	st, pool := migrated(t)
+	s := &seeder{t: t, pool: pool}
+	old := strings.Repeat("e0", 20)
+	ms := days(1).UnixMilli()
+	payload := jsonString(map[string]any{"eventKey": "repo:refs_changed",
+		"commits": []any{map[string]any{"id": sha("a"), "message": "m", "authorTimestamp": ms, "committerTimestamp": ms,
+			"author":  map[string]any{"name": "dev-anna", "displayName": "dev-anna", "type": "NORMAL"},
+			"parents": []any{map[string]any{"id": old}}}},
+		"changes": []any{
+			map[string]any{"ref": map[string]any{"displayId": "v1.0", "type": "TAG"}, "fromHash": strings.Repeat("0f", 20),
+				"toHash": sha("a"), "type": "ADD"},
+			map[string]any{"ref": map[string]any{"displayId": "master", "type": "BRANCH"}, "fromHash": old,
+				"toHash": sha("a"), "type": "UPDATE"}}})
+	s.exec(`INSERT INTO bitbucket_events (delivery_id, event_type, repo_full_name, branch_name, commit_sha, author,
+		occurred_at, team, jira_keys, payload, created_at)
+		VALUES ($1, 'repo:refs_changed', $2, 'master', $3, 'dev-anna', $4, $5, '{}', $6::jsonb, $4)`,
+		s.id(), shopAPI, sha("a"), days(1), team, payload)
+	s.merged(shopAPI, 1, strings.Repeat("a1", 20), days(2))
+	s.release(sha("1"), days(3).Add(-time.Hour), compare(shopAPI, old, strings.Repeat("a1", 20)))
+	s.deploy(team, "shop-prod", "prod", sha("1"), "Succeeded", days(3), "reg/shop-api:1.0")
+	d := load(t, st, t0, days(28))
+	expectProd(t, d, shopAPI, map[int64]string{1: "72h0m0s/compare"})
+}
+
+// A repo the library evidence calls a library stays one in a closed period
+// whatever deploys it after the period's end: its PRs' first deploy then
+// does not reclass the period.
+func TestTraceLibraryFrozen(t *testing.T) {
+	st, pool := migrated(t)
+	s := &seeder{t: t, pool: pool}
+	const shopCore = "shop/shop-core"
+	s.deploy(team, "shop-prod", "prod", sha("0"), "Failed", days(0.5))
+	s.push(shopAPI, "master", days(1), commit{sha: sha("a"), authored: days(1)})
+	s.push(shopCore, "master", days(1), commit{sha: sha("c"), authored: days(1)})
+	s.merged(shopAPI, 1, strings.Repeat("a1", 20), days(2))
+	s.run(run{pipeline: "shop-api/master", runID: "1", status: "SUCCESS", commit: strings.Repeat("a1", 20),
+		buildType: "release", started: days(2).Add(time.Minute), images: []string{"reg/shop-api:1.0"}})
+	s.release(sha("1"), days(3).Add(-time.Hour), compare(shopAPI, sha("a"), strings.Repeat("a1", 20)))
+	s.deploy(team, "shop-prod", "prod", sha("1"), "Succeeded", days(3), "reg/shop-api:1.0")
+	// shop-core: no link names it, no deployed image is named after it, and
+	// its run's commit is no push's tip: the evidence makes it a library.
+	s.merged(shopCore, 5, strings.Repeat("c5", 20), days(2))
+	s.push(shopCore, "master", days(2.4), commit{sha: strings.Repeat("c4", 20), authored: days(2.4)},
+		commit{sha: strings.Repeat("c6", 20), authored: days(2.4)})
+	s.run(run{pipeline: "core-svc/master", runID: "1", status: "SUCCESS", commit: strings.Repeat("c4", 20),
+		buildType: "release", started: days(2.5), images: []string{"reg/core-svc:1.0"}})
+	period := metrics.NewPeriod(1, days(5), time.UTC)
+	compute := func() metrics.Coverage {
+		d := load(t, st, period.From, period.To)
+		return metrics.Compute(d, &dataset.Dataset{Meta: d.Meta}, nil, metrics.Params{Period: period}).Coverage
+	}
+	before := compute()
+	if before.Library != 1 || before.Merged != 1 {
+		t.Fatalf("coverage = %+v", before.TraceCounts)
+	}
+	// After the period an App deploys shop-core's image: its PR is on
+	// production since then, the period stays as it was.
+	s.deploy(team, "core-prod", "prod", sha("2"), "Succeeded", days(6), "reg/core-svc:1.0")
+	d := load(t, st, t0, days(28))
+	expectProd(t, d, shopCore, map[int64]string{5: "144h0m0s/image~"})
+	if a, b := jsonString(compute()), jsonString(before); a != b {
+		t.Errorf("closed period moved:\n%s\n%s", b, a)
+	}
+}
+
+// An App's first deploy of an image repository starts after what another
+// App's deploy of it shipped there (exact); a rollback to an older head
+// ships nothing; two links of one repo in one release are one stretch.
+func TestTraceOtherAppsRollbacksAndUnions(t *testing.T) {
+	st, pool := migrated(t)
+	s := &seeder{t: t, pool: pool}
+	s.push(shopAPI, "master", days(1), commit{sha: sha("a"), authored: days(1)})
+	build := func(id, commit string, started time.Time, tag string) {
+		s.run(run{pipeline: "shop-api/master", runID: id, status: "SUCCESS", commit: commit, buildType: "release",
+			started: started, images: []string{"reg/shop-api:" + tag}})
+	}
+	s.merged(shopAPI, 1, strings.Repeat("a1", 20), days(2))
+	build("1", strings.Repeat("a1", 20), days(2).Add(10*time.Minute), "1.0")
+	s.deploy(team, "shop-a", "prod", sha("1"), "Succeeded", days(3), "reg/shop-api:1.0")
+	s.merged(shopAPI, 2, strings.Repeat("a2", 20), days(4))
+	build("2", strings.Repeat("a2", 20), days(4).Add(10*time.Minute), "1.1")
+	// shop-b's first deploy of the image: after what shop-a shipped.
+	s.deploy(team, "shop-b", "prod", sha("2"), "Succeeded", days(5), "reg/shop-api:1.1")
+	// Back to 1.0: an older head, nothing shipped.
+	s.merged(shopAPI, 3, strings.Repeat("a3", 20), days(5.5))
+	s.deploy(team, "shop-b", "prod", sha("3"), "Succeeded", days(6), "reg/shop-api:1.0")
+	// On intg one release links both steps of shop-api: one stretch.
+	s.release(sha("4"), days(4.5).Add(-time.Hour), compare(shopAPI, sha("a"), strings.Repeat("a1", 20)),
+		compare(shopAPI, strings.Repeat("a1", 20), strings.Repeat("a2", 20)))
+	s.deploy(team, "shop-intg", "intg", sha("4"), "Succeeded", days(4.5))
+	d := load(t, st, t0, days(28))
+	expectProd(t, d, shopAPI, map[int64]string{1: "72h0m0s/image~", 2: "120h0m0s/image", 3: "-"})
+	for _, p := range d.PRs {
+		if p.PRID > 2 {
+			continue
+		}
+		if !slices.ContainsFunc(p.Environments, func(e dataset.EnvironmentDeploy) bool {
+			return e.Environment == "intg" && e.FirstDeployedAt.Equal(days(4.5)) && !e.LowerBound
+		}) {
+			t.Errorf("#%d environments %+v, want intg exact at 108h", p.PRID, p.Environments)
+		}
+	}
+	for _, r := range d.Traces[shopAPI].Releases {
+		if r.At.Equal(days(6)) && (len(r.Stretches) != 1 || !r.Stretches[0].From.Equal(r.Stretches[0].To) ||
+			!r.Resolved(days(5.5), "master")) {
+			t.Errorf("rollback release %+v", r)
+		}
+	}
+}
+
+// A run's commit Bitbucket never saw as a push's tip, listed on two repos'
+// trunks: which repo built it, nothing tells; its image places nothing.
+func TestTraceRunOfTwoRepos(t *testing.T) {
+	st, pool := migrated(t)
+	s := &seeder{t: t, pool: pool}
+	s.push(shopAPI, "master", days(1), commit{sha: sha("a"), authored: days(1)})
+	s.push(shopUI, "master", days(1), commit{sha: sha("b"), authored: days(1)})
+	s.merged(shopAPI, 1, strings.Repeat("a1", 20), days(2))
+	s.merged(shopUI, 11, strings.Repeat("b1", 20), days(2))
+	shared := strings.Repeat("ab", 20)
+	s.push(shopAPI, "master", days(2.5), commit{sha: shared, authored: days(2.5)},
+		commit{sha: strings.Repeat("a9", 20), authored: days(2.5)})
+	s.push(shopUI, "master", days(2.5), commit{sha: shared, authored: days(2.5)},
+		commit{sha: strings.Repeat("b9", 20), authored: days(2.5)})
+	s.run(run{pipeline: "shop/master", runID: "1", status: "SUCCESS", commit: shared, buildType: "release",
+		started: days(2.6), images: []string{"reg/shop:1.0"}})
+	s.deploy(team, "shop-prod", "prod", sha("1"), "Succeeded", days(3), "reg/shop:1.0")
+	d := load(t, st, t0, days(28))
+	expectProd(t, d, shopAPI, map[int64]string{1: "-"})
+	expectProd(t, d, shopUI, map[int64]string{11: "-"})
+}
+
+// A legacy run without a start reads as no run, never as a failed page.
+func TestTraceRunWithoutStart(t *testing.T) {
+	st, pool := migrated(t)
+	s := &seeder{t: t, pool: pool}
+	s.push(shopAPI, "master", days(1), commit{sha: sha("a"), authored: days(1)})
+	s.run(run{pipeline: "shop-api/master", runID: "1", status: "SUCCESS", commit: sha("a"), buildType: "release",
+		started: days(1).Add(time.Minute), images: []string{"reg/shop-api:1.0"}})
+	s.exec(`UPDATE pipeline_events SET started_at = NULL WHERE run_id = '1'`)
+	s.deploy(team, "shop-prod", "prod", sha("1"), "Succeeded", days(2), "reg/shop-api:1.0")
+	load(t, st, t0, days(28))
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // A PR merged into another branch reaches the trunk with the PR that merges

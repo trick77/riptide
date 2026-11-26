@@ -22,7 +22,11 @@ yet at the period's end ("n gemergte PRs noch nicht auf PROD").
 - **A closed period is frozen at its end.** Only deploys before the end count:
   a PR merged in the period and shipped after it is "not on production yet" in
   that period, for good. The comparison with the previous period is fair: each
-  had the same time.
+  had the same time. What tells which Apps deploy a repo is read up to the end
+  too: a release counts only once a deploy before the end showed its App
+  deploys the repo, and which image repositories are the repo's is what its
+  runs had published by the release. A repo first deployed after the end
+  stays a library in the period.
 
 ## Placing a PR on production
 
@@ -32,13 +36,19 @@ data only. Two steps.
 
 **Where a PR reached the trunk.** The trunk is master, main, or the branch most
 of the repo's merged PRs went into (`repo_trunks`). A PR into the trunk arrives
-with its merge commit's first push (Bitbucket's merge pushes it in the same
-second; the merge time when that push was not seen). Merges are true merge
-commits and always the push's tip, so Bitbucket's cap of five commits per push
-never hides one. A PR into another branch arrives with the first PR merged
-from that branch into the trunk at or after it (its umbrella), one level deep;
-a PR Bitbucket marked merged when an umbrella's merge brought it in, with the
-umbrella. A PR with none of these is not placeable (`no_merge_commit`).
+with its merge commit's first push to that branch (Bitbucket's merge pushes it
+in the same second; the merge time when that push was not seen; a
+fast-forward merge's commit was pushed to the source branch before, which is
+not the trunk). Merges are true merge commits and always the push's tip, so
+Bitbucket's cap of five commits per push never hides one. A PR into another
+branch arrives with the first PR with a merge commit merged from that branch
+into a trunk at or after it (its umbrella), one level deep; a PR Bitbucket
+marked merged when an umbrella's merge brought it in, with the umbrella. A PR
+with none of these is not placeable (`no_merge_commit`, or `off_trunk` for one
+into another branch no PR merged on). A PR into a trunk other than master or
+main (develop, where most PRs go) also arrives on master or main with the
+first PR merged from its trunk into one of them: releases built from master
+hold it there, releases built from develop where it reached develop.
 
 **Which stretch of the trunk a deploy shipped.** For every successful deploy,
 per repo, the first of these routes that resolves:
@@ -59,14 +69,18 @@ per repo, the first of these routes that resolves:
    the run, and what landed in between is not in the image. The start is the
    newest head of the same image repository's tags in this App before (tags are
    compared as sets: an App may run two tags of one image side by side), exact;
-   else the deploy that ran them (a lower bound: nothing pushed after it was in
-   them); for an App's first deploy of the image repository, after what another
-   App's deploy of it shipped, else the repo's first trunk push (a lower bound:
-   everything on the trunk before the head, minus what an earlier deploy
-   shipped).
+   else the deploy that first ran them (a lower bound: nothing pushed after it
+   was in them; a re-sync of the same tags is no new start); for an App's first
+   deploy of the image repository, after what another App's deploy of it
+   shipped, else the repo's first trunk push (a lower bound: everything on the
+   trunk before the head, minus what an earlier deploy shipped). A head older
+   than a lower bound start ships an empty stretch that leaves the release
+   unresolved for what came before it.
 
 A known run head also caps a compare link's new end: a release tool's commit
-the link names may be pushed after the build started.
+the link names may be pushed after the build started. The App's next link
+from that commit starts where the head cut it, so what landed in between is
+in the next release, not in a gap.
 
 A PR is on an environment from the first deploy there whose stretch holds its
 arrival on the trunk. Never counted twice: the first deploy wins.
@@ -81,13 +95,17 @@ Otherwise it is **not placeable**, with the first reason that applies:
 
 | Reason | Meaning |
 |---|---|
+| `off_trunk` | merged into another branch, and no PR merged that branch into the trunk by the cutoff: its work may wait there, or have gone on by a push or a hotfix deploy; the same when its umbrella merges only after the cutoff |
 | `no_merge_commit` | nothing marks where it reached the trunk |
 | `repo_untraced` | no deploy ever showed an App deploys its repo (a compare link naming it, an image of its runs, an image named after it) |
-| `in_silence` | a release that may have shipped it lay in or within a week after a lost Bitbucket silence, or Argo CD did not report yet when it reached the trunk |
+| `in_silence` | a release that may have shipped it lay in or within a week after a lost Bitbucket silence, Argo CD did not report yet when it reached the trunk, or a release shows it went out unseen (below) |
 | `release_unresolved` | a release since then could not be resolved: it may have shipped it |
 
 A release resolved by a lower bound that starts after the PR's arrival may have
-shipped it, or an earlier one did: unresolved for that PR.
+shipped it, or an earlier one did: unresolved for that PR. A release whose
+exact stretch starts after the PR's arrival proves the App ran it already, with
+a deploy riptide did not see (one lost, or before Argo CD reported): on
+production, since when no one can tell, so `in_silence`, never "not yet".
 
 ## Reading it
 
@@ -106,13 +124,18 @@ reads far too fast. Per PR from its first commit, or not at all.
   the trunk counts dropped commits as shipped.
 - **A lower bound reads long.** A PR placed by one (`lower_bound`) may have gone
   out earlier with a deploy riptide could not resolve; the page counts them.
+  When they are more than a fifth of either period's PRs
+  (`metrics.LeadLowerBoundShare`), no change against the previous period is
+  judged (`incomplete`): the medians would differ by what tracing missed.
+- **A PR without a start** (no pushed commit, no opening) is traced but in no
+  time (`unmeasured`), said next to the number.
 - **Releases riptide cannot resolve place nothing**, and the PRs that may have
   gone out with them are not placeable, never "not yet". The deploy frequency
   counts them (`releases_unresolved`).
 - **A monorepo App shares its repo's stretch**: a PR touching only App B also
   reads as shipped by App A's release. Riptide sees no file paths.
 - **Hotfix and release branches**: a head that never reached the trunk resolves
-  no stretch.
+  no stretch; a PR into such a branch is `off_trunk`.
 - **Ingestion is forward-only.** The metric covers what riptide has seen.
 
 ## The SQL views

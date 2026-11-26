@@ -1291,8 +1291,9 @@ components:
         releases_unresolved:
           type: integer
           description: |
-            Of `releases`, those tracing resolved no stretch of any repo for:
-            what they shipped no one can name.
+            Of `releases`, those tracing resolved no stretch of any repo for,
+            and that changed an image of one (a sidecar's new tag ships nothing
+            of the App's repos): what they shipped no one can name.
         syncs: { type: integer, description: All revisions. }
         first_seen:
           type: integer
@@ -1407,7 +1408,7 @@ components:
         opening) to its first deploy there. Bots' PRs and library repos'
         PRs are in none.
       additionalProperties: false
-      required: [environment, human, lower_bound, low_sample]
+      required: [environment, human, lower_bound, unmeasured, low_sample]
       properties:
         environment: { type: string }
         human:
@@ -1418,17 +1419,29 @@ components:
           description: |
             Of `human`'s PRs, those placed by a stretch whose start was a lower
             bound: they may have gone out earlier, their time reads long.
+        unmeasured:
+          type: integer
+          description: |
+            PRs that reached the environment by the end too but have no start
+            (no pushed commit, no opening): in no time. `human.n` plus these
+            are the PRs traced there (for production `coverage.on_prod`).
         low_sample: { type: boolean, description: "Fewer than 10 PRs, but some." }
 
     TraceReasons:
       type: object
       description: The PRs tracing cannot place, by the first reason that applies.
       additionalProperties: false
-      required: [no_merge_commit, release_unresolved, repo_untraced, in_silence]
+      required: [no_merge_commit, off_trunk, release_unresolved, repo_untraced, in_silence]
       properties:
         no_merge_commit:
           type: integer
           description: The payload names no merge commit and no umbrella brought it in.
+        off_trunk:
+          type: integer
+          description: |
+            Merged into another branch than the trunk, and no PR merged that
+            branch into the trunk by the period's end: its work may wait there
+            or have gone on some other way.
         release_unresolved:
           type: integer
           description: A release of its repo's Apps since it reached the trunk could not be resolved; it may have shipped it.
@@ -1439,8 +1452,9 @@ components:
           type: integer
           description: |
             A release that may have shipped it lay in or within a week after a
-            lost Bitbucket silence, or Argo CD did not report yet when it
-            reached the trunk.
+            lost Bitbucket silence, Argo CD did not report yet when it reached
+            the trunk, or a release shows it went out with a deploy riptide
+            did not see.
 
     Coverage:
       type: object
@@ -2322,7 +2336,7 @@ components:
             promotion's included.
         prod_reason:
           type: [string, "null"]
-          enum: [no_merge_commit, release_unresolved, repo_untraced, in_silence, null]
+          enum: [no_merge_commit, off_trunk, release_unresolved, repo_untraced, in_silence, null]
           description: Why tracing cannot place it (`TraceReasons`); null unless `prod_state` is `not_placeable`.
         prod_route:
           type: [string, "null"]
@@ -2910,7 +2924,7 @@ components:
         against (config `thresholds`). Judged at `at`, the period's end.
       additionalProperties: false
       required: [key, unit, count, judged, unjudged, idle, worst, more, units, since, since_lower_bound, threshold, at,
-                 was, facts]
+                 was, facts, value_unit, names_kind]
       properties:
         key:
           type: string
@@ -2929,7 +2943,8 @@ components:
             their merge; `bot_loop` a bot branch failing builds in a row (CI
             time, no quality finding); `untraced`, `unattributed`,
             `no_prod_stage` what cannot be judged; `unmeasurable` a state
-            raised before that can no longer be judged (`was`);
+            the data judged a week before the period's end that it can no
+            longer judge for units it named then (`was`, the units);
             `deploy_failing` an App's last production deploy failed, none
             succeeded since; `deploy_failures` repeated runs of failed
             deploys; `first_review_wait` ready PRs waiting for a first review;
@@ -2954,18 +2969,41 @@ components:
           description: The earliest of its units'.
         since_lower_bound: { type: boolean, description: "`since` is that unit's lower bound." }
         threshold:
-          type: object
-          additionalProperties: false
-          required: [key, value, unit, min_key, min]
-          properties:
-            key: { type: string, description: "The config key (`thresholds.<key>`); empty for a data-honesty state." }
-            value: { type: number }
-            unit: { type: string, enum: [days, working_days, count, share, minutes] }
-            min_key: { type: [string, "null"], description: "A second threshold's key, a count, where the state has one." }
-            min: { type: [integer, "null"] }
+          description: |
+            The team's threshold it measured against; null for a
+            data-honesty state (`untraced`, `unattributed`, `no_prod_stage`,
+            measured against no agreement) and an `unmeasurable` card.
+          oneOf:
+            - type: "null"
+            - type: object
+              additionalProperties: false
+              required: [key, value, unit, min_key, min, within_key, within]
+              properties:
+                key: { type: string, minLength: 1, description: "The config key (`thresholds.<key>`)." }
+                value: { type: number }
+                unit: { type: string, enum: [days, working_days, count, share, minutes] }
+                min_key: { type: [string, "null"], description: "A second threshold's key, a count, where the state has one." }
+                min: { type: [integer, "null"] }
+                within_key:
+                  type: [string, "null"]
+                  description: |
+                    A third threshold's key, a span a case must lie in, where
+                    the state has one: `fast_approval_minutes`,
+                    `declined_days`, `branch_active_days`,
+                    `branch_failing_days`, `merge_pause_wait_days`; null with
+                    a `within` that is the rule's own (the 28 days before a
+                    repo's silent span, `builds_silent`).
+                within:
+                  $ref: "#/components/schemas/NullableNumber"
+                  description: "The span: minutes for `fast_approval`, days (working days but for `builds_silent`) otherwise."
         at: { $ref: "#/components/schemas/Instant" }
         was: { type: [string, "null"], description: "The state an `unmeasurable` card was; null otherwise." }
         facts: { type: string, enum: [prs, deploys, runs, ""], description: "The facts table its units are rows of; empty where none holds them (branches without a PR)." }
+        value_unit: { type: string, enum: [days, share, count], description: "What its units' `value` is, for the page to format it." }
+        names_kind:
+          type: string
+          enum: [build_kind, stage, ""]
+          description: "What its units' `names` are where the page words them: a build kind, a stage; empty for Apps, repos and branches, shown as they are."
 
     StateUnit:
       type: object
@@ -2982,17 +3020,22 @@ components:
         typical: { $ref: "#/components/schemas/NullableNumber" }
         since:
           $ref: "#/components/schemas/NullableInstant"
-          description: "When it began: the last release, the oldest waiting PR, a loop's first failure, a paused week's start."
+          description: |
+            When the state began to hold for it: the last release, the
+            oldest waiting PR's arrival on the trunk, when the Nth approved
+            or ready PR had waited past the threshold, when a branch without
+            a PR passed `branch_open_days`, a loop's first failure, a paused
+            week's start. Null for a state over a period's sample.
         lower_bound: { type: boolean, description: "`since` is a lower bound: at least since then." }
         week:
           oneOf:
             - $ref: "#/components/schemas/Week"
             - type: "null"
         names: { type: array, items: { type: string }, description: "What it holds: a project's Apps, the repos of a paused week's waiting PRs." }
-        held: { type: boolean, description: "Below the threshold now, kept while above its hysteresis share because the last assessment named it." }
+        held: { type: boolean, description: "Below the threshold now, kept while above its hysteresis share because it fired a week before the period's end (judged again from the data)." }
         reason:
           type: [string, "null"]
-          enum: [no_merge_commit, release_unresolved, repo_untraced, in_silence, null]
+          enum: [no_merge_commit, off_trunk, release_unresolved, repo_untraced, in_silence, null]
           description: A data-honesty unit's reason.
         ci_seconds: { $ref: "#/components/schemas/NullableNumber" }
         query:

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/trick77/riptide/internal/config"
+	"github.com/trick77/riptide/internal/dataset"
 	"github.com/trick77/riptide/internal/metrics"
 	"github.com/trick77/riptide/internal/store"
 )
@@ -17,7 +18,7 @@ import (
 func stateSig(key, tone string, units ...string) metrics.Signal {
 	c := &metrics.StateCard{Key: key, Unit: metrics.UnitProject, Count: len(units), Judged: len(units) + 1,
 		Worst: []metrics.StateUnit{}, Units: []metrics.StateUnit{},
-		Threshold: metrics.StateThreshold{Key: "release_breach_days", Value: 28, Unit: metrics.ThresholdDays}}
+		Threshold: &metrics.StateThreshold{Key: "release_breach_days", Value: 28, Unit: metrics.ThresholdDays}}
 	for _, u := range units {
 		c.Units = append(c.Units, metrics.StateUnit{Name: u, Value: 37, Names: []string{u + "-prod"}})
 	}
@@ -46,6 +47,20 @@ func TestDigestStateWithoutNames(t *testing.T) {
 	}
 	if got := leversFor(a.Signals[0]); !slices.Equal(got, []string{LeverPlanRelease}) {
 		t.Errorf("levers = %v", got)
+	}
+	// A failed sync says nothing of a build; nothing to do about a unit the
+	// data no longer judges.
+	if got := leversFor(stateSig(metrics.StateDeployFailing, metrics.ToneAttention, "kasse-prod")); !slices.Equal(got,
+		[]string{LeverInspectDeploys}) {
+		t.Errorf("deploy levers = %v", got)
+	}
+	if got := leversFor(stateSig(metrics.StateUnmeasurable, metrics.ToneLimit)); len(got) != 0 {
+		t.Errorf("unmeasurable levers = %v, want none", got)
+	}
+	// The prompt never teaches a fact id built from the key: an
+	// unmeasurable card has ids of its own.
+	if strings.Contains(promptText, "{{state:<key>") {
+		t.Errorf("the prompt teaches a templated state fact id")
 	}
 	// Every state key has its page words and levers.
 	for _, k := range []string{metrics.StateNoRelease, metrics.StateReleaseDue, metrics.StateNotOnProd, metrics.StateSlowToProd,
@@ -91,14 +106,21 @@ func TestStateCardsInLayout(t *testing.T) {
 	if err != nil || len(out.DE.Cards) != 1 || len(rep.Dropped) != 0 {
 		t.Errorf("worded state card = %+v, dropped %v, %v", out.DE.Cards, rep.Dropped, err)
 	}
-	if tab(a.Signals[0]) != "prs" {
-		t.Errorf("a card without its facts table links the PRs")
+	// A state card links its own facts table; one without links the PRs.
+	a.Signals[0].State.Facts = "deploys"
+	if got := tab(a.Signals[0]); got != "deploys" {
+		t.Errorf("the release card links %q, want its deploys", got)
+	}
+	if got := tab(a.Signals[1]); got != "prs" {
+		t.Errorf("a card without its facts table links %q", got)
 	}
 }
 
-// The latest assessment's state units are what the next one holds by
-// hysteresis.
-func TestHistoryStateUnits(t *testing.T) {
+// A stored analysis counts a state's streak (seen), never its units: what
+// the next assessment holds by hysteresis, resolves or calls no longer
+// measurable is judged again from the data (metrics), so a view works the
+// same without a model.
+func TestHistoryStateSeen(t *testing.T) {
 	st := &memStore{}
 	s := service(&fakeLLM{answer: goodAnswer}, st)
 	to := metrics.ClosedPeriod(4, now, zurich).To
@@ -112,24 +134,34 @@ func TestHistoryStateUnits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id := "state:" + metrics.StateNotOnProd
-	if got := h.StateUnits[id]; !slices.Equal(got, []string{"kasse/kasse-api", "lager/lager-api"}) {
-		t.Errorf("units = %v", got)
-	}
-	if _, ok := h.Open[id]; !ok {
-		t.Errorf("a raised state is open: %v", h.Open)
+	if id := "state:" + metrics.StateNotOnProd; h.Seen[id] != 1 {
+		t.Errorf("seen = %v, want the state seen once", h.Seen)
 	}
 }
 
-// The service passes the config's thresholds to the rules.
+// The service passes the config's thresholds to the rules: a changed one is
+// the one the card prints.
 func TestAssessUsesThresholds(t *testing.T) {
 	s := service(nil, &memStore{})
-	called := false
+	// The jammed PRs untouched: waiting for a first review.
+	s.Load = each(func(ctx context.Context, team string, p metrics.Period) (*dataset.Dataset, error) {
+		ds, err := jammed(ctx, team, p)
+		for i := range ds.OpenPRs {
+			ds.OpenPRs[i].Touched = false
+		}
+		return ds, err
+	})
 	s.Thresholds = func() config.Thresholds {
-		called = true
-		return config.DefaultThresholds()
+		th := config.DefaultThresholds()
+		th.FirstReviewDays = 3.5
+		return th
 	}
-	if _, err := s.assess(context.Background(), view); err != nil || !called {
-		t.Errorf("assess: %v, thresholds read %v", err, called)
+	a, err := s.assess(context.Background(), view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(a.Signals, func(s metrics.Signal) bool { return s.ID == "state:"+metrics.StateFirstReviewWait })
+	if i < 0 || a.Signals[i].State.Threshold == nil || a.Signals[i].State.Threshold.Value != 3.5 {
+		t.Errorf("signals %+v, want the first-review card against 3.5 working days", a.Signals)
 	}
 }

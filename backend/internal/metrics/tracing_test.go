@@ -26,9 +26,19 @@ func TestProdPlacement(t *testing.T) {
 				Branch: "master", From: from, To: to, LowerBound: lower})
 		}
 	}
+	onBranch := func(branch string, from, to time.Time) func(*dataset.TraceRelease) {
+		return func(r *dataset.TraceRelease) {
+			r.Stretches = append(r.Stretches, dataset.Stretch{Environment: "prod", At: r.At, Repo: "kasse/kasse-api",
+				Branch: branch, From: from, To: to})
+		}
+	}
+	knownAt := func(at time.Time) func(*dataset.TraceRelease) {
+		return func(r *dataset.TraceRelease) { r.Known = at }
+	}
 	traced := func(rels ...dataset.TraceRelease) map[string]dataset.RepoTrace {
 		return map[string]dataset.RepoTrace{"kasse/kasse-api": {DeployedSince: agoP(50), Releases: rels}}
 	}
+	develop := func(p *dataset.PR) { p.TrunkBranch = ptr("develop") }
 	for _, c := range []struct {
 		name          string
 		pr            func(*dataset.PR)
@@ -46,8 +56,17 @@ func TestProdPlacement(t *testing.T) {
 		}, traced(), ProdNotYet, ""},
 		{"no merge commit", func(p *dataset.PR) { p.TrunkAt, p.MergeCommit = nil, nil }, traced(), ProdNotPlaceable,
 			TraceNoMergeCommit},
+		// Off the trunk with no umbrella merged: waiting there, or gone on by a
+		// push or a hotfix deploy; no telling, never "not yet".
 		{"merged into a branch that went nowhere yet", func(p *dataset.PR) { p.TrunkAt, p.OffTrunk = nil, true }, traced(),
-			ProdNotYet, ""},
+			ProdNotPlaceable, TraceOffTrunk},
+		// The same at the cutoff when its umbrella merges only after it: a
+		// closed period does not move.
+		{"off the trunk, its umbrella merged after the cutoff", func(p *dataset.PR) {
+			p.TrunkAt, p.OffTrunk = ptr(cutoff.Add(time.Hour)), true
+		}, traced(), ProdNotPlaceable, TraceOffTrunk},
+		{"off the trunk, its umbrella merged before the cutoff, no release since", func(p *dataset.PR) { p.OffTrunk = true },
+			traced(), ProdNotYet, ""},
 		{"its umbrella merged after the cutoff", func(p *dataset.PR) { p.TrunkAt = ptr(cutoff.Add(time.Hour)) }, traced(),
 			ProdNotYet, ""},
 		{"no App known to deploy the repo", func(*dataset.PR) {}, map[string]dataset.RepoTrace{}, ProdNotPlaceable,
@@ -67,8 +86,34 @@ func TestProdPlacement(t *testing.T) {
 			ProdNotYet, ""},
 		{"a resolved release that ended before the merge", func(*dataset.PR) {},
 			traced(release(ago(2), stretch(ago(9), ago(6), true))), ProdNotYet, ""},
-		{"an exact stretch that does not hold it", func(*dataset.PR) {},
-			traced(release(ago(2), stretch(ago(4), ago(3), false))), ProdNotYet, ""},
+		{"an exact stretch that ended before it", func(*dataset.PR) {},
+			traced(release(ago(2), stretch(ago(9), ago(6), false))), ProdNotYet, ""},
+		// Starting at a known old end after the PR reached the trunk: the
+		// App ran it already, with a deploy riptide did not see.
+		{"an exact stretch starting after it: shipped unseen", func(*dataset.PR) {},
+			traced(release(ago(2), stretch(ago(4), ago(3), false))), ProdNotPlaceable, TraceInSilence},
+		{"an exact stretch starting at it: shipped unseen", func(*dataset.PR) {},
+			traced(release(ago(2), stretch(merged, ago(3), false))), ProdNotPlaceable, TraceInSilence},
+		{"an exact stretch of another branch proves nothing", func(*dataset.PR) {},
+			traced(release(ago(2), onBranch("release/1", ago(4), ago(3)), stretch(ago(9), ago(6), false))), ProdNotYet, ""},
+		// A release whose App was known to deploy the repo only after the
+		// cutoff is no evidence for the period (closed periods stay put).
+		{"a release of an App known only after the cutoff", func(*dataset.PR) {},
+			traced(release(ago(2), knownAt(cutoff))), ProdNotYet, ""},
+		{"a release of an App known before the cutoff", func(*dataset.PR) {},
+			traced(release(ago(2), knownAt(ago(60)))), ProdNotPlaceable, TraceReleaseUnresolved},
+		// Into develop, a trunk: master's releases hold it once a PR merged
+		// develop into master, and tell nothing before.
+		{"into develop, a master release, not onward yet", develop,
+			traced(release(ago(2), onBranch("master", ago(9), ago(3)))), ProdNotPlaceable, TraceReleaseUnresolved},
+		{"into develop, onward on master after the release", func(p *dataset.PR) {
+			develop(p)
+			p.OnwardAt, p.OnwardBranch = agoP(1), ptr("master")
+		}, traced(release(ago(2), onBranch("master", ago(9), ago(3)))), ProdNotYet, ""},
+		{"into develop, onward only after the cutoff", func(p *dataset.PR) {
+			develop(p)
+			p.OnwardAt, p.OnwardBranch = ptr(cutoff.Add(time.Hour)), ptr("master")
+		}, traced(release(ago(2), onBranch("master", ago(9), ago(3)))), ProdNotPlaceable, TraceReleaseUnresolved},
 		{"a lower bound starting after the merge may have it", func(*dataset.PR) {},
 			traced(release(ago(2), stretch(ago(4), ago(3), true))), ProdNotPlaceable, TraceReleaseUnresolved},
 		{"a release that shipped nothing of the repo", func(*dataset.PR) {},
