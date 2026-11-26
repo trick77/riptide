@@ -15,7 +15,7 @@ import { Facts } from "./Facts";
 import { Flow } from "./Flow";
 import { dateTime, fullDate, fullDay, stage } from "./format";
 import { FrameworkMap } from "./FrameworkMap";
-import { SECTIONS, SectionNav, useActiveSection } from "./nav";
+import { PAGE_SECTIONS, SectionNav, sectionOf, useActiveSection } from "./nav";
 import { Overview } from "./Overview";
 import {
   WINDOWS,
@@ -194,7 +194,7 @@ export default function App() {
     document.getElementById("daten")?.scrollIntoView?.({ behavior: "smooth" });
   }, []);
   const weeks = m?.period.weeks ?? [];
-  const active = useActiveSection(SECTIONS, m != null, headHeight);
+  const active = useActiveSection(PAGE_SECTIONS, m != null, headHeight);
 
   // A link to a section: the sections render once the numbers are in, so
   // the browser's own jump on load found nothing to land on. Once, then the
@@ -203,7 +203,7 @@ export default function App() {
   useEffect(() => {
     if (!m || landed.current) return;
     landed.current = true;
-    const id = decodeURIComponent(window.location.hash.slice(1));
+    const id = sectionOf(window.location.hash);
     if (id)
       requestAnimationFrame(() =>
         document

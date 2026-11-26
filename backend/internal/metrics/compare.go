@@ -76,17 +76,29 @@ const (
 const (
 	// ReasonLowSample: too few in one of the two periods to tell.
 	ReasonLowSample = "low_sample"
-	// ReasonIncomplete: the previous period starts before its source's data,
-	// or either period has more first deploys than releases (a first deploy
-	// is no release), so it reads low.
+	// ReasonStarted: the previous period starts before its source's first
+	// data (Change.Source, Since), so it reads low.
+	ReasonStarted = "source_started"
+	// ReasonLost: Bitbucket lost events in either period
+	// (dataset.Silence.Lost, the first such span Change.From to To): its
+	// counts read low there.
+	ReasonLost = "lost"
+	// ReasonFirstDeploys: either period has more first deploys than releases
+	// (a first deploy is no release), so its release rate reads low.
+	ReasonFirstDeploys = "first_deploys"
+	// ReasonIncomplete: the data covers both periods, but not alike: the
+	// build type first reported inside the previous period (its master runs
+	// split into known and unknown kinds), or too many lead times placed
+	// through a lower bound (LeadLowerBoundShare).
 	ReasonIncomplete = "incomplete"
 	// ReasonNoValue: one of the two values is missing.
 	ReasonNoValue = "no_value"
 	// ReasonUndirected: the number has no better direction; Prev still
 	// tells where it was.
 	ReasonUndirected = "undirected"
-	// ReasonNotReporting: the number's source does not report for the team
-	// yet (Argo CD, for the deploy numbers): nothing measured, not too few.
+	// ReasonNotReporting: the number's source (Change.Source) does not
+	// report for the team yet (Argo CD, for the deploy numbers): nothing
+	// measured, not too few.
 	ReasonNotReporting = "not_reporting"
 )
 
@@ -98,6 +110,14 @@ type Change struct {
 	Verdict string   `json:"verdict"`
 	// Reason is why the verdict is none; null otherwise.
 	Reason *string `json:"reason"`
+	// Source and Since are where ReasonStarted and ReasonNotReporting lie:
+	// the source (dataset.Source*) and its first data (absent: none yet);
+	// From and To ReasonLost's span, To absent while it runs. Absent for
+	// every other reason, so the page says the one that applies.
+	Source *string    `json:"source,omitempty"`
+	Since  *time.Time `json:"since,omitempty"`
+	From   *time.Time `json:"from,omitempty"`
+	To     *time.Time `json:"to,omitempty"`
 	// Directed: the number has a better direction, whatever the verdict
 	// (an undirected one with too few data says low_sample, not
 	// undirected).
@@ -264,6 +284,62 @@ func (id metricID) judge(cur, prev side, incomplete bool) Change {
 
 func (id metricID) none(reason string) Change { return id.def().none(reason) }
 
+// judgeWhy is judge, or why the periods do not compare (why, a Change with
+// its Reason and where it lies; nil: they compare).
+func (id metricID) judgeWhy(cur, prev side, why *Change) Change {
+	if why == nil {
+		return id.judge(cur, prev, false)
+	}
+	c := *why
+	c.Verdict, c.Directed = ChangeNone, id.def().d != undirected
+	return c
+}
+
+// started is why a number of source (first data at start) does not compare
+// over a previous period from from on: not reporting at all, or starting
+// after from (ReasonStarted); nil where it covers the period.
+func started(source string, start *time.Time, from time.Time) *Change {
+	switch {
+	case start == nil:
+		return &Change{Reason: ptr(ReasonNotReporting), Source: ptr(source)}
+	case start.After(from):
+		return &Change{Reason: ptr(ReasonStarted), Source: ptr(source), Since: start}
+	}
+	return nil
+}
+
+// latest is the reason that binds among whys: a source not reporting, else
+// the one starting last; nil when none applies.
+func latest(whys ...*Change) *Change {
+	var out *Change
+	for _, w := range whys {
+		switch {
+		case w == nil:
+		case out == nil, w.Since == nil && out.Since != nil, w.Since != nil && out.Since != nil && w.Since.After(*out.Since):
+			out = w
+		}
+	}
+	return out
+}
+
+// lostChange is ReasonLost over the first lost Bitbucket silence of metas,
+// oldest first; directed as the number it stands for.
+func lostChange(directed bool, metas ...dataset.Meta) Change {
+	c := Change{Verdict: ChangeNone, Reason: ptr(ReasonLost), Directed: directed}
+	for _, m := range metas {
+		for _, s := range m.Silences {
+			if !s.Lost || (c.From != nil && !s.From.Before(*c.From)) {
+				continue
+			}
+			c.From, c.To = ptr(s.From), ptr(s.To)
+			if s.Ongoing {
+				c.To = nil
+			}
+		}
+	}
+	return c
+}
+
 // side is one period's value and whether it rests on enough data.
 type side struct {
 	v  *float64
@@ -414,66 +490,79 @@ func before(start *time.Time, from time.Time) bool { return start == nil || star
 func compare(cur, prev Metrics, period Period, lost, product bool) Comparison {
 	meta := cur.Meta
 	from := period.From
-	argo := before(meta.DataStart.ArgoCD, from)
-	bitbucket := before(meta.DataStart.Bitbucket, from)
-	builds := buildsIncomplete(meta, from)
-	noergler := before(meta.DataStart.Noergler, from)
+	argo := started(dataset.SourceArgoCD, meta.DataStart.ArgoCD, from)
+	bitbucket := started(dataset.SourceBitbucket, meta.DataStart.Bitbucket, from)
+	var builds *Change
+	switch t := meta.BuildTypeFrom; {
+	case before(meta.BuildDataFrom, from):
+		builds = started(dataset.SourcePipeline, meta.BuildDataFrom, from)
+	case t != nil && t.After(from):
+		builds = &Change{Reason: ptr(ReasonIncomplete)}
+	}
+	noergler := started(dataset.SourceNoergler, meta.DataStart.Noergler, from)
 
 	cf, pf := cur.Delivery.Frequency, prev.Delivery.Frequency
+	// A first deploy is no release. Right after Argo CD started, most
+	// revisions are first deploys and the rate reads low; one new App later
+	// on costs a single release and still compares.
+	var firstDeploys *Change
+	if pf.FirstSeen > pf.Releases || cf.FirstSeen > cf.Releases {
+		firstDeploys = &Change{Reason: ptr(ReasonFirstDeploys)}
+	}
+	if argo != nil {
+		firstDeploys = argo
+	}
 	out := Comparison{
 		From: period.From, To: period.To, LastDay: period.LastDay,
-		// A first deploy is no release. Right after Argo CD started, most
-		// revisions are first deploys and the rate reads low; one new App
-		// later on costs a single release and still compares.
-		DeployFreq: deployFreqMetric.judge(side{ptr(cf.PerWeek), !cf.LowSample && cf.ArgoReporting},
-			side{ptr(pf.PerWeek), !pf.LowSample && pf.ArgoReporting},
-			argo || pf.FirstSeen > pf.Releases || cf.FirstSeen > cf.Releases),
-		DeploySuccess: caseGate(deploySuccessMetric.judge(side{cf.SuccessRate, cf.Finished >= lowSample},
+		DeployFreq: deployFreqMetric.judgeWhy(side{ptr(cf.PerWeek), !cf.LowSample && cf.ArgoReporting},
+			side{ptr(pf.PerWeek), !pf.LowSample && pf.ArgoReporting}, firstDeploys),
+		DeploySuccess: caseGate(deploySuccessMetric.judgeWhy(side{cf.SuccessRate, cf.Finished >= lowSample},
 			side{pf.SuccessRate, pf.Finished >= lowSample}, argo), cf.SuccessRate, pf.SuccessRate, cf.Finished, pf.Finished),
-		LeadTime: leadChange(cur.Delivery.LeadTime, prev.Delivery.LeadTime, argo || bitbucket),
+		LeadTime: leadChange(cur.Delivery.LeadTime, prev.Delivery.LeadTime, latest(argo, bitbucket)),
 	}
 	out.DeployFreq = releaseGate(out.DeployFreq, cf.Releases, pf.Releases)
 	if !cf.ArgoReporting {
 		out.DeployFreq = deployFreqMetric.none(ReasonNotReporting)
 		out.DeploySuccess = deploySuccessMetric.none(ReasonNotReporting)
+		out.DeployFreq.Source, out.DeploySuccess.Source = ptr(dataset.SourceArgoCD), ptr(dataset.SourceArgoCD)
 	}
 	if c, p := cur.Delivery.LeadTimePre, prev.Delivery.LeadTimePre; c != nil {
 		ch := leadTimeMetric.none(ReasonNoValue)
 		if p != nil && p.Environment == c.Environment {
-			ch = leadChange(*c, *p, argo || bitbucket)
+			ch = leadChange(*c, *p, latest(argo, bitbucket))
 		}
 		out.LeadTimePre = &ch
 	}
 	cr, pr := cur.Review, prev.Review
-	out.ReviewTime = reviewTimeMetric.judge(side{cr.Review.P50, cr.Review.N >= lowSample},
+	out.ReviewTime = reviewTimeMetric.judgeWhy(side{cr.Review.P50, cr.Review.N >= lowSample},
 		side{pr.Review.P50, pr.Review.N >= lowSample}, bitbucket)
-	out.WithinDay = caseGate(withinDayMetric.judge(side{cr.WithinDay.Rate, cr.WithinDay.N >= lowSample},
+	out.WithinDay = caseGate(withinDayMetric.judgeWhy(side{cr.WithinDay.Rate, cr.WithinDay.N >= lowSample},
 		side{pr.WithinDay.Rate, pr.WithinDay.N >= lowSample}, bitbucket),
 		cr.WithinDay.Rate, pr.WithinDay.Rate, cr.WithinDay.N, pr.WithinDay.N)
-	out.FirstTouch = caseGate(firstTouchMetric.judge(side{cr.FirstTouchRate, cr.Approved >= lowSample},
+	out.FirstTouch = caseGate(firstTouchMetric.judgeWhy(side{cr.FirstTouchRate, cr.Approved >= lowSample},
 		side{pr.FirstTouchRate, pr.Approved >= lowSample}, bitbucket), cr.FirstTouchRate, pr.FirstTouchRate,
 		cr.Approved, pr.Approved)
-	out.Untracked = caseGate(untrackedMetric.judge(side{cr.UntrackedRate, cr.Merged >= lowSample},
+	out.Untracked = caseGate(untrackedMetric.judgeWhy(side{cr.UntrackedRate, cr.Merged >= lowSample},
 		side{pr.UntrackedRate, pr.Merged >= lowSample}, bitbucket), cr.UntrackedRate, pr.UntrackedRate,
 		cr.Merged, pr.Merged)
 	ct, pt := cur.Throughput, prev.Throughput
-	out.MergedPerWeek = mergedPerWeekMetric.judge(side{ct.MergedPerWeek, ct.Merged >= lowSample},
+	out.MergedPerWeek = mergedPerWeekMetric.judgeWhy(side{ct.MergedPerWeek, ct.Merged >= lowSample},
 		side{pt.MergedPerWeek, pt.Merged >= lowSample}, bitbucket)
 	// The size is noergler's, the PRs Bitbucket's: both must cover it.
-	out.BatchSize = batchSizeMetric.judge(side{ct.BatchSize.P50, ct.BatchSize.N >= lowSample},
-		side{pt.BatchSize.P50, pt.BatchSize.N >= lowSample}, bitbucket || noergler)
+	out.BatchSize = batchSizeMetric.judgeWhy(side{ct.BatchSize.P50, ct.BatchSize.N >= lowSample},
+		side{pt.BatchSize.P50, pt.BatchSize.N >= lowSample}, latest(bitbucket, noergler))
 	// A count, no sample: both periods' ends count whatever is open.
 	co, po := cur.OpenPRs, prev.OpenPRs
-	out.OpenPRs = openPRsMetric.judge(side{ptr(float64(co.Open)), true}, side{ptr(float64(po.Open)), true},
+	out.OpenPRs = openPRsMetric.judgeWhy(side{ptr(float64(co.Open)), true}, side{ptr(float64(po.Open)), true},
 		bitbucket)
-	out.OpenJammed = openJammedMetric.judge(side{ptr(float64(co.Jammed)), true},
+	out.OpenJammed = openJammedMetric.judgeWhy(side{ptr(float64(co.Jammed)), true},
 		side{ptr(float64(po.Jammed)), true}, bitbucket)
 	cc, pc := cur.Costs, prev.Costs
 	// The wasted share is spend, not cases: one large declined PR may be
 	// most of it, and no count of PRs gates it.
-	out.CostPerKloc = costPerKlocMetric.judge(side{cc.PerKloc, cc.MergedReviews >= lowSample},
+	out.CostPerKloc = costPerKlocMetric.judgeWhy(side{cc.PerKloc, cc.MergedReviews >= lowSample},
 		side{pc.PerKloc, pc.MergedReviews >= lowSample}, noergler)
-	out.WastedShare = wastedShareMetric.judge(side{cc.WastedShare, cc.MergedReviews >= lowSample},
+	out.WastedShare = wastedShareMetric.judgeWhy(side{cc.WastedShare, cc.MergedReviews >= lowSample},
 		side{pc.WastedShare, pc.MergedReviews >= lowSample}, noergler)
 
 	out.Build = []KindChange{}
@@ -486,9 +575,9 @@ func compare(cur, prev Metrics, period Period, lost, product bool) Comparison {
 		}
 		kc := KindChange{
 			Kind: b.Kind,
-			Success: caseGate(buildSuccessMetric.judge(side{b.SuccessRate, b.Runs >= lowSample},
+			Success: caseGate(buildSuccessMetric.judgeWhy(side{b.SuccessRate, b.Runs >= lowSample},
 				side{p.SuccessRate, p.Runs >= lowSample}, builds), b.SuccessRate, p.SuccessRate, b.Runs, p.Runs),
-			Flaky: caseGate(buildFlakyMetric.judge(side{b.FlakyRate, b.judged >= lowSample},
+			Flaky: caseGate(buildFlakyMetric.judgeWhy(side{b.FlakyRate, b.judged >= lowSample},
 				side{p.FlakyRate, p.judged >= lowSample}, builds), b.FlakyRate, p.FlakyRate, b.judged, p.judged),
 			Compared: cur.Build.compared[b.Kind],
 		}
@@ -511,7 +600,7 @@ func compare(cur, prev Metrics, period Period, lost, product bool) Comparison {
 	if lost {
 		incomplete := func(cs ...*Change) {
 			for _, c := range cs {
-				*c = Change{Verdict: ChangeNone, Reason: ptr(ReasonIncomplete), Directed: c.Directed}
+				*c = lostChange(c.Directed, prev.Meta, cur.Meta)
 			}
 		}
 		incomplete(&out.ReviewTime, &out.WithinDay, &out.FirstTouch, &out.Untracked, &out.MergedPerWeek, &out.BatchSize,
@@ -543,10 +632,13 @@ func buildsIncomplete(meta dataset.Meta, from time.Time) bool {
 // it, they move the median by little.
 const LeadLowerBoundShare = 0.2
 
-func leadChange(c, p LeadTimes, incomplete bool) Change {
+func leadChange(c, p LeadTimes, why *Change) Change {
 	lower := func(l LeadTimes) bool {
 		return l.Human.N > 0 && float64(l.LowerBound) > LeadLowerBoundShare*float64(l.Human.N)
 	}
-	return leadTimeMetric.judge(side{c.Human.P50, c.Human.N >= lowSample},
-		side{p.Human.P50, p.Human.N >= lowSample}, incomplete || lower(c) || lower(p))
+	if why == nil && (lower(c) || lower(p)) {
+		why = &Change{Reason: ptr(ReasonIncomplete)}
+	}
+	return leadTimeMetric.judgeWhy(side{c.Human.P50, c.Human.N >= lowSample},
+		side{p.Human.P50, p.Human.N >= lowSample}, why)
 }

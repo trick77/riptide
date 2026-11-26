@@ -26,8 +26,10 @@ const (
 	// signals, symmetric thresholds, quiet decided here, resolved on
 	// evidence. 3: lead time per PR traced to production; states, hints and
 	// data honesty in groups of their own, judged against the team's
-	// thresholds and re-derived a week back from the same data.
-	RulesVersion = 3
+	// thresholds and re-derived a week back from the same data. 4: the
+	// page's vocabulary (state titles, the words, the levers the model is
+	// told).
+	RulesVersion = 4
 	// FocusMinWeight is the weight a repo's signals need for it to be a
 	// focus candidate: one attention signal, or a hint and a notable change.
 	FocusMinWeight = 3
@@ -499,7 +501,7 @@ func (a *assessor) gapSignals() {
 		if s.start != nil && s.start.After(a.p.Previous.From) && s.start.Before(end) {
 			a.limits = append(a.limits, Limit{Source: s.name, Kind: LimitStarts, From: *s.start})
 		}
-		if s.at == nil || end.Sub(*s.at) < SilentDays*24*time.Hour {
+		if !silentEnd(s.at, end) {
 			continue
 		}
 		a.gaps[s.name] = true
@@ -532,6 +534,13 @@ func (a *assessor) gapSignals() {
 		a.limits = append(a.limits, Limit{Source: dataset.SourceBitbucket, Kind: LimitSilence, From: s.From, To: to})
 	}
 	slices.SortStableFunc(a.limits, func(x, y Limit) int { return x.From.Compare(y.From) })
+}
+
+// silentEnd reports whether a source whose latest event is last (nil: it
+// never reported) has been silent SilentDays or more at end: a gap, its
+// numbers say nothing about the work.
+func silentEnd(last *time.Time, end time.Time) bool {
+	return last != nil && end.Sub(*last) >= SilentDays*24*time.Hour
 }
 
 // baselined reports whether a team number resting on enough cases has a
@@ -777,7 +786,7 @@ func (a *assessor) unlost(metric string, c Change) Change {
 	if !bitbucketCounted[metric] && !product {
 		return c
 	}
-	return Change{Verdict: ChangeNone, Reason: ptr(ReasonIncomplete), Directed: c.Directed}
+	return lostChange(c.Directed, a.prev.Meta, a.ds.Meta)
 }
 
 func (a *assessor) teamChanges() []teamChange {
@@ -798,7 +807,7 @@ func (a *assessor) teamChanges() []teamChange {
 			}
 		}
 	}
-	bb := before(m.Meta.DataStart.Bitbucket, a.p.Previous.From)
+	bb := started(dataset.SourceBitbucket, m.Meta.DataStart.Bitbucket, a.p.Previous.From)
 	// Flow numbers: throughput, work in progress against it.
 	merged, pmerged := a.m.Throughput.MergedPerWeek, a.pm.Throughput.MergedPerWeek
 	ok, pok := a.m.Review.Merged >= lowSample, a.pm.Review.Merged >= lowSample
@@ -806,7 +815,7 @@ func (a *assessor) teamChanges() []teamChange {
 	out = append(out, teamChange{"batch_size", "batch_size", UnitCount, dataset.SourceNoergler, m.Throughput.BatchSize.P50, c.BatchSize})
 	wip, pwip := wipWeeks(a.m, merged), wipWeeks(a.pm, pmerged)
 	out = append(out, teamChange{"wip_weeks", "wip_weeks", UnitWeeks, dataset.SourceBitbucket, wip,
-		wipWeeksMetric.judge(side{wip, ok}, side{pwip, pok}, bb)})
+		wipWeeksMetric.judgeWhy(side{wip, ok}, side{pwip, pok}, bb)})
 	for i := range out {
 		out[i].c = a.unlost(out[i].metric, out[i].c)
 	}
@@ -1056,10 +1065,10 @@ func (a *assessor) question() *Signal {
 		t := x.Review.MixTotal
 		return t.Feature + t.Bugfix + t.Hotfix + t.Other
 	}
-	bb := before(m.Meta.DataStart.Bitbucket, a.p.Previous.From)
+	bb := started(dataset.SourceBitbucket, m.Meta.DataStart.Bitbucket, a.p.Previous.From)
 	cands := []teamChange{
 		{"feature_share", "feature_share", UnitShare, dataset.SourceBitbucket, feature,
-			caseGate(featureShareMetric.judge(side{feature, mixN(m) >= lowSample}, side{pfeature, mixN(a.pm) >= lowSample}, bb),
+			caseGate(featureShareMetric.judgeWhy(side{feature, mixN(m) >= lowSample}, side{pfeature, mixN(a.pm) >= lowSample}, bb),
 				feature, pfeature, mixN(m), mixN(a.pm))},
 		{"untracked", "untracked", UnitShare, dataset.SourceBitbucket, m.Review.UntrackedRate, c.Untracked},
 		{"wasted_share", "wasted_share", UnitShare, dataset.SourceNoergler, m.Costs.WastedShare, c.WastedShare},

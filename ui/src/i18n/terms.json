@@ -38,10 +38,10 @@
     "running": "This week",
     "runKind": {
       "release": "Releases",
-      "main": "Main branch builds",
+      "main": "Default branch builds",
       "feature": "Feature and bugfix builds",
       "other": "Other branches",
-      "unknown": "Main branch, kind unknown"
+      "unknown": "Default branch, kind unknown"
     },
     "notCounted": {
       "umbrella": "Not counted: umbrella-branch merge",
@@ -58,7 +58,7 @@
     },
     "prodReason": {
       "no_merge_commit": "Bitbucket named no merge commit",
-      "off_trunk": "merged into a branch that did not reach the main branch by the period's end",
+      "off_trunk": "merged into a branch that did not reach the default branch by the period's end",
       "release_unresolved": "a later release cannot be tied to PRs",
       "repo_untraced": "no deploy of the repo known",
       "in_silence": "a gap in the data"
@@ -104,10 +104,10 @@
     "running": "Laufende Woche",
     "runKind": {
       "release": "Releases",
-      "main": "Hauptbranch-Builds",
+      "main": "Default-Branch-Builds",
       "feature": "Feature- und Bugfix-Builds",
       "other": "Übrige Branches",
-      "unknown": "Hauptbranch, Art unbekannt"
+      "unknown": "Default-Branch, Art unbekannt"
     },
     "notCounted": {
       "umbrella": "Nicht gezählt: Merge eines Sammel-Branches",
@@ -115,7 +115,7 @@
       "twice": "Nicht gezählt: Branch schon mit einem anderen PR gezählt"
     },
     "viaUmbrella": "über Sammel-Branch gemerged",
-    "library": "Bibliothek, wird nicht ausgerollt",
+    "library": "Library, wird nicht ausgerollt",
     "infra": "Infrastruktur, nicht gezählt",
     "prodState": {
       "on_prod": "auf {{prod}}",
@@ -124,7 +124,7 @@
     },
     "prodReason": {
       "no_merge_commit": "Bitbucket nannte keinen Merge-Commit",
-      "off_trunk": "in einen Branch gemerged, der bis zum Ende des Zeitraums nicht im Hauptbranch ankam",
+      "off_trunk": "in einen Branch gemerged, der bis zum Ende des Zeitraums nicht im Default-Branch ankam",
       "release_unresolved": "ein späteres Release lässt sich keinen PRs zuordnen",
       "repo_untraced": "kein Deploy des Repos bekannt",
       "in_silence": "eine Lücke in den Daten"

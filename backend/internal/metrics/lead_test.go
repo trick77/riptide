@@ -41,7 +41,7 @@ func TestLeadChangeLowerBounds(t *testing.T) {
 		{"most lower bounds now", lead(4e5, 12, 7), lead(2e5, 12, 0), false},
 		{"most lower bounds before", lead(4e5, 12, 0), lead(2e5, 12, 9), false},
 	} {
-		got := leadChange(c.cur, c.prev, false)
+		got := leadChange(c.cur, c.prev, nil)
 		if judged := got.Reason == nil; judged != c.judged {
 			t.Errorf("%s: change %+v, reason %v", c.name, got, str(got.Reason))
 		}

@@ -471,11 +471,21 @@ export type Change = {
   verdict: "better" | "worse" | "same" | "none";
   reason:
     | "low_sample"
+    | "source_started"
+    | "lost"
+    | "first_deploys"
     | "incomplete"
     | "no_value"
     | "undirected"
     | "not_reporting"
     | null;
+  // Where the reason lies: source_started and not_reporting name the
+  // source (since: its first data), lost its span (to absent while it
+  // runs).
+  source?: Source;
+  since?: string;
+  from?: string;
+  to?: string;
   // A better direction exists, whatever the verdict.
   directed: boolean;
   // -1..1, positive better: log2(now / previous), negated where lower is
@@ -575,9 +585,9 @@ export type Metrics = {
 };
 
 // Why a trend's week has no value: the source had not reported by its
-// start, a lost Bitbucket silence overlaps it, no case to take a typical
-// value of; "" where it has one.
-export type TrendGap = "" | "no_data" | "lost" | "none";
+// start, had fallen silent for good before it, a lost Bitbucket silence
+// overlaps it, no case to take a typical value of; "" where it has one.
+export type TrendGap = "" | "no_data" | "silent" | "lost" | "none";
 
 export type TrendWeek = Week & { running: boolean };
 
@@ -600,25 +610,47 @@ export type Trends = {
 export type RepoGroupKey =
   "none" | "rare" | "unjudged" | "regular" | "library" | "idle";
 
+// A threshold a repo's number is past, as the state's card names it:
+// no_release and release_due its project's.
 export type RepoFlag = {
-  key: "no_release" | "release_due" | "slow_to_prod" | "first_review_wait";
+  key:
+    | "no_release"
+    | "release_due"
+    | "not_on_prod"
+    | "slow_to_prod"
+    | "first_review_wait";
   tone: "breach" | "hint";
   value: number;
 };
+
+export type RepoReason =
+  | "not_reporting"
+  | "argocd_silent"
+  | "bitbucket_silent"
+  | "no_prod_stage"
+  | "infra"
+  | "untraced"
+  | "never_released";
 
 // One repo's numbers over the period; null where too few cases.
 export type RepoRow = {
   repo: string;
   project: string;
   group: RepoGroupKey;
-  reason: "not_reporting" | "infra" | "untraced" | null;
+  reason: RepoReason | null;
+  // Its project's last release, what the release rule judges.
   last_release: string | null;
   days_since: number | null;
   since_lower_bound: boolean;
   releases: number;
   releases_per_week: number | null;
   releases_prev: number | null;
-  // Per trend week but the running one; null where Argo CD had not reported.
+  // The weeks releases_per_week divides by; how the row writes its
+  // releases, null where it writes none.
+  releases_base: number;
+  releases_form: "none" | "per_week" | "in_weeks" | null;
+  // Per trend week but the running one; null where Argo CD had not
+  // reported or had fallen silent.
   release_weeks: (number | null)[];
   to_prod: number | null;
   to_prod_n: number;
@@ -715,6 +747,8 @@ export type RepoView = {
   }[];
   hint_days: number;
   breach_days: number;
+  // The fewest whole days the rare group holds.
+  rare_from: number;
   spreads: RepoSpread[];
 };
 

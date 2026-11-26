@@ -250,6 +250,8 @@ const row = (o: Partial<RepoRow>): RepoRow => ({
   releases: 4,
   releases_per_week: 1,
   releases_prev: 0.75,
+  releases_base: 4,
+  releases_form: "per_week",
   release_weeks: [null, 0, 1, 0, 1, 1, 1, 1],
   to_prod: 2.5,
   to_prod_n: 6,
@@ -280,6 +282,7 @@ export function repoView(): RepoView {
       days_since: 37,
       releases: 0,
       releases_per_week: 0,
+      releases_form: "none",
       to_prod: null,
       to_prod_n: 0,
       not_yet: 3,
@@ -292,6 +295,7 @@ export function repoView(): RepoView {
       days_since: 19,
       releases: 1,
       releases_per_week: 0.25,
+      releases_form: "in_weeks",
       flags: [{ key: "release_due", tone: "hint", value: 19 }],
     }),
     row({
@@ -301,6 +305,7 @@ export function repoView(): RepoView {
       reason: "untraced",
       days_since: null,
       last_release: null,
+      releases_form: null,
       to_prod: null,
       to_prod_n: 0,
     }),
@@ -317,6 +322,7 @@ export function repoView(): RepoView {
       group: "library",
       days_since: null,
       last_release: null,
+      releases_form: null,
     }),
   ];
   const dot = (
@@ -403,6 +409,7 @@ export function repoView(): RepoView {
     ],
     hint_days: 14,
     breach_days: 28,
+    rare_from: 15,
     spreads: [
       spread("releases"),
       spread("to_prod", {
@@ -887,7 +894,11 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       untracked: undirected(null, "low_sample"),
       merged_per_week: change("better", 0.5, null, 0.4),
       batch_size: change("worse", 80, null, -0.5),
-      cost_per_kloc: undirected(null, "incomplete"),
+      cost_per_kloc: {
+        ...undirected(null, "source_started"),
+        source: "noergler",
+        since: "2026-10-20T08:00:00Z",
+      },
       wasted_share: undirected(null, "low_sample"),
       open_prs: undirected(3),
       open_jammed: change("same", 1),

@@ -196,7 +196,8 @@ export function TrendChart({
                 fontSize="10"
                 fill="var(--color-muted)"
               >
-                {num(v, v < 10 && v % 1 ? 1 : 0)}
+                {/* 12.5 stays 12.5: a rounded label sits off its line. */}
+                {num(v, v % 1 ? 1 : 0)}
               </text>
             </g>
           ))}

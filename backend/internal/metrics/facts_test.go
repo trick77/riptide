@@ -226,6 +226,38 @@ func TestFactsPlacementSearch(t *testing.T) {
 	}
 }
 
+// A renamed mark stays searchable under its old words: a link shared before
+// still finds its rows, and the new words find them too.
+func TestFactsOldWords(t *testing.T) {
+	ds := factsData()
+	ds.Traces = map[string]dataset.RepoTrace{"kasse/kasse-api": {DeployedSince: agoP(50)}}
+	// PR 1 off the trunk, PR 4 a library's.
+	ds.PRs[0].OffTrunk, ds.PRs[0].TrunkAt = true, nil
+	ds.PRs[3].Library, ds.PRs[3].Environments = true, nil
+	for _, c := range []struct {
+		q    string
+		want string
+	}{
+		{"Periodenende", "[1]"},
+		{"nicht im Hauptbranch", "[1]"},
+		{"nicht im Default-Branch", "[1]"},
+		{"reach the main branch", "[1]"},
+		{"reach the default branch", "[1]"},
+		{"Bibliothek", "[4]"},
+		{"Library, wird nicht ausgerollt", "[4]"},
+	} {
+		if got := prIDs(ComputeFacts(ds, all(), c.q).PRs.Rows); fmt.Sprint(got) != c.want {
+			t.Errorf("%q: %v, want %s", c.q, got, c.want)
+		}
+	}
+	// A build of the default branch, by its words now and before.
+	for _, q := range []string{"Default-Branch-Builds", "Hauptbranch-Builds", "master-Builds"} {
+		if rows := ComputeFacts(ds, all(), q).Runs.Rows; len(rows) == 0 {
+			t.Errorf("%q finds no run", q)
+		}
+	}
+}
+
 func TestFactsLimit(t *testing.T) {
 	ds := data(func(ds *dataset.Dataset) {
 		for i := range FactsLimit + 5 {

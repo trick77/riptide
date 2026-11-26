@@ -21,6 +21,18 @@ const GROUP_TONE: Record<RepoGroupKey, string> = {
   idle: "bg-faint",
 };
 
+// The cut values the group names and the order line write, all the
+// backend's: the team's thresholds, the rare group's first day, the stage.
+function cuts(m: Metrics) {
+  const r = m.repos;
+  return {
+    hint: r.hint_days,
+    breach: r.breach_days,
+    from: r.rare_from,
+    prod: stage(m.delivery.production_stage),
+  };
+}
+
 function GroupHead({
   g,
   count,
@@ -31,7 +43,6 @@ function GroupHead({
   m: Metrics;
 }) {
   const { t } = useTranslation();
-  const r = m.repos;
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
       <span
@@ -39,14 +50,11 @@ function GroupHead({
         className={`inline-block size-2 rounded-full ${GROUP_TONE[g]}`}
       />
       <span className="text-[11px] font-medium tracking-[.12em] text-ink-dim uppercase">
-        {t(`repos.group.${g}`)}
+        {t(`repos.group.${g}`, cuts(m))}
       </span>
       <span className="font-mono text-[12.5px] text-muted">{count}</span>
       <span className="text-xs text-faint">
-        {t(`repos.groupSub.${g}`, {
-          hint: r.hint_days,
-          breach: r.breach_days,
-        })}
+        {t(`repos.groupSub.${g}`, cuts(m))}
       </span>
     </div>
   );
@@ -151,7 +159,8 @@ function StandPills({ r, prod }: { r: RepoRow; prod: string }) {
       days: num(f.value, 1),
       prod,
       lower:
-        f.key === "no_release" && r.since_lower_bound
+        (f.key === "no_release" || f.key === "release_due") &&
+        r.since_lower_bound
           ? t("repos.flag.lowerBound")
           : "",
     }),
@@ -197,7 +206,6 @@ export function Ranking({
   );
   const open = all ? v.rows.length : v.open;
   const shown = v.rows.slice(0, open);
-  const periodWeeks = m.period.weeks.length;
   const before = (x: number | null, f: (n: number) => string) =>
     x == null ? undefined : t("compare.before", { v: f(x) });
   const days = (x: number) => t("units.days", { n: num(x, 1) });
@@ -220,24 +228,33 @@ export function Ranking({
         </tr>,
       );
     }
+    // A week without a value names the trend's own reason: the same
+    // source's gap (the rows' weeks are the trend's closed ones).
     const mergedSeries: TrendSeries = {
       values: r.merged_weeks,
       n: [],
-      gaps: r.merged_weeks.map((x) => (x == null ? "no_data" : "")),
+      gaps: r.merged_weeks.map((x, i) =>
+        x == null ? tr.merged.gaps[i] || "no_data" : "",
+      ),
     };
-    const delivered = r.group !== "library" && r.reason !== "untraced";
-    const relText = !delivered
-      ? "–"
-      : r.releases === 0
-        ? t("repos.rel.none")
-        : r.releases_per_week != null && r.releases_per_week >= 1
-          ? t("repos.rel.perWeek", { n: perWeek(r.releases_per_week) })
-          : t("repos.rel.inWeeks", { count: r.releases, weeks: periodWeeks });
+    // How the row writes its releases is the backend's: null writes none.
+    const form = r.releases_form;
+    const relText =
+      form == null
+        ? "–"
+        : form === "none"
+          ? t("repos.rel.none")
+          : form === "per_week" && r.releases_per_week != null
+            ? t("repos.rel.perWeek", { n: perWeek(r.releases_per_week) })
+            : t("repos.rel.inWeeks", {
+                count: r.releases,
+                weeks: r.releases_base,
+              });
     const relSub =
-      delivered && r.days_since != null
-        ? r.last_release
-          ? t("repos.rel.last", { count: Math.round(r.days_since) })
-          : t("repos.rel.never", { count: Math.round(r.days_since) })
+      r.days_since != null
+        ? t(r.since_lower_bound ? "repos.rel.lastLower" : "repos.rel.last", {
+            count: Math.round(r.days_since),
+          })
         : undefined;
     let prodCell: { v: string; sub?: string; tone?: string };
     if (r.to_prod != null)
@@ -250,7 +267,7 @@ export function Ranking({
       };
     else if (r.to_prod_n > 0)
       prodCell = { v: t("repos.thinCell", { count: r.to_prod_n }) };
-    else if (r.group === "none")
+    else if (r.group === "none" && r.merged > 0)
       prodCell = { v: t("repos.lying", { prod }), tone: "text-danger-ink" };
     else prodCell = { v: "–" };
     if (r.not_yet > 0)
@@ -289,7 +306,7 @@ export function Ranking({
         </td>
         <td className="border-b border-border-soft px-3 py-2 align-middle">
           <span className="flex items-center gap-2.5">
-            {delivered && (
+            {form != null && (
               <Bars weeks={r.release_weeks} max={relMax} split={tr.split} />
             )}
             <Cell v={relText} sub={relSub} />
@@ -421,7 +438,7 @@ export function Ranking({
           {all || !hiddenAny
             ? t("repos.countAll", { count: v.rows.length })
             : t("repos.countOpen", { n: v.open, total: v.rows.length })}{" "}
-          {t("repos.order")}
+          {t("repos.order", cuts(m))}
         </span>
       </div>
     </div>

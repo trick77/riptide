@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -309,6 +310,10 @@ func TestRepoViewMatchesOpenAPISpec(t *testing.T) {
 			Silences: []dataset.Silence{}, RepoStarts: []dataset.RepoStart{}},
 		Products: []dataset.Product{{Key: "kasse", Repos: []string{"kasse/kasse-api"}, Apps: []string{"kasse-prod"}}},
 		Apps:     []dataset.App{{Name: "kasse-prod", Project: s("kasse")}, {Name: "lager-prod", Project: s("lager")}},
+		// The releases the traces list: the release rule reads them per
+		// project.
+		Releases: []dataset.AppRelease{{App: "kasse-prod", Environment: "prod", At: day(45)},
+			{App: "lager-prod", Environment: "prod", At: day(12)}, {App: "lager-prod", Environment: "prod", At: day(5)}},
 		Traces: map[string]dataset.RepoTrace{
 			"kasse/kasse-api": {DeployedSince: at(60), Releases: []dataset.TraceRelease{
 				{App: "kasse-prod", Environment: "prod", At: day(45), Known: day(60)}}},
@@ -350,6 +355,41 @@ func TestRepoViewMatchesOpenAPISpec(t *testing.T) {
 		if !strings.Contains(w.Body.String(), want) {
 			t.Errorf("metrics have no %s", want)
 		}
+	}
+}
+
+// The per-repo view judges against the team's own thresholds, as the
+// assessment does: a release 45 days back is no breach under a 60-day rule.
+func TestRepoViewUsesTheTeamsThresholds(t *testing.T) {
+	h := newHarness(t, nil)
+	cfg := strings.Replace(configJSON, `"environments"`,
+		`"thresholds": {"release_hint_days": 50, "release_breach_days": 60}, "environments"`, 1)
+	if err := os.WriteFile(h.cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.runtime.Reload()
+	day := func(d float64) time.Time { return fixedNow.Add(-time.Duration(d * float64(24*time.Hour))) }
+	start, kasse := day(200), "kasse"
+	h.mem.dataset = &dataset.Dataset{
+		Meta: dataset.Meta{Team: "checkout", From: day(30), To: fixedNow, GeneratedAt: fixedNow, ProductionStage: "prod",
+			DataStart: dataset.SourceTimes{Bitbucket: &start, Pipeline: &start, ArgoCD: &start, Noergler: &start},
+			DataEnd:   dataset.SourceTimes{Bitbucket: &fixedNow, Pipeline: &fixedNow, ArgoCD: &fixedNow, Noergler: &fixedNow},
+			Lost:      []dataset.Silence{}, Silences: []dataset.Silence{}, RepoStarts: []dataset.RepoStart{}},
+		Apps:     []dataset.App{{Name: "kasse-prod", Project: &kasse}},
+		Releases: []dataset.AppRelease{{App: "kasse-prod", Environment: "prod", At: day(45)}},
+		Traces: map[string]dataset.RepoTrace{"kasse/kasse-api": {DeployedSince: ptrTo(day(150)),
+			Releases: []dataset.TraceRelease{{App: "kasse-prod", Environment: "prod", At: day(45), Known: day(150)}}}},
+		PRs: []dataset.PR{{Repo: "kasse/kasse-api", Project: kasse, PRID: 1, State: "merged", MergedAt: ptrTo(day(9)),
+			TrunkAt: ptrTo(day(9)), OpenedAt: ptrTo(day(10))}},
+	}
+	w := h.serveUI(newRequest(http.MethodGet, "/api/metrics?team=checkout&tz=Europe/Zurich", nil))
+	expectStatus(t, w, http.StatusOK)
+	var m metrics.Metrics
+	if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil {
+		t.Fatal(err)
+	}
+	if v := m.Repos; v.BreachDays != 60 || v.HintDays != 50 || len(v.Rows) != 1 || v.Rows[0].Group != metrics.RepoGroupRegular {
+		t.Errorf("repos = %+v", v)
 	}
 }
 

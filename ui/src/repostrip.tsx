@@ -24,9 +24,10 @@ import { dur, num, pct } from "./format";
 export function unitValue(t: TFunction, unit: SpreadUnit, v: number): string {
   switch (unit) {
     case "per_week":
-      // Once a month is 0.25 a week: a tenth would round it to 0.3.
+      // Once a month is 0.25 a week: a tenth would round it to 0.3. None
+      // is 0, not 0.00.
       return t("repos.unit.perWeek", {
-        n: num(v, v < 1 ? 2 : v < 10 ? 1 : 0),
+        n: v === 0 ? "0" : num(v, v < 1 ? 2 : v < 10 ? 1 : 0),
       });
     // The backend rounds days to a tenth: 0 is under a tenth, not none.
     case "days":
@@ -80,25 +81,23 @@ const FILL: Record<DotVerdict, string> = {
 type Placed = { dot: RepoDot; cx: number; cy: number };
 
 // Dots stacked where they would overlap: each takes the lowest free row
-// around the centre line, the order the backend sent them in.
+// around the centre line (0, -1, 1, -2, 2, …), the order the backend sent
+// them in. The rows grow as far as the dots need, so no dot hides under
+// another; the band's height follows them.
 function layout(
   dots: RepoDot[],
   x0: number,
   x1: number,
 ): { placed: Placed[]; rows: number } {
-  const rowsOf = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5, -6, 6];
   const taken: { x: number; r: number }[] = [];
   const out: { dot: RepoDot; x: number; r: number }[] = [];
   for (const dot of dots) {
     if (dot.x == null) continue;
     const x = x0 + dot.x * (x1 - x0);
-    let row = rowsOf[rowsOf.length - 1];
-    for (const r of rowsOf) {
-      if (!taken.some((p) => p.r === r && Math.abs(p.x - x) < D)) {
-        row = r;
-        break;
-      }
-    }
+    const rowAt = (k: number) => (k % 2 === 0 ? k / 2 : -(k + 1) / 2);
+    let k = 0;
+    while (taken.some((p) => p.r === rowAt(k) && Math.abs(p.x - x) < D)) k++;
+    const row = rowAt(k);
     taken.push({ x, r: row });
     out.push({ dot, x, r: row });
   }
@@ -122,6 +121,11 @@ export function RepoStrip({
   const { t } = useTranslation();
   const tip = useId();
   const [active, setActive] = useState<number | null>(null);
+  // One tab stop per strip: the dot last focused, the arrow keys move
+  // between them (a roving tab index), so thirty repos on eleven strips
+  // are eleven stops, not three hundred.
+  const [stop, setStop] = useState(0);
+  const dotRefs = useRef<(SVGCircleElement | null)[]>([]);
   const wrap = useRef<HTMLDivElement>(null);
   const [W, setW] = useState(START_W);
   useLayoutEffect(() => {
@@ -170,12 +174,42 @@ export function RepoStrip({
       cy: (Math.floor(i / perRow) - (apartRows - 1) / 2) * 10,
     })),
   );
-  const tipText = (d: RepoDot) =>
-    d.apart || d.value == null
-      ? apartLabel
-      : `${unitValue(t, s.unit, d.value)} · ${t(`repos.n.${s.key}`, { count: d.n })}`;
+  // The dot's value, its cases and its verdict in words: a colour alone
+  // tells a screen reader or a colour-blind reader nothing.
+  const tipText = (d: RepoDot) => {
+    const verdict = d.apart
+      ? t("repos.verdict.breach")
+      : t(`repos.verdict.${d.verdict}`);
+    const value =
+      d.apart || d.value == null
+        ? apartLabel
+        : `${unitValue(t, s.unit, d.value)} · ${t(`repos.n.${s.key}`, { count: d.n })}`;
+    return verdict ? `${value} · ${verdict}` : value;
+  };
   const shown = active != null ? all[active] : null;
+  const current = Math.min(stop, all.length - 1);
+  const move = (to: number) => {
+    const i = (to + all.length) % all.length;
+    setStop(i);
+    dotRefs.current[i]?.focus();
+  };
   const typical = s.typical_x != null ? at(s.typical_x) : null;
+  // The threshold's label and the typical repo's sit on either side of
+  // each other where the two lines stand close, never on top of each other.
+  const markX = s.mark ? at(s.mark.x) : null;
+  const near =
+    markX != null && typical != null && Math.abs(markX - typical) < 60;
+  const markLeft = near && markX! <= typical!;
+  const markEnd = near ? markLeft : s.mark != null && s.mark.x > 0.8;
+  const typicalAnchor = near
+    ? markLeft
+      ? "start"
+      : "end"
+    : typical != null && typical < 40
+      ? "start"
+      : typical != null && typical > x1 - 30
+        ? "end"
+        : "middle";
   return (
     <div ref={wrap} className="relative mt-1.5">
       <svg
@@ -204,9 +238,9 @@ export function RepoStrip({
               strokeDasharray="3 3"
             />
             <text
-              x={at(s.mark.x) + (s.mark.x > 0.8 ? -3 : 3)}
+              x={at(s.mark.x) + (markEnd ? -3 : 3)}
               y={top + 1}
-              textAnchor={s.mark.x > 0.8 ? "end" : "start"}
+              textAnchor={markEnd ? "end" : "start"}
               fontSize="9.5"
               fill="var(--color-muted)"
             >
@@ -225,11 +259,9 @@ export function RepoStrip({
               strokeWidth="1.5"
             />
             <text
-              x={typical}
+              x={typical + (near ? (markLeft ? 2 : -2) : 0)}
               y={top - 5}
-              textAnchor={
-                typical < 40 ? "start" : typical > x1 - 30 ? "end" : "middle"
-              }
+              textAnchor={typicalAnchor}
               fontSize="9.5"
               fill="var(--color-accent-strong)"
             >
@@ -285,6 +317,9 @@ export function RepoStrip({
           return (
             <circle
               key={d.repo}
+              ref={(el) => {
+                dotRefs.current[i] = el;
+              }}
               data-testid="strip-dot"
               data-verdict={d.apart ? "apart" : d.verdict}
               cx={p.cx.toFixed(1)}
@@ -301,20 +336,35 @@ export function RepoStrip({
               strokeWidth={d.apart ? 1.6 : 1.2}
               // A hollow dot answers the pointer inside its ring too.
               pointerEvents="all"
-              tabIndex={0}
+              tabIndex={i === current ? 0 : -1}
               role="button"
               aria-label={`${d.repo}: ${tipText(d)}`}
               aria-describedby={active === i ? tip : undefined}
               className="cursor-pointer outline-none hover:stroke-ink focus-visible:stroke-accent-strong focus-visible:stroke-2"
               onMouseEnter={() => setActive(i)}
               onMouseLeave={() => setActive(null)}
-              onFocus={() => setActive(i)}
+              onFocus={() => {
+                setActive(i);
+                setStop(i);
+              }}
               onBlur={() => setActive(null)}
               onClick={open}
               onKeyDown={(e) => {
+                const step: Record<string, number> = {
+                  ArrowRight: 1,
+                  ArrowDown: 1,
+                  ArrowLeft: -1,
+                  ArrowUp: -1,
+                };
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   open();
+                } else if (e.key in step) {
+                  e.preventDefault();
+                  move(i + step[e.key]);
+                } else if (e.key === "Home" || e.key === "End") {
+                  e.preventDefault();
+                  move(e.key === "Home" ? 0 : all.length - 1);
                 }
               }}
             />
@@ -369,7 +419,9 @@ export function SpreadLines({ s }: { s: RepoSpread }) {
     );
   const n = s.note;
   if (n?.kind === "dominant" && n.repo)
-    lines.push(t("repos.note.dominant", { repo: n.repo, share: pct(n.share) }));
+    lines.push(
+      t("repos.note.dominant", { repo: n.repo, share: pct(n.share), cases }),
+    );
   if (n?.kind === "far")
     lines.push(
       [
@@ -408,7 +460,10 @@ export function StripBlock({
   title: string;
   onRepo?: (repo: string) => void;
 }) {
-  if (!s || (!s.shown && s.same == null)) return null;
+  // No strip without a spread to show, but its lines still say what is set
+  // apart, all at one value or too thin to place.
+  if (!s || (!s.shown && s.same == null && s.apart === 0 && s.thin === 0))
+    return null;
   return (
     <div className="mt-1.5 border-t border-border-soft pt-2">
       <div className="text-[11.5px] text-muted">{title}</div>

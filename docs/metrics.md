@@ -486,25 +486,31 @@ masculine, stages upper case through `{{prod}}`, never written out.
 | an App's first deploy | erstes Deploy | first deploy | Erstdeploy |
 | first commit to production | Zeit vom ersten Commit bis PROD | time from first commit to PROD | Lead Time as a title (Change lead time: reference line only) |
 | a piece of that way | Abschnitt | section | Etappe, Stufe |
-| INTG, SYST, PROD | Stage | stage | Stufe, Umgebung |
-| bring code to PROD | ausrollen | roll out | |
-| the repo's main line | Hauptbranch | main branch | Default-Branch, Trunk, master |
+| INTG, SYST, PROD | Stage | stage | Stufe, Umgebung; environment |
+| bring code to PROD (the verb) | ausrollen, ausgerollt | roll out, rolled out | ausliefern |
+| bringing code to PROD (the noun) | Rollout | rollout | das Ausrollen, Auslieferung; delivery |
+| the repo's main line | Default-Branch | default branch | Hauptbranch, Trunk; main branch, trunk |
 | a person's OK on a PR | Freigabe, freigegeben | approval, approved | Approval, approved (in German) |
-| a repo no deploy ships | Bibliothek | library | Library (in German) |
+| a repo no deploy ships | Library | library | Bibliothek |
 | the median | typisch (half above, half below) | typical | Median, p50 |
 | the 90th percentile | die langsamsten 10 % | the slowest 10 % | p90 |
 | the weeks shown / before | Zeitraum, Vorperiode | period, previous period | Periode, Periodenende |
-| a Bitbucket project | Produkt | product | Projekt |
-| a source stops sending | liefert keine Daten | sends no data | meldet nichts, Stall |
+| a Bitbucket project | Projekt | project | Produkt; product |
+| a source stops sending | liefert keine Daten | sends no data | meldet nichts, Stall; reports nothing |
 | a CI run | Build | build | Lauf, Run |
 | a build's result | erfolgreich, fehlgeschlagen | succeeded, failed | grün, rot |
 | failed, then passed on the same commit | unzuverlässig | flaky | Flaky (in German) |
-| a repo without merged work | ohne Aktivität | no activity | inaktiv |
+| a repo without merged work | ohne Aktivität | no activity | inaktiv (for a repo) |
 | a PR without events for weeks | inaktiv | inactive | |
 | the team's own threshold | Abmachung | agreement | |
 | what a rule found | Befund, Hinweis, nicht beurteilbar | finding, hint, cannot be judged | |
-| what to do about a finding | nächster Schritt | next step | Hebel |
-| trouble after a rollout | Ärger nach dem Ausrollen | trouble after a rollout | Instability |
+| what moves a number | Was die Zahl bewegt (a why panel), → before a step (the assessment) | What moves the number, → | Hebel, nächster Schritt |
+| trouble after a rollout | Ärger nach dem Rollout | trouble after a rollout | Instability |
+
+The owner chose Default-Branch, Projekt, Library and Rollout over German
+coinages (2026-11-26): the words a developer uses for them every day. The
+model's never-lists hold them per language (`not_de`, `not_en`): a word
+another language's page uses is no never-word there.
 
 A renamed word the facts table shows stays searchable under its old name
 (`*Alias` in `internal/metrics/facts.go`), so a shared `?q=` link keeps
@@ -560,6 +566,14 @@ noise), no verdict no score; Argo CD silent for the team is
 `not_reporting`, not too few. `directed` says whether the number
 has a better direction at all, whatever the verdict (an undirected one with
 too few data says `low_sample`); the strip draws only the directed ones.
+A number not compared because its data does not cover both periods says
+the one cause, which the page puts in one sentence: `source_started` (the
+source's first data after the previous period began; `source`, `since`),
+`lost` (Bitbucket lost events in either period; the first span `from` to
+`to`), `first_deploys` (more first deploys than releases in a period,
+deploy frequency only), `incomplete` (covered, not alike: the build type
+first reported inside the previous period, or lead times mostly placed
+through a lower bound).
 
 Deploy frequency also comes per calendar day in the viewer's zone, the
 period's weeks Monday first: each release on the day of its first deploy in
@@ -700,7 +714,9 @@ period and the week running now (`split` marks the period's first week,
 `delivery.frequency.weeks` does. A week is a gap, null with a reason, never
 a zero: `no_data` when the series' source started after the week's start
 (Bitbucket for merged PRs; Bitbucket and noergler for the size; Argo CD for
-releases), `lost` when a lost Bitbucket silence overlaps the week's working
+releases), `silent` when it sent nothing from before the week's start on
+and stayed silent 7 days or more by the read's end (a closed week judged at
+the period's end, the running week now), `lost` when a lost Bitbucket silence overlaps the week's working
 time (one reaching into a Sunday took no merges), `none` when a week has no
 PR with a size. Built from the sections the request computes anyway, no
 read of its own.
@@ -712,18 +728,34 @@ PR in the period or the previous one, from the rows the request already
 holds (both periods' PRs, tracing's releases, the build section's runs per
 repo):
 
-- A repo's releases are its Apps' releases to production that tracing does
-  not show leaving it unchanged, read as tracing knew them by the period's
-  end, each GitOps revision once; an App's first deploy within the grace
-  after Argo CD's first event counts as no release, as the team's frequency
-  has it, but its last release was then or before. Its last one against the team's
-  `release_hint_days` and `release_breach_days` puts it in a group: rolls
-  out regularly, rarely, or not at all (`none`, the sprint rule broken). Not
-  judged: a library (never rolled out), a repo nobody works on (no counted
-  merge since its last release nor within `release_breach_days`, as the
-  release state counts a project active), and, as `unjudged` with a reason,
-  one no App is known to deploy, one only infrastructure Apps deploy, or
-  Argo CD not reporting. Never judged as regular for want of data.
+- The release rule is per project (owner: at least one release to
+  production per sprint per project), so a repo's group is its project's
+  standing, read as `no_release` and `release_due` read it: the project's
+  last release (`last_release`, `days_since`, an App's first deploy inside
+  the grace a lower bound) against `release_hint_days` and
+  `release_breach_days`: a release in the last 14 days (`regular`), 15 to
+  28 days back (`rare`), more (`none`, the rule broken). A row is flagged
+  for a state exactly where the state's card names it or its project: never
+  red where the card raises nothing. A repo its project's last release left
+  unchanged, its merged work waiting longer than `not_on_prod_days`, is
+  flagged `not_on_prod` (its oldest PR not on production, both periods'
+  PRs read), not a missed release. Not judged: a library (never rolled
+  out), a repo nobody works on (no counted merge since its project's last
+  release nor within `release_breach_days`), and, as `unjudged` with a
+  reason, the assessment's gates: Argo CD not reporting, Argo CD or
+  Bitbucket silent 7 days at the period's end, Argo CD reporting no deploy
+  to the production stage; then one only infrastructure Apps deploy, one
+  no App is known to deploy, one whose project never released to
+  production as far as the data goes (the rule judges a project rolled out
+  only; its waiting work is `not_on_prod`'s). A gated source flags nothing
+  and judges no dot. Never judged as regular for want of data.
+- A repo's own releases are its Apps' releases to production that tracing
+  does not show leaving it unchanged, read as tracing knew them by the
+  period's end, each GitOps revision once, in the week of its first deploy;
+  an App's first deploy within the grace after Argo CD's first event counts
+  as no release, as the team's frequency has it. `releases_form` says how
+  the row writes them (none, per week from one a week, else the count over
+  `releases_base` weeks), null where Argo CD cannot tell.
 - The wait from the trunk to production, the typical pickup to the first
   review and a build kind's typical duration and failures are the states'
   own numbers (`slow_to_prod`, `first_review_wait`, `long_builds`,
@@ -731,11 +763,14 @@ repo):
   them is counted as too few (`thin`), never placed on a strip. Batch size
   per repo needs 3 PRs with a size.
 - A previous value per repo only where its sources saw the previous period
-  whole, as the comparison holds.
+  whole and Bitbucket lost no events in either period (in a project view
+  the releases and the wait to production neither), as the comparison
+  holds.
 
 The ranking orders the groups none, rare, unjudged, regular, library,
 idle; the longest without a release first, within regular those past a red
-threshold first, then the slowest to production. It opens 8 rows, or all of
+threshold (`not_on_prod`, `slow_to_prod`) first, then the slowest to
+production. It opens 8 rows, or all of
 them when fewer than 3 would stay hidden, and names the first 5 hidden per
 group.
 
@@ -743,16 +778,19 @@ Each strip (`spreads`) carries the repos' values at positions 0..1 with the
 better end at 0, on a scale fitted to the values and the team's threshold:
 a share from the nearest 10 % below its lowest value to 100 %, values
 spanning a factor of 8 or more on a log scale (one daily repo would squeeze
-the rest into one spot), else a linear one; ticks on round values of the
-unit. Each dot's verdict is against the team's threshold where the number
+the rest into one spot), else a linear one spanning at least half the
+largest value, the values centred (900 s and 902 s stay together, never at
+opposite ends); ticks on round values of the unit. A build kind's duration
+is drawn at the minutes it is judged on. Each dot's verdict is against the team's threshold where the number
 has one (`breach` where its state is the rule broken, `hint` where it is a
 hint), `neutral` where it has none. A repo that released nothing in the
 period while not rolling out (`none`) is set apart at the strip's end, not
 placed at zero. Placed repos at one value only make no strip (every dot on
 one spot reads as a picture of nothing): `same` carries the value for a line
 instead. The typical repo is the median of the placed repos. A note says what the team's number hides,
-from 3 repos with a value on: one repo carrying half of an added-up count or
-more (`dominant`), repos more than twice or under half the typical one's
+from 3 repos with a value on: one repo carrying half of the team's own
+count or more (`dominant`: of the team's releases, each revision once, or
+of its merged PRs, libraries' included), repos more than twice or under half the typical one's
 value (`far`), or the team's number itself that far from the typical repo
 (`pooled`: it adds the repos up, or counts every case so the busiest repos
 decide it). Starting values, not measured.

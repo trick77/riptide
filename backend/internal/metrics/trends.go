@@ -19,7 +19,21 @@ const (
 	// GapNone: the week has data but no case to take a typical value of (no
 	// PR with a size): no line through it, no zero either.
 	GapNone = "none"
+	// GapSilent: the series' source sent nothing from before the week's
+	// start on and stayed silent SilentDays or more by the read's end
+	// (silentEnd): a dead webhook, never a team that stopped.
+	GapSilent = "silent"
 )
+
+// stoppedAt is when a source whose latest event is latest went silent for
+// good by end: that event, where the silence has lasted SilentDays
+// (silentEnd); nil otherwise.
+func stoppedAt(latest *time.Time, end time.Time) *time.Time {
+	if silentEnd(latest, end) {
+		return latest
+	}
+	return nil
+}
 
 // Trends are three of the page's numbers week by week over the previous
 // period, the period and the week running now, so a line shows where a
@@ -65,12 +79,16 @@ func (s *TrendSeries) add(v *float64, n int, gap string) {
 }
 
 // weekGap is why a source's week [from, to) has no value: the source's data
-// starting after the week's start, or, for Bitbucket's numbers, a lost
-// silence (lost) overlapping its working time in loc. A silence reaching
-// into a Sunday took no merges of the week.
-func weekGap(from, to time.Time, start *time.Time, lost []dataset.Silence, loc *time.Location) string {
+// starting after the week's start, its silence for good from stop on
+// (stoppedAt, nil: none) covering the week, or, for Bitbucket's numbers, a
+// lost silence (lost) overlapping its working time in loc. A silence
+// reaching into a Sunday took no merges of the week.
+func weekGap(from, to time.Time, start, stop *time.Time, lost []dataset.Silence, loc *time.Location) string {
 	if start == nil || start.After(from) {
 		return GapNoData
+	}
+	if stop != nil && !from.Before(*stop) {
+		return GapSilent
 	}
 	for _, s := range lost {
 		if s.To.After(from) && s.From.Before(to) && workingDays(laterTime(s.From, from), earlierTime(s.To, to), loc) > 0 {
@@ -107,8 +125,10 @@ func lostOf(dss ...*dataset.Dataset) []dataset.Silence {
 
 // trends are m's and pm's weekly numbers side by side, then the running
 // week's from running (ds over p.Running, nil without one) as RunningWeek
-// counts it; the period's data start and lost silences decide the gaps.
-func trends(m, pm Metrics, running *dataset.Dataset, p Params, f filter) Trends {
+// counts it; the period's data start, lost silences and a source silent
+// for good decide the gaps: closed is each source's latest event by the
+// period's end, m.Meta's the read's newest.
+func trends(m, pm Metrics, closed dataset.SourceTimes, running *dataset.Dataset, p Params, f filter) Trends {
 	start := m.Meta.DataStart
 	lost := lostOf(&dataset.Dataset{Meta: m.Meta}, &dataset.Dataset{Meta: pm.Meta}, running)
 	out := Trends{Weeks: []TrendWeek{}, Split: len(pm.Period.Weeks),
@@ -122,11 +142,15 @@ func trends(m, pm Metrics, running *dataset.Dataset, p Params, f filter) Trends 
 		merged, sized int
 		batch         *float64
 		releases      int
+		// ends are the sources' latest events and end the instant they are
+		// judged silent at: the period's end, or now for the running week.
+		ends dataset.SourceTimes
+		end  time.Time
 	}
 	var weeks []week
 	for _, x := range []Metrics{pm, m} {
 		for i, w := range x.Period.Weeks {
-			tw := week{w: TrendWeek{Week: w}, to: w.End}
+			tw := week{w: TrendWeek{Week: w}, to: w.End, ends: closed, end: p.Period.To}
 			if i < len(x.Throughput.Weeks) {
 				t := x.Throughput.Weeks[i]
 				tw.merged, tw.sized, tw.batch = t.Merged, t.Sized, t.BatchP50
@@ -146,22 +170,24 @@ func trends(m, pm Metrics, running *dataset.Dataset, p Params, f filter) Trends 
 			}
 		}
 		weeks = append(weeks, week{w: TrendWeek{Week: p.Running.Weeks[0], Running: true}, to: p.Running.To,
-			merged: m.RunningWeek.Merged, sized: len(sizes), batch: Median(sizes), releases: m.RunningWeek.Releases})
+			merged: m.RunningWeek.Merged, sized: len(sizes), batch: Median(sizes), releases: m.RunningWeek.Releases,
+			ends: m.Meta.DataEnd, end: p.Running.To})
 	}
 	loc := p.Period.location()
 	for _, w := range weeks {
 		out.Weeks = append(out.Weeks, w.w)
-		merged := weekGap(w.w.Start, w.to, start.Bitbucket, lost, loc)
+		merged := weekGap(w.w.Start, w.to, start.Bitbucket, stoppedAt(w.ends.Bitbucket, w.end), lost, loc)
 		out.Merged.add(f64(w.merged), w.merged, merged)
 		batch := merged
 		if batch == "" {
-			batch = weekGap(w.w.Start, w.to, start.Noergler, nil, loc)
+			batch = weekGap(w.w.Start, w.to, start.Noergler, stoppedAt(w.ends.Noergler, w.end), nil, loc)
 		}
 		if batch == "" && w.batch == nil {
 			batch = GapNone
 		}
 		out.Batch.add(w.batch, w.sized, batch)
-		out.Releases.add(f64(w.releases), w.releases, weekGap(w.w.Start, w.to, start.ArgoCD, nil, loc))
+		out.Releases.add(f64(w.releases), w.releases,
+			weekGap(w.w.Start, w.to, start.ArgoCD, stoppedAt(w.ends.ArgoCD, w.end), nil, loc))
 	}
 	return out
 }

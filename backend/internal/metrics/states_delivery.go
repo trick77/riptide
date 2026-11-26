@@ -23,28 +23,7 @@ import (
 // breach's, escalated out of the hint: never "gelöst" there.
 func (a *assessor) releaseStates(at stateAt) []stateEval {
 	th, end := a.states.th, at.end
-	prod := a.ds.Meta.ProductionStage
-	argo := a.ds.Meta.DataStart.ArgoCD
-	project := map[string]string{}
-	for _, app := range a.ds.Apps {
-		if !app.Infra && app.Project != nil && a.f.inKey(*app.Project) {
-			project[app.Name] = *app.Project
-		}
-	}
-	last := map[string]dataset.AppRelease{}
-	apps := map[string][]string{}
-	for _, r := range a.ds.Releases {
-		p, ok := project[r.App]
-		if !ok || r.Environment != prod || !r.At.Before(end) {
-			continue
-		}
-		if !slices.Contains(apps[p], r.App) {
-			apps[p] = append(apps[p], r.App)
-		}
-		if l, ok := last[p]; !ok || r.At.After(l.At) {
-			last[p] = r
-		}
-	}
+	last := lastReleases(a.ds, a.f, end)
 	work := map[string][]time.Time{}
 	for _, pr := range a.states.prs {
 		if !pr.Library && notCounted(pr) == "" && pr.MergedAt.Before(end) {
@@ -59,12 +38,10 @@ func (a *assessor) releaseStates(at stateAt) []stateEval {
 		facts: "deploys", tier: tierLasting,
 		threshold: StateThreshold{Key: "release_hint_days", Value: float64(th.ReleaseHintDays), Unit: ThresholdDays}}
 	for _, p := range slices.Sorted(mapsKeys(last)) {
-		r := last[p]
+		l := last[p]
+		r := l.release
 		since := r.At
 		days := calendarDays(since, end)
-		// Inside the grace an App's first deploy is no known release: the last
-		// one was then or before.
-		lower := r.First && (argo == nil || r.At.Sub(*argo) <= dataset.FirstDeployGrace)
 		merged := 0
 		active := false
 		for _, t := range work[p] {
@@ -75,11 +52,10 @@ func (a *assessor) releaseStates(at stateAt) []stateEval {
 				active = true
 			}
 		}
-		slices.Sort(apps[p])
 		// The deploy table holds no project: its last release's App finds that
 		// release and the App's deploys around it.
 		u := stateUnit{StateUnit: StateUnit{Name: p, Project: ptr(p), Value: days, Count: ptr(merged), Since: ptr(since),
-			LowerBound: lower, Names: apps[p], Query: ptr(r.App)}}
+			LowerBound: l.lower, Names: l.apps, Query: ptr(r.App)}}
 		switch {
 		case !active:
 			u.status = unitIdle
@@ -102,6 +78,53 @@ func (a *assessor) releaseStates(at stateAt) []stateEval {
 		due.units = append(due.units, d)
 	}
 	return []stateEval{breach, due}
+}
+
+// projectLast is a project's last release to production before an instant:
+// the release, the project's Apps that released to production, and whether
+// it is a lower bound (lastReleases).
+type projectLast struct {
+	release dataset.AppRelease
+	apps    []string
+	lower   bool
+}
+
+// lastReleases are the last releases to production before end of the
+// view's projects (f), by project: the newest release of a project's
+// non-infrastructure Apps. Inside FirstDeployGrace of Argo CD's first event
+// an App's first deploy is no known release: the last one was then or
+// before (lower). The release rule's one reading, for its states and the
+// per-repo view alike.
+func lastReleases(ds *dataset.Dataset, f filter, end time.Time) map[string]projectLast {
+	prod := ds.Meta.ProductionStage
+	argo := ds.Meta.DataStart.ArgoCD
+	project := map[string]string{}
+	for _, app := range ds.Apps {
+		if !app.Infra && app.Project != nil && f.inKey(*app.Project) {
+			project[app.Name] = *app.Project
+		}
+	}
+	out := map[string]projectLast{}
+	for _, r := range ds.Releases {
+		p, ok := project[r.App]
+		if !ok || r.Environment != prod || !r.At.Before(end) {
+			continue
+		}
+		l, seen := out[p]
+		if !slices.Contains(l.apps, r.App) {
+			l.apps = append(l.apps, r.App)
+		}
+		if !seen || r.At.After(l.release.At) {
+			l.release = r
+		}
+		out[p] = l
+	}
+	for p, l := range out {
+		slices.Sort(l.apps)
+		l.lower = l.release.First && (argo == nil || l.release.At.Sub(*argo) <= dataset.FirstDeployGrace)
+		out[p] = l
+	}
+	return out
 }
 
 // Where a unit's last release to production stands against the sprint rule
@@ -179,10 +202,9 @@ func (a *assessor) notOnProdStates(at stateAt) []stateEval {
 	th, end := a.states.th, at.end
 	limit := float64(th.NotOnProdDays)
 	type acc struct {
-		project          string
-		notYet           int
-		oldest, oldestNP *time.Time
-		waits            []float64
+		prodWait
+		project string
+		waits   []float64
 	}
 	by := map[string]*acc{}
 	for _, pr := range a.states.prs {
@@ -194,22 +216,10 @@ func (a *assessor) notOnProdStates(at stateAt) []stateEval {
 			r = &acc{project: pr.Project}
 			by[pr.Repo] = r
 		}
-		arrived := trunkArrival(pr)
 		pl := a.states.placed(pr, end)
-		switch pl.state {
-		case ProdOnProd:
-			if at.period.In(pr.MergedAt) && pl.at != nil {
-				r.waits = append(r.waits, toProdDays(pr, *pl.at))
-			}
-		case ProdNotYet:
-			r.notYet++
-			if r.oldest == nil || arrived.Before(*r.oldest) {
-				r.oldest = arrived
-			}
-		default:
-			if r.oldestNP == nil || arrived.Before(*r.oldestNP) {
-				r.oldestNP = arrived
-			}
+		r.add(pr, pl)
+		if pl.state == ProdOnProd && at.period.In(pr.MergedAt) && pl.at != nil {
+			r.waits = append(r.waits, toProdDays(pr, *pl.at))
 		}
 	}
 	lying := stateEval{key: StateNotOnProd, unit: UnitRepo, source: dataset.SourceArgoCD, tone: ToneAttention,
@@ -221,17 +231,11 @@ func (a *assessor) notOnProdStates(at stateAt) []stateEval {
 			MinKey: ptr("not_on_prod_min_prs"), Min: ptr(th.NotOnProdMinPRs)}}
 	for _, repo := range slices.Sorted(mapsKeys(by)) {
 		r := by[repo]
-		u := stateUnit{StateUnit: StateUnit{Name: repo, Project: ptr(r.project), Names: []string{}}, status: unitClear}
+		u := stateUnit{StateUnit: StateUnit{Name: repo, Project: ptr(r.project), Names: []string{}},
+			status: r.status(end, limit)}
 		if r.oldest != nil {
 			u.Value, u.Count, u.Since = calendarDays(*r.oldest, end), ptr(r.notYet), ptr(*r.oldest)
 			u.LowerBound = r.oldest.Before(a.states.from.AddDate(0, 0, 7))
-		}
-		switch {
-		case u.Value > limit:
-			u.status = unitFires
-		case r.oldestNP != nil && calendarDays(*r.oldestNP, end) > limit:
-			// The oldest PR may be lying there or shipped: no telling.
-			u.status = unitUnjudged
 		}
 		lying.units = append(lying.units, u)
 		s := stateUnit{StateUnit: StateUnit{Name: repo, Project: ptr(r.project), Count: ptr(len(r.waits)),
@@ -245,6 +249,46 @@ func (a *assessor) notOnProdStates(at stateAt) []stateEval {
 		slow.units = append(slow.units, s)
 	}
 	return []stateEval{lying, slow}
+}
+
+// prodWait gathers a repo's merged PRs as placed on production at an
+// instant: how many are not there yet, the oldest of them by its arrival on
+// the trunk, and the oldest tracing cannot place (notOnProdStates, the
+// per-repo view).
+type prodWait struct {
+	notYet           int
+	oldest, oldestNP *time.Time
+}
+
+// add counts pr, placed pl.
+func (w *prodWait) add(pr dataset.PR, pl placement) {
+	arrived := trunkArrival(pr)
+	switch pl.state {
+	case ProdOnProd:
+	case ProdNotYet:
+		w.notYet++
+		if w.oldest == nil || arrived.Before(*w.oldest) {
+			w.oldest = arrived
+		}
+	default:
+		if w.oldestNP == nil || arrived.Before(*w.oldestNP) {
+			w.oldestNP = arrived
+		}
+	}
+}
+
+// status is the repo against the rule at end: it fires where the oldest
+// PR not on production arrived more than limit days back; unjudged where
+// the oldest PR tracing cannot place did, which may lie there or have
+// shipped; clear otherwise.
+func (w prodWait) status(end time.Time, limit float64) int {
+	switch {
+	case w.oldest != nil && calendarDays(*w.oldest, end) > limit:
+		return unitFires
+	case w.oldestNP != nil && calendarDays(*w.oldestNP, end) > limit:
+		return unitUnjudged
+	}
+	return unitClear
 }
 
 // ---- Data honesty ----------------------------------------------------------

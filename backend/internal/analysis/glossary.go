@@ -11,7 +11,7 @@ import (
 // the only levers it may pick. A lever names a step, never a cause riptide
 // does not see: riptide knows a run's duration, status and agent wait, not
 // its stages or tests; a PR's events, not why nobody merges it (a merge
-// freeze, a release date, a dependency, holidays). Only where the data
+// stop, a release date, a dependency, holidays). Only where the data
 // shows the cause (the agent wait) is a lever concrete. User, 2026-11-16:
 // "ohne dass das LLM weiss, was genau wie getestet wird, sollte es nicht
 // empfehlen, Integrationstests rauszunehmen".
@@ -85,49 +85,63 @@ var kinds = map[string]kindGloss{
 		nil, Words{"erledigt", "resolved"},
 	},
 	metrics.SignalState: {
-		"A state: a finding that stands without a previous period, judged per unit (product, repo, App, branch) against the team's own threshold, never pooled. state.key says which (states lists their meaning and the page's words); state.count units of state.judged fire, state.unjudged could not be judged, state.threshold is what they were measured against (null for what the data cannot judge: it measures against no agreement). tone attention: a finding; hint: a hint; limit: what the data cannot judge, never a finding about the team.",
+		"A state: a finding that stands without a previous period, judged per unit (project, repo, App, branch) against the team's own threshold, never pooled. state.key says which (states lists their meaning and the page's words); state.count units of state.judged fire, state.unjudged could not be judged, state.threshold is what they were measured against (null for what the data cannot judge: it measures against no agreement). tone attention: a finding; hint: a hint; limit: what the data cannot judge, never a finding about the team.",
 		nil, Words{"Befund", "finding"},
 	},
 }
 
-// Term is one thing the page names, in its words. Not are the words the
-// page never uses for it; the model must not either, nor translate a term
-// otherwise than the page does.
+// Term is one thing the page names, in its words. NotDE and NotEN are the
+// words the page never uses for it in that language; the model must not
+// either, nor translate a term otherwise than the page does. A word under
+// one language's list may be the other's page word (Approval in German,
+// approval in English).
 type Term struct {
 	Thing string `json:"thing"`
 	Words
-	Not string `json:"not,omitempty"`
+	NotDE string `json:"not_de,omitempty"`
+	NotEN string `json:"not_en,omitempty"`
 }
 
 // vocabulary is the page's word for each thing it names, the model's fixed
 // words: docs/metrics.md "Words on the page" keeps the same list for the
 // page's writers. TestVocabularyIsThePages holds each word to the catalogs.
+// The owner's words (2026-11-26): Default-Branch, Projekt, Library and the
+// noun Rollout, never Hauptbranch, Produkt, Bibliothek or the noun
+// Ausrollen.
 var vocabulary = []Term{
-	{"a PR merged into its repo", Words{"gemergter PR (gemerged)", "merged PR"}, "merged das Team"},
-	{"PRs merged per week", Words{"gemergte PRs pro Woche", "merged PRs per week"}, "throughput, PR Throughput"},
-	{"changed lines of a PR", Words{"PR-Grösse", "PR size"}, "batch size, Batch Size"},
-	{"a deploy to production with a new version", Words{"Release nach " + metrics.StageWord, "release to " + metrics.StageWord}, ""},
-	{"how often releases come", Words{"Releases pro Woche", "releases per week"}, "Deploy-Frequenz, deployment frequency"},
-	{"one Argo CD sync of an App", Words{"das Deploy", "deploy"}, "Sync, Deployment"},
-	{"what a deploy brings", Words{"Version", "version"}, "Image"},
-	{"a deploy that brings no new version", Words{"Deploy ohne neue Version", "deploy without a new version"}, "Re-Sync"},
-	{"first commit to production", Words{"Zeit vom ersten Commit bis " + metrics.StageWord, "time from first commit to " + metrics.StageWord}, "Lead Time, lead time"},
-	{"a piece of the way to production", Words{"Abschnitt", "section"}, "Etappe, Stufe, stage"},
-	{"bring code to production", Words{"ausrollen", "roll out"}, ""},
-	{"the repo's main line", Words{"Hauptbranch", "main branch"}, "Trunk, Default-Branch, trunk, default branch"},
-	{"a person's OK on a PR", Words{"Freigabe, freigegeben", "approval, approved"}, "Approval, approved, approvt (in German)"},
-	{"a repo no deploy ships", Words{"Bibliothek", "library"}, "Library (in German)"},
-	{"the median", Words{"typisch", "typical"}, "Median, median, p50"},
-	{"the 90th percentile", Words{"die langsamsten 10 %", "the slowest 10 %"}, "p90"},
-	{"the weeks judged and the weeks before", Words{"Zeitraum, Vorperiode", "period, previous period"}, "Periode, Periodenende"},
-	{"a Bitbucket project", Words{"Produkt", "product"}, "Projekt, project"},
-	{"a source stops sending", Words{"liefert keine Daten", "sends no data"}, "Stall, stall, meldet nichts"},
-	{"a CI run", Words{"Build", "build"}, "Lauf, Run, run"},
-	{"a build's result", Words{"erfolgreich, fehlgeschlagen", "succeeded, failed"}, "grün, rot, green, red"},
-	{"failed, then passed on the same commit", Words{"unzuverlässig", "flaky"}, "Flaky (in German)"},
-	{"a repo without merged work", Words{"ohne Aktivität", "no activity"}, "inaktiv"},
-	{"the team's own threshold", Words{"Abmachung", "agreement"}, ""},
-	{"trouble after a rollout", Words{"Ärger nach dem Ausrollen", "trouble after a rollout"}, "Instability, instability"},
+	{"a PR merged into its repo", Words{"gemergter PR (gemerged)", "merged PR"}, "merged das Team", ""},
+	{"PRs merged per week", Words{"gemergte PRs pro Woche", "merged PRs per week"}, "Throughput, PR Throughput", "throughput"},
+	{"changed lines of a PR", Words{"PR-Grösse", "PR size"}, "Batch Size", "batch size"},
+	{"a deploy to production with a new version", Words{"Release nach " + metrics.StageWord, "release to " + metrics.StageWord}, "", ""},
+	{"how often releases come", Words{"Releases nach " + metrics.StageWord + " pro Woche", "releases to " + metrics.StageWord + " per week"},
+		"Deploy-Frequenz", "deployment frequency"},
+	{"one Argo CD sync of an App", Words{"das Deploy", "deploy"}, "Sync, Deployment", "sync"},
+	{"what a deploy brings", Words{"Version", "version"}, "Image", "image"},
+	{"a deploy that brings no new version", Words{"Deploy ohne neue Version", "deploy without a new version"},
+		"Re-Sync, Sync ohne neue Images", "re-sync"},
+	{"an App's first deploy", Words{"erstes Deploy", "first deploy"}, "Erstdeploy", ""},
+	{"first commit to production", Words{"Zeit vom ersten Commit bis " + metrics.StageWord, "time from first commit to " + metrics.StageWord},
+		"Lead Time", "lead time"},
+	{"a piece of the way to production", Words{"Abschnitt", "section"}, "Etappe, Stufe", "leg"},
+	{"INTG, SYST, PROD", Words{"Stage", "stage"}, "Stufe, Umgebung", "environment"},
+	{"bring code to production (the verb)", Words{"ausgerollt (ausrollen)", "rolled out (roll out)"}, "ausliefern", "deliver"},
+	{"bringing code to production (the noun)", Words{"Rollout", "rollout"}, "das Ausrollen, Auslieferung", "delivery"},
+	{"the repo's main line", Words{"Default-Branch", "default branch"}, "Hauptbranch, Trunk", "main branch, trunk"},
+	{"a person's OK on a PR", Words{"Freigabe, freigegeben", "approval, approved"}, "Approval, approved, approvt", ""},
+	{"a repo no deploy ships", Words{"Library", "library"}, "Bibliothek", ""},
+	{"the median", Words{"typisch", "typical"}, "Median, p50", "median, p50"},
+	{"the 90th percentile", Words{"die langsamsten 10 %", "the slowest 10 %"}, "p90", "p90"},
+	{"the weeks judged and the weeks before", Words{"Zeitraum, Vorperiode", "period, previous period"}, "Periode, Periodenende", ""},
+	{"a Bitbucket project", Words{"Projekt", "project"}, "Produkt", "product"},
+	{"a source stops sending", Words{"liefert keine Daten", "sends no data"}, "Stall, meldet nichts", "stall, reports nothing"},
+	{"a CI run", Words{"Build", "build"}, "Lauf, Run", "run"},
+	{"a build's result", Words{"erfolgreich, fehlgeschlagen", "succeeded, failed"}, "grün, rot", "green, red"},
+	{"failed, then passed on the same commit", Words{"unzuverlässig", "flaky"}, "Flaky", ""},
+	{"a repo without merged work", Words{"ohne Aktivität", "no activity"}, "inaktiv (for a repo)", "inactive (for a repo)"},
+	{"a PR without events for weeks", Words{"inaktiv", "inactive"}, "", ""},
+	{"the team's own threshold", Words{"Abmachung", "agreement"}, "", ""},
+	{"what a rule found", Words{"Befund, Hinweis, nicht beurteilbar", "finding, hint, cannot be judged"}, "", ""},
+	{"trouble after a rollout", Words{"Ärger nach dem Rollout", "trouble after a rollout"}, "Instability", "instability"},
 }
 
 // vocabularyFor is the vocabulary with the view's production stage.
@@ -153,15 +167,15 @@ type StateGloss struct {
 // en.ts overview.assess.state.<key>.title), the production stage as
 // metrics.StageWord (stateGlosses puts in the view's).
 var states = map[string]StateGloss{
-	metrics.StateNoRelease: {"A product rolled out, with merged work, released to production longer ago than the team's agreement allows (at least one release per two-week sprint). value: days since its last release.",
+	metrics.StateNoRelease: {"A project rolled out, with merged work, released to production longer ago than the team's agreement allows (at least one release per two-week sprint). value: days since its last release.",
 		"Lange kein Release nach {{prod}}", "No release to {{prod}} for long"},
-	metrics.StateReleaseDue: {"A product's last release to production lies more than a sprint back, not yet past the agreement's limit. A hint.",
+	metrics.StateReleaseDue: {"A project's last release to production lies more than a sprint back, not yet past the agreement's limit. A hint.",
 		"Release nach {{prod}} bald fällig", "Release to {{prod}} due soon"},
-	metrics.StateNotOnProd: {"A repo's merged PRs are not on production yet, the oldest longer than the team's agreement allows. value: days since the oldest reached the main branch.",
+	metrics.StateNotOnProd: {"A repo's merged PRs are not on production yet, the oldest longer than the team's agreement allows. value: days since the oldest reached the default branch.",
 		"Gemergte PRs lange nicht auf {{prod}}", "Merged PRs not on {{prod}} for long"},
 	metrics.StateSlowToProd: {"A repo's merged PRs typically take longer from merge to production than the team's agreement allows.",
 		"Lange Wartezeit vom Merge bis {{prod}}", "Long wait from merge to {{prod}}"},
-	metrics.StateMergePause: {"A product's week in which hardly any PR was merged against its typical week, while at the week's end several PRs were open with a person's approval. value: those PRs. Why is not in the data (a merge stop, a release date).",
+	metrics.StateMergePause: {"A project's week in which hardly any PR was merged against its typical week, while at the week's end several PRs were open with a person's approval. value: those PRs. Why is not in the data (a merge stop, a release date).",
 		"Kaum gemerged, obwohl freigegebene PRs warteten", "Hardly merged while approved PRs waited"},
 	metrics.StateApprovedWaiting: {"A repo's approved PRs wait for their merge longer than the team's threshold, at the period's end.",
 		"Freigegeben, aber nicht gemerged", "Approved, but not merged"},
@@ -169,10 +183,10 @@ var states = map[string]StateGloss{
 		"Bot-Branch verbraucht CI-Zeit mit fehlgeschlagenen Builds", "Bot branch burning CI time on failed builds"},
 	metrics.StateUntraced: {"A repo's merged PRs cannot be placed on production: its delivery cannot be judged.",
 		"Nicht messbar, ob gemergte PRs auf {{prod}} sind", "Not measurable whether merged PRs are on {{prod}}"},
-	metrics.StateUnattributed: {"Releases to production that belong to no product: the release agreement cannot be judged for the products they belong to.",
-		"Releases nach {{prod}} ohne Produkt", "Releases to {{prod}} without a product"},
+	metrics.StateUnattributed: {"Releases to production that belong to no project: the release agreement cannot be judged for the projects they belong to.",
+		"Releases nach {{prod}} ohne Projekt", "Releases to {{prod}} without a project"},
 	metrics.StateNoProdStage: {"Argo CD reports deploys, but none to the production stage: the stage configuration or the notification is off.",
-		"Argo CD meldet nichts nach {{prod}}", "Argo CD reports nothing to {{prod}}"},
+		"Argo CD liefert keine Daten zur Stage {{prod}}", "Argo CD sends no data for the stage {{prod}}"},
 	metrics.StateUnmeasurable: {"A state (state.was) that held a week before can no longer be judged for units it named then: the data no longer tells. It has no numbers to word. Never call it solved, never a problem of the team.",
 		"Nicht mehr messbar", "No longer measurable"},
 	metrics.StateDeployFailing: {"An App's last deploy to production failed and none succeeded since, for longer than the threshold.",
@@ -181,8 +195,8 @@ var states = map[string]StateGloss{
 		"Deploys nach {{prod}} scheitern immer wieder", "Deploys to {{prod}} fail again and again"},
 	metrics.StateFirstReviewWait: {"A repo's ready PRs wait for their first review longer than the threshold, or its PRs typically do.",
 		"PRs warten auf ein erstes Review", "PRs wait for a first review"},
-	metrics.StateTrunkFailing: {"A repo's main-branch builds failed for longer than the threshold, with several failed builds.",
-		"Builds auf dem Hauptbranch lange fehlgeschlagen", "Builds on the main branch failing for long"},
+	metrics.StateTrunkFailing: {"A repo's default-branch builds failed for longer than the threshold, with several failed builds.",
+		"Builds auf dem Default-Branch lange fehlgeschlagen", "Builds on the default branch failing for long"},
 	metrics.StateBranchFailing: {"A person's feature branch whose builds failed many times in a row.",
 		"Builds eines Branches scheitern immer wieder", "A branch's builds fail again and again"},
 	metrics.StateFlakyBuilds: {"A repo's builds of a kind mostly failed for no code change: a retry on the same commit succeeded.",
@@ -278,23 +292,23 @@ var labels = map[string]string{
 	"cost_per_kloc":           "AI review spend per 1000 changed lines; no better direction",
 	"open_prs":                "open PRs at the period's end; no better direction",
 	"first_touch":             "share of approvals given without a prior comment; a PR that needs no change is approved without one; no better direction",
-	"state_units":             "units the state names (products, repos, Apps or branches, as state.unit says; unit project is a product)",
+	"state_units":             "units the state names (projects, repos, Apps or branches, as state.unit says)",
 	"state_judged":            "units the state's rule could judge, the base of state_units",
 	"state_threshold":         "the team's threshold the state measured against (state.threshold names its key)",
-	"state_no_release":        "days since the worst product's last release to production",
-	"state_release_due":       "days since the worst product's last release to production",
+	"state_no_release":        "days since the worst project's last release to production",
+	"state_release_due":       "days since the worst project's last release to production",
 	"state_not_on_prod":       "days since the merge of the worst repo's oldest PR not yet on production",
 	"state_slow_to_prod":      "typical days from merge to production in the worst repo",
-	"state_merge_pause":       "PRs open with a person's approval at the end of the worst product's paused week",
+	"state_merge_pause":       "PRs open with a person's approval at the end of the worst project's paused week",
 	"state_approved_waiting":  "working days the worst repo's oldest approved PR has waited for its merge",
 	"state_bot_loop":          "failed builds in a row on the worst bot branch",
 	"state_untraced":          "merged PRs of the worst repo that cannot be placed on production",
-	"state_unattributed":      "releases to production that belong to no product",
+	"state_unattributed":      "releases to production that belong to no project",
 	"state_no_prod_stage":     "stages Argo CD reported deploys to, none of them production",
 	"state_deploy_failing":    "working days the worst App's production deploy has stood on a failure",
 	"state_deploy_failures":   "times the worst App's production deploys failed in a row, each time until one succeeded",
 	"state_first_review_wait": "working days the worst repo's oldest ready PR waits for its first review, or its typical wait for one",
-	"state_trunk_failing":     "working days the worst repo's main-branch builds failed in a row",
+	"state_trunk_failing":     "working days the worst repo's default-branch builds failed in a row",
 	"state_branch_failing":    "failed builds in a row on the worst feature branch",
 	"state_flaky_builds":      "builds of the worst repo that failed, then passed on the same commit (unzuverlässig / flaky)",
 	"state_long_builds":       "minutes a successful build of the worst repo typically takes",
