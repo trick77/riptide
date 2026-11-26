@@ -58,6 +58,7 @@
     },
     "prodReason": {
       "no_merge_commit": "Bitbucket named no merge commit",
+      "off_trunk": "merged into a branch that is not on the main branch yet",
       "release_unresolved": "a later release cannot be tied to PRs",
       "repo_untraced": "no deploy of the repo known",
       "in_silence": "a gap in the data"
@@ -123,6 +124,7 @@
     },
     "prodReason": {
       "no_merge_commit": "Bitbucket nannte keinen Merge-Commit",
+      "off_trunk": "in einen Branch gemerged, der noch nicht im Hauptbranch ist",
       "release_unresolved": "ein späteres Release lässt sich keinen PRs zuordnen",
       "repo_untraced": "kein Deploy des Repos bekannt",
       "in_silence": "eine Lücke in den Daten"

@@ -102,7 +102,7 @@ the data captured in v1.
 | **Change lead time** | Per PR, not per commit and not per release (owner's decision, 2026-11): the people's PRs merged in the period that reached production by its end, each from its first commit (the oldest commit pushed to its branch, else its opening) to the **first** production deploy that shipped it, so a release rolled out to four Apps counts each PR once. The placement, routes and lower bounds are [Change lead time (DORA)](dora-lead-time.md)'s; the basis ("aus n PRs") and how many of the period's merged PRs were placed, not yet on production or not placeable stand next to it (`coverage`). Bots' PRs count nowhere, library repos' PRs are outside the base. A closed period is frozen at its end: a PR shipped after it was not on production then. Do **not** substitute the newest commit per release: it answers "how stale was the freshest change" and reads far too fast. |
 | **Lead time breakdown** | Where the lead time is spent, per human PR in app repos, as five stages: coding (oldest commit on the branch → PR ready), review (ready → approval), merge (approval → merged), to intg (merged → the PR's first intg deploy), to prod (intg → prod). One stage for review, not pickup + review: measured, 95 of 115 approvals were the reviewer's first and only touch, so "first review → approval" is zero by construction; the count is reported as a review-depth signal. Stages 4–5 reach only PRs placed on a deploy before the period's end, the change lead time's placement, so they cover fewer PRs than 1–3 — report the count per stage. The query below reads stages 4–5 from `lead_time_changes`, which knows the exact compare-link route only: on data where the other routes place PRs it reaches fewer. |
 | **PR cycle time** | `pr:merged.occurred_at − pr:opened.occurred_at` per PR, keyed by `(repo_full_name, pr_id)`: PR ids are numbered per repository, so `pr_id` alone joins unrelated PRs. A PR opened before ingestion started has no `pr:opened` and drops out. Exclude GitOps repos: their PRs are stage promotions (see [Reading the event tables](#reading-the-event-tables)). Merged PRs only: a PR still open is in no cycle time, however long it waits — see Open PR age. |
-| **PR throughput** *(Flow Framework "flow velocity")* | Human PRs merged per week: the merged PRs of the cycle-time row (GitOps repos and bots out) over the period's weeks, or over the weeks since Bitbucket's first event when that lies inside the period (as deploy frequency does for Argo CD), and per week by branch prefix. A PR opened before ingestion started counts: only its merge is needed. A PR is a PR wherever the work happened (owner, 2026-11): one merged into a feature or umbrella branch, not the repo's trunk (`pullRequest.toRef.displayId`; the trunk is master, main, or the branch most of the repo's PRs target, every branch tied for most), and one Bitbucket marked merged without a merge commit of its own in the second another PR of the repo merged (an **implicit merge**: an umbrella branch brought its commits in) are merged work, marked in the facts as merged via an umbrella branch. Two kinds of merged PR are no merged work and are left out of this and every other PR number, each counted under its first reason so the page can say how many: the **umbrella** itself, the vehicle of other people's merged PRs, whose work counts on them: a PR whose source branch is the target of other merged PRs of the repo, over its whole history, or whose merge implicitly merged another person's PR (a bot's PR never makes a person's uncounted, either way); **housekeeping**, a tool's change: a person's PR whose title as opened (trimmed, case and inner spaces aside) was opened by people in at least 3 of the team's repos within an hour, without a person's approval (a bot's, a service's or a declared non-human account's approval is none) and without a ticket key in its title or source branch (owner's decision, 2026-11; how long it stood open says nothing, some of one batch are merged at once, others days later). The openings are the team's of all history, not the window's PRs: a batch opened across a period's edge is housekeeping in both periods. A PR marked merged when an umbrella went in (an implicit merge) whose source branch another merged PR of the repo, counted, came from is the same work and counted once (**twice**: one PR into the umbrella branch, a second of the same branch into master). The umbrella's openers and the siblings' are told bot or person as every PR's opener is, riptide's automation detection at read included. A PR of a **library** repo is merged work, but out of the base of the PRs traced to production (`coverage.to_prod`): a repo that is never rolled out, on positive evidence (owner, 2026-11: a library PR must never read as not traced, nor as a missed release). Over all history: no deployed GitOps release commit names its slug in a compare link, no run of it built an image (deployed or not yet: a repo building one is deployable, in doubt), and no image Argo CD deployed for the team has a path segment equal to its slug (a deployable repo's image is named after it, even when its CI does not report; the tag and digest of the last segment aside, a registry's port is no tag), while the team's tracing works at all (a compare link names some repo, some run's image Argo CD deployed, by its full reference). It needs no build: a starter or client library whose CI does not report is one. A repo one of whose PRs in the window reached any stage is none, whatever the evidence. The rule's residual: a deployable repo whose CI does not report, whose images are named otherwise (one service, several images of other names) and whose release commits name no compare link reads as a library. A view whose counted PRs are all libraries' says so (`libraries_only`): nothing to trace, no release missed, no limit. The weekly rate is null when the weeks since Bitbucket's first event are under one: three PRs in six hours are no 84 a week. Per team, never per person. More is better, read next to the batch size: more PRs of the same size is more work done, more because they got smaller is the same work in better portions. |
+| **PR throughput** *(Flow Framework "flow velocity")* | Human PRs merged per week: the merged PRs of the cycle-time row (GitOps repos and bots out) over the period's weeks, or over the weeks since Bitbucket's first event when that lies inside the period (as deploy frequency does for Argo CD), and per week by branch prefix. A PR opened before ingestion started counts: only its merge is needed. A PR is a PR wherever the work happened (owner, 2026-11): one merged into a feature or umbrella branch, not the repo's trunk (`pullRequest.toRef.displayId`; the trunk is master, main, or the branch most of the repo's PRs target, every branch tied for most), and one Bitbucket marked merged without a merge commit of its own in the second another PR of the repo merged (an **implicit merge**: an umbrella branch brought its commits in) are merged work, marked in the facts as merged via an umbrella branch. Two kinds of merged PR are no merged work and are left out of this and every other PR number, each counted under its first reason so the page can say how many: the **umbrella** itself, the vehicle of other people's merged PRs, whose work counts on them: a PR whose source branch is the target of other merged PRs of the repo, over its whole history, or whose merge implicitly merged another person's PR (a bot's PR never makes a person's uncounted, either way); **housekeeping**, a tool's change: a person's PR whose title as opened (trimmed, case and inner spaces aside) was opened by people in at least 3 of the team's repos within an hour, without a person's approval (a bot's, a service's or a declared non-human account's approval is none) and without a ticket key in its title or source branch (owner's decision, 2026-11; how long it stood open says nothing, some of one batch are merged at once, others days later). The openings are the team's of all history, not the window's PRs: a batch opened across a period's edge is housekeeping in both periods. A PR marked merged when an umbrella went in (an implicit merge) whose source branch another merged PR of the repo, counted, came from is the same work and counted once (**twice**: one PR into the umbrella branch, a second of the same branch into master). The umbrella's openers and the siblings' are told bot or person as every PR's opener is, riptide's automation detection at read included. A PR of a **library** repo is merged work, but out of the base of the PRs traced to production (`coverage.to_prod`): a repo that is never rolled out, on positive evidence (owner, 2026-11: a library PR must never read as not traced, nor as a missed release). Over all history: no deployed GitOps release commit names its slug in a compare link, no run of it built an image (deployed or not yet: a repo building one is deployable, in doubt), and no image Argo CD deployed for the team has a path segment equal to its slug (a deployable repo's image is named after it, even when its CI does not report; the tag and digest of the last segment aside, a registry's port is no tag), while the team's tracing works at all (a compare link names some repo, some run's image Argo CD deployed, by its full reference). It needs no build: a starter or client library whose CI does not report is one. A repo one of whose PRs in the window reached any stage by the window's end is none, whatever the evidence (a deploy after a closed period's end does not reclass it). The rule's residual: a deployable repo whose CI does not report, whose images are named otherwise (one service, several images of other names) and whose release commits name no compare link reads as a library. A view whose counted PRs are all libraries' says so (`libraries_only`): nothing to trace, no release missed, no limit. The weekly rate is null when the weeks since Bitbucket's first event are under one: three PRs in six hours are no 84 a week. Per team, never per person. More is better, read next to the batch size: more PRs of the same size is more work done, more because they got smaller is the same work in better portions. |
 | **Batch size** *(DORA capability "working in small batches")* | Changed lines per merged human PR, added plus removed, median and 90th percentile, and the median per week. The size is the PR's final rollup in `noergler_pr_rollups` (`outcome = 'merged'`), joined on `pr_key` = `lower(repo_full_name) || '#' || pr_id`: Bitbucket DC webhooks carry no diff size. noergler counts the whole PR diff at close, over the files it reviews only, so lock files and vendored bundles are out. No size: a PR noergler never reviewed (no rollup), and a rollup counting 0 lines (noergler could not fetch the diff at close and had no run to fall back on). The median, not the mean, which one large PR decides. Smaller is better. |
 | **Open PR age** | The PRs open at an instant T (the period's end), per repo, with their age and what they wait on. Open at T: no `pr:merged` / `pr:deleted` before T, the PR's latest event before T is no `pr:declined`, and the latest event carrying a `pullRequest.state` has it `OPEN` (none does: open unless declined). Every PR event carries the PR, so a declined PR reopened is open again on its next event. Only events before T count, so the previous period's end reads what was open then; a PR open all along that riptide first heard of after it counts there too, else it would read as a new long-open one. Age: T − its last turn ready, the first event after the last one whose `pullRequest.draft` was true, whether or not the parser recognised the flip; never seen a draft (opened ready, or made ready before ingestion) T − `pullRequest.createdDate`, which every PR event carries, so a PR opened before ingestion has one too. Time as a draft is its author's, not the team's: a long draft just made ready is no long-open PR (user, 2026-11-20). A draft has no age and is in no median. Waits on, the first that applies: draft; changes (a human `NEEDS_WORK` in the latest event's `reviewers` or `participants`, Bitbucket's own status, approvals reset by a push included); merge (a human `APPROVED` there); review (a reviewer touch as in the pickup-time query); first review. Long open: 7 days or more; a repo with 4 long-open PRs or more is jammed (both chosen, not measured; the jam was 3 until 2026-11-18). A draft is never long open and never inactive: it waits on its author and may lie as long as it wants (user, 2026-11-18); it stays open, waiting on "draft". Draft is the latest event's `pullRequest.draft`, so a ready PR turned back into a draft is stored as a synthetic `pr:back_to_draft` (else it read as ready until its next event). Per repo the median age of its ready PRs, never the oldest PR's, which one PR alone decides. Exclude GitOps repos and bots as for cycle time. Inactive: no event of any kind on the PR for 30 days before T (for a PR riptide first heard of after T, since its creation); counted apart, in no other number. Webhook-only data cannot tell a PR whose close event Bitbucket never delivered from one nobody touches, and such losses recur: a lost one counts as open until it goes inactive, and alone never makes a jam. Where the loss is evident it is said: a PR whose latest event came before a Bitbucket silence with unseen runs (see [Sources and silences](#sources-and-silences)) and that has had none since is of **unknown** state, counted apart, in no open, long, jam, wait or WIP number, and listed in the PR table as unknown. Its state is never guessed from the review bot's rollup: noergler never decides a PR's lifecycle. A PR without any event since ingestion is missing. |
 | **Time to first review** *(DX Core 4 "code review pickup time")* | Two-part computation per PR — see the SQL block below the table. Clock-start = `COALESCE(pr:ready_for_review, pr:opened)`: PRs opened ready start at `pr:opened`; PRs opened as drafts start at the synthetic `pr:ready_for_review` (emitted by the parser when a `pr:modified` payload carries `previousDraft=true, draft=false`). Engagement = first reviewer touch (`pr:comment:added`, `pr:reviewer:approved`, `pr:reviewer:unapproved`, `pr:reviewer:needs_work`, `pr:reviewer:updated`) where `lower(author) != lower(pr_opener) AND NOT is_automated AND occurred_at >= clock-start`. The five-event reviewer union covers every touch Bitbucket DC emits (silent approvals, retracted approvals, "needs work" flips, bare reviewer-status changes); the `occurred_at >= clock-start` guard drops early-feedback comments solicited during the draft phase, which would otherwise produce negative pickup times. `NOT is_automated` strips bot comments (noergler / Renovate / etc.) — every review-time bot must be recognisable, otherwise its instant comment drives the metric toward zero. Detection matches the `automation` config block against **both** the login handle (`author`) and the display name (`author_display_name`), because a bot is often provisioned as an ordinary user account whose login says nothing. `is_automated` is decided at ingest, so rows written before a bot was recognised stay marked human: the `non_human_identities` CTE in the query below filters those at read time, on both names too, from the accounts senders declare (`reviewer_handle` + `reviewer_account_kind` on noergler rollups, `actor_handle` + `actor_account_kind` on pipeline events) — riptide stores the declaration, it carries no account names of its own. A declared handle is matched against both the login and the display name, so it must never equal a person's display name: that person's reviews and PRs would drop out as a bot's. |
@@ -692,9 +692,10 @@ Two holes the stored time cannot see:
 Where a number rests on part of the merged PRs, the page says how many of
 how many (`throughput.coverage`, of the people's merged PRs): traced to
 production (`to_prod`, the time to production and the breakdown's last
-stages), with a size (`sized`, the batch size), seen opened (`opened`, the
-cycle time). A PR missing there is missing from that number, not a PR
-that took no time.
+stages; `delivery.lead_time.unmeasured` of them have no start, neither a
+pushed commit nor an opening, and are in no time), with a size (`sized`,
+the batch size), seen opened (`opened`, the cycle time). A PR missing
+there is missing from that number, not a PR that took no time.
 
 ### The overview's assessment and its LLM wording
 
@@ -758,17 +759,21 @@ time. Stage shares stay plain numbers in the flow section.
 A state is a finding that stands without a previous period: a team's own
 agreement broken, work held up now, what lasts, what the data cannot judge.
 Signal kind `state`, its card in `signal.state`. Derived from the data on
-every assessment (never from stored analyses: those give only the
-hysteresis its last units); a stored analysis shows the states it was
+every assessment, never from stored analyses (a view without a model
+judges the same); a stored analysis shows the states it was
 assessed with, frozen like its other signals, so its words and cards agree
 (a closed period changes only by late events); judged at the period's end per
 unit, a project, a repo, an App or a bot branch, never pooled across busy and
 quiet units; summed up on one card per state: `count` of `judged` units,
 the worst three with their number (`worst`), how many more (`more`), every
-unit for the facts (`units`), since when (`since`, the earliest unit's; a
-lower bound where the data starts there), and the threshold measured
-against (`threshold`, a key of `riptide.json`'s `thresholds` block, which
-the card prints). A unit with nothing to judge (no work in the span) is
+unit for the facts (`units`), since when the state holds (`since`, the
+earliest unit's; a lower bound where the data starts there), and the
+threshold measured against (`threshold`, a key of `riptide.json`'s
+`thresholds` block, with a second count `min` and a span `within` where the
+state has them, all printed on the card; null for data honesty, which
+measures against no agreement). `value_unit` says what a unit's `value` is
+and `names_kind` what its `names` are (a build kind, a stage), so the page
+formats without deciding. A unit with nothing to judge (no work in the span) is
 `idle`; one without the data to judge is `unjudged`, never "ohne Befund".
 Each unit names the facts search that lists its rows in the card's facts
 table (`query`, the `/api/facts` `q`): a repo's or an App's name, the App of
@@ -779,36 +784,63 @@ whose card has no facts table. The facts search lists a merged PR by where
 it stands on production in the column's words ("auf PROD", "noch nicht auf
 PROD", "nicht zuordenbar" with its reason, "höchstens" on a time through a
 lower bound, both languages); exactly those words list exactly those PRs.
+The facts read as of now, within the facts window: a card judged at a
+closed period's end over the look-back may count a PR the link no longer
+lists (shipped since, merged before the window), so the page words the
+link as today's rows, never as the card's set.
 
 Eligibility, shared by every state: bots' PRs, branches and builds,
 infrastructure Apps and GitOps repos are never judged; library repos are
 work (merges, review, size, branches) but never judged for delivery; a
 source silent at the period's end judges nothing of its states (its units
 read unjudged). Look-back: at most 26 weeks before the period's end
-(`StateLookbackWeeks`); the analysis reads the weeks before the compared
-periods for it (PRs and deploys only), the approvals from 30 days before
-the period and the branches' pushes once per request.
+(`StateLookbackWeeks`), in every view (a 26-week view reads its previous
+26 weeks too; no state looks into them); the analysis reads the weeks
+before the compared periods for it (PRs and deploys only), the approvals
+from 30 days before the period and the branches' pushes from the look-back's
+start, once per request. A thresholds value past what the look-back holds
+is refused (`thresholds` bounds: days 182, working days 130, minutes 1440,
+weeks 26). Whose a branch is (a bot's, a tool's: every push's head commit by
+a git identity of the `.invalid` e-mail domain, or one the config's
+automation `authors` names) is read on every page: such a branch's builds
+are bots' builds in every number.
 
 Tones and groups: `attention` red ("Hakt"); `hint` a neutral group of its
 own ("Hinweise", never red); `limit` what cannot be judged ("Nicht
 beurteilbar", no finding: it adds the quiet reason `unjudged`). A lasting
-state is a hint until a unit has held it two sprints (28 days), then red.
+state is a hint until a unit has held it two sprints (28 days), then red:
+held since its onset where the data tells it (when the Nth approved or
+ready PR had waited past the threshold, when a branch without a PR passed
+`branch_open_days`), else firing at each of the four weekly instants back
+over those 28 days (a state over a period's sample: builds, review and
+size, branch life), each judged again from the data.
 Ranking (`weight`): the team's rule broken (9), held up now (7), lasting
 (5), data honesty (4); within a tier by breadth (count over judged), then
 the distance past the threshold. Layout slots: 4 red, 3 hints, 1 limit, 2
 gains, 1 resolution; the rest are "also spotted".
 
-Persistence: a unit the last assessment named keeps firing while its number
-stays at or above `hysteresis_share` (0.8) of the threshold (`held`). A
-state raised before and judged clear now is resolved, once ("gelöst"); one
-its units can no longer judge reads `unmeasurable` ("nicht mehr messbar",
-tone limit), never resolved. A notable worsening of a team number a state
-covers with a red card (deploy frequency: the release states; lead time:
-merged work before production; review time: the review waits; merged PRs
-per week: the merge pause; build success: the build states; deploy success:
-the deploy states; batch size: big PRs) is a fact on that card, not a card
-of its own; a review worsening keeps the driver repos no unit of it names.
-A hint covers nothing: a red worsening never turns into a hint.
+Persistence, judged again a week before the period's end (the assessment
+before this one) from the same reads and against today's thresholds (a
+changed threshold resolves nothing): a unit that fired then keeps firing
+while its number stays at or above `hysteresis_share` (0.8) of the
+threshold (`held`). A state that fired then and fires on none of its units
+now is resolved, once ("gelöst"), only where every unit it named is clear on
+evidence; where one of them can no longer be judged it reads
+`unmeasurable` ("nicht mehr messbar", tone limit, its units named, no
+lever), never resolved; a unit fallen idle, gone or escalated (a release
+hint past the breach) is neither. States the period's numbers alone tell
+(data honesty; the waiting PRs of `first_review_wait`, known at the
+period's end only) are judged at the end only. A notable worsening of a
+team number a red state covers (deploy frequency: the release states; lead
+time: merged work before production; review time: the review waits; merged
+PRs per week: the merge pause; trunk and feature build success: trunk
+failing and flaky builds; release build success: release builds failing;
+deploy success: deploy failing; batch size: big PRs) is a fact on that
+card, not a card of its own; a change naming driver repos keeps those no
+unit of any covering red state names. A hint covers nothing: a red
+worsening never turns into a hint. The folding is team-wide where the
+change names no repos: a red card on one project takes the team's
+worsening onto it.
 
 The states, their conditions and starting values (`thresholds` keys):
 
@@ -823,44 +855,58 @@ The states, their conditions and starting values (`thresholds` keys):
   period's end, the oldest on the trunk more than `not_on_prod_days` (14),
   red. A PR merged into a branch that has not gone on is not on the trunk;
   a library's never counts; a repo no deploy shows an App deploying gets
-  `untraced`, never this; an oldest PR tracing cannot place makes the repo
-  unjudged. `slow_to_prod`: its typical wait from merge to production over
-  the period's PRs that got there, on `not_on_prod_min_prs` (5).
+  `untraced`, never this; a repo only infrastructure Apps release (each of
+  its trace's releases matched to the App releasing then) is neither; an
+  oldest PR tracing cannot place makes the repo unjudged. `slow_to_prod`:
+  its typical wait from merge to production over the period's PRs that got
+  there, on `not_on_prod_min_prs` (5).
 - `merge_pause`: a project's week whose merged PRs fell to
   `merge_pause_share` (0.2) of its typical week (median of the
-  `merge_pause_weeks` (8) weeks before that Bitbucket covered, at least 3
-  such weeks, typical at least `merge_pause_min_typical` (3)) while
-  `merge_pause_waiting` (3) PRs approved by a person waited
-  `approved_wait_days` (1) working days or longer (to their merge or close,
-  or the read). A lost Bitbucket silence takes its working time out of the
-  week and its expectation. Held up now when it is the period's last week.
-- `approved_waiting`: a repo's PRs approved by a person (not the author)
-  waiting longer than `approved_wait_days` (1) working days for their merge
-  at the period's end, at least `approved_waiting_prs` (2). A PR whose merge
-  may lie in a lost silence after its approval is not counted. The
-  approvals are read whatever the PR's opening (one opened while events
-  were lost has none). Lasting.
+  `merge_pause_weeks` (8) weeks before that Bitbucket covered and the
+  look-back holds, at least 3 such weeks, typical at least
+  `merge_pause_min_typical` (3)) while `merge_pause_waiting` (3) PRs with a
+  person's approval standing in the week had waited `merge_pause_wait_days`
+  (0.5) working days or longer by its end (to their merge, close, the
+  approval's end or the week's end: a closed week reads the same whenever it
+  is read). Half a day, not `approved_wait_days`: measured to the week's end,
+  a PR approved on Thursday or Friday has a day or less of it left. A PR
+  whose merge may lie in a lost silence since its approval counts for
+  nothing; a lost silence takes its working time out of the week and its
+  expectation. Held up now when it is the period's last week.
+- `approved_waiting`: a repo's PRs with a person's approval (not the
+  author's) standing at the period's end, waiting longer than
+  `approved_wait_days` (1) working days for their merge, at least
+  `approved_waiting_prs` (2). An approval withdrawn, set to needs work or
+  reset by a push (the reviewer status every PR event carries) waits no
+  more; given again, it waits from then. A PR untouched for
+  `OpenInactiveDays` (30) waits for nothing; one whose merge may lie in a
+  lost silence since its approval is of unknown state (its repo unjudged
+  where it could decide it). The approvals are read whatever the PR's
+  opening (one opened while events were lost has none). Holds since the
+  Nth PR had waited past the threshold. Lasting.
 - `first_review_wait`: a repo's ready PRs waiting longer than
   `first_review_days` (2) working days for anyone's first touch, at least
-  `first_review_waiting` (3); or its typical pickup over it on
-  `first_review_min_prs` (5) merged PRs. The unit's `measure` says which
-  (`oldest`, `typical`); for the waiting PRs it is since the oldest was
-  ready, as an approved PR waits since its approval, so ready PRs untouched
-  for two sprints make it red. Lasting.
-- `deploy_failing`: an App's last production deploy in the period failed
-  (Failed or Error) and none succeeded for `deploy_failing_days` (1)
-  working day, red, held up now; `deploy_failures`:
-  `deploy_failure_streaks` (3) runs of failures each ended by a success,
-  a hint.
-- `trunk_failing`: a repo's trunk builds failed from the first failure to
-  the next success (or the period's end) for more than `trunk_failing_days`
-  (1) working day with `trunk_failed_builds` (2) failures; release builds
-  aside. Red; held up now when still failing at the end.
+  `first_review_waiting` (3), holding since the third had waited past it;
+  or its typical pickup over it on `first_review_min_prs` (5) merged PRs.
+  The unit's `measure` says which (`oldest`, `typical`); a repo with neither
+  is unjudged. Lasting.
+- `deploy_failing`: an App's last production deploy failed (Failed or
+  Error) and none succeeded for `deploy_failing_days` (1) working day,
+  counted from the run's first failure over the look-back's deploys (before
+  the period too; a lower bound where the data starts), red, held up now;
+  `deploy_failures`: `deploy_failure_streaks` (3) runs of failures in the
+  period each ended by a success, a hint.
+- `trunk_failing`: a repo's trunk builds (master, main, or the branch most
+  of its PRs arrive on) failed from the first failure to the next success
+  (or the period's end) for more than `trunk_failing_days` (1) working day
+  with `trunk_failed_builds` (2) failures, the run counted from its first
+  failure in the runs read; release builds aside. Red; held up now when
+  still failing at the end.
 - `branch_failing`: a person's feature or bugfix branch failing
   `branch_failing_builds` (5) builds in a row over `branch_failing_days`
   (1) working day. Never a bot's branch. A hint.
-- `flaky_builds`, `long_builds`, `release_failing` per repo and kind, never
-  across kinds: flaky builds `flaky_builds` (3) and `flaky_share` (1/3) of
+- `flaky_builds`, `long_builds`, `release_failing` per repo, its worst kind
+  (one unit per repo), never across kinds: flaky builds `flaky_builds` (3) and `flaky_share` (1/3) of
   the failed ones on `flaky_min_runs` (10); a typical successful feature or
   trunk build over `build_minutes` (15) on `build_min_runs` (5); release
   builds failing `release_builds_failed` (2) and `release_builds_share`
@@ -874,8 +920,9 @@ The states, their conditions and starting values (`thresholds` keys):
   approved within `fast_approval_minutes` 10 of being ready, the first
   touch), `unapproved` (`unapproved_share` 0.2 merged without a person's
   approval, on `unapproved_min` 10), `late_decline` (`declined_prs` 3 PRs
-  declined after more than `declined_days` 10 working days, team-wide, the
-  repos named): hints until held two sprints.
+  declined in the period after more than `declined_days` 10 working days,
+  whenever opened, unless a later PR from the same branch carries the work
+  on; team-wide, the repos named): hints until held two sprints.
 - `branch_life`: a repo's typical working days from a branch's first commit
   to its PR being ready over `branch_life_days` (5) on `branch_life_min_prs`
   (5) (a lower bound: a rebase resets the first commit). `branch_open`:
@@ -889,10 +936,13 @@ The states, their conditions and starting values (`thresholds` keys):
   is a tool's (a git identity of the `.invalid` e-mail domain, the one
   behind housekeeping commits; or one the config's automation `authors`
   names) are out, and so is a branch merged without a PR: its last head
-  reached the trunk (a trunk push whose tip it is, that lists it, or whose
-  commit names it a parent; the merge commit is a push's tip, never hidden
-  by the five-commit cap). Merged onto another branch that is no trunk, it
-  still reads as one without a PR. Hints.
+  reached the trunk or a branch a PR of the repo went into (a push whose
+  tip it is, at any time: a fast-forward, or a branch cut from there with no
+  commit of its own; after its last push, one that lists it or whose commit
+  names it a parent; the merge commit is a push's tip, never hidden by the
+  five-commit cap). Only pushes, PRs and merges before the instant judged
+  count: a branch pushed after a closed period's end was silent at it.
+  Hints; `branch_open` lasting, held since 14 days after the first push.
 - `bot_loop`: a bot branch failing `bot_loop_failures` (10) builds in a
   row, an aborted build neither breaking nor extending it: CI time wasted,
   a hint, never a quality finding. The build section's line is

@@ -213,6 +213,9 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
                     count: m.coverage.merged,
                     prod,
                   })}
+                  {/* The traced PRs the time leaves out: no start known. */}
+                  {lt.unmeasured > 0 &&
+                    ` · ${t("overview.lead.unmeasured", { count: lt.unmeasured })}`}
                   {m.coverage.not_yet > 0 &&
                     ` · ${t("overview.lead.notYet", { count: m.coverage.not_yet, prod })}`}
                 </span>

@@ -46,10 +46,16 @@ SELECT 'at' AS kind, a.sha, a.repo, a.branch, a.at
 FROM (SELECT DISTINCT ON (sha, repo) sha, repo, branch, at FROM arrivals ORDER BY sha, repo, at, branch) a
 UNION ALL
 SELECT 'start',
-       (SELECT lower(b.payload->'changes'->0->>'fromHash')
+       -- the change of this branch's ref (a push may move several), of the
+       -- first such event
+       (SELECT lower(c->>'fromHash')
           FROM bitbucket_events b
-         WHERE b.repo_full_name = f.repo AND b.branch_name = f.branch AND b.event_type = 'repo:refs_changed'
-           AND b.occurred_at = f.at AND jsonb_typeof(b.payload->'changes') = 'array'
+          CROSS JOIN LATERAL jsonb_array_elements(
+            CASE WHEN jsonb_typeof(b.payload->'changes') = 'array' THEN b.payload->'changes' END) c
+         WHERE b.team = $1 AND b.repo_full_name = f.repo AND b.branch_name = f.branch
+           AND b.event_type = 'repo:refs_changed' AND b.occurred_at = f.at
+           AND lower(c->'ref'->>'displayId') = f.branch
+         ORDER BY b.id
          LIMIT 1),
        f.repo, f.branch, f.at
 FROM (SELECT DISTINCT ON (repo, branch) repo, branch, at FROM pushes ORDER BY repo, branch, at) f

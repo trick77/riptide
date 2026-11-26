@@ -142,8 +142,9 @@ func (s *Service) tick(ctx context.Context, teams []string) {
 			if !due(weeks, w) {
 				continue
 			}
-			// The window's views share their two datasets: read once, not
-			// once per product (and once more for the product list).
+			// The window's views share their datasets (the period, the
+			// previous one, the states' look-back): read once, not once per
+			// product (and once more for the product list).
 			wctx := withLoads(ctx)
 			views := []View{{Team: team, Weeks: weeks}}
 			// A team whose products do not load gets its all-products view,
@@ -211,8 +212,8 @@ func (s *Service) productsFor(ctx context.Context, team string, weeks int, w, n 
 	if until, ok := s.backoff.Load("products|" + key); ok && n.Before(until.(time.Time)) {
 		return nil
 	}
-	// Both periods, as every view's assessment reads them: the tick's cache
-	// then serves them all.
+	// Every period a view's assessment reads (reads): the tick's cache then
+	// serves them all.
 	dss, err := s.load(ctx, team, s.reads(weeks)...)
 	if err != nil {
 		if sched {

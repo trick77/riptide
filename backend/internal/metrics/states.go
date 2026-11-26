@@ -22,6 +22,12 @@ import (
 // card: k of n units, the worst three with their number, since when. A
 // state carries no comparison: its threshold is the team's (config
 // Thresholds), and the card names it.
+//
+// Nothing about a state comes from a stored analysis: what it was a week
+// before (the assessment before this one) is judged again from the same
+// reads, as of that instant and against today's thresholds. That decides
+// what is held (hysteresis), "gelöst" and "nicht mehr messbar", and whether
+// a lasting state held two sprints.
 
 // SignalState is a state's signal kind: Signal.State says which.
 const SignalState = "state"
@@ -32,7 +38,7 @@ const SignalState = "state"
 const ToneLimit = "limit"
 
 // State keys (StateCard.Key). Each key has one tone, but for the lasting
-// states (tierLasting): a hint until a unit has held it two sprints.
+// states (stateEval.lasting): a hint until a unit has held it two sprints.
 const (
 	// StateNoRelease: a project rolled out with merged work, its last
 	// release to production more than ReleaseBreachDays back (the sprint
@@ -62,8 +68,9 @@ const (
 	// StateNoProdStage: Argo CD reports deploys, never one to the
 	// production stage: the stage configuration or the notification is off.
 	StateNoProdStage = "no_prod_stage"
-	// StateUnmeasurable is a state raised before that the data can no
-	// longer judge: "nicht mehr messbar", never "gelöst".
+	// StateUnmeasurable is a state the assessment a week before raised on
+	// units the data can no longer judge: "nicht mehr messbar", never
+	// "gelöst".
 	StateUnmeasurable = "unmeasurable"
 )
 
@@ -96,16 +103,23 @@ const (
 )
 
 // StateLookbackWeeks bounds every state's look back: a release, a PR still
-// before production, a typical week. Older data is read by no state.
-const StateLookbackWeeks = 26
+// before production, a typical week, a branch's pushes. Older data is read
+// by no state.
+const StateLookbackWeeks = config.StateLookbackWeeks
 
 // SprintDays is the team's sprint (owner, 2026-11): a lasting state that
 // held a unit two sprints is red, not a hint.
 const SprintDays = 14
 
+// lastingSamples are the weekly instants before the period's end a lasting
+// state without a known onset must have fired at too to have held two
+// sprints.
+const lastingSamples = 2 * SprintDays / 7
+
 // StateThreshold is what a state measured against, the team's config key
 // and value, for the card to name; Min is the fewest cases or units it
-// needs besides, where it has such a count.
+// needs besides, where it has such a count; Within the span a case must lie
+// in, where the state has one.
 type StateThreshold struct {
 	Key   string  `json:"key"`
 	Value float64 `json:"value"`
@@ -113,6 +127,12 @@ type StateThreshold struct {
 	// MinKey and Min: a second threshold, a count, when the state has one.
 	MinKey *string `json:"min_key"`
 	Min    *int    `json:"min"`
+	// WithinKey and Within: a third, a span (minutes or days, the state's
+	// own): approved within so many minutes, declined after so many working
+	// days, pushed within so many working days. WithinKey null where the
+	// span is the rule's own, no threshold of the team's.
+	WithinKey *string  `json:"within_key"`
+	Within    *float64 `json:"within"`
 }
 
 // StateUnit is one unit a state names: its number against the threshold,
@@ -130,9 +150,11 @@ type StateUnit struct {
 	Count   *int     `json:"count"`
 	Of      *int     `json:"of"`
 	Typical *float64 `json:"typical"`
-	// Since is when it began: the last release, the oldest waiting PR's
-	// merge or approval, a loop's first failure. LowerBound: at least since
-	// then (the data starts there).
+	// Since is when the state began to hold for the unit, where the data
+	// tells: the last release, the oldest waiting PR's arrival on the
+	// trunk, when the Nth approved PR had waited past the threshold, a
+	// loop's first failure. LowerBound: at least since then (the data
+	// starts there).
 	Since      *time.Time `json:"since"`
 	LowerBound bool       `json:"lower_bound"`
 	// Week is the calendar week of a dated state (a merge pause).
@@ -140,8 +162,9 @@ type StateUnit struct {
 	// Names are what the unit holds: a project's Apps, the repos of a
 	// week's waiting PRs.
 	Names []string `json:"names"`
-	// Held: below the threshold now, kept because the last assessment named
-	// it and its number has not fallen below HysteresisShare of it.
+	// Held: below the threshold now, kept because the assessment a week
+	// before named it and its number has not fallen below HysteresisShare
+	// of it.
 	Held bool `json:"held"`
 	// Reason is a data-honesty unit's reason (a TraceReasons key).
 	Reason *string `json:"reason"`
@@ -184,9 +207,12 @@ type StateCard struct {
 	More  int         `json:"more"`
 	Units []StateUnit `json:"units"`
 	// Since is the earliest of its units'.
-	Since           *time.Time     `json:"since"`
-	SinceLowerBound bool           `json:"since_lower_bound"`
-	Threshold       StateThreshold `json:"threshold"`
+	Since           *time.Time `json:"since"`
+	SinceLowerBound bool       `json:"since_lower_bound"`
+	// Threshold is the team's threshold it measured against; null for a
+	// data-honesty state (it measures what the data cannot tell, against
+	// no agreement) and an unmeasurable one.
+	Threshold *StateThreshold `json:"threshold"`
 	// At is the instant it was judged at: the period's end.
 	At time.Time `json:"at"`
 	// Was is the state an unmeasurable card was (StateUnmeasurable), else
@@ -194,7 +220,20 @@ type StateCard struct {
 	Was *string `json:"was"`
 	// Facts is the facts table its units are rows of: prs, deploys, runs.
 	Facts string `json:"facts"`
+	// ValueUnit is what its units' Value is (a fact unit: days, share,
+	// count), for the page to format it.
+	ValueUnit string `json:"value_unit"`
+	// NamesKind is what its units' Names are where the page words them:
+	// NamesBuildKind a build kind, NamesStage a stage; empty otherwise
+	// (Apps, repos, branches, shown as they are).
+	NamesKind string `json:"names_kind"`
 }
+
+// What a state's units' Names are (StateCard.NamesKind).
+const (
+	NamesBuildKind = "build_kind"
+	NamesStage     = "stage"
+)
 
 // Unit statuses while a state is judged.
 const (
@@ -202,16 +241,22 @@ const (
 	unitUnjudged
 	unitClear
 	unitFires
+	// unitEscalated: past the hint into the breach its sibling state names
+	// (StateReleaseDue past ReleaseBreachDays): judged, neither firing here
+	// nor clear.
+	unitEscalated
 )
 
-// stateUnit is a unit being judged: its card row, its status, and how far
-// past the threshold it is (Value over the threshold, for the rank).
+// stateUnit is a unit being judged: its card row, its status, and when the
+// state began to hold for it where the data tells (began; nil: a sampled
+// state, whose two sprints the earlier instants show).
 type stateUnit struct {
 	StateUnit
 	status int
+	began  *time.Time
 }
 
-// stateEval is one state judged over its units.
+// stateEval is one state judged over its units at an instant.
 type stateEval struct {
 	key, unit, source, tone, facts string
 	tier                           int
@@ -219,8 +264,8 @@ type stateEval struct {
 	units                          []stateUnit
 	// lasting: a hint until a unit has held it SprintDays*2, then red.
 	lasting bool
-	// lower: a firing unit's Value at or above this keeps it named by the
-	// last assessment firing (hysteresis); 0: no hysteresis.
+	// lower: a firing unit's Value at or above this keeps it named when the
+	// assessment a week before named it (hysteresis); 0: no hysteresis.
 	lower float64
 	// valueUnit is the units' Value's fact unit where it is not the
 	// threshold's (a merge pause's waiting PRs).
@@ -229,6 +274,8 @@ type stateEval struct {
 	// enough cases, a share on enough), so the calm line counts its repo as
 	// judged; a state clear for want of anything to name judges nothing.
 	judges bool
+	// namesKind is the card's NamesKind.
+	namesKind string
 }
 
 // thresholds are p's, or the starting values.
@@ -252,6 +299,13 @@ func StatePeriod(cur, prev Period) *Period {
 	}
 	p := weeksBefore(weeks, end)
 	return &p
+}
+
+// StateLookbackFrom is StateLookbackWeeks before cur's end: where every
+// state's look back starts, whatever the view's length (a 26-week view
+// reads its previous period too, which no state reads).
+func StateLookbackFrom(cur Period) time.Time {
+	return cur.To.In(cur.location()).AddDate(0, 0, -7*StateLookbackWeeks).UTC()
 }
 
 // workingDays is the Monday-to-Friday time in [from, to) in loc, in days of
@@ -280,41 +334,215 @@ func workingDays(from, to time.Time, loc *time.Location) float64 {
 	return out.Hours() / 24
 }
 
+// afterWorkingDays is the instant days working days (workingDays') after
+// from in loc: when a wait from from first counts more than days.
+func afterWorkingDays(from time.Time, days float64, loc *time.Location) time.Time {
+	left := time.Duration(days * float64(24*time.Hour))
+	t := from.In(loc)
+	for {
+		day := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
+		next := day.AddDate(0, 0, 1)
+		if wd := day.Weekday(); wd != time.Saturday && wd != time.Sunday {
+			if span := next.Sub(t); span >= left {
+				return t.Add(left).UTC()
+			} else {
+				left -= span
+			}
+		}
+		t = next
+	}
+}
+
 // calendarDays is to less from in whole days.
 func calendarDays(from, to time.Time) float64 {
 	return float64(int(to.Sub(from).Hours() / 24))
 }
 
-// stateUnits is the history's units of a state: the names its last
-// assessment named.
-func (a *assessor) lastUnits(id string) map[string]bool {
-	out := map[string]bool{}
-	for _, n := range a.h.StateUnits[id] {
-		out[n] = true
+// nthBegan is when the nth case of crossings (each the instant one case
+// first counted past the threshold) had crossed: when "at least n cases"
+// began to hold for the cases still counted. Nil with fewer.
+func nthBegan(crossings []time.Time, n int) *time.Time {
+	if n < 1 || len(crossings) < n {
+		return nil
+	}
+	cs := slices.Clone(crossings)
+	slices.SortFunc(cs, func(x, y time.Time) int { return x.Compare(y) })
+	return ptr(cs[n-1])
+}
+
+// stateAt is an instant the states are judged at, and the view's weeks
+// ending there: the period's end (now), or a whole week back each (the
+// assessment before this one; a lasting state's two sprints).
+type stateAt struct {
+	end    time.Time
+	period Period
+	// now: the period's own end, where the open PRs and the period's
+	// numbers (coverage, the hotspots) are known; an earlier instant
+	// re-derives what it can from the events read.
+	now bool
+}
+
+// instant is the instant weeks whole weeks before the period's end.
+func (a *assessor) instant(weeks int) stateAt {
+	if weeks == 0 {
+		return stateAt{end: a.p.Period.To, period: a.p.Period, now: true}
+	}
+	end := a.p.Period.To.In(a.states.loc).AddDate(0, 0, -7*weeks)
+	return stateAt{end: end.UTC(), period: weeksBefore(len(a.p.Period.Weeks), end)}
+}
+
+// stateRule judges one or more states at an instant; earlier: it can judge
+// an instant before the period's end from the events read.
+type stateRule struct {
+	keys    []string
+	earlier bool
+	judge   func(at stateAt) []stateEval
+}
+
+// rules are every state rule, in the order their cards rank on a tie.
+func (a *assessor) rules() []stateRule {
+	return []stateRule{
+		{[]string{StateNoRelease, StateReleaseDue}, true, a.releaseStates},
+		{[]string{StateNotOnProd, StateSlowToProd}, true, a.notOnProdStates},
+		{[]string{StateMergePause}, true, a.mergePauseState},
+		{[]string{StateApprovedWaiting}, true, a.approvedWaitingState},
+		{[]string{StateFirstReviewWait}, true, a.firstReviewState},
+		{[]string{StateDeployFailing, StateDeployFailures}, true, a.deployFailingStates},
+		{[]string{StateTrunkFailing}, true, a.trunkFailingState},
+		{[]string{StateBuildsSilent}, true, a.buildsSilentState},
+		{[]string{StateBranchFailing}, true, a.branchFailingState},
+		{[]string{StateFlakyBuilds, StateLongBuilds, StateReleaseFailing}, true, a.buildStates},
+		{[]string{StateBranchLife, StateBranchOpen, StateBranchSilent}, true, a.branchStates},
+		{[]string{StateBigPRs, StateFastApproval, StateUnapproved, StateLateDecline}, true, a.reviewStates},
+		{[]string{StateBotLoop}, true, a.botLoopState},
+		{[]string{StateUntraced, StateUnattributed, StateNoProdStage}, false, a.honestyStates},
+	}
+}
+
+// evalAt judges the states want names at at, by key; a rule that cannot
+// judge an earlier instant is left out there.
+func (a *assessor) evalAt(at stateAt, want func(key string) bool) map[string]stateEval {
+	out := map[string]stateEval{}
+	for _, r := range a.rules() {
+		if (!at.now && !r.earlier) || !slices.ContainsFunc(r.keys, want) {
+			continue
+		}
+		for _, e := range r.judge(at) {
+			if a.gaps[e.source] {
+				// A gated source judges nothing.
+				for i := range e.units {
+					if e.units[i].status != unitIdle {
+						e.units[i].status = unitUnjudged
+					}
+				}
+			}
+			out[e.key] = e
+		}
 	}
 	return out
 }
 
-// judge turns e into its signal: hysteresis for the units the last
-// assessment named, the firing units ranked, worst three, since. No unit
-// firing: nothing, but a state raised before and open since that its
-// units can no longer judge reads "nicht mehr messbar"; one judged clear
-// resolves (resolvedSignals). A gated source judges nothing.
-func (a *assessor) judge(e stateEval) {
-	id := SignalState + ":" + e.key
-	if a.gaps[e.source] {
-		for i := range e.units {
-			if e.units[i].status != unitIdle {
-				e.units[i].status = unitUnjudged
+// firing are the names of e's units that fire.
+func firing(e stateEval) map[string]bool {
+	out := map[string]bool{}
+	for _, u := range e.units {
+		if u.status == unitFires {
+			out[u.Name] = true
+		}
+	}
+	return out
+}
+
+// stateSignals judges every state at the period's end and a week before,
+// the assessment before this one, from the same reads: a unit that fired
+// then and is still within HysteresisShare of the threshold is held; a
+// state that fired then and fires on none of its units now is "gelöst"
+// where every unit it named is clear on evidence, "nicht mehr messbar"
+// where one can no longer be judged, and neither where a unit fell idle or
+// went (a project nobody works on is no news). A lasting state is red once
+// a unit has held it two sprints: from its onset where the data tells, else
+// firing at every week back over them.
+func (a *assessor) stateSignals() {
+	a.stateJudged, a.stateRepos, a.stateFlagged = map[string]bool{}, map[string]bool{}, map[string]bool{}
+	a.states = newStateInput(a)
+	all := func(string) bool { return true }
+	cur := a.evalAt(a.instant(0), all)
+	// The weeks back, the latest first: what the assessments before this one
+	// named (hysteresis, resolution) and a lasting state's two sprints.
+	back := make([]map[string]stateEval, lastingSamples)
+	for w := range back {
+		back[w] = a.evalAt(a.instant(w+1), all)
+	}
+	for _, r := range a.rules() {
+		for _, key := range r.keys {
+			if e, ok := cur[key]; ok {
+				a.judge(e, named(back, key), back)
 			}
 		}
 	}
-	last := a.lastUnits(id)
-	var fire []StateUnit
-	card := StateCard{Key: e.key, Unit: e.unit, Threshold: e.threshold, At: a.p.Period.To, Facts: e.facts,
-		Worst: []StateUnit{}, Units: []StateUnit{}}
+	for _, r := range a.rules() {
+		for _, key := range r.keys {
+			if p, ok := back[0][key]; ok {
+				a.settled(p, named(back, key), cur[key])
+			}
+		}
+	}
+}
+
+// named are the units of state key the assessment a week before named:
+// those that fired then, and those within its hysteresis then that it had
+// named the week before, back as far as the weeks read (lastingSamples):
+// a held unit stays held while its number stays in the band.
+func named(back []map[string]stateEval, key string) map[string]bool {
+	out := map[string]bool{}
+	if len(back) == 0 {
+		return out
+	}
+	e, ok := back[0][key]
+	if !ok {
+		return out
+	}
+	earlier := named(back[1:], key)
 	for _, u := range e.units {
-		if u.status == unitClear && e.lower > 0 && last[u.Name] && u.Value >= e.lower {
+		if u.status == unitFires || (inBand(e, u) && earlier[u.Name]) {
+			out[u.Name] = true
+		}
+	}
+	return out
+}
+
+// inBand reports whether u, judged clear in e, stands within e.lower of the
+// threshold: held, had it been named before.
+func inBand(e stateEval, u stateUnit) bool {
+	return e.lower > 0 && u.status == unitClear && u.Value >= e.lower
+}
+
+// heldAt reports whether unit name fired in e, or stood within e.lower of
+// the threshold (held, had it fired before).
+func heldAt(e stateEval, name string) bool {
+	for _, u := range e.units {
+		if u.Name == name {
+			return u.status == unitFires || inBand(e, u)
+		}
+	}
+	return false
+}
+
+// judge turns e into its signal: a unit the week before named and still
+// within e.lower of the threshold held, the firing units ranked, worst
+// three, since, a lasting state red where a unit held it two sprints
+// (back: the weeks before, the latest first). No unit firing: nothing.
+func (a *assessor) judge(e stateEval, named map[string]bool, back []map[string]stateEval) {
+	id := SignalState + ":" + e.key
+	var fire []StateUnit
+	card := StateCard{Key: e.key, Unit: e.unit, At: a.p.Period.To, Facts: e.facts, Worst: []StateUnit{}, Units: []StateUnit{}}
+	if e.threshold.Key != "" {
+		card.Threshold = ptr(e.threshold)
+	}
+	end := a.p.Period.To
+	tone := e.tone
+	for _, u := range e.units {
+		if u.status == unitClear && e.lower > 0 && named[u.Name] && u.Value >= e.lower {
 			u.status, u.Held = unitFires, true
 		}
 		// A repo's or an App's rows are found by its name; a state names
@@ -329,7 +557,10 @@ func (a *assessor) judge(e stateEval) {
 				u.Names = []string{}
 			}
 			fire = append(fire, u.StateUnit)
-		case unitClear:
+			if e.lasting && a.heldTwoSprints(e.key, u, end, back) {
+				tone = ToneAttention
+			}
+		case unitClear, unitEscalated:
 			card.Judged++
 		case unitUnjudged:
 			card.Unjudged++
@@ -338,24 +569,7 @@ func (a *assessor) judge(e stateEval) {
 		}
 	}
 	a.stateJudged[id] = card.Judged > 0
-	// The calm line's repos: judged by a state whose clear verdict rests on
-	// evidence (judges; never on PRs while Bitbucket's events were lost), or
-	// named by one (a finding; data honesty is none).
-	if e.unit == UnitRepo || e.unit == UnitBranch {
-		pr := e.source == dataset.SourceBitbucket || e.source == dataset.SourceNoergler
-		for _, u := range e.units {
-			repo, _, _ := strings.Cut(u.Name, ":")
-			if e.judges && (u.status == unitClear || u.status == unitFires) && (!a.lost || !pr) {
-				a.stateRepos[repo] = true
-			}
-		}
-		if e.tone != ToneLimit {
-			for _, u := range fire {
-				repo, _, _ := strings.Cut(u.Name, ":")
-				a.stateFlagged[repo] = true
-			}
-		}
-	}
+	a.calmLine(e, fire)
 	if len(fire) == 0 {
 		return
 	}
@@ -365,13 +579,9 @@ func (a *assessor) judge(e stateEval) {
 	card.Count, card.Units = len(fire), fire
 	card.Worst = fire[:min(len(fire), 3)]
 	card.More = len(fire) - len(card.Worst)
-	tone := e.tone
 	for _, u := range fire {
 		if u.Since != nil && (card.Since == nil || u.Since.Before(*card.Since)) {
 			card.Since, card.SinceLowerBound = u.Since, u.LowerBound
-		}
-		if e.lasting && u.Since != nil && a.p.Period.To.Sub(*u.Since) >= 2*SprintDays*24*time.Hour {
-			tone = ToneAttention
 		}
 	}
 	worst := fire[0].Value
@@ -379,20 +589,140 @@ func (a *assessor) judge(e stateEval) {
 	if vu == "" {
 		vu = thresholdFactUnit(e.threshold.Unit)
 	}
+	card.ValueUnit, card.NamesKind = vu, e.namesKind
 	s := Signal{
 		ID: id, Kind: SignalState, Tone: tone, Source: e.source, Weight: e.tier, State: &card,
 		Facts: []Fact{
 			plain(id+".count", "state_units", UnitCount, f64(card.Count)),
 			plain(id+".judged", "state_judged", UnitCount, f64(card.Judged)),
 			plain(id+".worst", "state_"+e.key, vu, &worst),
-			plain(id+".threshold", "state_threshold", thresholdFactUnit(e.threshold.Unit), &e.threshold.Value),
 		},
+	}
+	// A data-honesty state measures against no agreement: no threshold to
+	// name.
+	if card.Threshold != nil {
+		s.Facts = append(s.Facts,
+			plain(id+".threshold", "state_threshold", thresholdFactUnit(e.threshold.Unit), &e.threshold.Value))
 	}
 	// Breadth first, then the distance past the threshold.
 	if card.Judged > 0 {
 		s.score = float64(card.Count)/float64(card.Judged)*100 + min(worst/max(e.threshold.Value, 1), 99)
 	}
 	a.add(s)
+}
+
+// heldTwoSprints reports whether a lasting state's firing unit u has held
+// two sprints by end: from its onset where the data tells it (began), else
+// fired, or stood within its hysteresis, at every week back over them.
+func (a *assessor) heldTwoSprints(key string, u stateUnit, end time.Time, back []map[string]stateEval) bool {
+	if u.began != nil {
+		return end.Sub(*u.began) >= 2*SprintDays*24*time.Hour
+	}
+	if len(back) < lastingSamples {
+		return false
+	}
+	for _, evals := range back {
+		e, ok := evals[key]
+		if !ok || !heldAt(e, u.Name) {
+			return false
+		}
+	}
+	return true
+}
+
+// calmLine notes the repos e judged on evidence and those it names (a
+// finding; data honesty is none): the calm line's. A project's or an App's
+// finding names its project's repos.
+func (a *assessor) calmLine(e stateEval, fire []StateUnit) {
+	pr := e.source == dataset.SourceBitbucket || e.source == dataset.SourceNoergler
+	if e.unit == UnitRepo || e.unit == UnitBranch {
+		for _, u := range e.units {
+			repo, _, _ := strings.Cut(u.Name, ":")
+			if e.judges && (u.status == unitClear || u.status == unitFires) && (!a.lost || !pr) {
+				a.stateRepos[repo] = true
+			}
+		}
+	}
+	if e.tone == ToneLimit {
+		return
+	}
+	for _, u := range fire {
+		switch e.unit {
+		case UnitRepo, UnitBranch:
+			repo, _, _ := strings.Cut(u.Name, ":")
+			a.stateFlagged[repo] = true
+		case UnitProject, UnitApp:
+			if u.Project == nil {
+				continue
+			}
+			for repo := range a.activeRepos() {
+				if projectOf(repo) == *u.Project {
+					a.stateFlagged[repo] = true
+				}
+			}
+		}
+	}
+}
+
+// settled is what became of a state the assessment a week before raised
+// (prev, judged again as of then; named, the units it named, held ones
+// among them) and that fires on none of its units now (cur): "gelöst"
+// where every unit it named is clear on evidence, "nicht
+// mehr messbar" where one of them cannot be judged now, nothing where one
+// fell idle, went, or escalated into a sibling state. Once: a week on, the
+// instant before no longer raised it.
+func (a *assessor) settled(prev stateEval, named map[string]bool, cur stateEval) {
+	if len(named) == 0 || len(firing(cur)) > 0 || a.gaps[prev.source] {
+		return
+	}
+	// Held now: still raised.
+	if cur.lower > 0 && slices.ContainsFunc(cur.units, func(u stateUnit) bool {
+		return named[u.Name] && u.status == unitClear && u.Value >= cur.lower
+	}) {
+		return
+	}
+	status := map[string]int{}
+	for _, u := range cur.units {
+		status[u.Name] = u.status
+	}
+	var unjudged []string
+	clear := 0
+	for _, name := range slices.Sorted(maps.Keys(named)) {
+		st, ok := status[name]
+		switch {
+		case !ok:
+		case st == unitUnjudged:
+			unjudged = append(unjudged, name)
+		case st == unitClear:
+			clear++
+		}
+	}
+	id := SignalState + ":" + prev.key
+	switch {
+	case len(unjudged) > 0:
+		card := StateCard{Key: StateUnmeasurable, Unit: prev.unit, At: a.p.Period.To, Was: ptr(prev.key),
+			Count: len(unjudged), Unjudged: len(unjudged), Worst: []StateUnit{}, Units: []StateUnit{},
+			ValueUnit: UnitCount}
+		for _, name := range unjudged {
+			u := StateUnit{Name: name, Names: []string{}}
+			if prev.unit == UnitTeam {
+				u.Name = ""
+			}
+			card.Units = append(card.Units, u)
+		}
+		card.Worst = card.Units[:min(len(card.Units), 3)]
+		card.More = len(card.Units) - len(card.Worst)
+		sid := SignalState + ":" + StateUnmeasurable + ":" + prev.key
+		a.add(Signal{
+			ID: sid, Kind: SignalState, Tone: ToneLimit, Source: prev.source, Weight: tierLimit, State: &card,
+			Facts: []Fact{plain(sid+".count", "state_units", UnitCount, f64(len(unjudged)))},
+		})
+	case clear == len(named):
+		s := Signal{ID: SignalResolved + ":" + id, Kind: SignalResolved, Tone: ToneGood, Weight: 2, Metric: ptr(id),
+			Source: prev.source}
+		s.Facts = []Fact{plain(s.ID+".count", "state_units", UnitCount, f64(len(named)))}
+		a.add(s)
+	}
 }
 
 // thresholdFactUnit is a threshold unit as a fact's.
@@ -419,54 +749,13 @@ func compareSince(x, y *time.Time) int {
 	return x.Compare(*y)
 }
 
-// stateSignals judges every state, then what became of the states the
-// last assessments raised: judged clear, resolved (resolvedSignals); not
-// judgeable any more, "nicht mehr messbar".
-func (a *assessor) stateSignals() {
-	a.stateJudged, a.stateRepos, a.stateFlagged = map[string]bool{}, map[string]bool{}, map[string]bool{}
-	a.states = newStateInput(a)
-	a.releaseStates()
-	a.notOnProdStates()
-	a.mergePauseState()
-	a.approvedWaitingState()
-	a.firstReviewState()
-	a.deployFailingStates()
-	a.trunkFailingState()
-	a.buildsSilentState()
-	a.branchFailingState()
-	a.buildStates()
-	a.branchStates()
-	a.reviewStates()
-	a.botLoopState()
-	a.honestyStates()
-	raised := map[string]bool{}
-	for _, s := range a.out {
-		raised[s.ID] = true
-	}
-	for _, id := range slices.Sorted(mapsKeys(a.h.Open)) {
-		key, ok := strings.CutPrefix(id, SignalState+":")
-		if !ok || raised[id] || key == StateUnmeasurable {
-			continue
-		}
-		if judged, known := a.stateJudged[id]; known && judged {
-			continue
-		}
-		card := StateCard{Key: StateUnmeasurable, Unit: UnitTeam, At: a.p.Period.To, Was: ptr(key),
-			Worst: []StateUnit{}, Units: []StateUnit{}}
-		sid := SignalState + ":" + StateUnmeasurable + ":" + key
-		a.out = append(a.out, Signal{
-			ID: sid, Kind: SignalState, Tone: ToneLimit, Source: cmp.Or(stateSource[key], dataset.SourceArgoCD),
-			Weight: tierLimit, State: &card, Facts: []Fact{plain(sid+".count", "state_units", UnitCount, f64(0))},
-		})
-	}
-}
-
 // mapsKeys are m's keys, for slices.Sorted.
 func mapsKeys[V any](m map[string]V) iter.Seq[string] { return maps.Keys(m) }
 
 // coveringStates are the states that speak for a team number: its notable
 // worsening is a fact on their card, not a card of its own (states-catalogue
-// section 4: worsened changes only where no state covers them).
+// section 4: worsened changes only where no state covers them). Only states
+// that can be red cover: a hint never takes a red change's place.
 var coveringStates = map[string][]string{
 	"deploy_frequency":             {StateNoRelease, StateReleaseDue},
 	"lead_time":                    {StateNotOnProd, StateSlowToProd},
@@ -474,20 +763,21 @@ var coveringStates = map[string][]string{
 	"merged_per_week":              {StateMergePause},
 	"batch_size":                   {StateBigPRs},
 	"build_success:" + KindMain:    {StateTrunkFailing, StateFlakyBuilds},
-	"build_success:" + KindFeature: {StateBranchFailing, StateFlakyBuilds},
+	"build_success:" + KindFeature: {StateFlakyBuilds},
 	"build_success:" + KindRelease: {StateReleaseFailing},
-	"deploy_success":               {StateDeployFailing, StateDeployFailures},
+	"deploy_success":               {StateDeployFailing},
 }
 
-// foldChanges puts a notable worsening of a team number a state covers on
-// that state's card, as a fact against the previous period, and drops its
-// own card: one finding, said once.
+// foldChanges puts a notable worsening of a team number a red state covers
+// on that state's card, as a fact against the previous period, and drops
+// its own card: one finding, said once. A change naming its repos keeps
+// those no unit of any covering red state names, shown per unit where no
+// state covers the unit.
 func (a *assessor) foldChanges() {
-	// Only onto a red card: a red worsening never turns into a hint.
-	byKey := map[string]int{}
+	red := map[string]int{}
 	for i, s := range a.out {
 		if s.State != nil && s.Tone == ToneAttention {
-			byKey[s.State.Key] = i
+			red[s.State.Key] = i
 		}
 	}
 	var drop []string
@@ -495,43 +785,30 @@ func (a *assessor) foldChanges() {
 		if s.Kind != SignalChange || s.Tone != ToneAttention || s.Metric == nil {
 			continue
 		}
+		var cards []int
+		named := map[string]bool{}
 		for _, key := range coveringStates[*s.Metric] {
-			i, ok := byKey[key]
-			if !ok {
-				continue
-			}
-			// A change naming its repos keeps those no unit of the state names:
-			// it is shown per unit, where no state covers the unit.
-			if len(s.Drivers) > 0 {
-				named := map[string]bool{}
+			if i, ok := red[key]; ok {
+				cards = append(cards, i)
 				for _, u := range a.out[i].State.Units {
 					named[u.Name] = true
 				}
-				left := slices.DeleteFunc(slices.Clone(s.Drivers), func(d Driver) bool { return named[d.Repo] })
-				if len(left) > 0 {
-					a.out[j].Drivers = left
-					break
-				}
 			}
-			a.out[i].Facts = append(a.out[i].Facts, s.Facts...)
-			drop = append(drop, s.ID)
-			break
 		}
+		if len(cards) == 0 {
+			continue
+		}
+		if len(s.Drivers) > 0 {
+			left := slices.DeleteFunc(slices.Clone(s.Drivers), func(d Driver) bool { return named[d.Repo] })
+			if len(left) > 0 {
+				a.out[j].Drivers = left
+				continue
+			}
+		}
+		a.out[cards[0]].Facts = append(a.out[cards[0]].Facts, s.Facts...)
+		drop = append(drop, s.ID)
 	}
 	a.out = slices.DeleteFunc(a.out, func(s Signal) bool { return slices.Contains(drop, s.ID) })
-}
-
-// stateResolved is a state the last assessments raised and the data now
-// judges clear: "gelöst", once (History drops it after).
-func (a *assessor) stateResolved(id string) *Signal {
-	key, _ := strings.CutPrefix(id, SignalState+":")
-	if !a.stateJudged[id] {
-		return nil
-	}
-	s := Signal{ID: SignalResolved + ":" + id, Kind: SignalResolved, Tone: ToneGood, Weight: 2, Metric: ptr(id),
-		Source: stateSource[key]}
-	s.Facts = []Fact{plain(s.ID+".count", "state_units", UnitCount, f64(0))}
-	return &s
 }
 
 // stateSource is each state's source, for a resolution's gate.
@@ -543,26 +820,43 @@ var stateSource = map[string]string{
 	StateUntraced: dataset.SourceArgoCD, StateUnattributed: dataset.SourceArgoCD, StateNoProdStage: dataset.SourceArgoCD,
 }
 
-// stateInput is what the states read across the windows: the merged PRs of
-// the period, the previous one and the look-back before it, each once.
+// stateInput is what the states read across the windows, each row once:
+// the period's, the previous one's and the look-back's before it, bounded
+// at StateLookbackWeeks before the period's end.
 type stateInput struct {
 	// prs are the people's merged PRs (peopleMerged) of every window read,
-	// each once, in the view's product.
+	// merged in the look-back, in the view's product.
 	prs []dataset.PR
+	// all is every PR of every window read: what an earlier instant's
+	// period counts (mergedPRs over it), declines included.
+	all *dataset.Dataset
+	// runs are the period's and the previous period's runs (the look-back
+	// window reads none); deploys every window's.
+	runs    []dataset.Run
+	deploys []dataset.Deploy
 	// traces are every window's repo traces, for placing an older PR.
 	traces map[string]dataset.RepoTrace
 	// th are the thresholds.
 	th config.Thresholds
 	// loc is the period's zone.
 	loc *time.Location
+	// from is the look-back's start.
+	from time.Time
 	// view is the period's dataset with traces: what places an older PR.
 	view dataset.Dataset
+	// names names the runs' repos; gitops tells a GitOps repo's run.
+	names  repoNamer
+	gitops func(dataset.Run) bool
+	// infra are the repos only infrastructure Apps deploy (infraRepos).
+	infra map[string]bool
 }
 
 func newStateInput(a *assessor) *stateInput {
-	in := &stateInput{traces: map[string]dataset.RepoTrace{}, th: a.p.thresholds(), loc: a.p.Period.location()}
-	seen := map[string]bool{}
-	for _, ds := range []*dataset.Dataset{a.ds, a.prev, a.earlier} {
+	in := &stateInput{traces: map[string]dataset.RepoTrace{}, th: a.p.thresholds(), loc: a.p.Period.location(),
+		from: StateLookbackFrom(a.p.Period)}
+	seen, seenAll := map[string]bool{}, map[string]bool{}
+	all := &dataset.Dataset{Meta: a.ds.Meta, Apps: a.ds.Apps, GitOpsRepos: a.ds.GitOpsRepos}
+	for i, ds := range []*dataset.Dataset{a.ds, a.prev, a.earlier} {
 		if ds == nil {
 			continue
 		}
@@ -571,15 +865,34 @@ func newStateInput(a *assessor) *stateInput {
 		}
 		for _, pr := range ds.PRs {
 			key := pr.Repo + "#" + strconv.FormatInt(pr.PRID, 10)
-			if seen[key] || pr.GitOps || pr.Bot || pr.State != "merged" || pr.MergedAt == nil || !a.f.inKey(pr.Project) {
+			if !seenAll[key] {
+				seenAll[key] = true
+				all.PRs = append(all.PRs, pr)
+			}
+			if seen[key] || pr.GitOps || pr.Bot || pr.State != "merged" || pr.MergedAt == nil || !a.f.inKey(pr.Project) ||
+				pr.MergedAt.Before(in.from) {
 				continue
 			}
 			seen[key] = true
 			in.prs = append(in.prs, pr)
 		}
+		// The windows do not overlap: a deploy or a run is read by one only.
+		for _, d := range ds.Deploys {
+			if !d.At.Before(in.from) {
+				in.deploys = append(in.deploys, d)
+			}
+		}
+		if i <= 1 {
+			in.runs = append(in.runs, ds.Runs...)
+		}
 	}
+	all.Runs = in.runs
+	in.all = all
+	in.names = newRepoNamer(in.runs)
+	in.gitops = gitopsRun(all)
 	in.view = *a.ds
 	in.view.Traces = in.traces
+	in.infra = infraRepos(a.ds, in.traces)
 	return in
 }
 
@@ -587,4 +900,60 @@ func newStateInput(a *assessor) *stateInput {
 // window read.
 func (in *stateInput) placed(pr dataset.PR, cutoff time.Time) placement {
 	return prodPlacement(&in.view, pr, cutoff)
+}
+
+// runsIn are the runs read with an instant in p, for the build section's
+// numbers over it (build).
+func (in *stateInput) runsIn(p Period) *dataset.Dataset {
+	ds := &dataset.Dataset{Meta: in.all.Meta, GitOpsRepos: in.all.GitOpsRepos}
+	for _, r := range in.runs {
+		if p.In(runAt(r)) {
+			ds.Runs = append(ds.Runs, r)
+		}
+	}
+	return ds
+}
+
+// infraRepos are the repos tracing knows an App deploys whose every
+// release came from infrastructure Apps (dataset.App.Infra as of the
+// period's end): a log shipper's repo is no team's delivery to judge. A
+// repo's App is the one releasing at the instant and stage of its trace's
+// release (dataset.AppRelease), or a stretch's; a repo with none known is
+// judged.
+func infraRepos(ds *dataset.Dataset, traces map[string]dataset.RepoTrace) map[string]bool {
+	infra := map[string]bool{}
+	for _, app := range ds.Apps {
+		infra[app.Name] = app.Infra
+	}
+	type at struct {
+		env string
+		at  time.Time
+	}
+	apps := map[at][]string{}
+	for _, r := range ds.Releases {
+		k := at{r.Environment, r.At.UTC()}
+		apps[k] = append(apps[k], r.App)
+	}
+	out := map[string]bool{}
+	for repo, t := range traces {
+		known, human := false, false
+		for _, r := range t.Releases {
+			names := apps[at{r.Environment, r.At.UTC()}]
+			for _, s := range r.Stretches {
+				names = append(names, s.App)
+			}
+			for _, n := range names {
+				isInfra, ok := infra[n]
+				if !ok {
+					continue
+				}
+				known = true
+				human = human || !isInfra
+			}
+		}
+		if known && !human {
+			out[repo] = true
+		}
+	}
+	return out
 }

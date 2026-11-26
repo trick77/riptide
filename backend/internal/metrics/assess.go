@@ -22,11 +22,11 @@ const (
 	// what is raised, how it is judged or what the model is told. An
 	// analysis stores the version it was assessed under; one of an older
 	// version (or none, before the column) words signals the rules no longer
-	// raise, and is not shown as the assessment's wording. 2: wave 1 (dropped
+	// raise, and is not shown as the assessment's wording. 2: dropped
 	// signals, symmetric thresholds, quiet decided here, resolved on
-	// evidence). 3: wave 2 (lead time per PR traced to production; states,
-	// hints and data honesty in groups of their own, judged against the
-	// team's thresholds).
+	// evidence. 3: lead time per PR traced to production; states, hints and
+	// data honesty in groups of their own, judged against the team's
+	// thresholds and re-derived a week back from the same data.
 	RulesVersion = 3
 	// FocusMinWeight is the weight a repo's signals need for it to be a
 	// focus candidate: one attention signal, or a hint and a notable change.
@@ -243,10 +243,6 @@ type History struct {
 	Open map[string]Problem
 	// Runs are the earlier assessments read; none: the view's first.
 	Runs int
-	// StateUnits are the units each state of the latest assessment named,
-	// by its signal ID: a unit it named keeps firing until its number falls
-	// below Thresholds.HysteresisShare of the threshold.
-	StateUnits map[string][]string
 }
 
 // Limit is a hole in a source's data the comparison crosses: a reason the
@@ -370,8 +366,10 @@ type assessor struct {
 	// stateRepos are the repos a state's rule judged, stateFlagged those a
 	// state (not data honesty) names: the calm line's.
 	stateRepos, stateFlagged map[string]bool
-	gaps                     map[string]bool
-	limits                   []Limit
+	// active are the period's repos with people's work, computed once.
+	active map[string]bool
+	gaps   map[string]bool
+	limits []Limit
 	// lost: Bitbucket's events were lost in one of the two periods
 	// (lostEvents, LimitSilence). Its counts read low there, so none of its
 	// numbers is compared (compare, unlost), nor judges a repo.
@@ -965,15 +963,9 @@ func (a *assessor) resolvedSignals() {
 	for _, id := range slices.Sorted(maps.Keys(a.h.Open)) {
 		pb := a.h.Open[id]
 		kind, rest, _ := strings.Cut(id, ":")
-		if kind == SignalState && !now[id] {
-			// A state judged clear now, its units with the data to judge.
-			if r := a.stateResolved(id); r != nil && !a.gaps[r.Source] {
-				a.add(*r)
-				resolved[id] = true
-			}
-			continue
-		}
-		if now[id] || !slices.Contains(resolvable, kind) {
+		// A state's resolution is re-derived from the data (settled), never
+		// read from an earlier assessment.
+		if now[id] || kind == SignalState || !slices.Contains(resolvable, kind) {
 			continue
 		}
 		s := Signal{ID: "resolved:" + id, Kind: SignalResolved, Tone: ToneGood, Weight: 2, Metric: ptr(id)}

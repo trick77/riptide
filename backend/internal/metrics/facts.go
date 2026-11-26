@@ -109,7 +109,9 @@ var (
 		ProdNotPlaceable: {"nicht zuordenbar", "not placeable"},
 	}
 	prodReasonTerm = map[string]uiTerm{
-		TraceNoMergeCommit:     {"Bitbucket nannte keinen Merge-Commit", "Bitbucket named no merge commit"},
+		TraceNoMergeCommit: {"Bitbucket nannte keinen Merge-Commit", "Bitbucket named no merge commit"},
+		TraceOffTrunk: {"in einen Branch gemerged, der noch nicht im Hauptbranch ist",
+			"merged into a branch that is not on the main branch yet"},
 		TraceReleaseUnresolved: {"ein späteres Release lässt sich keinen PRs zuordnen", "a later release cannot be tied to PRs"},
 		TraceRepoUntraced:      {"kein Deploy des Repos bekannt", "no deploy of the repo known"},
 		TraceInSilence:         {"eine Lücke in den Daten", "a gap in the data"},
@@ -335,8 +337,8 @@ type PRFact struct {
 	// ProdState is where a merged PR stands on production now, the facts'
 	// end (prodPlacement): on_prod, not_yet or not_placeable; null for
 	// every other PR, a library's and a promotion's included. ProdReason
-	// is why tracing cannot place it (no_merge_commit, release_unresolved,
-	// repo_untraced, in_silence), null otherwise.
+	// is why tracing cannot place it (no_merge_commit, off_trunk,
+	// release_unresolved, repo_untraced, in_silence), null otherwise.
 	ProdState  *string `json:"prod_state"`
 	ProdReason *string `json:"prod_reason"`
 	// ProdRoute is how its first production deploy was found: compare (a

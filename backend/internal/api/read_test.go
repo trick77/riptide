@@ -278,7 +278,9 @@ func TestReadMatchesOpenAPISpec(t *testing.T) {
 	for path, want := range map[string][]string{
 		"/api/metrics": {`"unknown":1`, `"unseen_runs":2`, `"lost":true`, `"bot_runs":{`, `"grace_days":14`},
 		"/api/facts": {`"not_counted":"umbrella"`, `"via_umbrella":true`, `"library":true`, `"state":"unknown"`,
-			`"phase":"Error"`, `"infra":true`, `"first_deploy":true`},
+			`"phase":"Error"`, `"infra":true`, `"first_deploy":true`,
+			// #8 off the trunk, no umbrella merged on.
+			`"prod_state":"not_placeable"`, `"prod_reason":"off_trunk"`},
 	} {
 		body := h.serveUI(newRequest(http.MethodGet, path+"?team=checkout", nil)).Body.String()
 		for _, w := range want {
@@ -332,6 +334,107 @@ func TestAnalysisShapesMatchOpenAPISpec(t *testing.T) {
 }
 
 func ptrTo[T any](v T) *T { return &v }
+
+// The assessment's read: the period and the previous one in full, the
+// states' look-back past them lean (PRs and deploys only); its shared read
+// takes the approvals from the period's start and the branches from
+// StateLookbackWeeks before its end.
+func TestDatasetsStatesRead(t *testing.T) {
+	h := newHarness(t, nil)
+	var shared []dataset.SharedParams
+	reader := sharedSpy{memStore: h.mem, got: &shared}
+	d := Deps{Reader: reader, Runtime: h.runtime, Now: func() time.Time { return fixedNow }}
+	cur, prev := metrics.ClosedPeriod(4, fixedNow, time.UTC), metrics.ClosedPrevious(4, fixedNow, time.UTC)
+	ps := []metrics.Period{cur, prev, *metrics.StatePeriod(cur, prev)}
+	if _, err := d.Datasets(context.Background(), "checkout", ps...); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.mem.params) != 3 {
+		t.Fatalf("reads %+v, want 3", h.mem.params)
+	}
+	for _, p := range h.mem.params {
+		want := p.From.Equal(ps[2].From)
+		if p.Lean != want || p.FactsOnly != want || !p.ClassAt.Equal(cur.To) {
+			t.Errorf("read %v..%v lean %v facts-only %v class %v, want lean only for the look-back", p.From, p.To,
+				p.Lean, p.FactsOnly, p.ClassAt)
+		}
+	}
+	if len(shared) != 1 || !shared[0].States || !shared[0].ApprovalsFrom.Equal(cur.From) ||
+		!shared[0].BranchesFrom.Equal(metrics.StateLookbackFrom(cur)) || !shared[0].From.Equal(ps[2].From) {
+		t.Errorf("shared %+v, want the states' read", shared)
+	}
+}
+
+// sharedSpy records the shared read's parameters.
+type sharedSpy struct {
+	*memStore
+	got *[]dataset.SharedParams
+}
+
+func (s sharedSpy) Shared(ctx context.Context, p dataset.SharedParams) (*dataset.Shared, error) {
+	*s.got = append(*s.got, p)
+	return s.memStore.Shared(ctx, p)
+}
+
+// A firing state card, a data-honesty card with its reason and an
+// unmeasurable one (no threshold either) match the contract.
+func TestStateCardsMatchOpenAPISpec(t *testing.T) {
+	cur, prev := metrics.ClosedPeriod(4, fixedNow, time.UTC), metrics.ClosedPrevious(4, fixedNow, time.UTC)
+	since := cur.To.Add(-34 * 24 * time.Hour)
+	week := cur.Weeks[3]
+	unit := func(name string, mod func(*metrics.StateUnit)) metrics.StateUnit {
+		u := metrics.StateUnit{Name: name, Project: ptrTo("kasse"), Value: 34, Count: ptrTo(3), Names: []string{}}
+		if mod != nil {
+			mod(&u)
+		}
+		return u
+	}
+	card := func(key, unitKind string, th *metrics.StateThreshold, units ...metrics.StateUnit) *metrics.StateCard {
+		return &metrics.StateCard{Key: key, Unit: unitKind, Count: len(units), Judged: len(units) + 1, Units: units,
+			Worst: units[:min(3, len(units))], Threshold: th, At: cur.To, Facts: "deploys", ValueUnit: metrics.UnitDays}
+	}
+	signal := func(id, tone string, c *metrics.StateCard) metrics.Signal {
+		return metrics.Signal{ID: id, Kind: metrics.SignalState, Tone: tone, Source: dataset.SourceArgoCD, Weight: 9,
+			State: c, Drivers: []metrics.Driver{},
+			Facts: []metrics.Fact{{ID: id + ".count", Label: "state_units", Unit: metrics.UnitCount, Value: ptrTo(1.0),
+				Verdict: metrics.ChangeNone}}}
+	}
+	release := card(metrics.StateNoRelease, metrics.UnitProject,
+		&metrics.StateThreshold{Key: "release_breach_days", Value: 28, Unit: metrics.ThresholdDays},
+		unit("kasse", func(u *metrics.StateUnit) { u.Since, u.LowerBound, u.Query = &since, true, ptrTo("kasse-prod") }))
+	release.Since = &since
+	pause := card(metrics.StateMergePause, metrics.UnitProject,
+		&metrics.StateThreshold{Key: "merge_pause_share", Value: 0.2, Unit: metrics.ThresholdShare,
+			MinKey: ptrTo("merge_pause_waiting"), Min: ptrTo(3), WithinKey: ptrTo("merge_pause_wait_days"), Within: ptrTo(0.5)},
+		unit("kasse", func(u *metrics.StateUnit) { u.Week, u.Typical, u.Held = &week, ptrTo(7.5), true }))
+	untraced := card(metrics.StateUntraced, metrics.UnitRepo, nil,
+		unit("kasse/kasse-api", func(u *metrics.StateUnit) { u.Reason, u.Of = ptrTo(metrics.TraceInSilence), ptrTo(9) }))
+	gone := card(metrics.StateUnmeasurable, metrics.UnitRepo, nil, unit("kasse/kasse-api", nil))
+	gone.Was = ptrTo(metrics.StateApprovedWaiting)
+	share := metrics.Share{Count: 0, N: 3}
+	a := metrics.Assessment{Period: cur, Previous: prev, Focus: []metrics.FocusRepo{}, Team: []metrics.Fact{},
+		Signals: []metrics.Signal{
+			signal("state:no_release", metrics.ToneAttention, release),
+			signal("state:merge_pause", metrics.ToneAttention, pause),
+			signal("state:untraced", metrics.ToneLimit, untraced),
+			signal("state:unmeasurable:approved_waiting", metrics.ToneLimit, gone),
+		},
+		QuietReasons: []string{metrics.QuietFindings}, Limits: []metrics.Limit{},
+		Coverage: metrics.PRCoverage{ToProd: share, Sized: share, Opened: share}}
+	st := analysis.Status{State: analysis.StateNone, Enabled: true, Assessment: a,
+		Layout: analysis.Layout{Focus: []analysis.LayoutFocus{}, Cards: []analysis.LayoutCard{}, Also: []analysis.LayoutCard{}},
+		Zone:   "UTC"}
+	h := newHarness(t, &analystMem{memStore: newMemStore(), st: st})
+	w := h.serveUI(newRequest(http.MethodGet, "/api/analysis?team=checkout", nil))
+	expectStatus(t, w, http.StatusOK)
+	validateResponse(t, specRouter(t), http.MethodGet, "/api/analysis", w)
+	for _, want := range []string{`"key":"no_release"`, `"threshold":null`, `"within":0.5`, `"was":"approved_waiting"`,
+		`"reason":"in_silence"`} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Errorf("no %s in %s", want, w.Body)
+		}
+	}
+}
 
 func TestReadFailureIs500AndLogged(t *testing.T) {
 	h := newHarness(t, nil)

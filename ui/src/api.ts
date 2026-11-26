@@ -125,12 +125,19 @@ export type LeadTimes = {
   human: Spread;
   // Of human, placed through a lower bound: they may have gone out earlier.
   lower_bound: number;
+  // Traced there too, but without a start (no pushed commit, no opening):
+  // in no time. human.n + unmeasured = the PRs traced there.
+  unmeasured: number;
   low_sample: boolean;
 };
 
 // Why tracing cannot place a merged PR, the first reason that applies.
 export type TraceReason =
-  "no_merge_commit" | "release_unresolved" | "repo_untraced" | "in_silence";
+  | "no_merge_commit"
+  | "off_trunk"
+  | "release_unresolved"
+  | "repo_untraced"
+  | "in_silence";
 
 // How merged PRs stood on production at the period's end:
 // merged = on_prod + not_yet + not_placeable; library PRs are outside merged.
@@ -841,16 +848,25 @@ export type StateCard = {
   units: StateUnit[];
   since: string | null;
   since_lower_bound: boolean;
+  // Null for a data-honesty state and an unmeasurable one: measured
+  // against no agreement of the team's.
   threshold: {
     key: string;
     value: number;
     unit: "days" | "working_days" | "count" | "share" | "minutes";
     min_key: string | null;
     min: number | null;
-  };
+    // A span a case must lie in (minutes, or days), where the state has one.
+    within_key: string | null;
+    within: number | null;
+  } | null;
   at: string;
   was: string | null;
   facts: "prs" | "deploys" | "runs" | "";
+  // What the units' value is, and what their names are where the page
+  // words them: the backend's, never decided here.
+  value_unit: "days" | "share" | "count";
+  names_kind: "build_kind" | "stage" | "";
 };
 
 export type Driver = {

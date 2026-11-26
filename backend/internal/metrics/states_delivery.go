@@ -11,16 +11,17 @@ import (
 
 // releaseStates judge each project rolled out against the sprint rule (at
 // least one release to production per two-week sprint, owner 2026-11),
-// without a sprint calendar: days since its last release at the period's
-// end. A project's Apps are the non-infrastructure Apps of the product
+// without a sprint calendar: days since its last release at the instant.
+// A project's Apps are the non-infrastructure Apps of the product
 // (dataset.App); its last release the newest of theirs, an App's first
 // deploy counting (a lower bound inside FirstDeployGrace: it may have run
 // those images long before). Only a project with merged work since that
 // release or within the last ReleaseBreachDays is judged; one nobody works
 // on is idle, no finding. Library-only projects have no App and are never
-// judged; infrastructure Apps neither.
-func (a *assessor) releaseStates() {
-	th, end := a.states.th, a.p.Period.To
+// judged; infrastructure Apps neither. A project past the breach is the
+// breach's, escalated out of the hint: never "gelöst" there.
+func (a *assessor) releaseStates(at stateAt) []stateEval {
+	th, end := a.states.th, at.end
 	prod := a.ds.Meta.ProductionStage
 	argo := a.ds.Meta.DataStart.ArgoCD
 	project := map[string]string{}
@@ -65,11 +66,11 @@ func (a *assessor) releaseStates() {
 		lower := r.First && (argo == nil || r.At.Sub(*argo) <= dataset.FirstDeployGrace)
 		merged := 0
 		active := false
-		for _, at := range work[p] {
-			if at.After(since) {
+		for _, t := range work[p] {
+			if t.After(since) {
 				merged++
 			}
-			if at.After(since) || !at.Before(recent) {
+			if t.After(since) || !t.Before(recent) {
 				active = true
 			}
 		}
@@ -89,7 +90,7 @@ func (a *assessor) releaseStates() {
 		}
 		b, d := u, u
 		if u.status == unitClear && days > float64(th.ReleaseBreachDays) {
-			b.status = unitFires
+			b.status, d.status = unitFires, unitEscalated
 		}
 		if u.status == unitClear && days > float64(th.ReleaseHintDays) && days <= float64(th.ReleaseBreachDays) {
 			d.status = unitFires
@@ -97,24 +98,23 @@ func (a *assessor) releaseStates() {
 		breach.units = append(breach.units, b)
 		due.units = append(due.units, d)
 	}
-	a.judge(breach)
-	a.judge(due)
+	return []stateEval{breach, due}
 }
 
 // ---- Merged work before production -----------------------------------------
 
 // notOnProdStates judge each deployable repo against the team's rule that
 // merged work reaches production within a sprint (owner, 2026-11): its
-// merged PRs (people's, counted work) not on production at the period's
-// end, the oldest by its arrival on the trunk; and its typical wait from
-// merge to production over the period's PRs that got there. A library's
-// PRs are never rolled out; a repo no deploy shows an App deploying (not
-// traceable) gets StateUntraced, never this; a PR tracing cannot place at
-// all makes the repo unjudged rather than clear when it is the oldest.
-func (a *assessor) notOnProdStates() {
-	th, end := a.states.th, a.p.Period.To
+// merged PRs (people's, counted work) not on production at the instant, the
+// oldest by its arrival on the trunk; and its typical wait from merge to
+// production over the period's PRs that got there. A library's PRs are
+// never rolled out; a repo no deploy shows an App deploying (not traceable)
+// gets StateUntraced, never this; a repo only infrastructure Apps deploy is
+// no team's delivery (infraRepos); a PR tracing cannot place at all makes
+// the repo unjudged rather than clear when it is the oldest.
+func (a *assessor) notOnProdStates(at stateAt) []stateEval {
+	th, end := a.states.th, at.end
 	limit := float64(th.NotOnProdDays)
-	lookback := end.AddDate(0, 0, -7*StateLookbackWeeks)
 	type acc struct {
 		project          string
 		notYet           int
@@ -123,7 +123,8 @@ func (a *assessor) notOnProdStates() {
 	}
 	by := map[string]*acc{}
 	for _, pr := range a.states.prs {
-		if pr.Library || notCounted(pr) != "" || !pr.MergedAt.Before(end) || (pr.TrunkAt == nil && pr.OffTrunk) {
+		if pr.Library || notCounted(pr) != "" || !pr.MergedAt.Before(end) || (pr.TrunkAt == nil && pr.OffTrunk) ||
+			a.states.infra[pr.Repo] {
 			continue
 		}
 		rt, ok := a.states.traces[pr.Repo]
@@ -135,24 +136,24 @@ func (a *assessor) notOnProdStates() {
 			r = &acc{project: pr.Project}
 			by[pr.Repo] = r
 		}
-		at := pr.MergedAt
+		arrived := pr.MergedAt
 		if pr.TrunkAt != nil {
-			at = pr.TrunkAt
+			arrived = pr.TrunkAt
 		}
 		pl := a.states.placed(pr, end)
 		switch pl.state {
 		case ProdOnProd:
-			if a.p.Period.In(pr.MergedAt) && pl.at != nil {
-				r.waits = append(r.waits, pl.at.Sub(*at).Hours()/24)
+			if at.period.In(pr.MergedAt) && pl.at != nil {
+				r.waits = append(r.waits, pl.at.Sub(*arrived).Hours()/24)
 			}
 		case ProdNotYet:
 			r.notYet++
-			if r.oldest == nil || at.Before(*r.oldest) {
-				r.oldest = at
+			if r.oldest == nil || arrived.Before(*r.oldest) {
+				r.oldest = arrived
 			}
 		default:
-			if r.oldestNP == nil || at.Before(*r.oldestNP) {
-				r.oldestNP = at
+			if r.oldestNP == nil || arrived.Before(*r.oldestNP) {
+				r.oldestNP = arrived
 			}
 		}
 	}
@@ -168,7 +169,7 @@ func (a *assessor) notOnProdStates() {
 		u := stateUnit{StateUnit: StateUnit{Name: repo, Project: ptr(r.project), Names: []string{}}, status: unitClear}
 		if r.oldest != nil {
 			u.Value, u.Count, u.Since = calendarDays(*r.oldest, end), ptr(r.notYet), ptr(*r.oldest)
-			u.LowerBound = r.oldest.Before(lookback.AddDate(0, 0, 7))
+			u.LowerBound = r.oldest.Before(a.states.from.AddDate(0, 0, 7))
 		}
 		switch {
 		case u.Value > limit:
@@ -188,35 +189,39 @@ func (a *assessor) notOnProdStates() {
 		}
 		slow.units = append(slow.units, s)
 	}
-	a.judge(lying)
-	a.judge(slow)
+	return []stateEval{lying, slow}
 }
 
 // ---- Data honesty ----------------------------------------------------------
 
 // honestyStates are what the data cannot judge, each in its own card of
 // the limit group: a repo's merged PRs tracing cannot place (with the
-// reason, Coverage's), releases to production of no project, an Argo CD
-// that never reports the production stage.
-func (a *assessor) honestyStates() {
+// reason most of them have, Coverage's), releases to production of no
+// project, an Argo CD that never reports the production stage. Judged at
+// the period's end only (the period's coverage), against no agreement of
+// the team's: no threshold.
+func (a *assessor) honestyStates(stateAt) []stateEval {
 	untraced := stateEval{key: StateUntraced, unit: UnitRepo, source: dataset.SourceArgoCD, tone: ToneLimit,
-		facts: "prs", tier: tierLimit, threshold: StateThreshold{Key: "", Value: 1, Unit: ThresholdCount}}
+		facts: "prs", tier: tierLimit, threshold: StateThreshold{Value: 1, Unit: ThresholdCount}}
 	for _, r := range a.m.Coverage.Repos {
-		if r.Merged == 0 {
+		if r.Merged == 0 || a.states.infra[r.Repo] {
 			continue
 		}
-		u := stateUnit{StateUnit: StateUnit{Name: r.Repo, Project: ptr(r.Project), Value: float64(r.NotPlaceable),
-			Count: ptr(r.NotPlaceable), Of: ptr(r.Merged), Names: []string{}}, status: unitClear}
-		if r.NotPlaceable > 0 {
+		// A PR merged into a branch not yet on the trunk is the team's
+		// workflow, no source that fails to report: in the coverage and the
+		// facts, never this card.
+		n := r.NotPlaceable - r.Reasons.OffTrunk
+		u := stateUnit{StateUnit: StateUnit{Name: r.Repo, Project: ptr(r.Project), Value: float64(n),
+			Count: ptr(n), Of: ptr(r.Merged), Names: []string{}}, status: unitClear}
+		if n > 0 {
 			u.status, u.Reason = unitFires, ptr(mainReason(r.Reasons))
 		}
 		untraced.units = append(untraced.units, u)
 	}
-	a.judge(untraced)
 
 	freq := a.m.Delivery.Frequency
 	unattributed := stateEval{key: StateUnattributed, unit: UnitTeam, source: dataset.SourceArgoCD, tone: ToneLimit,
-		facts: "deploys", tier: tierLimit, threshold: StateThreshold{Key: "", Value: 1, Unit: ThresholdCount}}
+		facts: "deploys", tier: tierLimit, threshold: StateThreshold{Value: 1, Unit: ThresholdCount}}
 	if freq.ArgoReporting {
 		u := stateUnit{StateUnit: StateUnit{Name: "", Value: float64(freq.Unattributed), Count: ptr(freq.Unattributed),
 			Names: []string{}}, status: unitClear}
@@ -225,10 +230,9 @@ func (a *assessor) honestyStates() {
 		}
 		unattributed.units = append(unattributed.units, u)
 	}
-	a.judge(unattributed)
 
 	noProd := stateEval{key: StateNoProdStage, unit: UnitTeam, source: dataset.SourceArgoCD, tone: ToneLimit,
-		facts: "deploys", tier: tierLimit, threshold: StateThreshold{Key: "", Value: 1, Unit: ThresholdCount}}
+		facts: "deploys", tier: tierLimit, threshold: StateThreshold{Value: 1, Unit: ThresholdCount}, namesKind: NamesStage}
 	if len(a.ds.Releases) > 0 {
 		envs := map[string]bool{}
 		for _, r := range a.ds.Releases {
@@ -241,11 +245,11 @@ func (a *assessor) honestyStates() {
 		}
 		noProd.units = append(noProd.units, u)
 	}
-	a.judge(noProd)
+	return []stateEval{untraced, unattributed, noProd}
 }
 
-// mainReason is the reason most of a repo's unplaced PRs have, in
-// TraceReasons' order on a tie.
+// mainReason is the reason most of a repo's PRs tracing cannot place have,
+// in TraceReasons' order on a tie; off the trunk is none (honestyStates).
 func mainReason(r TraceReasons) string {
 	best, n := TraceNoMergeCommit, r.NoMergeCommit
 	for _, c := range []struct {

@@ -14,8 +14,11 @@ values the assessment's states fire at (`release_breach_days`,
 `not_on_prod_days`, `approved_wait_days`, `bot_loop_failures` and the rest;
 the list with the starting values is in [metrics.md](metrics.md), "States").
 Absent, the starting values apply; an unknown key, a value of 0 or below, a
-share over 1 or a fractional count refuses the config (hot reload keeps the
-old one). Each card prints the value it measured against.
+share over 1, a fractional count, or a value past what the states' 26-week
+look-back holds (182 days, 130 working days, 26 weeks; 1440 minutes)
+refuses the config (hot reload keeps the old one). Each card prints the
+value it measured against. `merge_pause_wait_days` (0.5) is the wait a merge
+pause counts, measured to the week's end.
 
 **Rules version 3**: analyses stored under version 2 are outdated and not
 shown until assessed again. The assessment reads more per request: the
@@ -29,10 +32,18 @@ occurred_at)` indexes serve them. Watch `GET /api/analysis` durations after
 the deploy.
 
 **A branch merged onto its trunk without a PR** is no branch "without a PR"
-any more: the branches' read also reads the trunk pushes since the same
-start (tip, listed commits and their parents) once per request. On the
-reference data `GET /api/analysis` took about 40 ms longer for it; watch it
-on a database with many release-tooling pushes to the trunk.
+any more: the branches' read also reads the trunk pushes (tip, listed
+commits and their parents) of the repos with a branch without a PR, from
+that branch's last push on, once per request; a branch cut from the trunk
+is found by its head's SHA index. Watch `GET /api/analysis` on a database
+with many release-tooling pushes to the trunk.
+
+**A tool's branch's builds are bots' builds on every page** (a branch whose
+every push's head commit is by an `.invalid` e-mail identity, or one the
+config's automation `authors` names): the build numbers of past periods
+drop them once with this change, and the bot CI-time line takes them. Every
+page reads these branches' owners once per request (pushes off the trunk,
+bots' left out before their payloads are read).
 
 **A branch named after its ticket without a prefix** (`KAS-12-login`) is a
 feature branch now: its builds count as feature builds, its PRs (stored as
@@ -57,6 +68,11 @@ repo whose trunk is main, and an image's build are traced too (see
 **Closed periods are frozen at their end**: a deploy after it moves no
 number of the period. Numbers of past periods change once with this
 change; stored analyses keep their wording until assessed again.
+
+**`coverage.reasons` and `prod_reason` take a fifth reason, `off_trunk`**:
+a PR merged into a branch no PR had merged into the trunk by the cutoff
+is not placeable, no longer "not on production yet". A client that lists
+the reasons by a fixed set has to add it.
 
 ## 2026-11-25 — counting as it happened, and saying what is missing
 

@@ -171,6 +171,9 @@ type RepoTrace struct {
 	// repo (its compare link, its run's image, an image named after it);
 	// nil: none ever did, nothing tells where its PRs went.
 	DeployedSince *time.Time
+	// Apps are the Apps known to deploy it, each since the first deploy that
+	// showed it (DeployedSince is the earliest).
+	Apps map[string]time.Time
 	// Releases are its Apps' deploys that brought new images (or an App's
 	// first), oldest first: the deploys that could have shipped its PRs.
 	Releases []TraceRelease
@@ -179,8 +182,13 @@ type RepoTrace struct {
 // TraceRelease is one release of an App that deploys a repo, and what
 // tracing could tell of the repo in it.
 type TraceRelease struct {
+	App         string
 	Environment string
 	At          time.Time
+	// Known is when a deploy first showed the App deploys the repo
+	// (RepoTrace.Apps), possibly after this release: a closed period reads
+	// the release only when that came before its end.
+	Known time.Time
 	// Stretches are the repo's stretches this release resolved;
 	// Unchanged: it shipped nothing of the repo (its compare links name
 	// other repos only, or the repo's images stayed the same).
@@ -203,6 +211,17 @@ func (r TraceRelease) Resolved(at time.Time, branch string) bool {
 	}
 	return slices.ContainsFunc(r.Stretches, func(s Stretch) bool {
 		return (branch == "" || branch == s.Branch) && (s.holds(at, branch) || s.To.Before(at) || !s.LowerBound)
+	})
+}
+
+// ShippedBefore reports whether a stretch of the release proves a PR that
+// reached the repo's trunk branch ("": any) at at was out before it: the
+// stretch starts at a known old end at or after at, so the deploy the App
+// ran before this one already held it, whether riptide saw that deploy or
+// not.
+func (r TraceRelease) ShippedBefore(at time.Time, branch string) bool {
+	return slices.ContainsFunc(r.Stretches, func(s Stretch) bool {
+		return !s.LowerBound && (branch == "" || branch == s.Branch) && !s.From.Before(at)
 	})
 }
 
@@ -375,10 +394,15 @@ func buildTrace(in *traceInput, silences []Silence) *trace {
 		}
 		var pos *tracePosition
 		for i, p := range at[run.CommitSHA] {
-			if repo == "" || p.Repo == repo {
+			if p.Repo == repo {
 				pos = &at[run.CommitSHA][i]
 				break
 			}
+		}
+		if repo == "" && len(at[run.CommitSHA]) == 1 {
+			// Bitbucket saw the commit nowhere else: the one trunk it reached
+			// (as imageRepos tells a run's repo; of several, none).
+			pos = &at[run.CommitSHA][0]
 		}
 		if pos == nil {
 			return repo, nil
@@ -415,9 +439,11 @@ func buildTrace(in *traceInput, silences []Silence) *trace {
 			since[repo][app] = when
 		}
 	}
-	// The image repositories each repo's runs published, and the repos each
-	// image repository's runs were built in.
-	imageRepos := map[string]map[string]bool{}
+	// The image repositories each repo's runs published, each since the
+	// first run's start: what a release knew of them is what ran before it,
+	// so a closed period's releases read the same whatever a later run
+	// publishes.
+	imageRepos := map[string]map[string]time.Time{}
 	for _, r := range in.runs {
 		repo := ""
 		if r.Repo != nil {
@@ -429,17 +455,34 @@ func buildTrace(in *traceInput, silences []Silence) *trace {
 			continue
 		}
 		if imageRepos[repo] == nil {
-			imageRepos[repo] = map[string]bool{}
+			imageRepos[repo] = map[string]time.Time{}
 		}
 		for _, ref := range r.ImageRefs {
-			imageRepos[repo][imageRepository(ref)] = true
+			ir := imageRepository(ref)
+			if s, ok := imageRepos[repo][ir]; !ok || r.StartedAt.Before(s) {
+				imageRepos[repo][ir] = r.StartedAt
+			}
 		}
 	}
+	// Whether a run of repo started by when had published image repository
+	// ir ("": any).
+	published := func(repo, ir string, when time.Time) bool {
+		if ir != "" {
+			s, ok := imageRepos[repo][ir]
+			return ok && !s.After(when)
+		}
+		for _, s := range imageRepos[repo] {
+			if !s.After(when) {
+				return true
+			}
+		}
+		return false
+	}
 
-	// Whether image repository ir is repo's: one its runs published, or
-	// one named after it.
-	owns := func(repo, ir string) bool {
-		if imageRepos[repo][ir] {
+	// Whether image repository ir is repo's as of when: one its runs had
+	// published, or one named after it.
+	owns := func(repo, ir string, when time.Time) bool {
+		if published(repo, ir, when) {
 			return true
 		}
 		_, slug, _ := strings.Cut(repo, "/")
@@ -453,9 +496,19 @@ func buildTrace(in *traceInput, silences []Silence) *trace {
 		unchanged map[string]bool
 		links     bool
 		changed   map[string]bool
+		// changedIRs are changed's keys, sorted.
+		changedIRs []string
 	}
 	last := map[appEnv]map[string]*imageSet{}
 	previous := map[appEnv][]string{}
+	// Where a run's head cut a link's new end back (an App's deploy, the
+	// repo, the new end's SHA): the next link from that SHA starts there, or
+	// what landed between the head and the new end's push is in no stretch.
+	type cut struct {
+		appEnv
+		repo, sha string
+	}
+	capped := map[cut]time.Time{}
 	// Per environment and image repository, what an earlier deploy of any
 	// App shipped: the newest head by repo, and when one last ran it.
 	envHead := map[string]map[string]map[string]head{}
@@ -492,6 +545,8 @@ func buildTrace(in *traceInput, silences []Silence) *trace {
 
 		// Route 1: the compare links.
 		byRepo := map[string]*Stretch{}
+		// The new end of the link that gave each repo's stretch its end.
+		endSHA := map[string]string{}
 		named := map[string]bool{}
 		for _, l := range linksOf[d.Revision] {
 			rel.links = true
@@ -527,7 +582,9 @@ func buildTrace(in *traceInput, silences []Silence) *trace {
 			}
 			var from time.Time
 			lower := false
-			if p, ok := reached(l.old, repo); ok {
+			if c, ok := capped[cut{key, repo, l.old}]; ok {
+				from = c
+			} else if p, ok := reached(l.old, repo); ok {
 				from = p.At
 			} else if _, s, ok := firstFrom(l.old, repo); ok {
 				from = justBefore(s.at)
@@ -540,6 +597,7 @@ func buildTrace(in *traceInput, silences []Silence) *trace {
 			if st == nil {
 				byRepo[repo] = &Stretch{DeployID: d.ID, App: d.App, Environment: d.Environment, At: d.At, Repo: repo,
 					Branch: branch, From: from, To: to, Route: RouteCompare, LowerBound: lower}
+				endSHA[repo] = l.new
 				continue
 			}
 			// Several links of one repo (Apps of the product on different
@@ -552,6 +610,7 @@ func buildTrace(in *traceInput, silences []Silence) *trace {
 			}
 			if to.After(st.To) {
 				st.To, st.Branch = to, branch
+				endSHA[repo] = l.new
 			}
 		}
 		// A run's head caps a link's new end: a release tool's commits pushed
@@ -567,6 +626,7 @@ func buildTrace(in *traceInput, silences []Silence) *trace {
 		for repo, st := range byRepo {
 			if c, ok := capOf[repo]; ok && c.Before(st.To) && c.After(st.From) {
 				st.To = c
+				capped[cut{key, repo, endSHA[repo]}] = c
 			}
 		}
 
@@ -626,8 +686,11 @@ func buildTrace(in *traceInput, silences []Silence) *trace {
 		}
 		for _, repo := range slices.Sorted(maps.Keys(byRepo)) {
 			st := *byRepo[repo]
-			if st.To.Before(st.From) {
+			if st.To.Before(st.From) && !st.LowerBound {
 				// A rollback: an older head than the one before ships nothing.
+				// A head older than a lower bound start is no rollback: what
+				// the images before held is unknown, and the stretch, empty,
+				// leaves the release unresolved for what came before its head.
 				st.To = st.From
 			}
 			t.stretches[repo] = append(t.stretches[repo], st)
@@ -637,10 +700,12 @@ func buildTrace(in *traceInput, silences []Silence) *trace {
 		// Shipped nothing of a repo: the links name others only, and none of
 		// its own images changed (a repo whose image changed while no link
 		// names it is no proof of anything).
+		changedIRs := slices.Sorted(maps.Keys(rel.changed))
+		rel.changedIRs = changedIRs
 		if rel.links {
 			for repo := range repos {
-				if !named[repo] && !slices.ContainsFunc(slices.Collect(maps.Keys(rel.changed)), func(ir string) bool {
-					return owns(repo, ir)
+				if !named[repo] && !slices.ContainsFunc(changedIRs, func(ir string) bool {
+					return owns(repo, ir, d.At)
 				}) {
 					rel.unchanged[repo] = true
 				}
@@ -648,10 +713,15 @@ func buildTrace(in *traceInput, silences []Silence) *trace {
 		}
 
 		// Remember the sets, for the next deploy of this App and of others.
+		// A re-sync of the same tags keeps the set as it first ran: what
+		// landed after that was not in it.
 		if last[key] == nil {
 			last[key] = map[string]*imageSet{}
 		}
 		for ir, s := range sets {
+			if p := last[key][ir]; p != nil && slices.Equal(p.refs, s.refs) {
+				s = p
+			}
 			last[key][ir] = s
 			if envHead[d.Environment] == nil {
 				envHead[d.Environment] = map[string]map[string]head{}
@@ -665,7 +735,7 @@ func buildTrace(in *traceInput, silences []Silence) *trace {
 					envHead[d.Environment][ir][repo] = h
 				}
 			}
-			envLast[d.Environment][ir] = d.At
+			envLast[d.Environment][ir] = s.at
 		}
 		if isRelease {
 			releases = append(releases, rel)
@@ -674,17 +744,18 @@ func buildTrace(in *traceInput, silences []Silence) *trace {
 	}
 
 	// Which repos each App deploys, and since when.
-	apps := map[string]map[string]bool{}
+	apps := map[string]map[string]time.Time{}
 	for repo, byApp := range since {
-		rt := &RepoTrace{}
+		rt := &RepoTrace{Apps: map[string]time.Time{}}
 		for app, when := range byApp {
 			if rt.DeployedSince == nil || when.Before(*rt.DeployedSince) {
 				rt.DeployedSince = ptr(when)
 			}
+			rt.Apps[app] = when.UTC()
 			if apps[app] == nil {
-				apps[app] = map[string]bool{}
+				apps[app] = map[string]time.Time{}
 			}
-			apps[app][repo] = true
+			apps[app][repo] = when
 		}
 		t.repos[repo] = rt
 	}
@@ -693,21 +764,33 @@ func buildTrace(in *traceInput, silences []Silence) *trace {
 		silence := slices.ContainsFunc(silences, func(s Silence) bool {
 			return s.Lost && !s.From.After(rel.d.At) && !s.To.Before(rel.d.At.Add(-LostCommitReach))
 		})
-		for repo := range apps[rel.d.App] {
+		// Whether it shipped nothing of the repos its App was known to deploy
+		// by then (one learnt later must not reopen a closed period).
+		all, some := true, false
+		for repo, known := range apps[rel.d.App] {
 			unchanged := rel.unchanged[repo]
 			if !unchanged && len(rel.stretches[repo]) == 0 {
 				// Its images stayed the same: the repo's image repositories
-				// (its runs', or named after it) none of the changed ones.
-				own := func(ir string) bool { return owns(repo, ir) }
-				known := len(imageRepos[repo]) > 0 || slices.ContainsFunc(rel.d.Images, func(ref string) bool {
+				// (its runs' before the release, or named after it) none of
+				// the changed ones.
+				own := func(ir string) bool { return owns(repo, ir, rel.d.At) }
+				knownIRs := published(repo, "", rel.d.At) || slices.ContainsFunc(rel.d.Images, func(ref string) bool {
 					return own(imageRepository(ref))
 				})
-				unchanged = known && !slices.ContainsFunc(slices.Collect(maps.Keys(rel.changed)), own)
+				unchanged = knownIRs && !slices.ContainsFunc(rel.changedIRs, own)
+			}
+			if !known.After(rel.d.At) {
+				all, some = all && unchanged, true
 			}
 			t.repos[repo].Releases = append(t.repos[repo].Releases, TraceRelease{
-				Environment: rel.d.Environment, At: rel.d.At.UTC(), Stretches: rel.stretches[repo], Unchanged: unchanged,
-				Silence: silence,
+				App: rel.d.App, Environment: rel.d.Environment, At: rel.d.At.UTC(), Known: known.UTC(),
+				Stretches: rel.stretches[repo], Unchanged: unchanged, Silence: silence,
 			})
+		}
+		if all && some {
+			// It shipped nothing of any repo its App deploys (a sidecar's or
+			// a base image's new tag): resolved, nothing to tie to PRs.
+			t.traced[rel.d.ID] = true
 		}
 	}
 	for _, rt := range t.repos {
@@ -717,19 +800,19 @@ func buildTrace(in *traceInput, silences []Silence) *trace {
 }
 
 // place gives every merged PR its first deploy per environment whose
-// stretch holds its arrival on the trunk, and the dataset its repos'
-// traces. A PR an umbrella's merge marked merged (ImplicitMerge) arrives
-// with the umbrella. After markImplicitMerges.
+// stretch holds its arrival on the trunk (or onward on master or main), and
+// the dataset its repos' traces. A PR an umbrella's merge marked merged
+// (ImplicitMerge) arrives with the umbrella. After markImplicitMerges.
 func place(d *Dataset, t *trace) {
 	d.Traces = map[string]RepoTrace{}
 	for i := range d.PRs {
 		pr := &d.PRs[i]
 		envs := []EnvironmentDeploy{}
 		if pr.TrunkAt != nil {
-			branch := deref(pr.TrunkBranch)
 			first := map[string]EnvironmentDeploy{}
 			for _, s := range t.stretches[pr.Repo] {
-				if !s.holds(*pr.TrunkAt, branch) {
+				if !s.holds(*pr.TrunkAt, deref(pr.TrunkBranch)) &&
+					(pr.OnwardAt == nil || !s.holds(*pr.OnwardAt, deref(pr.OnwardBranch))) {
 					continue
 				}
 				e, ok := first[s.Environment]

@@ -245,7 +245,8 @@ export function traceLines(t: TFunction, m: Metrics, prod: string): string[] {
           .filter((r) => c.reasons[r] > 0)
           .map((r) =>
             t("flow.reasonPart", {
-              reason: t(`facts.prodReason.${r}`),
+              // An unknown reason shows as the backend sent it, never a key.
+              reason: t(`facts.prodReason.${r}`, { defaultValue: r, prod }),
               count: c.reasons[r],
             }),
           )

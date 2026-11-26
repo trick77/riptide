@@ -27,6 +27,7 @@ import {
   dayMonth,
   dur,
   fullDate,
+  fullDay,
   money,
   num,
   pct,
@@ -174,8 +175,8 @@ function daysLabel(a: AssessmentData, zone?: string): string {
 
 // A number's words; a label the catalog does not know shows nothing, never
 // its key.
-function labelText(t: TFunction, label: string): string {
-  return t(`overview.assess.label.${label}`, { defaultValue: "" });
+function labelText(t: TFunction, label: string, prod = "PROD"): string {
+  return t(`overview.assess.label.${label}`, { defaultValue: "", prod });
 }
 
 // The rule title of a signal, its words filled from the signal itself;
@@ -192,7 +193,7 @@ export function signalTitle(t: TFunction, s: Signal, prod = "PROD"): string {
           })
         : "",
     });
-  const label = s.facts[0] ? labelText(t, s.facts[0].label) : "";
+  const label = s.facts[0] ? labelText(t, s.facts[0].label, prod) : "";
   const vars = {
     repo: s.repo ?? "",
     kind: s.run_kind
@@ -216,11 +217,14 @@ export function signalTitle(t: TFunction, s: Signal, prod = "PROD"): string {
             prod,
           })
         : t(`overview.assess.kind.${was}`, { defaultValue: "" });
+    // A state is named by its own title, never by its count's label.
     vars.what = s.repo
       ? kindWord
         ? `${s.repo} (${kindWord})`
         : s.repo
-      : label || kindWord;
+      : was === "state"
+        ? kindWord || label
+        : label || kindWord;
   }
   return t(`overview.assess.title.${s.kind}`, { ...vars, defaultValue: "" });
 }
@@ -235,6 +239,10 @@ function changeKey(s: Signal): "changeBad" | "changeGood" {
 // wait's floor (Build.agent_wait_min_s) and share.
 function ruleText(t: TFunction, s: Signal, m: Metrics): string {
   if (s.kind === "change") return t(`overview.assess.rule.${changeKey(s)}`);
+  // A state resolves when its units are clear again, judged anew from the
+  // data, not when a number is back where it was.
+  if (s.kind === "resolved" && s.metric?.startsWith("state:"))
+    return t("overview.assess.rule.resolvedState");
   if (s.kind === "state" && s.state)
     return t(`overview.assess.state.${s.state.key}.rule`, {
       defaultValue: "",
@@ -338,9 +346,11 @@ function CompareBars({ f }: { f: Fact }) {
 
 // The next step, where the backend gives one: none for a resolution, and
 // none the catalog does not know, never its key.
-function Lever({ k }: { k: string }) {
+function Lever({ k, prod = "PROD" }: { k: string; prod?: string }) {
   const { t } = useTranslation();
-  const text = k ? t(`overview.assess.lever.${k}`, { defaultValue: "" }) : "";
+  const text = k
+    ? t(`overview.assess.lever.${k}`, { defaultValue: "", prod })
+    : "";
   if (!text) return null;
   return (
     <div className="text-[13.5px] text-ink">
@@ -373,6 +383,8 @@ type FocusView = {
   take: string;
   retro: string | null;
   lever: string;
+  // prod is the production stage as the page shows it.
+  prod: string;
 };
 
 function FocusBlock({
@@ -416,7 +428,7 @@ function FocusBlock({
                 {fmtFact(t, x.unit, x.value)}
               </span>
               <span className="text-xs leading-snug text-muted">
-                {labelText(t, x.label)}
+                {labelText(t, x.label, f.prod)}
               </span>
               <Prev f={x} />
             </div>
@@ -431,7 +443,7 @@ function FocusBlock({
       <div className="min-w-0">
         <p className="my-2 text-sm text-ink-dim">{f.take}</p>
         <Retro q={f.retro} />
-        <Lever k={f.lever} />
+        <Lever k={f.lever} prod={f.prod} />
         <button
           type="button"
           onClick={() => onFacts(f.tab, f.r.repo)}
@@ -453,6 +465,8 @@ type CardView = {
   lever: string;
   // prod is the production stage as the page shows it.
   prod: string;
+  // lastDay is the period's last day, what a state was judged as of.
+  lastDay: string;
 };
 
 const SPARK_STROKE: Record<Column, string> = {
@@ -466,23 +480,40 @@ const SPARK_STROKE: Record<Column, string> = {
 type StateData = NonNullable<Signal["state"]>;
 type StateUnitData = StateData["units"][number];
 
-// A state's value is a share where the state measures one; else a count
-// or days, one decimal where it has one (working days).
-const SHARE_VALUE: ReadonlySet<string> = new Set([
-  "release_failing",
-  "big_prs",
-  "unapproved",
-]);
-
-// The build states name a unit's build kind: in the build section's words.
-const KIND_NAMES: ReadonlySet<string> = new Set([
-  "flaky_builds",
-  "long_builds",
-  "release_failing",
-]);
-
 function bare(v: number): string {
   return num(v, Number.isInteger(v) ? 0 : 1);
+}
+
+// A unit's value as the backend says it is: a share, else a count or days,
+// one decimal where it has one (working days).
+function unitValue(c: StateData, v: number): string {
+  return c.value_unit === "share" ? pct(v) : bare(v);
+}
+
+// The grammar of a span in a state's words: minutes, working days or
+// days, the dative where the sentence needs it ("nach mehr als 10
+// Arbeitstagen"). Wording only; the span's value is the backend's.
+type Span = "minutes" | "wd" | "wdDat" | "daysDat";
+
+const WITHIN_SPAN: Partial<Record<StateData["key"], Span>> = {
+  fast_approval: "minutes",
+  late_decline: "wdDat",
+  branch_open: "wdDat",
+  branch_failing: "wd",
+  merge_pause: "wd",
+  builds_silent: "daysDat",
+};
+
+function span(t: TFunction, kind: Span, v: number): string {
+  return t(`overview.assess.state.span.${kind}`, { count: v, n: bare(v) });
+}
+
+// The threshold's span a case must lie in, in the state's words; "" where
+// the state has none.
+function withinText(t: TFunction, c: StateData): string {
+  const kind = WITHIN_SPAN[c.key];
+  const v = c.threshold?.within;
+  return kind && v != null ? span(t, kind, v) : "";
 }
 
 // The states whose rows a mark of the facts table lists across their
@@ -514,42 +545,52 @@ export function stateUnitText(
       : "unit";
   const text = t(`overview.assess.state.${c.key}.${key}`, {
     defaultValue: "{{n}}",
-    n: SHARE_VALUE.has(c.key) ? pct(u.value) : bare(u.value),
+    n: unitValue(c, u.value),
     count: u.count ?? 0,
     of: u.of != null ? num(u.of) : "",
     typical: u.typical != null ? num(u.typical, 1) : "",
     week: u.week ? u.week.kw : "",
     names: u.names
-      .map((x) => (c.key === "no_prod_stage" ? stage(x) : x))
+      .map((x) => (c.names_kind === "stage" ? stage(x) : x))
       .join(", "),
-    kind: KIND_NAMES.has(c.key)
-      ? u.names.map((k) => t(`build.kind.${k}`, { defaultValue: k })).join(", ")
-      : "",
+    kind:
+      c.names_kind === "build_kind"
+        ? u.names
+            .map((k) => t(`build.kind.${k}`, { defaultValue: k }))
+            .join(", ")
+        : "",
     ci: u.ci_seconds != null ? dur(u.ci_seconds) : "",
     reason: u.reason
-      ? t(`facts.prodReason.${u.reason}`, { defaultValue: "" })
+      ? t(`facts.prodReason.${u.reason}`, { defaultValue: u.reason, prod })
       : "",
-    lines: c.threshold.min != null ? num(c.threshold.min) : "",
+    lines: c.threshold?.min != null ? num(c.threshold.min) : "",
+    within: withinText(t, c),
+    // A unit's value as a span of working days, in the dative ("seit 3
+    // Arbeitstagen") or not ("3 Arbeitstage lang").
+    days: span(t, "wd", u.value),
+    daysDat: span(t, "wdDat", u.value),
     prod,
   });
   return u.held ? `${text} ${t("overview.assess.state.held")}` : text;
 }
 
 // The threshold a state measured against, in the team's words: the
-// agreement it breaks, or from where it counts. The values are the
-// backend's (config thresholds), never written into a text.
+// agreement it breaks, or when it is reported. The values are the
+// backend's (config thresholds), never written into a text; none for a
+// state measured against no agreement.
 export function thresholdText(
   t: TFunction,
   c: StateData,
   prod: string,
 ): string {
   const th = c.threshold;
-  if (!th.key) return "";
+  if (!th) return "";
   return t(`overview.assess.state.${c.key}.threshold`, {
     defaultValue: "",
     count: th.value,
     n: th.unit === "share" ? pct(th.value) : bare(th.value),
     min: th.min != null ? num(th.min) : "",
+    within: withinText(t, c),
     prod,
   });
 }
@@ -561,16 +602,21 @@ function stateOf(t: TFunction, c: StateData): string | null {
   if (c.unit === "team" || c.judged === 0) return null;
   const unit = c.key === "bot_loop" ? "botBranch" : c.unit;
   return t(`overview.assess.state.of.${unit}`, {
+    defaultValue: "{{k}} / {{n}}",
     count: c.judged,
     k: num(c.count),
     n: num(c.judged),
   });
 }
 
-// The card's day: its instant is the period's end, Monday 00:00, so the
-// day shown is the one before it.
-function asOfDay(at: string): string {
-  return fullDate(new Date(new Date(at).getTime() - 1));
+// The word for n units of a state's kind ("Repos"); "" for a team-wide one.
+function unitWord(t: TFunction, c: StateData, n: number): string {
+  if (c.unit === "team") return "";
+  const unit = c.key === "bot_loop" ? "botBranch" : c.unit;
+  return t(`overview.assess.state.unitWord.${unit}`, {
+    defaultValue: "",
+    count: n,
+  });
 }
 
 // A state's units: the worst three, the rest behind "+N weitere" (the
@@ -605,7 +651,7 @@ function StateUnits({
                   type="button"
                   onClick={() => onFacts(tab, q)}
                   title={t("overview.assess.state.unitFacts", { name: u.name })}
-                  className="mr-1.5 border-0 bg-transparent p-0 text-left font-mono text-[12.5px] font-semibold break-all text-ink underline decoration-border decoration-dotted underline-offset-[3px] hover:text-accent-strong hover:decoration-accent-strong"
+                  className="mr-1.5 border-0 bg-transparent p-0 text-left font-mono text-[12.5px] font-semibold break-all text-accent-strong hover:underline"
                 >
                   {u.name}
                 </button>
@@ -643,10 +689,14 @@ function StateUnits({
 function StateBody({
   s,
   prod,
+  lastDay,
   onFacts,
 }: {
   s: Signal;
   prod: string;
+  // lastDay is the period's last day (Period.last_day), what the card was
+  // judged as of.
+  lastDay: string;
   onFacts: OnFacts;
 }) {
   const { t } = useTranslation();
@@ -666,7 +716,7 @@ function StateBody({
       {folded.map((f) => (
         <p key={f.id} className="m-0 mb-1.5 text-[13px] text-ink-dim">
           {t("overview.assess.state.folded", {
-            label: labelText(t, f.label),
+            label: labelText(t, f.label, prod),
             value: fmtFact(t, f.unit, f.value),
           })}{" "}
           <Prev f={f} />
@@ -681,11 +731,14 @@ function StateBody({
                 : "overview.assess.state.since",
               { date: fullDate(new Date(c.since)) },
             ),
-          t("overview.assess.state.asOf", { date: asOfDay(c.at) }),
+          lastDay &&
+            t("overview.assess.state.asOf", { date: fullDay(lastDay) }),
           c.unjudged > 0 &&
+            c.key !== "unmeasurable" &&
             t("overview.assess.state.unjudged", {
               count: c.unjudged,
               n: num(c.unjudged),
+              unit: unitWord(t, c, c.unjudged),
             }),
         ]
           .filter(Boolean)
@@ -766,8 +819,10 @@ function WeekSpark({
 
 function SignalCard({ c, onFacts }: { c: CardView; onFacts: OnFacts }) {
   const { t } = useTranslation();
-  // A state's card says it with its units, not with a hero number.
-  const f = c.s.state ? undefined : c.s.facts[0];
+  // A state's card says it with its units, not with a hero number; nor does
+  // a state's resolution (its number is the units it had named).
+  const f =
+    c.s.state || c.s.metric?.startsWith("state:") ? undefined : c.s.facts[0];
   const d = c.s.drivers?.[0];
   const style = columnStyle(c.column);
   // The column says "runs" or "stuck"; only a resolution, which shares the
@@ -799,7 +854,7 @@ function SignalCard({ c, onFacts }: { c: CardView; onFacts: OnFacts }) {
               {fmtFact(t, f.unit, f.value)}
             </span>
             <span className="text-[13px] text-muted">
-              {labelText(t, f.label)}
+              {labelText(t, f.label, c.prod)}
             </span>
             <Prev f={f} />
           </div>
@@ -808,7 +863,14 @@ function SignalCard({ c, onFacts }: { c: CardView; onFacts: OnFacts }) {
           )}
         </div>
       )}
-      {c.s.state && <StateBody s={c.s} prod={c.prod} onFacts={onFacts} />}
+      {c.s.state && (
+        <StateBody
+          s={c.s}
+          prod={c.prod}
+          lastDay={c.lastDay}
+          onFacts={onFacts}
+        />
+      )}
       {c.s.waiting && <WaitingBar w={c.s.waiting} />}
       {d && (
         <div className="mt-1.5 font-mono text-xs leading-relaxed text-ochre">
@@ -817,7 +879,7 @@ function SignalCard({ c, onFacts }: { c: CardView; onFacts: OnFacts }) {
       )}
       {c.take && <p className="my-2 text-sm text-ink-dim">{c.take}</p>}
       <Retro q={c.retro} />
-      <Lever k={c.lever} />
+      <Lever k={c.lever} prod={c.prod} />
       {c.s.state && (
         <StateFactsLink c={c.s.state} prod={c.prod} onFacts={onFacts} />
       )}
@@ -1039,9 +1101,10 @@ function words(
         seen: r.seen,
         take: ft
           ? fill(t, ft.take, facts)
-          : sigs.map((s) => signalTitle(t, s)).join("; "),
+          : sigs.map((s) => signalTitle(t, s, prod)).join("; "),
         retro: ft?.retro ? fill(t, ft.retro, facts) : null,
         lever: lf.lever,
+        prod,
       },
     ];
   });
@@ -1058,6 +1121,7 @@ function words(
         retro: ct?.retro ? fill(t, ct.retro, facts) : null,
         lever: lc.lever,
         prod,
+        lastDay: a.period.last_day,
       },
     ];
   });

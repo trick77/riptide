@@ -751,13 +751,17 @@ func TestTickLoadsOnceSkipsQuiet(t *testing.T) {
 	})
 	ctx := context.Background()
 	s.tick(ctx, []string{"team-a"})
-	windows := 1
-	if due(12, weekStart(now, zurich)) {
-		windows++
+	// Each due window's reads once: the period, the previous one and the
+	// states' look-back before them, where the previous one does not reach
+	// that far (a 26-week window reads two).
+	want := 0
+	for _, weeks := range metrics.Windows {
+		if due(weeks, weekStart(now, zurich)) {
+			want += len(s.reads(weeks))
+		}
 	}
-	// The period, the previous one and the states' look-back before them.
-	if int(loadsN.Load()) != 3*windows {
-		t.Errorf("%d dataset loads for %d due windows, want 3 each", loadsN.Load(), windows)
+	if int(loadsN.Load()) != want {
+		t.Errorf("%d dataset loads, want %d: each due window's reads once", loadsN.Load(), want)
 	}
 	for _, r := range st.rows {
 		if r.Product == "idle" {

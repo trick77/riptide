@@ -16,4 +16,6 @@ SELECT p.id,
          LIMIT 1) AS repo
 FROM pipeline_events p
 WHERE p.team = $1 AND p.phase = 'COMPLETED' AND cardinality(p.image_refs) > 0 AND p.commit_sha IS NOT NULL
+  -- a run's start is its head's cap: a legacy row without one names none
+  AND p.started_at IS NOT NULL
 ORDER BY p.started_at, p.id

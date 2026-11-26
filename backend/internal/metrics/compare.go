@@ -536,7 +536,17 @@ func buildsIncomplete(meta dataset.Meta, from time.Time) bool {
 	return before(meta.BuildDataFrom, from) || (t != nil && t.After(from))
 }
 
+// LeadLowerBoundShare is the share of a period's lead times placed through a
+// lower bound (LeadTimes.LowerBound) above which its median is no basis for
+// a change: a lower bound reads long by how much tracing missed, not by what
+// the team did, and near the data's start most placements are one. Below
+// it, they move the median by little.
+const LeadLowerBoundShare = 0.2
+
 func leadChange(c, p LeadTimes, incomplete bool) Change {
+	lower := func(l LeadTimes) bool {
+		return l.Human.N > 0 && float64(l.LowerBound) > LeadLowerBoundShare*float64(l.Human.N)
+	}
 	return leadTimeMetric.judge(side{c.Human.P50, c.Human.N >= lowSample},
-		side{p.Human.P50, p.Human.N >= lowSample}, incomplete)
+		side{p.Human.P50, p.Human.N >= lowSample}, incomplete || lower(c) || lower(p))
 }

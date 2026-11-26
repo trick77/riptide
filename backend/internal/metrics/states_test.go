@@ -227,11 +227,31 @@ func TestSlowToProd(t *testing.T) {
 	}
 }
 
+// approval is a PR of repo a person approved days before the period's
+// end, still approved, merged mergedDays before it (nil: open); its last
+// event the approval.
 func approval(repo string, id int64, approved float64, mergedDays *float64) dataset.Approval {
-	a := dataset.Approval{Repo: repo, Project: projectOf(repo), PRID: id, ApprovedAt: endAgoP(approved)}
+	a := dataset.Approval{Repo: repo, Project: projectOf(repo), PRID: id, ApprovedAt: endAgoP(approved),
+		Spans: []dataset.ApprovalSpan{{From: endAgo(approved)}}, Activity: []time.Time{endAgo(approved)}}
 	if mergedDays != nil {
 		a.MergedAt = endAgoP(*mergedDays)
+		a.Activity = append(a.Activity, endAgo(*mergedDays))
 	}
+	return a
+}
+
+// withdrawn ends a's approval days before the period's end (unapproved,
+// needs work, reset by a push).
+func withdrawn(a dataset.Approval, days float64) dataset.Approval {
+	a.Spans = []dataset.ApprovalSpan{{From: a.Spans[0].From, To: endAgoP(days)}}
+	a.Activity = append(a.Activity, endAgo(days))
+	return a
+}
+
+// touched adds an event days before the period's end to a.
+func touched(a dataset.Approval, days float64) dataset.Approval {
+	a.Activity = append(slices.Clone(a.Activity), endAgo(days))
+	slices.SortFunc(a.Activity, func(x, y time.Time) int { return x.Compare(y) })
 	return a
 }
 
@@ -261,15 +281,45 @@ func TestApprovedWaiting(t *testing.T) {
 		x.State.Units[0].Value != 5 {
 		t.Errorf("approved waiting = %s %+v, want a hint, kasse-api with 2 PRs, the oldest 5 working days", x.Tone, x.State.Units)
 	}
-	// Waiting two sprints: red.
-	ds.Approvals[0].ApprovedAt = endAgoP(30)
+	// Since the second of them had waited past a working day.
+	if s := x.State.Units[0].Since; s == nil || !s.Equal(afterWorkingDays(endAgo(6), 1, zurich)) {
+		t.Errorf("since %v, want the second PR's crossing", s)
+	}
+	// One approval forgotten for 40 days (touched since) and one of 4: two
+	// waiting began days ago, a hint (the onset, not the oldest case).
+	old := slices.Clone(ds.Approvals)
+	ds.Approvals[0] = touched(approval("kasse/kasse-api", 10, 40, nil), 3)
+	ds.Approvals[1] = approval("kasse/kasse-api", 11, 4, nil)
+	if x := stateSignal(assessStates(t, ds, nil, History{}), StateApprovedWaiting); x == nil || x.Tone != ToneHint {
+		t.Errorf("one old approval and one young = %+v, want a hint", x)
+	}
+	// Both waiting for over a month, still touched: held two sprints, red.
+	ds.Approvals[1] = touched(approval("kasse/kasse-api", 11, 35, nil), 2)
 	if x := stateSignal(assessStates(t, ds, nil, History{}), StateApprovedWaiting); x == nil || x.Tone != ToneAttention {
 		t.Errorf("held two sprints = %+v, want red", x)
 	}
+	// Approved 40 days back and untouched since: inactive, no wait.
+	ds.Approvals[0] = approval("kasse/kasse-api", 10, 40, nil)
+	if x := stateSignal(assessStates(t, ds, nil, History{}), StateApprovedWaiting); x != nil {
+		t.Errorf("an untouched PR waits for nothing: %+v", x.State.Units)
+	}
+	ds.Approvals = old
+	// An approval withdrawn (needs work, unapproved, reset by a push) waits
+	// no more.
+	ds.Approvals[1] = withdrawn(ds.Approvals[1], 5)
+	if x := stateSignal(assessStates(t, ds, nil, History{}), StateApprovedWaiting); x != nil {
+		t.Errorf("a withdrawn approval waits: %+v", x.State.Units)
+	}
+	ds.Approvals = old
 	// A lost Bitbucket silence after the approvals: their merge may be lost.
 	ds.Meta.Silences = []dataset.Silence{{Source: dataset.SourceBitbucket, From: endAgo(3), To: endAgo(1), Lost: true}}
 	if x := stateSignal(assessStates(t, ds, nil, History{}), StateApprovedWaiting); x != nil {
 		t.Errorf("unknown after a lost silence: %+v", x.State.Units)
+	}
+	// So is one running since before the approval.
+	ds.Meta.Silences = []dataset.Silence{{Source: dataset.SourceBitbucket, From: endAgo(9), To: endAgo(2), Lost: true}}
+	if x := stateSignal(assessStates(t, ds, nil, History{}), StateApprovedWaiting); x != nil {
+		t.Errorf("unknown in a silence running at the approval: %+v", x.State.Units)
 	}
 }
 
@@ -324,6 +374,48 @@ func TestMergePause(t *testing.T) {
 	ds.Meta.Silences = []dataset.Silence{{Source: dataset.SourceBitbucket, From: endAgo(7.5), To: endAgo(-0.5), Lost: true}}
 	if x := stateSignal(assessStates(t, ds, nil, History{}), StateMergePause); x != nil {
 		t.Errorf("a lost week judges nothing: %+v", x.State.Units)
+	}
+	// Approvals withdrawn on Wednesday (needs work, reset by a push) wait
+	// no more after it: their wait counts to then, a day and a half.
+	ds = pauseData(3)
+	for i := range ds.Approvals {
+		ds.Approvals[i] = withdrawn(ds.Approvals[i], 4.5)
+	}
+	th := config.DefaultThresholds()
+	th.MergePauseWaitDays = 2
+	if x := stateSignal(assessStates(t, ds, &th, History{}), StateMergePause); x != nil {
+		t.Errorf("withdrawn approvals waited: %+v", x.State.Units)
+	}
+	// A silence lost since the approvals: their merges may be in it, so
+	// they wait for nothing, though no silence began after them.
+	ds = pauseData(3)
+	ds.Meta.Silences = []dataset.Silence{{Source: dataset.SourceBitbucket, From: endAgo(6.5), To: endAgo(5.5), Lost: true}}
+	if x := stateSignal(assessStates(t, ds, nil, History{}), StateMergePause); x != nil {
+		t.Errorf("approvals in a lost silence waited: %+v", x.State.Units)
+	}
+}
+
+// A merge pause's waits end with the week: approved Friday afternoon,
+// merged Monday, a PR waited a quarter of a working day in the week, read
+// on whatever day.
+func TestMergePauseFrozenAtWeekEnd(t *testing.T) {
+	ds := pauseData(0)
+	for i := range 3 {
+		// Friday 15:00 of the last week; merged the Monday after at 16:00.
+		ds.Approvals = append(ds.Approvals, approval("kasse/kasse-api", int64(200+i), 2.375, ptr(-0.6667)))
+	}
+	ds.Meta.GeneratedAt = endAgo(-10)
+	if x := stateSignal(assessStates(t, ds, nil, History{}), StateMergePause); x != nil {
+		t.Errorf("Friday approvals made a pause: %+v", x.State.Units)
+	}
+	// Approved Thursday 10:00, still open well after: 1.6 working days by the
+	// week's end, past the half day.
+	ds = pauseData(0)
+	for i := range 3 {
+		ds.Approvals = append(ds.Approvals, approval("kasse/kasse-api", int64(300+i), 3.5833, nil))
+	}
+	if x := stateSignal(assessStates(t, ds, nil, History{}), StateMergePause); x == nil || x.State.Units[0].Value != 3 {
+		t.Errorf("Thursday approvals = %+v, want a pause with 3 waiting", x)
 	}
 }
 
@@ -411,43 +503,148 @@ func TestHonestyStates(t *testing.T) {
 	if !slices.Contains(a.QuietReasons, QuietUnjudged) {
 		t.Errorf("quiet reasons %v, want unjudged for the data-honesty states", a.QuietReasons)
 	}
+	// Against no agreement of the team's: no threshold, no threshold fact a
+	// model could call the team's.
+	for _, key := range []string{StateUntraced, StateUnattributed, StateNoProdStage} {
+		x := stateSignal(a, key)
+		if x == nil {
+			continue
+		}
+		if x.State.Threshold != nil || slices.ContainsFunc(x.Facts, func(f Fact) bool { return f.Label == "state_threshold" }) {
+			t.Errorf("%s threshold %+v facts %+v, want none", key, x.State.Threshold, x.Facts)
+		}
+	}
 }
 
+// shippedOn is a PR on production days before the period's end.
+func shippedOn(days float64) func(*dataset.PR) {
+	return func(p *dataset.PR) {
+		p.Environments = []dataset.EnvironmentDeploy{{Environment: "prod", FirstDeployedAt: endAgo(days)}}
+	}
+}
+
+func hasSignal(a Assessment, id, tone string) bool {
+	return slices.ContainsFunc(a.Signals, func(s Signal) bool { return s.ID == id && s.Tone == tone })
+}
+
+// Hysteresis, "gelöst" and "nicht mehr messbar" come from the data judged
+// again as of a week before, never from a stored analysis: they work
+// without one.
 func TestStateHysteresisAndResolution(t *testing.T) {
-	// kasse-api's oldest lying PR at 12 days: under the threshold, above 80 %
-	// of it. Named last time: held.
+	id := SignalState + ":" + StateNotOnProd
+	resolved := SignalResolved + ":" + id
+	// A week before, #1 had lain 18 days (fired); it shipped 2 days ago.
+	// Now the oldest, #2, has lain 12 days: under 14, above 80 % of it.
 	ds := stateData(func(d *dataset.Dataset) {
 		d.Releases = []dataset.AppRelease{release("kasse-prod", 2, false)}
-		d.PRs = []dataset.PR{merged(1, 12)}
+		d.PRs = []dataset.PR{merged(1, 25, shippedOn(2)), merged(2, 12)}
 	})
-	id := SignalState + ":" + StateNotOnProd
-	h := History{Runs: 1, Latest: map[string]string{id: ToneAttention}, Open: map[string]Problem{id: {Tone: ToneAttention}},
-		StateUnits: map[string][]string{id: {"kasse/kasse-api"}}, Seen: map[string]int{id: 1}}
-	a := assessStates(t, ds, nil, h)
+	a := assessStates(t, ds, nil, History{})
 	x := stateSignal(a, StateNotOnProd)
-	if x == nil || !x.State.Units[0].Held || x.Seen != 1 {
-		t.Fatalf("held = %+v, want kasse-api held, seen once", x)
+	if x == nil || !x.State.Units[0].Held || x.State.Units[0].Value != 12 {
+		t.Fatalf("held = %+v, want kasse-api held at 12 days", x)
 	}
-	// Not named last time: no card.
+	// Not named a week before: no card.
+	ds.PRs = []dataset.PR{merged(2, 12)}
 	if x := stateSignal(assessStates(t, ds, nil, History{}), StateNotOnProd); x != nil {
-		t.Errorf("12 days without history fire nothing: %+v", x.State.Units)
+		t.Errorf("12 days, nothing a week before, fire nothing: %+v", x.State.Units)
 	}
-	// Under 80 % of it: resolved, with evidence.
-	ds.PRs = []dataset.PR{merged(1, 8)}
-	a = assessStates(t, ds, nil, h)
-	if stateSignal(a, StateNotOnProd) != nil || !slices.ContainsFunc(a.Signals, func(s Signal) bool {
-		return s.ID == SignalResolved+":"+id && s.Tone == ToneGood
-	}) {
+	// Under 80 % of it now: "gelöst", with evidence, once.
+	ds.PRs = []dataset.PR{merged(1, 25, shippedOn(2)), merged(2, 8)}
+	a = assessStates(t, ds, nil, History{})
+	if stateSignal(a, StateNotOnProd) != nil || !hasSignal(a, resolved, ToneGood) {
 		t.Errorf("signals %v, want the state resolved", sigIDs(a.Signals))
 	}
-	// No longer judgeable (no merged PR of a deployable repo): not resolved,
-	// "nicht mehr messbar".
-	ds.PRs = nil
-	a = assessStates(t, ds, nil, h)
-	if !slices.ContainsFunc(a.Signals, func(s Signal) bool {
-		return s.ID == SignalState+":"+StateUnmeasurable+":"+StateNotOnProd && s.Tone == ToneLimit && s.State.Was != nil
-	}) || slices.ContainsFunc(a.Signals, func(s Signal) bool { return s.Kind == SignalResolved }) {
+	// The oldest PR now one tracing cannot place: "nicht mehr messbar",
+	// never "gelöst".
+	ds.PRs = []dataset.PR{merged(1, 25, shippedOn(2)), merged(3, 20, func(p *dataset.PR) { p.TrunkAt = nil })}
+	a = assessStates(t, ds, nil, History{})
+	if !hasSignal(a, SignalState+":"+StateUnmeasurable+":"+StateNotOnProd, ToneLimit) ||
+		slices.ContainsFunc(a.Signals, func(s Signal) bool { return s.Kind == SignalResolved }) {
 		t.Errorf("signals %v, want not_on_prod unmeasurable, never resolved", sigIDs(a.Signals))
+	}
+	// A raised threshold resolves nothing: the week before is judged against
+	// it too.
+	th := config.DefaultThresholds()
+	th.NotOnProdDays = 21
+	ds.PRs = []dataset.PR{merged(1, 16)}
+	if a := assessStates(t, ds, &th, History{}); stateSignal(a, StateNotOnProd) != nil || hasSignal(a, resolved, ToneGood) {
+		t.Errorf("signals %v, want neither the card nor a resolution after the threshold moved", sigIDs(a.Signals))
+	}
+}
+
+// A held unit stays held while its number stays in the band, week after
+// week, and is "gelöst" once it drops below it: fired two weeks back (#1 at
+// 16 days), in the band a week back (#2 at 13) and now (#3 at 12).
+func TestStateHeldAcrossWeeks(t *testing.T) {
+	id := SignalState + ":" + StateNotOnProd
+	ds := stateData(func(d *dataset.Dataset) {
+		d.Releases = []dataset.AppRelease{release("kasse-prod", 2, false)}
+		d.PRs = []dataset.PR{merged(1, 30, shippedOn(10)), merged(2, 20, shippedOn(3)), merged(3, 12)}
+	})
+	x := stateSignal(assessStates(t, ds, nil, History{}), StateNotOnProd)
+	if x == nil || !x.State.Units[0].Held || x.State.Units[0].Value != 12 {
+		t.Errorf("card = %+v, want kasse-api still held at 12 days", x)
+	}
+	// Below the band now: "gelöst", not silently gone.
+	ds.PRs[2] = merged(3, 8)
+	a := assessStates(t, ds, nil, History{})
+	if stateSignal(a, StateNotOnProd) != nil || !hasSignal(a, SignalResolved+":"+id, ToneGood) {
+		t.Errorf("signals %v, want the held state resolved", sigIDs(a.Signals))
+	}
+}
+
+// A unit gone or fallen idle since the week before is no news: neither
+// "gelöst" nor "nicht mehr messbar", and nothing keeps the period from
+// being quiet.
+func TestStateGoneIsNoNews(t *testing.T) {
+	// A bot branch looped in the period a week before; its builds all lie
+	// before this period: gone.
+	ds := stateData(func(d *dataset.Dataset) {
+		for i := range 12 {
+			d.Runs = append(d.Runs, botRun(i, true, func(r *dataset.Run) {
+				r.StartedAt, r.FinishedAt = endAgoP(33-float64(i)*0.1), endAgoP(33-float64(i)*0.1-0.01)
+				r.OccurredAt = *r.FinishedAt
+			}))
+		}
+	})
+	a := assessStates(t, ds, nil, History{})
+	if slices.ContainsFunc(a.Signals, func(s Signal) bool {
+		return s.Kind == SignalResolved || (s.State != nil && s.State.Key == StateUnmeasurable)
+	}) || slices.Contains(a.QuietReasons, QuietUnjudged) {
+		t.Errorf("signals %v reasons %v, want nothing of a gone bot branch", sigIDs(a.Signals), a.QuietReasons)
+	}
+}
+
+// Per unit, not per card: approved PRs waiting in kasse-api a week before,
+// now of unknown state after a lost Bitbucket silence: "nicht mehr
+// messbar", though no unit fires and kasse-api reads clear otherwise.
+func TestStateUnjudgedUnitIsUnmeasurable(t *testing.T) {
+	ds := stateData(func(d *dataset.Dataset) {
+		d.PRs = []dataset.PR{merged(1, 3)}
+		d.Approvals = []dataset.Approval{
+			touched(approval("kasse/kasse-api", 10, 14, nil), 6), touched(approval("kasse/kasse-api", 11, 13, nil), 6),
+		}
+		d.Meta.Silences = []dataset.Silence{{Source: dataset.SourceBitbucket, From: endAgo(5), To: endAgo(4), Lost: true}}
+	})
+	a := assessStates(t, ds, nil, History{})
+	if !hasSignal(a, SignalState+":"+StateUnmeasurable+":"+StateApprovedWaiting, ToneLimit) ||
+		hasSignal(a, SignalResolved+":"+SignalState+":"+StateApprovedWaiting, ToneGood) {
+		t.Errorf("signals %v, want approved_waiting unmeasurable, not resolved", sigIDs(a.Signals))
+	}
+}
+
+// A project past the breach escalated out of the hint: the hint a week
+// before is not "gelöst" beside the red card.
+func TestReleaseEscalationIsNoResolution(t *testing.T) {
+	ds := stateData(func(d *dataset.Dataset) {
+		d.Releases = []dataset.AppRelease{release("kasse-prod", 34, false)}
+		d.PRs = []dataset.PR{merged(1, 3)}
+	})
+	a := assessStates(t, ds, nil, History{})
+	if !hasSignal(a, SignalState+":"+StateNoRelease, ToneAttention) ||
+		hasSignal(a, SignalResolved+":"+SignalState+":"+StateReleaseDue, ToneGood) {
+		t.Errorf("signals %v, want the breach and no resolved hint", sigIDs(a.Signals))
 	}
 }
 

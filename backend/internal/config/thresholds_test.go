@@ -41,10 +41,21 @@ func TestThresholdsInvalid(t *testing.T) {
 		{`{"thresholds": {"flaky_share": 1.5}}`, "at most 1"},
 		{`{"thresholds": {"release_hint_days": 30}}`, "below `release_breach_days`"},
 		{`{"thresholds": {"branch_silent_days": 90}}`, "below `branch_silent_max_days`"},
+		// Past the states' look-back nothing could ever fire; a day count
+		// past it, a loop over each day, hung every assessment.
+		{`{"thresholds": {"silent_builds_days": 5000}}`, "silent_builds_days` must be at most 130"},
+		{`{"thresholds": {"not_on_prod_days": 200}}`, "at most 182"},
+		{`{"thresholds": {"merge_pause_weeks": 40}}`, "at most 26"},
+		{`{"thresholds": {"build_minutes": 2000}}`, "at most 1440"},
+		{`{"thresholds": {"bot_loop_failures": 20000}}`, "at most 10000"},
+		// Two bad keys: the first by name, every time.
+		{`{"thresholds": {"release_breach_days": 0, "approved_wait_days": -1}}`, "approved_wait_days"},
 	} {
-		_, err := Parse([]byte(c.in))
-		if err == nil || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("%s: err = %v, want %q", c.in, err, c.want)
+		for range 5 {
+			_, err := Parse([]byte(c.in))
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Errorf("%s: err = %v, want %q", c.in, err, c.want)
+			}
 		}
 	}
 }

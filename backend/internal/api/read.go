@@ -200,7 +200,8 @@ func (d Deps) periods(ctx context.Context, v view, ps []metrics.Period, running 
 	// The approvals from the period's start: the states judge its weeks; the
 	// look-back reads merged PRs only.
 	sh, err := d.Reader.Shared(ctx, dataset.SharedParams{Team: v.team, From: from, ClassEnds: ends, Now: v.now, Libraries: true,
-		Trace: true, States: states, ApprovalsFrom: ps[0].From, Automated: v.cfg.AutomatedAtRead})
+		Trace: true, States: states, ApprovalsFrom: ps[0].From, BranchesFrom: metrics.StateLookbackFrom(ps[0]),
+		Automated: v.cfg.AutomatedAtRead})
 	if err != nil {
 		return nil, nil, err
 	}

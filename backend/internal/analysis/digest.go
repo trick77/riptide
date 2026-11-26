@@ -73,14 +73,14 @@ type digestSignal struct {
 
 // digestState is a state card as the model reads it: no unit named.
 type digestState struct {
-	Key       string                 `json:"key"`
-	Unit      string                 `json:"unit"`
-	Count     int                    `json:"count"`
-	Judged    int                    `json:"judged"`
-	Unjudged  int                    `json:"unjudged"`
-	Idle      int                    `json:"idle"`
-	More      int                    `json:"more"`
-	Threshold metrics.StateThreshold `json:"threshold"`
+	Key       string                  `json:"key"`
+	Unit      string                  `json:"unit"`
+	Count     int                     `json:"count"`
+	Judged    int                     `json:"judged"`
+	Unjudged  int                     `json:"unjudged"`
+	Idle      int                     `json:"idle"`
+	More      int                     `json:"more"`
+	Threshold *metrics.StateThreshold `json:"threshold"`
 	// Was is the state an unmeasurable card was.
 	Was *string `json:"was"`
 }
