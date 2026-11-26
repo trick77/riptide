@@ -71,7 +71,28 @@ const COLUMN_STYLE: Record<
     ink: "text-s1",
     dot: "bg-s1",
   },
+  // A hint is neutral, never red (owner, 2026-11).
+  hint: {
+    border: "border-border border-l-muted",
+    wash: "from-active",
+    line: "border-border",
+    ink: "text-muted",
+    dot: "bg-muted",
+  },
+  // What the data cannot judge: the limits' ochre.
+  limit: {
+    border: "border-ochre/35 border-l-ochre",
+    wash: "from-ochre/10",
+    line: "border-ochre/45",
+    ink: "text-ochre",
+    dot: "bg-ochre",
+  },
 };
+
+// A column the page does not know (a newer backend) is drawn as a hint.
+function columnStyle(c: string) {
+  return COLUMN_STYLE[c as Column] ?? COLUMN_STYLE.hint;
+}
 
 export function fmtFact(
   t: TFunction,
@@ -157,8 +178,20 @@ function labelText(t: TFunction, label: string): string {
   return t(`overview.assess.label.${label}`, { defaultValue: "" });
 }
 
-// The rule title of a signal, its words filled from the signal itself.
-function signalTitle(t: TFunction, s: Signal): string {
+// The rule title of a signal, its words filled from the signal itself;
+// prod is the production stage as the page shows it.
+function signalTitle(t: TFunction, s: Signal, prod = "PROD"): string {
+  if (s.kind === "state" && s.state)
+    return t(`overview.assess.state.${s.state.key}.title`, {
+      defaultValue: "",
+      prod,
+      was: s.state.was
+        ? t(`overview.assess.state.${s.state.was}.title`, {
+            defaultValue: "",
+            prod,
+          })
+        : "",
+    });
   const label = s.facts[0] ? labelText(t, s.facts[0].label) : "";
   const vars = {
     repo: s.repo ?? "",
@@ -174,8 +207,15 @@ function signalTitle(t: TFunction, s: Signal): string {
   if (s.kind === "change")
     return t(`overview.assess.title.${changeKey(s)}`, vars);
   if (s.kind === "resolved") {
-    const was = (s.metric ?? "").split(":")[0];
-    const kindWord = t(`overview.assess.kind.${was}`, { defaultValue: "" });
+    const parts = (s.metric ?? "").split(":");
+    const was = parts[0];
+    const kindWord =
+      was === "state"
+        ? t(`overview.assess.state.${parts[1]}.title`, {
+            defaultValue: "",
+            prod,
+          })
+        : t(`overview.assess.kind.${was}`, { defaultValue: "" });
     vars.what = s.repo
       ? kindWord
         ? `${s.repo} (${kindWord})`
@@ -195,6 +235,11 @@ function changeKey(s: Signal): "changeBad" | "changeGood" {
 // wait's floor (Build.agent_wait_min_s) and share.
 function ruleText(t: TFunction, s: Signal, m: Metrics): string {
   if (s.kind === "change") return t(`overview.assess.rule.${changeKey(s)}`);
+  if (s.kind === "state" && s.state)
+    return t(`overview.assess.state.${s.state.key}.rule`, {
+      defaultValue: "",
+      prod: stage(m.delivery.production_stage),
+    });
   return t(`overview.assess.rule.${s.kind}`, {
     defaultValue: "",
     minutes: num(m.build.agent_wait_min_s / 60),
@@ -406,13 +451,136 @@ type CardView = {
   take: string;
   retro: string | null;
   lever: string;
+  // prod is the production stage as the page shows it.
+  prod: string;
 };
 
 const SPARK_STROKE: Record<Column, string> = {
   good: "var(--color-online)",
   bad: "var(--color-danger-ink)",
   done: "var(--color-s1)",
+  hint: "var(--color-muted)",
+  limit: "var(--color-ochre)",
 };
+
+type StateData = NonNullable<Signal["state"]>;
+
+// A state's number in its threshold's unit, as the page writes it.
+function stateValue(
+  t: TFunction,
+  unit: StateData["threshold"]["unit"],
+  v: number,
+): string {
+  switch (unit) {
+    case "days":
+      return t("overview.assess.state.days", { count: v, n: num(v) });
+    case "working_days":
+      return t("overview.assess.state.workingDays", {
+        count: v,
+        n: num(v, 1),
+      });
+    case "share":
+      return pct(v);
+    case "minutes":
+      return t("overview.assess.state.minutes", { n: num(v) });
+    default:
+      return num(v);
+  }
+}
+
+// One unit of a state in the state's own words: every number, the ranking
+// and the worst three are the backend's.
+function stateUnitLine(
+  t: TFunction,
+  c: StateData,
+  u: StateData["units"][number],
+  prod: string,
+): string {
+  const line = t(`overview.assess.state.${c.key}.unit`, {
+    defaultValue: "{{name}}: {{value}}",
+    name: u.name,
+    value: stateValue(t, c.threshold.unit, u.value),
+    // The bare number, one decimal where it has one (working days).
+    n: num(u.value, Number.isInteger(u.value) ? 0 : 1),
+    count: u.count ?? 0,
+    of: u.of != null ? num(u.of) : "",
+    typical: u.typical != null ? num(u.typical, 1) : "",
+    week: u.week ? u.week.kw : "",
+    names: u.names
+      .map((x) => (c.key === "no_prod_stage" ? stage(x) : x))
+      .join(", "),
+    ci: u.ci_seconds != null ? dur(u.ci_seconds) : "",
+    reason: u.reason
+      ? t(`overview.assess.state.reason.${u.reason}`, { defaultValue: "" })
+      : "",
+    prod,
+  });
+  return u.held ? `${line} ${t("overview.assess.state.held")}` : line;
+}
+
+// A state's card body: k of n units, the worst three with their number,
+// how many more, since when, the team's threshold.
+function StateBody({ s, prod }: { s: Signal; prod: string }) {
+  const { t } = useTranslation();
+  const c = s.state;
+  if (!c) return null;
+  const th = c.threshold;
+  return (
+    <div className="mb-2 text-[13.5px] text-ink-dim">
+      {c.unit !== "team" && c.judged > 0 && (
+        <p className="m-0 mb-1.5 font-serif text-[22px] leading-tight text-ink tabular-nums">
+          {t(`overview.assess.state.of.${c.unit}`, {
+            count: c.judged,
+            k: num(c.count),
+            n: num(c.judged),
+          })}
+        </p>
+      )}
+      {c.worst.length > 0 && (
+        <ul className="m-0 mb-1.5 grid list-none gap-0.5 p-0">
+          {c.worst.map((u) => (
+            <li key={`${u.name}|${u.week?.kw ?? ""}`} className="break-words">
+              {stateUnitLine(t, c, u, prod)}
+            </li>
+          ))}
+          {c.more > 0 && (
+            <li className="text-muted">
+              {t("overview.assess.state.more", { count: c.more })}
+            </li>
+          )}
+        </ul>
+      )}
+      <p className="m-0 font-mono text-[11.5px] text-muted">
+        {[
+          c.since &&
+            t(
+              c.since_lower_bound
+                ? "overview.assess.state.sinceAtLeast"
+                : "overview.assess.state.since",
+              { date: fullDate(new Date(c.since)) },
+            ),
+          th.key &&
+            t(
+              th.min != null
+                ? "overview.assess.state.thresholdMin"
+                : "overview.assess.state.threshold",
+              {
+                value: stateValue(t, th.unit, th.value),
+                min: th.min != null ? num(th.min) : "",
+              },
+            ),
+          c.unjudged > 0 &&
+            t("overview.assess.state.unjudged", {
+              count: c.unjudged,
+              n: num(c.unjudged),
+            }),
+        ]
+          .filter(Boolean)
+          .join(META_SEP)}
+      </p>
+    </div>
+  );
+}
 
 // A card's number week by week, the previous period on a band: a share
 // scaled as the build section scales its rates (shareLow, from the card's
@@ -455,9 +623,10 @@ function WeekSpark({
 
 function SignalCard({ c }: { c: CardView }) {
   const { t } = useTranslation();
-  const f = c.s.facts[0];
+  // A state's card says it with its units, not with a hero number.
+  const f = c.s.state ? undefined : c.s.facts[0];
   const d = c.s.drivers?.[0];
-  const style = COLUMN_STYLE[c.column];
+  const style = columnStyle(c.column);
   // The column says "runs" or "stuck"; only a resolution, which shares the
   // left with the gains, names its own.
   const tags = c.column === "done" || c.s.seen > 0;
@@ -496,6 +665,7 @@ function SignalCard({ c }: { c: CardView }) {
           )}
         </div>
       )}
+      {c.s.state && <StateBody s={c.s} prod={c.prod} />}
       {c.s.waiting && <WaitingBar w={c.s.waiting} />}
       {d && (
         <div className="mt-1.5 font-mono text-xs leading-relaxed text-ochre">
@@ -624,7 +794,7 @@ function Group({
   n,
   children,
 }: {
-  col: "good" | "bad";
+  col: "good" | "bad" | "hint" | "limit";
   n: number;
   children: ReactNode;
 }) {
@@ -680,6 +850,7 @@ function words(
   m: Metrics,
 ): Words {
   const facts = factIndex(a);
+  const prod = stage(m.delivery.production_stage);
   const byId = new Map(a.signals.map((s) => [s.id, s]));
   const repos = new Map(a.focus.map((r) => [r.repo, r]));
   const rank = (r: FocusRepo) => {
@@ -728,10 +899,11 @@ function words(
       {
         s,
         column: lc.column,
-        title: signalTitle(t, s),
+        title: signalTitle(t, s, prod),
         take: ct ? fill(t, ct.take, facts) : ruleText(t, s, m),
         retro: ct?.retro ? fill(t, ct.retro, facts) : null,
         lever: lc.lever,
+        prod,
       },
     ];
   });
@@ -811,9 +983,20 @@ function Panel({
 
   const tally = st.layout.tally;
   // Each group in the backend's order: gains and resolutions as it ranked
-  // them, the worries as worded.
-  const left = w.cards.filter((c) => c.column !== "bad");
+  // them, the worries as worded; hints and what could not be judged in
+  // groups of their own, never red.
+  const left = w.cards.filter(
+    (c) => c.column === "good" || c.column === "done",
+  );
   const stuck = w.cards.filter((c) => c.column === "bad");
+  const hints = w.cards.filter((c) => c.column === "hint");
+  // A column the page does not know yet joins the hints' neutral group.
+  const unknown = w.cards.filter(
+    (c) => !(c.column in COLUMN_STYLE) && c.column !== "limit",
+  );
+  const unjudgedCards = w.cards.filter((c) => c.column === "limit");
+  const neutral = [...hints, ...unknown];
+  const prod = stage(m.delivery.production_stage);
 
   const button =
     st.enabled &&
@@ -970,6 +1153,16 @@ function Panel({
               {t("overview.assess.tally.done")}
             </TallyCount>
           )}
+          {(tally.hint ?? 0) > 0 && (
+            <TallyCount look={COLUMN_STYLE.hint} n={num(tally.hint)}>
+              {t("overview.assess.tally.hint")}
+            </TallyCount>
+          )}
+          {(tally.limit ?? 0) > 0 && (
+            <TallyCount look={COLUMN_STYLE.limit} n={num(tally.limit)}>
+              {t("overview.assess.tally.limit")}
+            </TallyCount>
+          )}
           {tally.talk > 0 && (
             <TallyCount look={TALK_STYLE} n={num(tally.talk)}>
               {t("overview.assess.tally.talk")}
@@ -1024,6 +1217,24 @@ function Panel({
           {left.length > 0 && (
             <Group col="good" n={left.length}>
               {left.map((c) => (
+                <SignalCard key={c.s.id} c={c} />
+              ))}
+            </Group>
+          )}
+        </div>
+      )}
+      {(neutral.length > 0 || unjudgedCards.length > 0) && (
+        <div className="mt-5 flex flex-wrap gap-x-[18px] gap-y-5">
+          {neutral.length > 0 && (
+            <Group col="hint" n={neutral.length}>
+              {neutral.map((c) => (
+                <SignalCard key={c.s.id} c={c} />
+              ))}
+            </Group>
+          )}
+          {unjudgedCards.length > 0 && (
+            <Group col="limit" n={unjudgedCards.length}>
+              {unjudgedCards.map((c) => (
                 <SignalCard key={c.s.id} c={c} />
               ))}
             </Group>
@@ -1095,9 +1306,9 @@ function Panel({
           {also.map(({ s, column }) => (
             <span
               key={s.id}
-              className={`rounded-full border px-2.5 py-0.5 text-[12.5px] ${COLUMN_STYLE[column].line} ${COLUMN_STYLE[column].ink}`}
+              className={`rounded-full border px-2.5 py-0.5 text-[12.5px] ${columnStyle(column).line} ${columnStyle(column).ink}`}
             >
-              {signalTitle(t, s)}
+              {signalTitle(t, s, prod)}
             </span>
           ))}
         </div>

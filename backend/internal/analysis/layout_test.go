@@ -26,38 +26,43 @@ func columns(cs []LayoutCard) map[string][]string {
 	return out
 }
 
-// Gains and resolutions get their own slots on top of MaxCards, worded or
-// not: ranked last, they would never get past the worries otherwise.
+// Gains, resolutions, hints and data honesty get their own slots on top of
+// MaxCards, worded or not: ranked after the worries, they would never get
+// past them otherwise. Hints are a neutral group of their own, never red
+// (owner, 2026-11).
 func TestLayoutSlots(t *testing.T) {
 	a := metrics.Assessment{Signals: []metrics.Signal{
 		sig("gap", metrics.ToneGate),
 		sig("b1", metrics.ToneAttention), sig("b2", metrics.ToneAttention), sig("b3", metrics.ToneHint),
-		sig("b4", metrics.ToneHint), sig("b5", metrics.ToneHint),
+		sig("b4", metrics.ToneHint), sig("b5", metrics.ToneHint), sig("b6", metrics.ToneHint),
+		sig("l1", metrics.ToneLimit), sig("l2", metrics.ToneLimit),
 		sig("g1", metrics.ToneGood), sig("g2", metrics.ToneGood), sig("g3", metrics.ToneGood),
 		sig("d1", "done"), sig("d2", "done"),
 	}, Team: []metrics.Fact{{Verdict: metrics.ChangeNone}, {Verdict: metrics.ChangeBetter}}}
-	want := Tally{Good: 3, Done: 2, Bad: 5}
+	want := Tally{Good: 3, Done: 2, Bad: 2, Hint: 4, Limit: 2}
 
 	off := layout(a, nil)
 	got := columns(off.Cards)
-	if !slices.Equal(got[ColumnBad], []string{"b1", "b2", "b3", "b4"}) ||
+	if !slices.Equal(got[ColumnBad], []string{"b1", "b2"}) || !slices.Equal(got[ColumnHint], []string{"b3", "b4", "b5"}) ||
+		!slices.Equal(got[ColumnLimit], []string{"l1"}) ||
 		!slices.Equal(got[ColumnGood], []string{"g1", "g2"}) || !slices.Equal(got[ColumnDone], []string{"d1"}) {
 		t.Errorf("cards without words = %v", got)
 	}
-	if also := columns(off.Also); len(also[ColumnBad]) != 1 || len(also[ColumnGood]) != 1 || len(also[ColumnDone]) != 1 {
+	if also := columns(off.Also); len(also[ColumnHint]) != 1 || len(also[ColumnLimit]) != 1 || len(also[ColumnGood]) != 1 ||
+		len(also[ColumnDone]) != 1 {
 		t.Errorf("also without words = %v", also)
 	}
 	if off.Tally != want {
 		t.Errorf("tally = %+v, want %+v", off.Tally, want)
 	}
 
-	// The model worded two worries and the third gain: those show, and the
-	// best gain and a resolution join them unworded, the best gain first;
-	// no worry does.
+	// The model worded a worry, a hint and the third gain: those show, the
+	// best gain, hint, limit and a resolution join them unworded; no worry
+	// does.
 	text := &Text{Cards: []CardText{{Signal: "b2"}, {Signal: "b5"}, {Signal: "g3"}}}
 	worded := layout(a, text)
 	got = columns(worded.Cards)
-	if !slices.Equal(got[ColumnBad], []string{"b2", "b5"}) ||
+	if !slices.Equal(got[ColumnBad], []string{"b2"}) || !slices.Equal(got[ColumnHint], []string{"b3", "b4", "b5"}) ||
 		!slices.Equal(got[ColumnGood], []string{"g1", "g3"}) || !slices.Equal(got[ColumnDone], []string{"d1"}) {
 		t.Errorf("cards with words = %v", got)
 	}
@@ -154,7 +159,7 @@ func TestLayoutKeepsRankAcrossColumns(t *testing.T) {
 // review worsening's drivers do): its words are never dropped.
 func TestWordedCardBesideItsFocus(t *testing.T) {
 	a := metrics.Assessment{
-		Signals: []metrics.Signal{sig("review", metrics.ToneAttention), sig("b2", metrics.ToneHint)},
+		Signals: []metrics.Signal{sig("review", metrics.ToneAttention), sig("b2", metrics.ToneAttention)},
 		Focus:   []metrics.FocusRepo{{Repo: "kasse/kasse-api", Signals: []string{"review"}}},
 	}
 	l := layout(a, &Text{Focus: []FocusText{{Repo: "kasse/kasse-api"}}, Cards: []CardText{{Signal: "review", Lever: "pairing"}}})

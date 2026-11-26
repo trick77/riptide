@@ -24,8 +24,10 @@ const (
 	// version (or none, before the column) words signals the rules no longer
 	// raise, and is not shown as the assessment's wording. 2: wave 1 (dropped
 	// signals, symmetric thresholds, quiet decided here, resolved on
-	// evidence).
-	RulesVersion = 2
+	// evidence). 3: wave 2 (lead time per PR traced to production; states,
+	// hints and data honesty in groups of their own, judged against the
+	// team's thresholds).
+	RulesVersion = 3
 	// FocusMinWeight is the weight a repo's signals need for it to be a
 	// focus candidate: one attention signal, or a hint and a notable change.
 	FocusMinWeight = 3
@@ -95,6 +97,9 @@ const (
 	// QuietNotMeasurable: the period's numbers do not exist; why is
 	// Assessment.NotMeasurable.
 	QuietNotMeasurable = "not_measurable"
+	// QuietUnjudged: a data-honesty state (tone limit) says what the rules
+	// could not judge: no finding, but nothing to call quiet either.
+	QuietUnjudged = "unjudged"
 	// QuietFindings: a signal or the question stands out.
 	QuietFindings = "findings"
 )
@@ -187,6 +192,9 @@ type Signal struct {
 	// anyway (deploy frequency, build success); absent for the rest, so the
 	// model's digest, which marshals signals as they are, never carries it.
 	Series *Series `json:"series,omitempty"`
+	// State is a state's card (Kind SignalState): its units, k of n, the
+	// worst three, since when, the threshold; null for every other kind.
+	State *StateCard `json:"state"`
 	// score ranks good changes among themselves, the larger move first: the
 	// Change's |Score|. Not stored: the stored order already holds it.
 	score float64
@@ -235,6 +243,10 @@ type History struct {
 	Open map[string]Problem
 	// Runs are the earlier assessments read; none: the view's first.
 	Runs int
+	// StateUnits are the units each state of the latest assessment named,
+	// by its signal ID: a unit it named keeps firing until its number falls
+	// below Thresholds.HysteresisShare of the threshold.
+	StateUnits map[string][]string
 }
 
 // Limit is a hole in a source's data the comparison crosses: a reason the
@@ -337,17 +349,29 @@ func Assess(ds, prev *dataset.Dataset, p Params, h History) Assessment {
 	ds, prev = classified(ds, prev)
 	m, pm := computeBoth(ds, prev, nil, p)
 	a := &assessor{m: m, pm: pm, ds: ds, prev: prev, p: p, f: newFilter(ds, p), h: h}
+	if p.Earlier != nil {
+		a.earlier = p.Earlier.Classified(ds.Apps)
+	}
 	return a.run()
 }
 
 type assessor struct {
 	m, pm    Metrics
 	ds, prev *dataset.Dataset
-	p        Params
-	f        filter
-	h        History
-	gaps     map[string]bool
-	limits   []Limit
+	// earlier is Params.Earlier, classed as ds; nil when none was read.
+	earlier *dataset.Dataset
+	p       Params
+	f       filter
+	h       History
+	// states is what the states read across the windows; stateJudged, by
+	// a state's signal ID, whether a rule judged a unit of it.
+	states      *stateInput
+	stateJudged map[string]bool
+	// stateRepos are the repos a state's rule judged, stateFlagged those a
+	// state (not data honesty) names: the calm line's.
+	stateRepos, stateFlagged map[string]bool
+	gaps                     map[string]bool
+	limits                   []Limit
 	// lost: Bitbucket's events were lost in one of the two periods
 	// (lostEvents, LimitSilence). Its counts read low there, so none of its
 	// numbers is compared (compare, unlost), nor judges a repo.
@@ -363,6 +387,8 @@ func (a *assessor) run() Assessment {
 	a.jamSignals()
 	a.buildSignals()
 	a.changeSignals()
+	a.stateSignals()
+	a.foldChanges()
 	a.resolvedSignals()
 	for i := range a.out {
 		a.out[i].Seen = a.h.Seen[a.out[i].ID]
@@ -422,10 +448,12 @@ func toneRank(t string) int {
 		return 1
 	case ToneHint:
 		return 2
-	case ToneGood:
+	case ToneLimit:
 		return 3
+	case ToneGood:
+		return 4
 	}
-	return 4
+	return 5
 }
 
 // add keeps s unless its source is silenced.
@@ -574,7 +602,12 @@ func (a *assessor) quietReasons(out Assessment) []string {
 	if a.notMeasurable() != "" {
 		reasons = append(reasons, QuietNotMeasurable)
 	}
-	findings := out.Question != nil || slices.ContainsFunc(out.Signals, func(s Signal) bool { return s.Tone != ToneGate })
+	if slices.ContainsFunc(out.Signals, func(s Signal) bool { return s.Tone == ToneLimit }) {
+		reasons = append(reasons, QuietUnjudged)
+	}
+	findings := out.Question != nil || slices.ContainsFunc(out.Signals, func(s Signal) bool {
+		return s.Tone != ToneGate && s.Tone != ToneLimit
+	})
 	if findings {
 		reasons = append(reasons, QuietFindings)
 	}
@@ -597,11 +630,23 @@ func (a *assessor) jamSignals() {
 			more = t.c.Verdict == ChangeWorse && t.c.Magnitude != nil && *t.c.Magnitude == MagnitudeNotable
 		}
 	}
+	// Each repo's merged PRs per week: the jam's weeks of work standing open
+	// (Little's law, the states-catalogue's B-11 fact).
+	perWeek := map[string]float64{}
+	if a.p.Period.Span > 0 {
+		for _, pr := range mergedPRs(a.ds, a.p.Period, a.f) {
+			perWeek[pr.Repo] += 1 / a.p.Period.Span
+		}
+	}
 	for _, r := range a.m.OpenPRs.Repos {
 		if !r.Jammed {
 			continue
 		}
 		id := "pr_jam:" + r.Repo
+		var wip *float64
+		if perWeek[r.Repo] > 0 {
+			wip = ptr(float64(r.Open) / perWeek[r.Repo])
+		}
 		// A jam makes its repo a focus candidate alone: the pattern the
 		// assessment is there to name.
 		tone, w := ToneHint, FocusMinWeight
@@ -630,7 +675,7 @@ func (a *assessor) jamSignals() {
 		a.add(Signal{
 			ID: id, Kind: SignalPRJam, Tone: tone, Source: dataset.SourceBitbucket, Repo: ptr(r.Repo), Weight: w,
 			Facts: []Fact{long, plain(id+".open", "open", UnitCount, f64(r.Open)),
-				plain(id+".age", "age_p50", UnitSeconds, r.Age.P50)},
+				plain(id+".age", "age_p50", UnitSeconds, r.Age.P50), plain(id+".wip", "wip_weeks", UnitWeeks, wip)},
 			Waiting: &w2,
 		})
 	}
@@ -920,6 +965,14 @@ func (a *assessor) resolvedSignals() {
 	for _, id := range slices.Sorted(maps.Keys(a.h.Open)) {
 		pb := a.h.Open[id]
 		kind, rest, _ := strings.Cut(id, ":")
+		if kind == SignalState && !now[id] {
+			// A state judged clear now, its units with the data to judge.
+			if r := a.stateResolved(id); r != nil && !a.gaps[r.Source] {
+				a.add(*r)
+				resolved[id] = true
+			}
+			continue
+		}
 		if now[id] || !slices.Contains(resolvable, kind) {
 			continue
 		}
@@ -1093,8 +1146,8 @@ func (a *assessor) focus(out *Assessment) []FocusRepo {
 	out.Active = len(act)
 	for repo := range act {
 		switch {
-		case by[repo] != nil:
-		case a.judgeable(repo, merged[repo], pmerged[repo]):
+		case by[repo] != nil, a.stateFlagged[repo]:
+		case a.judgeable(repo, merged[repo], pmerged[repo]), a.stateRepos[repo]:
 			out.Calm++
 		default:
 			out.Unjudged++

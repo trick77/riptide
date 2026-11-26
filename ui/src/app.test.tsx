@@ -14,6 +14,7 @@ import type {
   FlowOutcome,
   Metrics,
   RunKind,
+  Signal,
 } from "./api";
 import { Build } from "./Build";
 import { DayCalendar } from "./calendar";
@@ -995,7 +996,7 @@ describe("App", () => {
               ...base.layout,
               cards: base.layout.cards.filter((c) => c.column === "bad"),
               // The backend's tally: its gains it never had.
-              tally: { good: 0, done: 0, bad: 4, talk: 1 },
+              tally: { good: 0, done: 0, bad: 4, hint: 0, limit: 0, talk: 1 },
             },
           };
         }
@@ -1019,6 +1020,185 @@ describe("App", () => {
       ).toBeNull();
     },
   );
+
+  // States: a red card, a hint in its own neutral group and what could not
+  // be judged apart, each with k of n, the worst three with their number,
+  // how many more, since when and the team's threshold, all the backend's.
+  // A kind and a column the page does not know yet still render.
+  it("shows state cards in their three groups", async () => {
+    const unit = (name: string, value: number, o = {}) => ({
+      name,
+      project: null,
+      value,
+      count: 4,
+      of: null,
+      typical: null,
+      since: "2026-10-02T09:00:00Z",
+      lower_bound: false,
+      week: null,
+      names: ["kasse-prod"],
+      held: false,
+      reason: null,
+      ci_seconds: null,
+      ...o,
+    });
+    const card = (
+      key: string,
+      unitKind: string,
+      units: ReturnType<typeof unit>[],
+      more: number,
+      threshold: { key: string; value: number; unit: string },
+    ) => ({
+      key,
+      unit: unitKind,
+      count: units.length + more,
+      judged: 9,
+      unjudged: 1,
+      idle: 2,
+      worst: units,
+      more,
+      units,
+      since: "2026-10-02T09:00:00Z",
+      since_lower_bound: true,
+      threshold: { ...threshold, min_key: null, min: null },
+      at: "2026-11-09T00:00:00Z",
+      was: null,
+      facts: "deploys",
+    });
+    const state = (id: string, tone: string, st: unknown, kind = "state") =>
+      ({
+        id,
+        kind,
+        tone,
+        source: "argocd",
+        repo: null,
+        run_kind: null,
+        metric: null,
+        weight: 9,
+        seen: 0,
+        facts: [
+          {
+            id: `${id}.count`,
+            label: "state_units",
+            unit: "count",
+            value: 1,
+            prev: null,
+            verdict: "none",
+            magnitude: null,
+          },
+        ],
+        waiting: null,
+        drivers: [],
+        state: st,
+      }) as unknown as Signal;
+    mockFetch((url) => {
+      if (url.pathname === "/api/facts") return facts();
+      if (url.pathname === "/api/analysis") {
+        const base = analysisStatus();
+        const signals = [
+          state(
+            "state:no_release",
+            "attention",
+            card(
+              "no_release",
+              "project",
+              [unit("kasse", 41), unit("lager", 31), unit("portal", 29)],
+              1,
+              { key: "release_breach_days", value: 28, unit: "days" },
+            ),
+          ),
+          state(
+            "state:bot_loop",
+            "hint",
+            card(
+              "bot_loop",
+              "branch",
+              [
+                unit("kasse/kasse-api:renovate/lib-2.x", 23, {
+                  ci_seconds: 7200,
+                }),
+              ],
+              0,
+              { key: "bot_loop_failures", value: 10, unit: "count" },
+            ),
+          ),
+          state(
+            "state:untraced",
+            "limit",
+            card(
+              "untraced",
+              "repo",
+              [unit("kasse/kasse-web", 2, { of: 9, reason: "in_silence" })],
+              0,
+              { key: "", value: 1, unit: "count" },
+            ),
+          ),
+          state("future:thing", "hint", null, "future_kind"),
+        ];
+        return {
+          ...base,
+          assessment: { ...base.assessment, signals },
+          layout: {
+            focus: [],
+            cards: [
+              {
+                signal: "state:no_release",
+                column: "bad",
+                lever: "plan_release",
+              },
+              {
+                signal: "state:bot_loop",
+                column: "hint",
+                lever: "stop_bot_loop",
+              },
+              {
+                signal: "state:untraced",
+                column: "limit",
+                lever: "check_source",
+              },
+              { signal: "future:thing", column: "future_column", lever: "" },
+            ],
+            also: [],
+            tally: { good: 0, done: 0, bad: 1, hint: 2, limit: 1, talk: 0 },
+          },
+        } as unknown as AnalysisStatus;
+      }
+      return metrics();
+    });
+    render(<App />);
+    const p = within(await screen.findByTestId("assessment"));
+    expect(p.getByRole("heading", { name: "Hakt" })).toBeInTheDocument();
+    expect(p.getByRole("heading", { name: "Hinweise" })).toBeInTheDocument();
+    expect(
+      p.getByRole("heading", { name: "Nicht beurteilbar" }),
+    ).toBeInTheDocument();
+    expect(p.getByText("Kein Release nach PROD")).toBeInTheDocument();
+    expect(p.getByText("4 von 9 Projekten")).toBeInTheDocument();
+    expect(
+      p.getByText(
+        "kasse: seit 41 Tagen kein Release nach PROD (kasse-prod); seither 4 PRs gemerged",
+      ),
+    ).toBeInTheDocument();
+    expect(p.getByText("+1 weiteres")).toBeInTheDocument();
+    expect(
+      p.getAllByText(
+        /seit mindestens dem 02\.10\.2026.*Schwelle des Teams: 28 Tage/,
+      ).length,
+    ).toBe(1);
+    expect(
+      p.getByText(
+        /^kasse\/kasse-api:renovate\/lib-2\.x: 23 fehlgeschlagene Builds in Folge, 2.0 \S+ CI-Zeit$/,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      p.getByText(
+        "kasse/kasse-web: 2 von 9 gemergten PRs lassen sich PROD nicht zuordnen (in einer Lücke von Bitbucket)",
+      ),
+    ).toBeInTheDocument();
+    const tally = within(p.getByRole("list", { name: "Bilanz" }));
+    expect(tally.getByText("Hinweise")).toBeInTheDocument();
+    expect(tally.getByText("nicht beurteilbar")).toBeInTheDocument();
+  });
 
   // A gain the cards left out still counts: the tally and the foot follow
   // the backend's tally, never the cards shown. Once a gain stood as a
@@ -1184,7 +1364,7 @@ describe("App", () => {
             focus: [],
             cards: [],
             also: [],
-            tally: { good: 0, done: 0, bad: 0, talk: 0 },
+            tally: { good: 0, done: 0, bad: 0, hint: 0, limit: 0, talk: 0 },
           },
         });
       }
@@ -1318,7 +1498,7 @@ describe("App", () => {
             focus: [],
             cards: base.layout.cards.filter((c) => c.column !== "bad"),
             also: [],
-            tally: { good: 1, done: 1, bad: 0, talk: 0 },
+            tally: { good: 1, done: 1, bad: 0, hint: 0, limit: 0, talk: 0 },
           },
         });
       }
@@ -3666,7 +3846,7 @@ describe("limits", () => {
         focus: [],
         cards: [],
         also: [],
-        tally: { good: 0, done: 0, bad: 0, talk: 0 },
+        tally: { good: 0, done: 0, bad: 0, hint: 0, limit: 0, talk: 0 },
       },
     });
   };
@@ -4058,7 +4238,12 @@ describe("limits", () => {
       build: {
         ...m.build,
         unattributed: 5,
-        bot_runs: { runs: 1500, ci_seconds: 90000 },
+        bot_runs: {
+          runs: 1500,
+          ci_seconds: 90000,
+          failed: 300,
+          failed_seconds: 18000,
+        },
       },
       throughput: {
         ...m.throughput,

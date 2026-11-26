@@ -47,6 +47,8 @@ var (
 	repoStartsSQL = query("repo_starts.sql")
 	appsSQL       = query("apps.sql")
 	librariesSQL  = query("libraries.sql")
+	approvalsSQL  = query("approvals.sql")
+	branchesSQL   = query("branches.sql")
 
 	traceDeploysSQL   = query("trace_deploys.sql")
 	traceReleasesSQL  = query("trace_releases.sql")
@@ -179,6 +181,11 @@ type Params struct {
 	// Shared are the reads every window of one page shares (LoadShared),
 	// read once for all of them; nil reads them for this window alone.
 	Shared *Shared
+	// Lean reads the PRs and deploys only, no open PRs, runs or reviews: a
+	// window before the compared periods that the assessment's states look
+	// back into (merged work still before production, a project's typical
+	// week of merges).
+	Lean bool
 	// ClassAt is the end of the window whose Apps class this one's deploys
 	// (Shared's, App): a page classes its period and the previous one by the
 	// period's end, so an App is no infrastructure in one and a product's in
@@ -208,6 +215,89 @@ type Dataset struct {
 	// one by the period's end (Classified), so an App is no infrastructure
 	// in one and a product's in the other.
 	Apps []App `json:"-"`
+	// Releases are every App's releases per environment over all history
+	// (AppRelease), oldest first, whatever the window: since when a project
+	// has not released. Empty for a read without tracing (CountsOnly).
+	Releases []AppRelease `json:"-"`
+	// Approvals are the PRs approved since SharedParams.From less
+	// ApprovalLookback, whenever opened or merged (sql/approvals.sql);
+	// empty unless the shared read was asked for them (SharedParams.States).
+	Approvals []Approval `json:"-"`
+	// Branches are every branch pushed to since SharedParams.From
+	// (sql/branches.sql); empty unless SharedParams.States.
+	Branches []BranchLife `json:"-"`
+}
+
+// BranchLife is a branch as its pushes show it (sql/branches.sql): when it
+// was first and last pushed, whether a PR came from it, whether it is a
+// PR's target. Its deletion is never stored.
+type BranchLife struct {
+	Repo    string    `db:"repo"`
+	Project string    `db:"project"`
+	Branch  string    `db:"branch"`
+	FirstAt time.Time `db:"first_at"`
+	LastAt  time.Time `db:"last_at"`
+	Pushes  int64     `db:"pushes"`
+	// Bot: a bot's branch, by riptide's automation detection on its last
+	// pusher or its head commit's git identity, or Tool. Bots' pushes
+	// (the ingest flag) are not read at all.
+	Bot bool `db:"-"`
+	// Tool: every push's head commit authored by a git identity of the
+	// .invalid e-mail domain, a tool's (the housekeeping commits' author).
+	Tool              bool   `db:"tool"`
+	Author            string `db:"author"`
+	AuthorDisplayName string `db:"author_display_name"`
+	HeadName          string `db:"head_name"`
+	HeadDisplayName   string `db:"head_display_name"`
+	HasPR             bool   `db:"has_pr"`
+	Target            bool   `db:"target"`
+}
+
+// ApprovalLookback is how far before the earliest window an approval is
+// read: a PR approved then and still waiting into the window counts; one
+// waiting longer is as inactive as an open PR (metrics.OpenInactiveDays).
+const ApprovalLookback = 30 * 24 * time.Hour
+
+// Approval is a PR with a person's approval (sql/approvals.sql): its author,
+// merge or close, and its first approval by someone else, a person.
+type Approval struct {
+	Repo    string `db:"repo"`
+	Project string `db:"project"`
+	PRID    int64  `db:"pr_id"`
+	// Bot: a bot's PR (ingest flag, a declared non-human, or riptide's
+	// automation detection on its author), out of every state.
+	Bot               bool       `db:"bot"`
+	Opener            string     `db:"opener"`
+	OpenerDisplayName string     `db:"opener_display_name"`
+	MergedAt          *time.Time `db:"merged_at"`
+	ClosedAt          *time.Time `db:"closed_at"`
+	// ApprovedAt is the first approval by a person other than the author.
+	ApprovedAt *time.Time  `db:"-"`
+	Approvals  []approving `db:"approvals"`
+}
+
+// approving is one approval event of sql/approvals.sql.
+type approving struct {
+	At          time.Time `json:"at"`
+	Author      string    `json:"author"`
+	DisplayName string    `json:"display_name"`
+	Bot         bool      `json:"bot"`
+}
+
+// approved sets each approval's bot flag and first person's approval, the
+// author's own aside, by the same detection as every other row.
+func approved(as []Approval, automated func(login, displayName string) bool) {
+	for i := range as {
+		a := &as[i]
+		a.Bot = a.Bot || automated(a.Opener, a.OpenerDisplayName)
+		for _, e := range a.Approvals {
+			if e.Bot || strings.EqualFold(e.Author, a.Opener) || automated(e.Author, e.DisplayName) {
+				continue
+			}
+			a.ApprovedAt = ptr(e.At.UTC())
+			break
+		}
+	}
 }
 
 // App is one of the team's Apps as its deploys over AppHistory show it.
@@ -581,6 +671,13 @@ type SharedParams struct {
 	// Trace reads the team's tracing input (trace.go): a window whose PRs
 	// are placed on the deploys that shipped them needs it.
 	Trace bool
+	// States reads what only the assessment's states need: the approvals
+	// since ApprovalsFrom (zero: From) less ApprovalLookback
+	// (Dataset.Approvals).
+	States        bool
+	ApprovalsFrom time.Time
+	// Automated is Params.Automated, for the approvals read here.
+	Automated func(author, displayName string) bool
 }
 
 // Shared are the reads every window of one page request uses alike, read
@@ -598,6 +695,10 @@ type Shared struct {
 	trace *trace
 	// repoStarts is noergler's first event per repository, lowercased.
 	repoStarts map[string]time.Time
+	// approvals and branches are SharedParams.States' (Dataset.Approvals,
+	// Dataset.Branches).
+	approvals []Approval
+	branches  []BranchLife
 }
 
 // LoadShared reads a page request's Shared: the tracing input side by side
@@ -615,7 +716,7 @@ func LoadShared(ctx context.Context, db DB, p SharedParams) (*Shared, error) {
 		if err == nil {
 			defer func() { _ = tx.Rollback(ctx) }()
 			sh, err = loadShared(ctx, tx, SharedParams{Team: p.Team, From: p.From, ClassEnds: p.ClassEnds, Now: p.Now,
-				Libraries: p.Libraries})
+				Libraries: p.Libraries, States: p.States, ApprovalsFrom: p.ApprovalsFrom, Automated: p.Automated})
 		}
 		if errs[0] = err; err != nil {
 			cancel()
@@ -731,6 +832,28 @@ func loadShared(ctx context.Context, tx pgx.Tx, p SharedParams) (*Shared, error)
 	for _, r := range starts {
 		sh.repoStarts[r.Repo] = r.Noergler
 	}
+	sh.approvals, sh.branches = []Approval{}, []BranchLife{}
+	if p.States {
+		since := p.ApprovalsFrom
+		if since.IsZero() {
+			since = p.From
+		}
+		if sh.approvals, err = all[Approval](ctx, tx, "approvals", approvalsSQL, p.Team, since.Add(-ApprovalLookback),
+			sh.gitops); err != nil {
+			return nil, err
+		}
+		automated := func(login, displayName string) bool {
+			return p.Automated != nil && p.Automated(login, displayName)
+		}
+		approved(sh.approvals, automated)
+		if sh.branches, err = all[BranchLife](ctx, tx, "branches", branchesSQL, p.Team, p.From, sh.gitops); err != nil {
+			return nil, err
+		}
+		for i := range sh.branches {
+			b := &sh.branches[i]
+			b.Bot = b.Tool || automated(b.Author, b.AuthorDisplayName) || automated(b.HeadName, b.HeadDisplayName)
+		}
+	}
 	return sh, nil
 }
 
@@ -786,19 +909,29 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 	if d.PRs, err = all[PR](ctx, tx, "prs", prsSQL, p.Team, p.From, p.To, d.GitOpsRepos, HousekeepingWindow.Seconds()); err != nil {
 		return nil, err
 	}
-	if d.OpenPRs, err = all[OpenPR](ctx, tx, "open_prs", openPRsSQL, p.Team, p.To, d.GitOpsRepos); err != nil {
-		return nil, err
+	d.OpenPRs, d.Runs = []OpenPR{}, []Run{}
+	if !p.Lean {
+		if d.OpenPRs, err = all[OpenPR](ctx, tx, "open_prs", openPRsSQL, p.Team, p.To, d.GitOpsRepos); err != nil {
+			return nil, err
+		}
 	}
 	if d.Deploys, err = all[Deploy](ctx, tx, "deploys", deploysSQL, p.Team, p.From, p.To); err != nil {
 		return nil, err
 	}
 	firstReleases(d.Deploys, d.Meta.DataStart.ArgoCD)
 	classDeploys(d.Deploys, d.Apps)
-	if d.Runs, err = all[Run](ctx, tx, "runs", runsSQL, p.Team, p.From, p.To, d.GitOpsRepos); err != nil {
-		return nil, err
+	if !p.Lean {
+		if d.Runs, err = all[Run](ctx, tx, "runs", runsSQL, p.Team, p.From, p.To, d.GitOpsRepos); err != nil {
+			return nil, err
+		}
 	}
 	d.Reviews = []Review{}
-	if !p.FactsOnly {
+	d.Approvals, d.Branches = sh.approvals, sh.branches
+	d.Releases = []AppRelease{}
+	if sh.trace != nil {
+		d.Releases = sh.trace.releases
+	}
+	if !p.FactsOnly && !p.Lean {
 		if d.Reviews, err = all[Review](ctx, tx, "reviews", reviewsSQL, p.Team, p.From, p.To, d.GitOpsRepos); err != nil {
 			return nil, err
 		}
@@ -815,6 +948,11 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 	}
 	for i := range d.PRs {
 		reviewed(&d.PRs[i], automated)
+		// A branch named after its ticket (KAS-12-login) is a feature's, on
+		// read: change_type is stored at ingest as "other".
+		if pr := &d.PRs[i]; pr.ChangeType != nil && *pr.ChangeType == "other" && parse.TicketBranch(pr.SourceRef) {
+			pr.ChangeType = ptr("feature")
+		}
 	}
 	for i := range d.OpenPRs {
 		reviewedOpen(&d.OpenPRs[i], automated)
@@ -1622,6 +1760,9 @@ func BranchKind(branch string) string {
 		return BranchFeature
 	case prBranch.MatchString(b):
 		return BranchPR
+	// A branch named after its ticket without a prefix (KAS-12-login).
+	case parse.TicketBranch(b):
+		return BranchFeature
 	}
 	return BranchOther
 }

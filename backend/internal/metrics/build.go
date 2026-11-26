@@ -372,10 +372,13 @@ func gitopsRun(ds *dataset.Dataset) func(dataset.Run) bool {
 }
 
 // BotRuns are runs of bots' branches, with a status: their count and CI
-// time, outliers included.
+// time, outliers included; Failed and FailedSeconds the failed ones' (the
+// page's line "Bot-Builds: x Stunden CI-Zeit, davon y in fehlgeschlagenen").
 type BotRuns struct {
-	Runs      int     `json:"runs"`
-	CISeconds float64 `json:"ci_seconds"`
+	Runs          int     `json:"runs"`
+	CISeconds     float64 `json:"ci_seconds"`
+	Failed        int     `json:"failed"`
+	FailedSeconds float64 `json:"failed_seconds"`
 }
 
 // teamRuns are the runs the build section counts: with a status, in the
@@ -391,8 +394,15 @@ func teamRuns(ds *dataset.Dataset, f filter, gitops func(dataset.Run) bool, bots
 		if r.Bot {
 			if bots != nil {
 				bots.Runs++
+				failed := verdict(r) == VerdictFailure
+				if failed {
+					bots.Failed++
+				}
 				if r.DurationS != nil && *r.DurationS > 0 {
 					bots.CISeconds += float64(*r.DurationS)
+					if failed {
+						bots.FailedSeconds += float64(*r.DurationS)
+					}
 				}
 			}
 			continue

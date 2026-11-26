@@ -404,7 +404,7 @@ because there's no clock-start to subtract from in the first place.
 | **PR size** | `lines_added`, `lines_removed`, `files_changed` on `noergler_pr_rollups` (one row per PR; a reopened PR has two `pr_completed` rows in `noergler_events`), joined to Bitbucket PRs on `pr_key` = `'<repo_full_name>#<pr_id>'`. The same columns exist on `bitbucket_events` but are always NULL: Bitbucket DC webhooks carry no diff stats, and fetching them would put an outbound REST call in the ingest path. Covers the repos noergler reviews. |
 | **Revert rate** | `COUNT(*) WHERE is_revert = true` over total commits — a free, weak Change-Failure-Rate proxy. |
 | **Hotfix rate** | `COUNT(*) WHERE change_type = 'hotfix'` over total deploys per window — operational-pain signal. |
-| **Change mix** | Distribution of `change_type` (feature / bugfix / hotfix / chore / refactor / docs / other) per team per week, over `pr:opened` / `pr:merged` rows only — a push to `master` has no prefix to classify and would swamp the distribution with `other`. Exclude GitOps repos: stage-promotion PRs carry no prefix either. |
+| **Change mix** | Distribution of `change_type` (feature / bugfix / hotfix / chore / refactor / docs / other) per team per week, over `pr:opened` / `pr:merged` rows only — a push to `master` has no prefix to classify and would swamp the distribution with `other`. Exclude GitOps repos: stage-promotion PRs carry no prefix either. A branch named after its ticket without a prefix (`KAS-12-login`, `kas-12`) is a feature, on read (stored as `other`), and its CI runs are feature builds; a dash scheme of a release line, a dependency bot or Jenkins' `PR-<n>` is not. |
 | **Tickets per deploy** | `COUNT(DISTINCT unnest(jira_keys))` per deploy — small-batch indicator. Jira keys are extracted at write time from PR title, description, branch name, and commit messages via regex `[A-Z][A-Z0-9]+-\d+`, deduplicated, GIN-indexed. |
 | **Untracked-work rate** | `COUNT(*) WHERE jira_keys = '{}'` over merged PRs outside GitOps repos — process-compliance signal. |
 | **Per-ticket flow** | `WHERE 'ABC-1234' = ANY(jira_keys)` returns every event for a ticket across Bitbucket / pipeline / Argo (joined via commit_sha). |
@@ -753,6 +753,144 @@ repos stuck at once (each fired on a single case; the open PRs and the
 build hotspots show them as numbers), and the waiting part of the lead
 time. Stage shares stay plain numbers in the flow section.
 
+#### States (rules version 3)
+
+A state is a finding that stands without a previous period: a team's own
+agreement broken, work held up now, what lasts, what the data cannot judge.
+Signal kind `state`, its card in `signal.state`. Derived from the data on
+every assessment (never from stored analyses: those give only the
+hysteresis its last units); a stored analysis shows the states it was
+assessed with, frozen like its other signals, so its words and cards agree
+(a closed period changes only by late events); judged at the period's end per
+unit, a project, a repo, an App or a bot branch, never pooled across busy and
+quiet units; summed up on one card per state: `count` of `judged` units,
+the worst three with their number (`worst`), how many more (`more`), every
+unit for the facts (`units`), since when (`since`, the earliest unit's; a
+lower bound where the data starts there), and the threshold measured
+against (`threshold`, a key of `riptide.json`'s `thresholds` block, which
+the card prints). A unit with nothing to judge (no work in the span) is
+`idle`; one without the data to judge is `unjudged`, never "ohne Befund".
+
+Eligibility, shared by every state: bots' PRs, branches and builds,
+infrastructure Apps and GitOps repos are never judged; library repos are
+work (merges, review, size, branches) but never judged for delivery; a
+source silent at the period's end judges nothing of its states (its units
+read unjudged). Look-back: at most 26 weeks before the period's end
+(`StateLookbackWeeks`); the analysis reads the weeks before the compared
+periods for it (PRs and deploys only), the approvals from 30 days before
+the period and the branches' pushes once per request.
+
+Tones and groups: `attention` red ("Hakt"); `hint` a neutral group of its
+own ("Hinweise", never red); `limit` what cannot be judged ("Nicht
+beurteilbar", no finding: it adds the quiet reason `unjudged`). A lasting
+state is a hint until a unit has held it two sprints (28 days), then red.
+Ranking (`weight`): the team's rule broken (9), held up now (7), lasting
+(5), data honesty (4); within a tier by breadth (count over judged), then
+the distance past the threshold. Layout slots: 4 red, 3 hints, 1 limit, 2
+gains, 1 resolution; the rest are "also spotted".
+
+Persistence: a unit the last assessment named keeps firing while its number
+stays at or above `hysteresis_share` (0.8) of the threshold (`held`). A
+state raised before and judged clear now is resolved, once ("gelöst"); one
+its units can no longer judge reads `unmeasurable` ("nicht mehr messbar",
+tone limit), never resolved. A notable worsening of a team number a state
+covers with a red card (deploy frequency: the release states; lead time:
+merged work before production; review time: the review waits; merged PRs
+per week: the merge pause; build success: the build states; deploy success:
+the deploy states; batch size: big PRs) is a fact on that card, not a card
+of its own; a review worsening keeps the driver repos no unit of it names.
+A hint covers nothing: a red worsening never turns into a hint.
+
+The states, their conditions and starting values (`thresholds` keys):
+
+- `no_release`: a project rolled out (an App of it released to production)
+  whose last release lies more than `release_breach_days` (28) back, red;
+  `release_due` more than `release_hint_days` (14), a hint. An App's first
+  deploy counts as a release (inside `FirstDeployGrace` a lower bound: it
+  may have run those images before). Only a project with merged work since
+  that release or within the last 28 days is judged; one nobody works on is
+  idle. A library-only project has no App and is never judged.
+- `not_on_prod`: a deployable repo's merged PRs not on production at the
+  period's end, the oldest on the trunk more than `not_on_prod_days` (14),
+  red. A PR merged into a branch that has not gone on is not on the trunk;
+  a library's never counts; a repo no deploy shows an App deploying gets
+  `untraced`, never this; an oldest PR tracing cannot place makes the repo
+  unjudged. `slow_to_prod`: its typical wait from merge to production over
+  the period's PRs that got there, on `not_on_prod_min_prs` (5).
+- `merge_pause`: a project's week whose merged PRs fell to
+  `merge_pause_share` (0.2) of its typical week (median of the
+  `merge_pause_weeks` (8) weeks before that Bitbucket covered, at least 3
+  such weeks, typical at least `merge_pause_min_typical` (3)) while
+  `merge_pause_waiting` (3) PRs approved by a person waited
+  `approved_wait_days` (1) working days or longer (to their merge or close,
+  or the read). A lost Bitbucket silence takes its working time out of the
+  week and its expectation. Held up now when it is the period's last week.
+- `approved_waiting`: a repo's PRs approved by a person (not the author)
+  waiting longer than `approved_wait_days` (1) working days for their merge
+  at the period's end, at least `approved_waiting_prs` (2). A PR whose merge
+  may lie in a lost silence after its approval is not counted. The
+  approvals are read whatever the PR's opening (one opened while events
+  were lost has none). Lasting.
+- `first_review_wait`: a repo's ready PRs waiting longer than
+  `first_review_days` (2) working days for anyone's first touch, at least
+  `first_review_waiting` (3); or its typical pickup over it on
+  `first_review_min_prs` (5) merged PRs. Lasting.
+- `deploy_failing`: an App's last production deploy in the period failed
+  (Failed or Error) and none succeeded for `deploy_failing_days` (1)
+  working day, red, held up now; `deploy_failures`:
+  `deploy_failure_streaks` (3) runs of failures each ended by a success,
+  a hint.
+- `trunk_failing`: a repo's trunk builds failed from the first failure to
+  the next success (or the period's end) for more than `trunk_failing_days`
+  (1) working day with `trunk_failed_builds` (2) failures; release builds
+  aside. Red; held up now when still failing at the end.
+- `branch_failing`: a person's feature or bugfix branch failing
+  `branch_failing_builds` (5) builds in a row over `branch_failing_days`
+  (1) working day. Never a bot's branch. A hint.
+- `flaky_builds`, `long_builds`, `release_failing` per repo and kind, never
+  across kinds: flaky builds `flaky_builds` (3) and `flaky_share` (1/3) of
+  the failed ones on `flaky_min_runs` (10); a typical successful feature or
+  trunk build over `build_minutes` (15) on `build_min_runs` (5); release
+  builds failing `release_builds_failed` (2) and `release_builds_share`
+  (0.2) on `release_builds_min` (5). Lasting.
+- `builds_silent`: a repo with `silent_builds_merges` (3) merged PRs in the
+  last `silent_builds_days` (10) working days, no build reported in them,
+  after `silent_builds_before` (10) builds in the four weeks before. Data
+  ("meldet nicht"), tone limit.
+- `big_prs` (`big_pr_share` 1/3 of the sized merged PRs over `big_pr_lines`
+  400, on `big_pr_min` 6), `fast_approval` (`fast_approval_prs` 3 big PRs
+  approved within `fast_approval_minutes` 10 of being ready, the first
+  touch), `unapproved` (`unapproved_share` 0.2 merged without a person's
+  approval, on `unapproved_min` 10), `late_decline` (`declined_prs` 3 PRs
+  declined after more than `declined_days` 10 working days, team-wide, the
+  repos named): hints until held two sprints.
+- `branch_life`: a repo's typical working days from a branch's first commit
+  to its PR being ready over `branch_life_days` (5) on `branch_life_min_prs`
+  (5) (a lower bound: a rebase resets the first commit). `branch_open`:
+  branches without a PR first pushed more than `branch_open_days` (14) ago
+  and pushed within `branch_active_days` (5) working days. `branch_silent`:
+  `branch_silent_min` (3) branches without a PR last pushed
+  `branch_silent_days` (14) to `branch_silent_max_days` (60) ago; whether
+  they still exist Bitbucket does not report (deletions are not stored).
+  Branches that are a PR's target, the trunk, release lines, a dependency
+  bot's scheme, bots' pushes, and branches whose every push's head commit
+  is a tool's (a git identity of the `.invalid` e-mail domain, the one
+  behind housekeeping commits; or one the config's automation `authors`
+  names) are out. Hints. A branch merged without a PR (its commits pushed
+  onto a target) is not recognised: it reads as one without a PR.
+- `bot_loop`: a bot branch failing `bot_loop_failures` (10) builds in a
+  row, an aborted build neither breaking nor extending it: CI time wasted,
+  a hint, never a quality finding. The build section's line is
+  `build.bot_runs` (runs, CI seconds, and of them the failed ones).
+- Data honesty (tone limit): `untraced`, a repo's merged PRs tracing cannot
+  place on production, with the main reason (`coverage`'s); `unattributed`,
+  releases to production of no project; `no_prod_stage`, Argo CD reports
+  deploys, none to the production stage.
+
+The calm line counts a repo with a state's finding (not data honesty) as
+not calm, and one a state judged clear on a sample (a typical value or a
+share on enough cases) as judgeable.
+
 The layout puts the gains and resolutions on the left ("runs") and the rest
 on the right ("stuck"), with a tally of each and of the question. Gains rank
 last, so they get slots of their own (the best 2 gains, 1 resolution) on
@@ -798,8 +936,10 @@ that instead, one sentence each:
   PRs of repos rolled out when libraries' are left out, `library`). Merged
   PRs of library repos only had nothing to trace: measurable, and said
   (`libraries_only`), no limit;
-- `findings`: a signal or the question stands out; a gain or a resolution
-  included.
+- `unjudged`: a data-honesty state (tone limit) names what could not be
+  judged; no finding;
+- `findings`: a signal or the question stands out; a gain, a hint, a state
+  or a resolution included.
 
 The repos: `active` had people's work in the period: a PR merged as merged
 work, a build of a person's branch, an open PR. A repo whose only merge was

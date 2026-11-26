@@ -62,9 +62,11 @@ func jammed(_ context.Context, team string, p metrics.Period) (*dataset.Dataset,
 	}
 	for i, days := range []int{9, 10, 12, 14} {
 		at := p.To.AddDate(0, 0, -days)
+		// Touched: reviewed once, so the jam is the one finding, no wait for
+		// a first review beside it.
 		ds.OpenPRs = append(ds.OpenPRs, dataset.OpenPR{
 			Repo: "kasse/kasse-api", Project: "kasse", PRID: int64(i + 1), OpenedAt: at, ReadyAt: &at, ReadySince: &at,
-			LastEventAt: p.To.AddDate(0, 0, -1),
+			LastEventAt: p.To.AddDate(0, 0, -1), Touched: true,
 		})
 	}
 	return ds, nil
@@ -753,8 +755,9 @@ func TestTickLoadsOnceSkipsQuiet(t *testing.T) {
 	if due(12, weekStart(now, zurich)) {
 		windows++
 	}
-	if int(loadsN.Load()) != 2*windows {
-		t.Errorf("%d dataset loads for %d due windows, want 2 each", loadsN.Load(), windows)
+	// The period, the previous one and the states' look-back before them.
+	if int(loadsN.Load()) != 3*windows {
+		t.Errorf("%d dataset loads for %d due windows, want 3 each", loadsN.Load(), windows)
 	}
 	for _, r := range st.rows {
 		if r.Product == "idle" {

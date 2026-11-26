@@ -1702,10 +1702,12 @@ components:
             `branch_prefixes`, a bot PR's PR-<n>), with a status: in no other
             build number, their count and CI time (outliers included) apart.
           additionalProperties: false
-          required: [runs, ci_seconds]
+          required: [runs, ci_seconds, failed, failed_seconds]
           properties:
             runs: { type: integer, minimum: 0 }
             ci_seconds: { type: number, minimum: 0 }
+            failed: { type: integer, minimum: 0, description: Of them the failed runs. }
+            failed_seconds: { type: number, minimum: 0, description: "Their part of `ci_seconds`." }
         data_from:
           $ref: "#/components/schemas/NullableInstant"
           description: When riptide first received a run of the team.
@@ -2578,11 +2580,13 @@ components:
                 whether nothing stands out, or nothing could be compared, is
                 the assessment's `quiet` and `quiet_reasons`.
               additionalProperties: false
-              required: [good, done, bad, talk]
+              required: [good, done, bad, hint, limit, talk]
               properties:
                 good: { type: integer, minimum: 0 }
                 done: { type: integer, minimum: 0 }
-                bad: { type: integer, minimum: 0 }
+                bad: { type: integer, minimum: 0, description: The red findings (tone attention) alone. }
+                hint: { type: integer, minimum: 0, description: "The hints, a neutral group of their own." }
+                limit: { type: integer, minimum: 0, description: "The data-honesty states: what could not be judged, no finding." }
                 talk: { type: integer, minimum: 0, maximum: 1, description: "1 when there is a question." }
         enabled: { type: boolean, description: A model is configured; the page offers to ask. }
         running: { type: boolean, description: An attempt is under way. }
@@ -2616,7 +2620,13 @@ components:
       required: [signal, column, lever]
       properties:
         signal: { type: string, description: A signal id. }
-        column: { type: string, enum: [good, bad, done] }
+        column:
+          type: string
+          enum: [good, bad, done, hint, limit]
+          description: |
+            `bad` red (tone attention), `hint` a neutral group of hints,
+            `limit` what could not be judged ("nicht beurteilbar"), `good` and
+            `done` what runs and what was resolved.
         lever: { type: string, description: "The model's lever key where it worded the card, the rules' otherwise; empty for a resolution: no next step." }
 
     Analysis:
@@ -2754,8 +2764,10 @@ components:
             after the previous period began; `source_gap` a source silent at
             the end, Bitbucket's events lost in either period, or a source
             starting inside it (`limits`); `not_measurable` see
-            `not_measurable`; `findings` a signal or the question stands out.
-          items: { type: string, enum: [no_baseline, source_gap, not_measurable, findings] }
+            `not_measurable`; `unjudged` a data-honesty state (tone `limit`)
+            names what could not be judged; `findings` a signal (tone
+            attention, hint, good) or the question stands out.
+          items: { type: string, enum: [no_baseline, source_gap, not_measurable, unjudged, findings] }
         not_measurable:
           type: [string, "null"]
           enum: [bitbucket, argocd, no_merged, no_release, to_prod, null]
@@ -2826,16 +2838,19 @@ components:
       type: object
       description: |
         A pattern the numbers raise. `id` is stable across periods. Tones:
-        `gate` silences a source, `attention` and `hint` are stuck, `good`
-        runs, `talk` is a question without a verdict.
+        `gate` silences a source, `attention` is stuck (red), `hint` a
+        hint (neutral), `limit` what the data cannot judge (a state of data
+        honesty, no finding), `good` runs, `talk` is a question without a
+        verdict. Kind `state` is a finding that stands without a previous
+        period, its card in `state`.
       additionalProperties: false
-      required: [id, kind, tone, source, repo, run_kind, metric, weight, seen, facts, waiting, drivers]
+      required: [id, kind, tone, source, repo, run_kind, metric, weight, seen, facts, waiting, drivers, state]
       properties:
         id: { type: string }
         kind:
           type: string
-          enum: [data_gap, pr_jam, slower_build, failing_more, change, agent_wait, resolved, question]
-        tone: { type: string, enum: [gate, attention, hint, good, talk] }
+          enum: [data_gap, pr_jam, slower_build, failing_more, change, agent_wait, resolved, question, state]
+        tone: { type: string, enum: [gate, attention, hint, limit, good, talk] }
         source: { type: string, enum: [bitbucket, pipeline, argocd, noergler] }
         repo: { type: [string, "null"] }
         run_kind: { type: [string, "null"] }
@@ -2873,6 +2888,106 @@ components:
           properties:
             prev: { type: array, items: { $ref: "#/components/schemas/NullableNumber" } }
             cur: { type: array, items: { $ref: "#/components/schemas/NullableNumber" } }
+        state:
+          description: A state's card (kind `state`); null for every other kind.
+          oneOf:
+            - $ref: "#/components/schemas/StateCard"
+            - type: "null"
+
+    StateCard:
+      type: object
+      description: |
+        What a state says beyond its facts: which state, over which units
+        (projects, repos, Apps, bot branches, or the team), how many of the
+        judged ones it names, the worst three with their number and the
+        rest's count, since when, and the team's threshold it measured
+        against (config `thresholds`). Judged at `at`, the period's end.
+      additionalProperties: false
+      required: [key, unit, count, judged, unjudged, idle, worst, more, units, since, since_lower_bound, threshold, at,
+                 was, facts]
+      properties:
+        key:
+          type: string
+          enum: [no_release, release_due, not_on_prod, slow_to_prod, merge_pause, approved_waiting, bot_loop, untraced,
+                 unattributed, no_prod_stage, unmeasurable, deploy_failing, deploy_failures, first_review_wait,
+                 trunk_failing, branch_failing, flaky_builds, long_builds, release_failing, builds_silent, big_prs,
+                 fast_approval, unapproved, late_decline, branch_life, branch_open, branch_silent]
+          description: |
+            `no_release` a project's last release to production lies more
+            than `release_breach_days` back; `release_due` more than
+            `release_hint_days`; `not_on_prod` a repo's merged PRs not on
+            production, the oldest past `not_on_prod_days`; `slow_to_prod`
+            its typical wait from merge to production past it;
+            `merge_pause` a project's week of hardly any merge while approved
+            PRs waited; `approved_waiting` a repo's approved PRs waiting for
+            their merge; `bot_loop` a bot branch failing builds in a row (CI
+            time, no quality finding); `untraced`, `unattributed`,
+            `no_prod_stage` what cannot be judged; `unmeasurable` a state
+            raised before that can no longer be judged (`was`);
+            `deploy_failing` an App's last production deploy failed, none
+            succeeded since; `deploy_failures` repeated runs of failed
+            deploys; `first_review_wait` ready PRs waiting for a first review;
+            `trunk_failing` a repo's trunk builds failing for long;
+            `branch_failing` a person's feature branch failing in a row;
+            `flaky_builds`, `long_builds`, `release_failing` a repo's builds
+            per kind; `builds_silent` a repo merging while its CI reports no
+            build (data, tone `limit`); `big_prs`, `fast_approval`,
+            `unapproved`, `late_decline` review and size; `branch_life`,
+            `branch_open`, `branch_silent` branches before and without a PR.
+            The unit's `names` hold a build state's kind.
+        unit: { type: string, enum: [project, repo, app, branch, team] }
+        count: { type: integer, minimum: 0, description: The units it names. }
+        judged: { type: integer, minimum: 0, description: "The units a rule could judge, `count` among them." }
+        unjudged: { type: integer, minimum: 0, description: Units without the data to judge. }
+        idle: { type: integer, minimum: 0, description: "Units with nothing to judge (no work in the span): idle, no finding." }
+        worst: { type: array, maxItems: 3, items: { $ref: "#/components/schemas/StateUnit" }, description: "The first three of `units`." }
+        more: { type: integer, minimum: 0, description: "How many units follow `worst`." }
+        units: { type: array, items: { $ref: "#/components/schemas/StateUnit" }, description: "Every unit it names, ranked: the worst first." }
+        since:
+          $ref: "#/components/schemas/NullableInstant"
+          description: The earliest of its units'.
+        since_lower_bound: { type: boolean, description: "`since` is that unit's lower bound." }
+        threshold:
+          type: object
+          additionalProperties: false
+          required: [key, value, unit, min_key, min]
+          properties:
+            key: { type: string, description: "The config key (`thresholds.<key>`); empty for a data-honesty state." }
+            value: { type: number }
+            unit: { type: string, enum: [days, working_days, count, share, minutes] }
+            min_key: { type: [string, "null"], description: "A second threshold's key, a count, where the state has one." }
+            min: { type: [integer, "null"] }
+        at: { $ref: "#/components/schemas/Instant" }
+        was: { type: [string, "null"], description: "The state an `unmeasurable` card was; null otherwise." }
+        facts: { type: string, enum: [prs, deploys, runs, ""], description: The facts table its units are rows of. }
+
+    StateUnit:
+      type: object
+      description: One unit a state names, its number in the threshold's unit and what it rests on.
+      additionalProperties: false
+      required: [name, project, value, count, of, typical, since, lower_bound, week, names, held, reason, ci_seconds]
+      properties:
+        name: { type: string, description: "A project key, a repo, an App, a bot branch as `<repo>:<branch>`; empty for the team." }
+        project: { type: [string, "null"] }
+        value: { type: number }
+        count: { type: [integer, "null"], description: "The cases it rests on: PRs, builds, waiting PRs, merges of a paused week." }
+        of: { type: [integer, "null"], description: "The base of a share (a repo's merged PRs)." }
+        typical: { $ref: "#/components/schemas/NullableNumber" }
+        since:
+          $ref: "#/components/schemas/NullableInstant"
+          description: "When it began: the last release, the oldest waiting PR, a loop's first failure, a paused week's start."
+        lower_bound: { type: boolean, description: "`since` is a lower bound: at least since then." }
+        week:
+          oneOf:
+            - $ref: "#/components/schemas/Week"
+            - type: "null"
+        names: { type: array, items: { type: string }, description: "What it holds: a project's Apps, the repos of a paused week's waiting PRs." }
+        held: { type: boolean, description: "Below the threshold now, kept while above its hysteresis share because the last assessment named it." }
+        reason:
+          type: [string, "null"]
+          enum: [no_merge_commit, release_unresolved, repo_untraced, in_silence, null]
+          description: A data-honesty unit's reason.
+        ci_seconds: { $ref: "#/components/schemas/NullableNumber" }
 
     Fact:
       type: object

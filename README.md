@@ -196,6 +196,12 @@ variable still set refuses the start.
   `<base_url>/browse/<KEY>`; unset, they are shown unlinked
 - `automation`: bot accounts nobody declares, `<name>: {authors,
   branch_prefixes}`
+- `thresholds`: the team's agreements the assessment's states measure
+  against, each optional (`release_breach_days` 28, `release_hint_days` 14,
+  `not_on_prod_days` 14, `approved_wait_days` 1, `bot_loop_failures` 10 and
+  more; the full list with starting values in
+  [docs/metrics.md](docs/metrics.md#states-rules-version-3)); an unknown
+  key refuses the config
 
 Adding a team: [docs/onboarding-a-team.md](docs/onboarding-a-team.md).
 

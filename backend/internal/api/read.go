@@ -147,6 +147,9 @@ const (
 	readFull readKind = iota
 	readFacts
 	readRunning
+	// readEarlier: PRs and deploys only, the window before the compared
+	// periods the assessment's states look back into.
+	readEarlier
 )
 
 // load reads the team's dataset from from to to, with sh, the request's
@@ -167,6 +170,7 @@ func (d Deps) load(ctx context.Context, v view, from, to time.Time, kind readKin
 		Now:        v.now,
 		FactsOnly:  kind != readFull,
 		CountsOnly: kind == readRunning,
+		Lean:       kind == readEarlier,
 		Shared:     sh,
 		ClassAt:    classAt,
 	})
@@ -176,8 +180,11 @@ func (d Deps) load(ctx context.Context, v view, from, to time.Time, kind readKin
 // end classes them all (ClassAt), with the reads they share done once; the
 // running week, when given, classed by its own end. Side by side; the first
 // to fail cancels the others, and its error, not the cancellation, is
-// returned.
-func (d Deps) periods(ctx context.Context, v view, ps []metrics.Period, running *metrics.Period) ([]*dataset.Dataset, *dataset.Dataset, error) {
+// returned. states: the assessment's read, whose shared read takes the
+// approvals and whose periods past the second are the look-back of its
+// states (readEarlier).
+func (d Deps) periods(ctx context.Context, v view, ps []metrics.Period, running *metrics.Period,
+	states bool) ([]*dataset.Dataset, *dataset.Dataset, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	ends := []time.Time{ps[0].To}
@@ -190,8 +197,10 @@ func (d Deps) periods(ctx context.Context, v view, ps []metrics.Period, running 
 			from = p.From
 		}
 	}
+	// The approvals from the period's start: the states judge its weeks; the
+	// look-back reads merged PRs only.
 	sh, err := d.Reader.Shared(ctx, dataset.SharedParams{Team: v.team, From: from, ClassEnds: ends, Now: v.now, Libraries: true,
-		Trace: true})
+		Trace: true, States: states, ApprovalsFrom: ps[0].From, Automated: v.cfg.AutomatedAtRead})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -200,8 +209,12 @@ func (d Deps) periods(ctx context.Context, v view, ps []metrics.Period, running 
 	var run *dataset.Dataset
 	var wg sync.WaitGroup
 	for i, p := range ps {
+		kind := readFull
+		if states && i >= 2 {
+			kind = readEarlier
+		}
 		wg.Go(func() {
-			if out[i], errs[i] = d.load(ctx, v, p.From, p.To, readFull, sh, ps[0].To); errs[i] != nil {
+			if out[i], errs[i] = d.load(ctx, v, p.From, p.To, kind, sh, ps[0].To); errs[i] != nil {
 				cancel()
 			}
 		})
@@ -271,7 +284,8 @@ func (d Deps) metrics(w http.ResponseWriter, r *http.Request) {
 	// now (open PRs as they are, its counts): three reads side by side, the
 	// reads they share done once before. Not one longer read: lead times and
 	// costs take the dataset's bounds as their window.
-	ds, running, err := d.periods(r.Context(), v, []metrics.Period{v.params.Period, v.params.Previous}, &v.params.Running)
+	ds, running, err := d.periods(r.Context(), v, []metrics.Period{v.params.Period, v.params.Previous}, &v.params.Running,
+		false)
 	if err != nil {
 		d.failed(w, r, v.team, err)
 		return
