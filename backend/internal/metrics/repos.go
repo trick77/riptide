@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"cmp"
+	"math"
 	"slices"
 	"time"
 
@@ -20,16 +21,21 @@ import (
 // datasets, tracing's releases, the build section's runs per repo.
 
 // Repo groups (RepoRow.Group), in the ranking's order: what stands out first.
+// The release rule is per project (releaseStates): a repo worked on stands
+// where its project stands, never apart from the state's card. A repo its
+// project's last release left unchanged, its merged work waiting, is
+// StateNotOnProd's (RepoRow.Flags), not a missed release.
 const (
-	// RepoGroupNone: rolled out, and nothing released for more than
-	// ReleaseBreachDays while people worked on it (the sprint rule broken).
+	// RepoGroupNone: its project's last release more than ReleaseBreachDays
+	// back while people worked on it (StateNoRelease fires for the project).
 	RepoGroupNone = "none"
-	// RepoGroupRare: its last release more than ReleaseHintDays back.
+	// RepoGroupRare: its project's last release more than ReleaseHintDays
+	// back (StateReleaseDue).
 	RepoGroupRare = "rare"
 	// RepoGroupUnjudged: worked on, but whether it was rolled out cannot be
 	// told (RepoRow.Reason says why): never counted as regular.
 	RepoGroupUnjudged = "unjudged"
-	// RepoGroupRegular: released within ReleaseHintDays.
+	// RepoGroupRegular: its project released within ReleaseHintDays.
 	RepoGroupRegular = "regular"
 	// RepoGroupLibrary: a library (dataset.PR.Library): work, never rolled
 	// out, so never judged for its releases.
@@ -54,6 +60,29 @@ const (
 	// RepoReasonUntraced: no deploy ever showed an App deploys it
 	// (TraceRepoUntraced): where its work went nobody can tell.
 	RepoReasonUntraced = "untraced"
+	// RepoReasonArgoSilent and RepoReasonBitbucketSilent: the source has
+	// been silent SilentDays or more at the period's end (silentEnd), the
+	// assessment's gate: a dead webhook reads as no release, or as nobody
+	// working.
+	RepoReasonArgoSilent      = "argocd_silent"
+	RepoReasonBitbucketSilent = "bitbucket_silent"
+	// RepoReasonNoProdStage: Argo CD reports deploys, none to the production
+	// stage (StateNoProdStage).
+	RepoReasonNoProdStage = "no_prod_stage"
+	// RepoReasonNeverReleased: no App of its project released to production
+	// as far as the data goes: the release rule judges a project rolled out
+	// only. Its merged work waiting is StateNotOnProd's.
+	RepoReasonNeverReleased = "never_released"
+)
+
+// How a row writes its releases (RepoRow.ReleasesForm).
+const (
+	// ReleasesFormNone: nothing released in the period.
+	ReleasesFormNone = "none"
+	// ReleasesFormPerWeek: one release a week or more: the rate.
+	ReleasesFormPerWeek = "per_week"
+	// ReleasesFormInWeeks: fewer: the count over RepoRow.ReleasesBase weeks.
+	ReleasesFormInWeeks = "in_weeks"
 )
 
 // How the ranking opens and when a spread is worth a word.
@@ -143,9 +172,11 @@ type RepoView struct {
 	// past Open, which the closed ranking names in one line per group.
 	Groups []RepoGroup `json:"groups"`
 	// HintDays and BreachDays are the team's thresholds the groups were cut
-	// by (release_hint_days, release_breach_days).
+	// by (release_hint_days, release_breach_days); RareFrom is the fewest
+	// whole days RepoGroupRare holds, the day after HintDays.
 	HintDays   int `json:"hint_days"`
 	BreachDays int `json:"breach_days"`
+	RareFrom   int `json:"rare_from"`
 	// Spreads are one strip per number: releases, to_prod, merged, batch,
 	// pickup, then per build kind its duration and success.
 	Spreads []RepoSpread `json:"spreads"`
@@ -162,10 +193,12 @@ type RepoGroup struct {
 	More        int      `json:"more"`
 }
 
-// RepoFlag is a threshold a repo's number is past, a state's key: the
-// release rule (StateNoRelease, StateReleaseDue), production
-// (StateSlowToProd), the first review (StateFirstReviewWait). Tone is the
-// dot's verdict, DotBreach or DotHint.
+// RepoFlag is a threshold a repo's number is past, a state's key: its
+// project's release rule (StateNoRelease, StateReleaseDue), production
+// (StateNotOnProd: the oldest merged PR not on production, in days;
+// StateSlowToProd), the first review (StateFirstReviewWait). Tone is the
+// dot's verdict, DotBreach or DotHint. A source the assessment gates
+// (silentEnd) flags nothing.
 type RepoFlag struct {
 	Key   string  `json:"key"`
 	Tone  string  `json:"tone"`
@@ -174,8 +207,8 @@ type RepoFlag struct {
 
 // RepoRow is one repo's numbers over the period. A previous period's value
 // (ReleasesPrev, ToProdPrev, MergedPrev, BatchPrev) is null where its
-// sources did not see the previous period whole, as the comparison holds
-// (ReasonIncomplete).
+// sources did not see the previous period whole, or Bitbucket lost events in
+// either period, as the comparison holds.
 type RepoRow struct {
 	Repo    string `json:"repo"`
 	Project string `json:"project"`
@@ -183,26 +216,32 @@ type RepoRow struct {
 	// Reason is why its releases cannot be judged (RepoReason*); null
 	// outside RepoGroupUnjudged.
 	Reason *string `json:"reason"`
-	// LastRelease is its last release to production before the period's
-	// end: a release of an App that deploys it that tracing does not show
-	// leaving it unchanged (dataset.TraceRelease.Unchanged), read as tracing
-	// knew it then. Null without one. DaysSince is the whole days from it to
-	// the period's end; without a release, from Argo CD's first report
-	// (SinceLowerBound: at least that long).
+	// LastRelease is its project's last release to production before the
+	// period's end (lastReleases), what the release rule judges; DaysSince
+	// the whole days from it to the period's end, SinceLowerBound: an App's
+	// first deploy inside FirstDeployGrace, at least that long. Null for a
+	// library and an unjudged repo.
 	LastRelease     *time.Time `json:"last_release"`
 	DaysSince       *float64   `json:"days_since"`
 	SinceLowerBound bool       `json:"since_lower_bound"`
-	// Releases are such releases in the period, each GitOps revision once,
-	// an App's first deploy within FirstDeployGrace of Argo CD's first event
-	// none (DeployFrequency counts it a first deploy);
-	// ReleasesPerWeek over the period's weeks Argo CD reported, null under a
-	// week; ReleasesPrev the previous period's per week.
+	// Releases are the period's releases of the Apps that deploy it that
+	// tracing does not show leaving it unchanged
+	// (dataset.TraceRelease.Unchanged), read as tracing knew them by the
+	// period's end, each GitOps revision once at its first instant, an App's
+	// first deploy within FirstDeployGrace of Argo CD's first event none
+	// (DeployFrequency counts it a first deploy); ReleasesPerWeek over the
+	// period's weeks Argo CD reported (ReleasesBase, rounded, at least 1),
+	// null under a week; ReleasesPrev the previous period's per week.
+	// ReleasesForm is how the row writes them (ReleasesForm*), null where it
+	// writes none: a library, or a repo whose releases cannot be read.
 	Releases        int      `json:"releases"`
 	ReleasesPerWeek *float64 `json:"releases_per_week"`
 	ReleasesPrev    *float64 `json:"releases_prev"`
+	ReleasesBase    int      `json:"releases_base"`
+	ReleasesForm    *string  `json:"releases_form"`
 	// ReleaseWeeks are its releases per week of the previous period and the
 	// period (Trends.Weeks without the running week); null where Argo CD
-	// had not reported.
+	// had not reported or was silent for good (GapSilent).
 	ReleaseWeeks []*int `json:"release_weeks"`
 	// ToProd is the typical days its merged PRs of the period waited from
 	// the trunk to production (typicalToProd, as StateSlowToProd judges
@@ -335,14 +374,14 @@ type repoAcc struct {
 	library bool
 	// work are its counted merges outside libraries, both periods: whether
 	// anyone works on it.
-	work               []time.Time
-	waits, prevWaits   []float64
-	sizes, prevSizes   []float64
-	pickups            []float64
-	prevMerged         int
-	releases, prevRels map[string]bool
-	weeks              map[int]map[string]bool
-	mergedWeek         []int
+	work             []time.Time
+	waits, prevWaits []float64
+	sizes, prevSizes []float64
+	pickups          []float64
+	prevMerged       int
+	// wait are its merged PRs of both periods as placed at the period's end.
+	wait       prodWait
+	mergedWeek []int
 }
 
 // trendWeekIndex is the index of the week t falls in among weeks, -1
@@ -356,13 +395,18 @@ func trendWeekIndex(weeks []Week, t time.Time) int {
 	return -1
 }
 
-// perWeek is n over the weeks of p since start (a source's first data)
-// when that is a week or more; null otherwise.
-func perWeek(n int, p Period, start *time.Time) *float64 {
-	span := p.Span
+// weeksSince are the weeks of p since start (a source's first data).
+func weeksSince(p Period, start *time.Time) float64 {
 	if start != nil && start.After(p.From) {
-		span = float64(p.To.Sub(*start)) / float64(7*24*time.Hour)
+		return float64(p.To.Sub(*start)) / float64(7*24*time.Hour)
 	}
+	return p.Span
+}
+
+// perWeek is n over the weeks of p since start (weeksSince) when that is a
+// week or more; null otherwise.
+func perWeek(n int, p Period, start *time.Time) *float64 {
+	span := weeksSince(p, start)
 	if start == nil || span < 1 {
 		return nil
 	}
@@ -404,12 +448,28 @@ func repoView(ds, prev *dataset.Dataset, m, pm Metrics, p Params, f filter) Repo
 			firstSeen[releaseKey(r.App, r.Environment, r.At)] = true
 		}
 	}
+	// The assessment's gates: a source silent SilentDays at the period's end
+	// judges nothing (gapSignals), read off the period's own latest events
+	// (the page's meta holds the running week's by now).
+	gated := map[string]bool{
+		dataset.SourceBitbucket: silentEnd(ds.Meta.DataEnd.Bitbucket, end),
+		dataset.SourceArgoCD:    silentEnd(ds.Meta.DataEnd.ArgoCD, end),
+		dataset.SourcePipeline:  silentEnd(ds.Meta.DataEnd.Pipeline, end),
+	}
+	// Argo CD reports deploys but none to the production stage
+	// (StateNoProdStage): no release to judge.
+	noProd := len(ds.Releases) > 0 &&
+		!slices.ContainsFunc(ds.Releases, func(r dataset.AppRelease) bool { return r.Environment == prod })
+	projects := lastReleases(ds, f, end)
+	// Where a PR stands on production at the period's end, by both periods'
+	// traces, as the states place it.
+	view := *ds
+	view.Traces = traces
 	by := map[string]*repoAcc{}
 	get := func(pr dataset.PR) *repoAcc {
 		r := by[pr.Repo]
 		if r == nil {
 			r = &repoAcc{row: RepoRow{Repo: pr.Repo, Project: pr.Project, Flags: []RepoFlag{}},
-				releases: map[string]bool{}, prevRels: map[string]bool{}, weeks: map[int]map[string]bool{},
 				mergedWeek: make([]int, len(weeks))}
 			by[pr.Repo] = r
 		}
@@ -450,6 +510,7 @@ func repoView(ds, prev *dataset.Dataset, m, pm Metrics, p Params, f filter) Repo
 			if !toProdCandidate(pr, traces, infra) {
 				continue
 			}
+			r.wait.add(pr, prodPlacement(&view, pr, end))
 			if e := firstDeployBefore(pr, prod, cutoff); e != nil {
 				if cur {
 					r.waits = append(r.waits, toProdDays(pr, e.FirstDeployedAt))
@@ -465,29 +526,35 @@ func repoView(ds, prev *dataset.Dataset, m, pm Metrics, p Params, f filter) Repo
 	}
 	argo, bitbucket := ds.Meta.DataStart.ArgoCD, ds.Meta.DataStart.Bitbucket
 	// A previous value only over a previous period its sources saw whole,
-	// as the comparison holds (ReasonIncomplete): a part of it reads low.
+	// as the comparison holds (ReasonStarted): a part of it reads low. Nor
+	// over Bitbucket's lost events in either period (ReasonLost), which its
+	// counts read low by; in a product view the releases too, which reach a
+	// product through Bitbucket's commits.
 	whole := func(starts ...*time.Time) bool {
 		return !slices.ContainsFunc(starts, func(s *time.Time) bool { return s == nil || s.After(p.Previous.From) })
 	}
-	prevRel, prevMerged := whole(argo), whole(bitbucket)
-	prevBatch, prevProd := whole(bitbucket, ds.Meta.DataStart.Noergler), whole(argo, bitbucket)
+	lostAny := lostEvents(ds, prev)
+	lostProduct := lostAny && f.product != ""
+	prevRel, prevMerged := whole(argo) && !lostProduct, whole(bitbucket) && !lostAny
+	prevBatch := whole(bitbucket, ds.Meta.DataStart.Noergler) && !lostAny
+	prevProd := whole(argo, bitbucket) && !lostProduct
 	lost := lostOf(ds, prev)
+	argoStop, bitbucketStop := stoppedAt(ds.Meta.DataEnd.ArgoCD, end), stoppedAt(ds.Meta.DataEnd.Bitbucket, end)
 	recent := end.AddDate(0, 0, -th.ReleaseBreachDays)
+	limit := float64(th.NotOnProdDays)
 	out := RepoView{Rows: []RepoRow{}, Groups: []RepoGroup{}, HintDays: th.ReleaseHintDays,
-		BreachDays: th.ReleaseBreachDays}
+		BreachDays: th.ReleaseBreachDays, RareFrom: th.ReleaseHintDays + 1}
 	for _, r := range by {
 		row := &r.row
 		row.NotYet = notYet[row.Repo]
 		// Releases that may have shipped it, as tracing knew them by the
-		// period's end.
-		var last *time.Time
+		// period's end: each revision at its first instant, so one rolled out
+		// to several Apps counts once, in one week, as the team's frequency.
 		rt := traces[row.Repo]
+		firsts := map[string]time.Time{}
 		for _, rel := range rt.Releases {
 			if rel.Environment != prod || rel.Unchanged || !rel.At.Before(end) || !rel.Known.Before(end) {
 				continue
-			}
-			if last == nil || rel.At.After(*last) {
-				last = ptr(rel.At)
 			}
 			key := releaseKey(rel.App, rel.Environment, rel.At)
 			if firstSeen[key] {
@@ -497,38 +564,34 @@ func repoView(ds, prev *dataset.Dataset, m, pm Metrics, p Params, f filter) Repo
 			if rev == "" {
 				rev = rel.At.UTC().Format(time.RFC3339Nano)
 			}
+			if at, ok := firsts[rev]; !ok || rel.At.Before(at) {
+				firsts[rev] = rel.At
+			}
+		}
+		prevRels, weekRels := 0, make([]int, len(weeks))
+		for _, at := range firsts {
 			switch {
-			case p.Period.In(&rel.At):
-				r.releases[rev] = true
-			case p.Previous.In(&rel.At):
-				r.prevRels[rev] = true
+			case p.Period.In(&at):
+				row.Releases++
+			case p.Previous.In(&at):
+				prevRels++
 			}
-			if w := trendWeekIndex(weeks, rel.At); w >= 0 {
-				if r.weeks[w] == nil {
-					r.weeks[w] = map[string]bool{}
-				}
-				r.weeks[w][rev] = true
+			if w := trendWeekIndex(weeks, at); w >= 0 {
+				weekRels[w]++
 			}
 		}
-		row.LastRelease = last
-		switch {
-		case last != nil:
-			row.DaysSince = ptr(calendarDays(*last, end))
-		case argo != nil && argo.Before(end):
-			row.DaysSince, row.SinceLowerBound = ptr(calendarDays(*argo, end)), true
-		}
-		row.Releases = len(r.releases)
 		row.ReleasesPerWeek = perWeek(row.Releases, p.Period, argo)
+		row.ReleasesBase = max(1, int(math.Round(weeksSince(p.Period, argo))))
 		if prevRel {
-			row.ReleasesPrev = perWeek(len(r.prevRels), p.Previous, argo)
+			row.ReleasesPrev = perWeek(prevRels, p.Previous, argo)
 		}
 		row.ReleaseWeeks = make([]*int, len(weeks))
 		row.MergedWeeks = make([]*int, len(weeks))
 		for i, w := range weeks {
-			if weekGap(w.Start, w.End, argo, nil, loc) == "" {
-				row.ReleaseWeeks[i] = ptr(len(r.weeks[i]))
+			if weekGap(w.Start, w.End, argo, argoStop, nil, loc) == "" {
+				row.ReleaseWeeks[i] = ptr(weekRels[i])
 			}
-			if weekGap(w.Start, w.End, bitbucket, lost, loc) == "" {
+			if weekGap(w.Start, w.End, bitbucket, bitbucketStop, lost, loc) == "" {
 				row.MergedWeeks[i] = ptr(r.mergedWeek[i])
 			}
 		}
@@ -543,10 +606,17 @@ func repoView(ds, prev *dataset.Dataset, m, pm Metrics, p Params, f filter) Repo
 		if len(r.prevSizes) >= RepoMinCases && prevBatch {
 			row.BatchPrev = Median(r.prevSizes)
 		}
+		// Its merged work not on production (StateNotOnProd), the oldest past
+		// the agreement: a repo its project's release left unchanged waits
+		// here, not under a missed release.
+		if r.wait.status(end, limit) == unitFires && !gated[dataset.SourceArgoCD] {
+			row.Flags = append(row.Flags, RepoFlag{Key: StateNotOnProd, Tone: DotBreach,
+				Value: calendarDays(*r.wait.oldest, end)})
+		}
 		row.ToProdN = len(r.waits)
 		if v, judged, fires := typicalToProd(r.waits, th); judged {
 			row.ToProd = ptr(v)
-			if fires {
+			if fires && !gated[dataset.SourceArgoCD] {
 				row.Flags = append(row.Flags, RepoFlag{Key: StateSlowToProd, Tone: DotBreach, Value: v})
 			}
 		}
@@ -556,39 +626,65 @@ func repoView(ds, prev *dataset.Dataset, m, pm Metrics, p Params, f filter) Repo
 		row.PickupN = len(r.pickups)
 		if v, judged, fires := typicalPickup(r.pickups, th); judged {
 			row.Pickup = ptr(v)
-			if fires {
+			if fires && !gated[dataset.SourceBitbucket] {
 				row.Flags = append(row.Flags, RepoFlag{Key: StateFirstReviewWait, Tone: DotHint, Value: v})
 			}
 		}
-		// Anyone working on it: work since its last release, or within the
-		// breach span, as the release rule counts a project active.
+		// Anyone working on it: work since its project's last release (any,
+		// without one), or within the breach span, as the release rule counts
+		// a project active.
+		pl, released := projects[row.Project]
 		active := slices.ContainsFunc(r.work, func(t time.Time) bool {
-			return t.Before(end) && ((last != nil && t.After(*last)) || !t.Before(recent))
+			return t.Before(end) && (!released || t.After(pl.release.At) || !t.Before(recent))
 		})
+		unjudged := func(reason string) { row.Group, row.Reason = RepoGroupUnjudged, ptr(reason) }
 		switch {
 		case r.library:
 			// Never rolled out: no release to be late with.
-			row.Group, row.DaysSince, row.SinceLowerBound = RepoGroupLibrary, nil, false
+			row.Group = RepoGroupLibrary
 		case !active:
 			row.Group = RepoGroupIdle
 		case argo == nil || !argo.Before(end):
-			row.Group, row.Reason = RepoGroupUnjudged, ptr(RepoReasonNotReporting)
+			unjudged(RepoReasonNotReporting)
+		case gated[dataset.SourceArgoCD]:
+			unjudged(RepoReasonArgoSilent)
+		case noProd:
+			unjudged(RepoReasonNoProdStage)
 		case infra[row.Repo]:
-			row.Group, row.Reason = RepoGroupUnjudged, ptr(RepoReasonInfra)
+			unjudged(RepoReasonInfra)
 		case rt.DeployedSince == nil || !rt.DeployedSince.Before(end):
 			// No App known to deploy it: no release of its to count either.
-			row.Group, row.Reason, row.DaysSince, row.SinceLowerBound = RepoGroupUnjudged, ptr(RepoReasonUntraced), nil, false
+			unjudged(RepoReasonUntraced)
+		case !released:
+			unjudged(RepoReasonNeverReleased)
+		case gated[dataset.SourceBitbucket]:
+			// Whether anyone worked on it is Bitbucket's to tell.
+			unjudged(RepoReasonBitbucketSilent)
 		default:
-			switch releaseStanding(*row.DaysSince, th) {
+			days := calendarDays(pl.release.At, end)
+			switch releaseStanding(days, th) {
 			case releaseBreach:
 				row.Group = RepoGroupNone
-				row.Flags = append([]RepoFlag{{Key: StateNoRelease, Tone: DotBreach, Value: *row.DaysSince}}, row.Flags...)
+				row.Flags = append([]RepoFlag{{Key: StateNoRelease, Tone: DotBreach, Value: days}}, row.Flags...)
 			case releaseDue:
 				row.Group = RepoGroupRare
-				row.Flags = append([]RepoFlag{{Key: StateReleaseDue, Tone: DotHint, Value: *row.DaysSince}}, row.Flags...)
+				row.Flags = append([]RepoFlag{{Key: StateReleaseDue, Tone: DotHint, Value: days}}, row.Flags...)
 			default:
 				row.Group = RepoGroupRegular
 			}
+		}
+		// The project's last release where the rule reads it: a row in a
+		// group it decides, or nobody working on it.
+		if released && (row.Group == RepoGroupIdle || slices.Contains([]string{RepoGroupNone, RepoGroupRare,
+			RepoGroupRegular}, row.Group)) {
+			row.LastRelease = ptr(pl.release.At)
+			row.DaysSince, row.SinceLowerBound = ptr(calendarDays(pl.release.At, end)), pl.lower
+		}
+		// Its releases read as counted: Argo CD reporting the production stage,
+		// an App known to deploy it.
+		if !r.library && argo != nil && argo.Before(end) && !gated[dataset.SourceArgoCD] && !noProd &&
+			rt.DeployedSince != nil && rt.DeployedSince.Before(end) {
+			row.ReleasesForm = releasesForm(*row)
 		}
 		out.Rows = append(out.Rows, *row)
 	}
@@ -618,8 +714,20 @@ func repoView(ds, prev *dataset.Dataset, m, pm Metrics, p Params, f filter) Repo
 			out.Groups = append(out.Groups, grp)
 		}
 	}
-	out.Spreads = repoSpreads(out.Rows, m, th)
+	out.Spreads = repoSpreads(out.Rows, m, th, gated)
 	return out
+}
+
+// releasesForm is how a row whose releases read as counted writes them: none
+// in the period, the rate from one a week, else the count over its weeks.
+func releasesForm(r RepoRow) *string {
+	switch {
+	case r.Releases == 0:
+		return ptr(ReleasesFormNone)
+	case r.ReleasesPerWeek != nil && *r.ReleasesPerWeek >= 1:
+		return ptr(ReleasesFormPerWeek)
+	}
+	return ptr(ReleasesFormInWeeks)
 }
 
 // releaseKey names a deploy of an App to an environment at an instant.
@@ -665,8 +773,15 @@ type spreadDot struct {
 }
 
 // repoSpreads are the strips of the rows and of the build section's repos
-// per kind (KindHotspots.all, as the build states read them).
-func repoSpreads(rows []RepoRow, m Metrics, th config.Thresholds) []RepoSpread {
+// per kind (KindHotspots.all, as the build states read them). A source the
+// assessment gates (gated) judges no dot: its values stand, neutral.
+func repoSpreads(rows []RepoRow, m Metrics, th config.Thresholds, gated map[string]bool) []RepoSpread {
+	judge := func(source, verdict string) string {
+		if gated[source] && verdict != DotThin {
+			return DotNeutral
+		}
+		return verdict
+	}
 	var rel, prod, merged, batch, pickup []spreadDot
 	for _, r := range rows {
 		dot := func(v *float64, n int, verdict string) spreadDot {
@@ -695,11 +810,12 @@ func repoSpreads(rows []RepoRow, m Metrics, th config.Thresholds) []RepoSpread {
 			if *r.ToProd > float64(th.NotOnProdDays) {
 				verdict = DotBreach
 			}
-			prod = append(prod, dot(r.ToProd, r.ToProdN, verdict))
+			prod = append(prod, dot(r.ToProd, r.ToProdN, judge(dataset.SourceArgoCD, verdict)))
 		case r.ToProdN > 0:
 			prod = append(prod, dot(nil, r.ToProdN, DotThin))
-		case r.Group == RepoGroupNone:
-			// Nothing on production: its work lies there, no wait ended.
+		case r.Group == RepoGroupNone && r.Merged > 0:
+			// Merged, nothing on production: its work lies there, no wait
+			// ended.
 			d := dot(nil, 0, DotBreach)
 			d.apart = true
 			prod = append(prod, d)
@@ -722,7 +838,7 @@ func repoSpreads(rows []RepoRow, m Metrics, th config.Thresholds) []RepoSpread {
 					verdict = DotHint
 				}
 			}
-			pickup = append(pickup, dot(r.Pickup, r.PickupN, verdict))
+			pickup = append(pickup, dot(r.Pickup, r.PickupN, judge(dataset.SourceBitbucket, verdict)))
 		}
 	}
 	freq, tp := m.Delivery.Frequency, m.Throughput
@@ -731,13 +847,13 @@ func repoSpreads(rows []RepoRow, m Metrics, th config.Thresholds) []RepoSpread {
 		freqTeam = ptr(freq.PerWeek)
 	}
 	out := []RepoSpread{
-		newSpread(SpreadReleases, nil, UnitPerWeek, true, rel, nil, freqTeam, true),
+		newSpread(SpreadReleases, nil, UnitPerWeek, true, rel, nil, freqTeam, freq.Releases),
 		newSpread(SpreadToProd, nil, UnitDays, false, prod,
-			&StripMark{Key: "not_on_prod_days", Value: float64(th.NotOnProdDays)}, nil, false),
-		newSpread(SpreadMerged, nil, UnitPerWeek, true, merged, nil, tp.MergedPerWeek, true),
-		newSpread(SpreadBatch, nil, UnitLines, false, batch, nil, tp.BatchSize.P50, false),
+			&StripMark{Key: "not_on_prod_days", Value: float64(th.NotOnProdDays)}, nil, 0),
+		newSpread(SpreadMerged, nil, UnitPerWeek, true, merged, nil, tp.MergedPerWeek, tp.Merged),
+		newSpread(SpreadBatch, nil, UnitLines, false, batch, nil, tp.BatchSize.P50, 0),
 		newSpread(SpreadPickup, nil, UnitWorkingDays, false, pickup,
-			&StripMark{Key: "first_review_days", Value: th.FirstReviewDays}, nil, false),
+			&StripMark{Key: "first_review_days", Value: th.FirstReviewDays}, nil, 0),
 	}
 	for _, k := range m.Build.Hotspots.Kinds {
 		var dur, succ []spreadDot
@@ -746,11 +862,13 @@ func repoSpreads(rows []RepoRow, m Metrics, th config.Thresholds) []RepoSpread {
 				return spreadDot{repo: h.Repo, project: projectOf(h.Repo), value: v, n: n, verdict: verdict}
 			}
 			if h.Duration.P50 != nil {
-				verdict := DotThin
+				verdict, value := DotThin, h.Duration.P50
 				switch {
 				case k.Kind == KindFeature || k.Kind == KindMain:
-					if _, judged, fires := longBuild(h, th); judged {
-						verdict = DotWithin
+					if minutes, judged, fires := longBuild(h, th); judged {
+						// Drawn at the minutes it is judged on: 902 s judged as
+						// 15.0 min sits on the 15-minute mark, not past it.
+						verdict, value = DotWithin, ptr(minutes*60)
 						if fires {
 							verdict = DotHint
 						}
@@ -758,7 +876,7 @@ func repoSpreads(rows []RepoRow, m Metrics, th config.Thresholds) []RepoSpread {
 				case h.Duration.N >= th.BuildMinRuns:
 					verdict = DotNeutral
 				}
-				dur = append(dur, dot(h.Duration.P50, h.Duration.N, verdict))
+				dur = append(dur, dot(value, h.Duration.N, judge(dataset.SourcePipeline, verdict)))
 			}
 			if h.FailureRate != nil {
 				verdict := DotThin
@@ -773,7 +891,7 @@ func repoSpreads(rows []RepoRow, m Metrics, th config.Thresholds) []RepoSpread {
 				case h.Runs >= HotspotMinRuns:
 					verdict = DotNeutral
 				}
-				succ = append(succ, dot(ptr(1-*h.FailureRate), h.Runs, verdict))
+				succ = append(succ, dot(ptr(1-*h.FailureRate), h.Runs, judge(dataset.SourcePipeline, verdict)))
 			}
 		}
 		var durMark, succMark *StripMark
@@ -788,18 +906,19 @@ func repoSpreads(rows []RepoRow, m Metrics, th config.Thresholds) []RepoSpread {
 			success = ptr(1 - *k.FailureRate)
 		}
 		out = append(out,
-			newSpread(SpreadBuildDuration, ptr(k.Kind), UnitSeconds, false, dur, durMark, k.Duration.P50, false),
-			newSpread(SpreadBuildSuccess, ptr(k.Kind), UnitShare, true, succ, succMark, success, false))
+			newSpread(SpreadBuildDuration, ptr(k.Kind), UnitSeconds, false, dur, durMark, k.Duration.P50, 0),
+			newSpread(SpreadBuildSuccess, ptr(k.Kind), UnitShare, true, succ, succMark, success, 0))
 	}
 	return out
 }
 
 // newSpread is the strip of dots: sorted the better end first, positioned
 // on a scale fitted to them and the mark, the typical repo among the
-// judged ones, and the note on the spread; additive: the values add up to
-// the team's count (releases, merged PRs), so one repo can dominate it.
+// judged ones, and the note on the spread; total is the team's count the
+// repos' counts add up to (releases, merged PRs), so one repo can dominate
+// it, 0 for a number no count adds up to.
 func newSpread(key string, kind *string, unit string, higher bool, dots []spreadDot, mark *StripMark,
-	team *float64, additive bool) RepoSpread {
+	team *float64, total int) RepoSpread {
 	out := RepoSpread{Key: key, Kind: kind, Unit: unit, HigherBetter: higher, Dots: []RepoDot{}, Team: team}
 	// A repo with too few cases is counted, never placed: a dot would read
 	// as a value like any other.
@@ -870,7 +989,7 @@ func newSpread(key string, kind *string, unit string, higher bool, dots []spread
 	if len(distinct) == 1 && len(values) >= 2 {
 		out.Same = ptr(values[0])
 	}
-	out.Note = spreadNote(dots, out.Typical, team, additive)
+	out.Note = spreadNote(dots, out.Typical, team, total)
 	return out
 }
 
@@ -882,10 +1001,12 @@ func boolInt(b bool) int {
 }
 
 // spreadNote is what the team's number (team) hides, if anything: one repo
-// carrying SpreadDominantShare of an additive count, else repos far from
-// the typical one, else the team's number itself far from it. Nil with
-// fewer than SpreadMinRepos judged repos, or nothing to say.
-func spreadNote(dots []spreadDot, typical, team *float64, additive bool) *SpreadNote {
+// carrying SpreadDominantShare of the team's count total (an additive one,
+// 0: none), else repos far from the typical one, else the team's number
+// itself far from it. Nil with fewer than SpreadMinRepos judged repos, or
+// nothing to say. The share is of the team's own count: a release shipping
+// two repos counts once there, a library's merged PRs count too.
+func spreadNote(dots []spreadDot, typical, team *float64, total int) *SpreadNote {
 	var vals []spreadDot
 	for _, d := range dots {
 		if d.value != nil && !d.apart && d.verdict != DotThin {
@@ -895,20 +1016,15 @@ func spreadNote(dots []spreadDot, typical, team *float64, additive bool) *Spread
 	if len(vals) < SpreadMinRepos || typical == nil {
 		return nil
 	}
+	additive := total > 0
 	if additive {
-		sum, top := 0, vals[0]
+		top := vals[0]
 		for _, d := range vals {
-			sum += d.n
 			if d.n > top.n {
 				top = d
 			}
 		}
-		for _, d := range dots {
-			if d.apart {
-				sum += d.n
-			}
-		}
-		if share := float64(top.n) / float64(max(sum, 1)); sum > 0 && share >= SpreadDominantShare {
+		if share := min(1, float64(top.n)/float64(total)); share >= SpreadDominantShare {
 			return &SpreadNote{Kind: NoteDominant, Repo: ptr(top.repo), Share: ptr(share), Of: len(vals),
 				Additive: true}
 		}

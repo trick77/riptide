@@ -7,6 +7,21 @@ repository.
 Real account handles, hostnames and tokens belong in the mounted
 `riptide.json` / team-keys Secret, never in this file: the repository is public.
 
+## 2026-11-26 — the page's words, numbers per repo
+
+**Rules version 4**: the state titles, the words and the levers the model
+is told changed (Default-Branch, Projekt, Library, Rollout). Analyses stored
+under version 3 are outdated and not shown until assessed again: one model
+call per team, at the next Monday run or on "Neu einschätzen". No
+migration, no config change.
+
+**`/api/metrics` sets the numbers out per repo** (`repos`) and week by week
+(`trends`), from the rows the request reads anyway: no new database read.
+Watch `GET /api/metrics` durations after the deploy. A compared number
+without a comparison now names its cause (`reason` `source_started`,
+`lost`, `first_deploys`, with the source and dates); a client reading
+`incomplete` for those sees the new codes.
+
 ## 2026-11-26 — states: findings judged against the team's thresholds
 
 **`riptide.json` takes an optional top-level `thresholds` block**: the

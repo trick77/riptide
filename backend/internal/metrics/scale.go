@@ -12,6 +12,11 @@ import (
 // single spot at the slow end.
 const logScaleFactor = 8.0
 
+// stripMinSpan: a linear scale spans at least this share of its largest
+// value, the values centred in it, so a difference small against the values
+// stays small on the strip.
+const stripMinSpan = 0.5
+
 // maxTicks is the most labelled values a strip's axis carries.
 const maxTicks = 4
 
@@ -74,10 +79,12 @@ func stripScale(values []float64, mark *float64, unit string, higher bool) Strip
 			break
 		}
 		lo = slices.Min(all)
-		pad := (hi - lo) * 0.15
-		if hi == lo {
-			pad = hi * 0.5
+		// Values close together stay close: 900 s and 902 s at opposite ends
+		// would read as far apart as 2 and 20 minutes.
+		if span, least := hi-lo, hi*stripMinSpan; span < least {
+			lo, hi = lo-(least-span)/2, hi+(least-span)/2
 		}
+		pad := (hi - lo) * 0.15
 		s.Lo, s.Hi = max(0, lo-pad), hi+pad
 		s.Ticks = linearTicks(s.Lo, s.Hi, unit)
 	}

@@ -93,8 +93,11 @@ var (
 		NotCountedTwice:        {"Nicht gezählt: Branch schon mit einem anderen PR gezählt", "Not counted: branch already counted with another PR"},
 	}
 	viaUmbrellaTerm = uiTerm{"über Sammel-Branch gemerged", "merged via an umbrella branch"}
-	libraryTerm     = uiTerm{"Bibliothek, wird nicht ausgerollt", "Library, never rolled out"}
+	libraryTerm     = uiTerm{"Library, wird nicht ausgerollt", "Library, never rolled out"}
 	infraTerm       = uiTerm{"Infrastruktur, nicht gezählt", "Infrastructure, not counted"}
+	// libraryAlias is the German mark until 2026-11-26, still searched, as
+	// prStateAlias.
+	libraryAlias = "Bibliothek, wird nicht ausgerollt"
 )
 
 // prodStateTerm is where a merged PR stands on production, the words of the
@@ -110,13 +113,20 @@ var (
 	}
 	prodReasonTerm = map[string]uiTerm{
 		TraceNoMergeCommit: {"Bitbucket nannte keinen Merge-Commit", "Bitbucket named no merge commit"},
-		TraceOffTrunk: {"in einen Branch gemerged, der bis zum Ende des Zeitraums nicht im Hauptbranch ankam",
-			"merged into a branch that did not reach the main branch by the period's end"},
+		TraceOffTrunk: {"in einen Branch gemerged, der bis zum Ende des Zeitraums nicht im Default-Branch ankam",
+			"merged into a branch that did not reach the default branch by the period's end"},
 		TraceReleaseUnresolved: {"ein späteres Release lässt sich keinen PRs zuordnen", "a later release cannot be tied to PRs"},
 		TraceRepoUntraced:      {"kein Deploy des Repos bekannt", "no deploy of the repo known"},
 		TraceInSilence:         {"eine Lücke in den Daten", "a gap in the data"},
 	}
 	atMostTerm = uiTerm{"höchstens", "at most"}
+	// prodReasonAlias is a reason's words the UI showed before (until
+	// 2026-11-26), still searched, as prStateAlias.
+	prodReasonAlias = map[string]string{
+		TraceOffTrunk: "in einen Branch gemerged, der bis zum Periodenende nicht im Hauptbranch ankam " +
+			"in einen Branch gemerged, der bis zum Ende des Zeitraums nicht im Hauptbranch ankam " +
+			"merged into a branch that did not reach the main branch by the period's end",
+	}
 )
 
 // StageWord is the placeholder a term holds for the production stage.
@@ -139,20 +149,20 @@ func prMarks(pr dataset.PR) (uncounted *string, via, library bool) {
 // runKindTerm is a run kind's words in the runs table's Art column.
 var runKindTerm = map[string]uiTerm{
 	KindRelease: {"Releases", "Releases"},
-	KindMain:    {"Hauptbranch-Builds", "Main branch builds"},
+	KindMain:    {"Default-Branch-Builds", "Default branch builds"},
 	KindFeature: {"Feature- und Bugfix-Builds", "Feature and bugfix builds"},
 	KindOther:   {"Übrige Branches", "Other branches"},
-	KindUnknown: {"Hauptbranch, Art unbekannt", "Main branch, kind unknown"},
+	KindUnknown: {"Default-Branch, Art unbekannt", "Default branch, kind unknown"},
 }
 
-// runKindAlias is a kind's words the UI showed before (until 2026-11-17,
-// then the default-branch words until 2026-11-26), still searched, as
+// runKindAlias is a kind's words the UI showed or nearly showed before
+// (master until 2026-11-17, the main-branch words), still searched, as
 // prStateAlias.
 var runKindAlias = map[string]string{
-	KindMain:    "master-Builds master builds Default-Branch-Builds Default branch builds",
+	KindMain:    "master-Builds master builds Hauptbranch-Builds Main branch builds",
 	KindFeature: "Feature- und PR-Builds Feature and PR builds",
 	KindOther:   "Andere Branches",
-	KindUnknown: "master, Art unbekannt master, kind unknown Default-Branch, Art unbekannt Default branch, kind unknown",
+	KindUnknown: "master, Art unbekannt master, kind unknown Hauptbranch, Art unbekannt Main branch, kind unknown",
 }
 
 // runKindTerms is a run kind's search words.
@@ -606,7 +616,7 @@ func placeTerms(pl *placement, prod string) string {
 	}
 	t := stageTerm(prodStateTerm[pl.state].both(), prod)
 	if pl.reason != "" {
-		t += " " + prodReasonTerm[pl.reason].both()
+		t += " " + strings.TrimSpace(prodReasonTerm[pl.reason].both()+" "+prodReasonAlias[pl.reason])
 	}
 	if pl.lowerBound {
 		t += " " + atMostTerm.both()
@@ -803,7 +813,7 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 				term += " " + viaUmbrellaTerm.both()
 			}
 			if library {
-				term += " " + libraryTerm.both()
+				term += " " + libraryTerm.both() + " " + libraryAlias
 			}
 			if prRunning(x) {
 				term += " " + runningTerm.both()

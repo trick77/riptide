@@ -1,9 +1,11 @@
 // The page's primitives, in the family's look (almanach, noergler): tokens
 // only, through the generated utilities.
 
+import type { TFunction } from "i18next";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { Change } from "./api";
+import { dateTime, fullDate } from "./format";
 import { type UiLanguage, setLanguage } from "./i18n";
 
 export function Eyebrow({
@@ -134,6 +136,35 @@ export function Delta({
   );
 }
 
+// Why a number has no comparison, the one cause the backend names, in one
+// sentence: its source and dates where it sent them.
+export function noCompare(t: TFunction, c: Change): string {
+  const source = c.source
+    ? t(`overview.assess.source.${c.source}`)
+    : t("overview.assess.source.argocd");
+  switch (c.reason) {
+    case "source_started":
+      return c.since
+        ? t("compare.source_started", {
+            source,
+            date: fullDate(new Date(c.since)),
+          })
+        : t("compare.incomplete");
+    case "lost":
+      if (!c.from) return t("compare.incomplete");
+      return c.to
+        ? t("compare.lost", { from: dateTime(c.from), to: dateTime(c.to) })
+        : t("compare.lostOngoing", { from: dateTime(c.from) });
+    case "not_reporting":
+      return t("compare.not_reporting", { source });
+    case null:
+    case "undirected":
+      return t("compare.none");
+    default:
+      return t(`compare.${c.reason}`);
+  }
+}
+
 // The foot of a number against the previous period: the backend's verdict,
 // or why there is none. The previous value stands under the number
 // (Delta), never here again.
@@ -142,11 +173,7 @@ export function Compare({ change }: { change: Change }) {
   if (change.prev == null)
     return (
       <div className="mt-1 border-t border-border-soft pt-2 text-xs text-muted">
-        {change.reason === "undirected"
-          ? ""
-          : change.reason
-            ? t(`compare.${change.reason}`)
-            : t("compare.none")}
+        {change.reason === "undirected" ? "" : noCompare(t, change)}
       </div>
     );
   const v = change.verdict;

@@ -203,7 +203,7 @@ describe("App", () => {
     ).toHaveAttribute("aria-current", "location");
     // The view stays in sight in the header.
     expect(screen.getByTestId("head-view")).toHaveTextContent(
-      "Alle Produkte · KW 43–46",
+      "Alle Projekte · KW 43–46",
     );
     // The viewer's zone goes along: the backend cuts the weeks there.
     expect(metricsCalls(calls)[0]).toBe(
@@ -213,7 +213,7 @@ describe("App", () => {
       "/api/facts?team=team-a&weeks=4&tz=Europe%2FZurich",
     );
     expect(
-      screen.getByText(/Team team-a, alle Produkte · KW 43–46/),
+      screen.getByText(/Team team-a, alle Projekte · KW 43–46/),
     ).toBeInTheDocument();
     // Per source since when and until when it reports, as data.
     const asOf = screen.getByText(
@@ -242,7 +242,7 @@ describe("App", () => {
     expect(document.body.textContent).not.toMatch(
       /Throughput und|PR Throughput|Batch Size|Deploy-Frequenz|Lead Time bis/,
     );
-    expect(screen.getByText("Ärger nach dem Ausrollen")).toBeInTheDocument();
+    expect(screen.getByText("Ärger nach dem Rollout")).toBeInTheDocument();
     expect(screen.getByText("nicht gemessen")).toBeInTheDocument();
     // "Typisch" is explained once, where the numbers start; the own-history
     // rule is said there once, never on every tile.
@@ -318,14 +318,14 @@ describe("App", () => {
     ).toBeGreaterThan(0);
     expect(
       screen.getAllByText(
-        "kein Vergleich: zu wenig Daten im Zeitraum oder in der Vorperiode",
+        "Kein Vergleich: zu wenig Daten im Zeitraum oder in der Vorperiode.",
       ).length,
     ).toBeGreaterThan(0);
-    // One reason for three causes (data not covering the previous period,
-    // lost events, first deploys): a sentence true for each.
+    // The one cause the backend names, in one plain sentence with its
+    // source and date.
     expect(
       screen.getByText(
-        "kein Vergleich: Die Daten im Zeitraum oder in der Vorperiode sind lückenhaft",
+        "Kein Vergleich: noergler liefert erst seit dem 20.10.2026 Daten.",
       ),
     ).toBeInTheDocument();
     expect(
@@ -441,7 +441,7 @@ describe("App", () => {
       /unauffällig|fällt nichts auf|Nichts hakt/,
     );
     // Whose they are: the team or one product.
-    expect(p.getByText("Team, alle Produkte")).toBeInTheDocument();
+    expect(p.getByText("Team, alle Projekte")).toBeInTheDocument();
     // Two groups: what is stuck, then what runs with its evidence.
     expect(
       p
@@ -1077,7 +1077,7 @@ describe("App", () => {
     );
     // A library's PR is never rolled out: no "not yet".
     expect(
-      (await row("g")).getByText("Bibliothek, wird nicht ausgerollt"),
+      (await row("g")).getByText("Library, wird nicht ausgerollt"),
     ).toBeInTheDocument();
   });
 
@@ -1422,7 +1422,7 @@ describe("App", () => {
     const red = within(
       p.getByText("Lange kein Release nach PROD").closest("article")!,
     );
-    expect(red.getByText("4 von 9 Produkten")).toBeInTheDocument();
+    expect(red.getByText("4 von 9 Projekten")).toBeInTheDocument();
     // Each unit: its name, then its number in the state's words.
     expect(
       red.getByText(
@@ -1446,14 +1446,14 @@ describe("App", () => {
     // The team's worsening the state speaks for, as a line of its own.
     expect(
       red.getByText(
-        "Releases pro Woche: 0.5, deutlich schlechter als in der Vorperiode",
+        "Releases nach PROD pro Woche: 0.5, deutlich schlechter als in der Vorperiode",
       ),
     ).toBeInTheDocument();
     expect(red.getByText("vorher 2.0")).toBeInTheDocument();
     // Since when, as of when, the agreement with the team's own number.
     expect(
       red.getByText(
-        /^spätestens seit dem 02\.10\.2026 · Stand 08\.11\.2026 · 1 Produkt mit zu wenig Daten$/,
+        /^spätestens seit dem 02\.10\.2026 · Stand 08\.11\.2026 · 1 Projekt mit zu wenig Daten$/,
       ),
     ).toBeInTheDocument();
     expect(
@@ -1599,7 +1599,7 @@ describe("App", () => {
     fireEvent.click(p.getByRole("button", { name: "Als Markdown kopieren" }));
     expect(writeText).toHaveBeenCalledWith(
       expect.stringMatching(
-        /^## Retro-Input riptide\u2002·\u2002team-a\u2002·\u2002Alle Produkte\u2002·\u2002KW /,
+        /^## Retro-Input riptide\u2002·\u2002team-a\u2002·\u2002Alle Projekte\u2002·\u2002KW /,
       ),
     );
   });
@@ -1829,10 +1829,10 @@ describe("App", () => {
     const calls = mockFetch();
     render(<App />);
     await screen.findByRole("heading", { name: "Einschätzung" });
-    const products = screen.getByRole("group", { name: "Produkt" });
+    const products = screen.getByRole("group", { name: "Projekt" });
     fireEvent.click(within(products).getByRole("button", { name: /portal/ }));
     expect(window.location.search).toBe("?product=portal");
-    await screen.findByText(/Team team-a, Produkt portal/);
+    await screen.findByText(/Team team-a, Projekt portal/);
     expect(metricsCalls(calls).at(-1)).toMatch(/&product=portal$/);
     expect(screen.getByText("Argo-CD-Apps")).toBeInTheDocument();
     expect(screen.getByText("keine")).toBeInTheDocument();
@@ -1846,9 +1846,9 @@ describe("App", () => {
     expect(screen.getByText("Nach Repo")).toBeInTheDocument();
 
     fireEvent.click(
-      within(products).getByRole("button", { name: /Alle Produkte/ }),
+      within(products).getByRole("button", { name: /Alle Projekte/ }),
     );
-    await screen.findByText(/Team team-a, alle Produkte/);
+    await screen.findByText(/Team team-a, alle Projekte/);
     expect(screen.getByText(/^\(0 von 1\)/)).toBeInTheDocument();
     // Bots are never counted in: no switch for them.
     expect(screen.queryByRole("button", { name: /Bots/ })).toBeNull();
@@ -2621,7 +2621,7 @@ describe("App", () => {
     // no feature builds, none hiding: the first kind
     const kinds = screen.getByRole("group", { name: "Build-Art" });
     expect(
-      within(kinds).getByRole("button", { name: "Hauptbranch-Builds" }),
+      within(kinds).getByRole("button", { name: "Default-Branch-Builds" }),
     ).toHaveAttribute("aria-pressed", "true");
   });
 
@@ -2638,13 +2638,13 @@ describe("App", () => {
     // the cards in the backend's order, before the hotspots' kind buttons
     const names = screen
       .getAllByText(
-        /^(Feature- und Bugfix-Builds|Hauptbranch-Builds|Releases)$/,
+        /^(Feature- und Bugfix-Builds|Default-Branch-Builds|Releases)$/,
       )
       .slice(0, 3)
       .map((e) => e.textContent);
     expect(names).toEqual([
       "Feature- und Bugfix-Builds",
-      "Hauptbranch-Builds",
+      "Default-Branch-Builds",
       "Releases",
     ]);
   });
@@ -4325,7 +4325,7 @@ describe("limits", () => {
       "Noch kein Vergleich möglich: Für die Vorperiode gibt es keine vergleichbaren Daten.",
     );
     expect(
-      screen.getByText(/^Team team-a, alle Produkte/).textContent,
+      screen.getByText(/^Team team-a, alle Projekte/).textContent,
     ).not.toMatch(/verglichen/);
   });
 
@@ -4360,8 +4360,8 @@ describe("limits", () => {
       name: "Was diese Einschätzung einschränkt",
     });
     expect([...note.children].map((c) => c.textContent)).toEqual([
-      "Bitbucket lieferte vom 05.11.2026 bis 09.11.2026 keine Daten, obwohl Builds liefen: Ereignisse gingen verloren. Darum bleiben die PR-Zahlen ohne Urteil, und auch Deploys und Builds: Sie finden ihr Produkt nur über Bitbucket.",
-      "Bitbucket liefert seit dem 12.11.2026 keine Daten, obwohl Builds laufen: Ereignisse gehen verloren. Darum bleiben die PR-Zahlen ohne Urteil, und auch Deploys und Builds: Sie finden ihr Produkt nur über Bitbucket.",
+      "Bitbucket lieferte vom 05.11.2026 bis 09.11.2026 keine Daten, obwohl Builds liefen: Ereignisse gingen verloren. Darum bleiben die PR-Zahlen ohne Urteil, und auch Deploys und Builds: Sie finden ihr Projekt nur über Bitbucket.",
+      "Bitbucket liefert seit dem 12.11.2026 keine Daten, obwohl Builds laufen: Ereignisse gehen verloren. Darum bleiben die PR-Zahlen ohne Urteil, und auch Deploys und Builds: Sie finden ihr Projekt nur über Bitbucket.",
     ]);
   });
 
@@ -4384,7 +4384,7 @@ describe("limits", () => {
     const panel = await screen.findByTestId("assessment");
     expect(
       within(panel).getByText(
-        "Dieses Produkt enthält nur Bibliotheken; sie werden nicht ausgerollt.",
+        "Dieses Projekt enthält nur Libraries; sie werden nicht ausgerollt.",
       ),
     ).toBeInTheDocument();
     expect(within(panel).queryByRole("note")).toBeNull();
@@ -4554,20 +4554,20 @@ describe("limits", () => {
       screen.getAllByText(/aus den ersten 21 Tagen der Argo-CD-Daten/).length,
     ).toBeGreaterThan(0);
     // In the team view they count: no word of them on the tile.
-    expect(screen.queryByText(/keinem Produkt zuordenbar/)).toBeNull();
+    expect(screen.queryByText(/keinem Projekt zuordenbar/)).toBeNull();
     fireEvent.click(
       screen.getAllByRole("button", { name: "Was heisst das?" })[0],
     );
     expect(
       screen.getByText(
-        /Nicht gezählt: 4 Deploys von Infrastruktur-Apps, die keinem Produkt des Teams gehören \(cert-sync, log-shipper\)\./,
+        /Nicht gezählt: 4 Deploys von Infrastruktur-Apps, die keinem Projekt des Teams gehören \(cert-sync, log-shipper\)\./,
       ),
     ).toBeInTheDocument();
 
-    const products = screen.getByRole("group", { name: "Produkt" });
+    const products = screen.getByRole("group", { name: "Projekt" });
     fireEvent.click(within(products).getByRole("button", { name: /portal/ }));
     expect(
-      await screen.findByText("2 Deploys keinem Produkt zuordenbar"),
+      await screen.findByText("2 Deploys keinem Projekt zuordenbar"),
     ).toBeInTheDocument();
     expect(screen.queryByText("keine Deploys im Zeitraum")).toBeNull();
     expect(screen.queryByText(/Infrastruktur-Apps nicht gezählt/)).toBeNull();
@@ -4578,7 +4578,7 @@ describe("limits", () => {
       await screen.findByText(/^\d+ Releases? im Zeitraum/),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText("2 Deploys keinem Produkt zuordenbar"),
+      screen.queryByText("2 Deploys keinem Projekt zuordenbar"),
     ).toBeNull();
   });
 
@@ -4636,7 +4636,7 @@ describe("limits", () => {
     expect(onFacts).toHaveBeenCalledWith("prs", "Unbekannt");
     expect(
       screen.getByText(
-        "5 Builds ohne Repo: Weder ihr Commit noch ihr Pipeline-Name nennt eines. In der Ansicht des ganzen Teams gezählt, in keiner Produktansicht.",
+        "5 Builds ohne Repo: Weder ihr Commit noch ihr Pipeline-Name nennt eines. In der Ansicht des ganzen Teams gezählt, in keiner Projektansicht.",
       ),
     ).toBeInTheDocument();
     // Bots' builds as what they cost, CI time, never a finding.
@@ -4661,9 +4661,7 @@ describe("limits", () => {
     expect(traced).toMatch(
       /1 verfolgter PR kam vielleicht schon mit einem früheren Deploy auf PROD, das sich keinem PR zuordnen lässt: Seine Zeit bis PROD ist ein Höchstwert\./,
     );
-    expect(traced).toMatch(
-      /3 PRs in Bibliotheken: Sie werden nicht ausgerollt/,
-    );
+    expect(traced).toMatch(/3 PRs in Libraries, werden nicht ausgerollt/);
   });
 
   // No merged PR to trace: no "0 of 0" under the line that says so.
@@ -4752,7 +4750,7 @@ describe("limits", () => {
     // A library's PR is never rolled out: no "no" in the column to PROD.
     const lib = data.getByText("kasse/kasse-lib").closest("tr")!;
     expect(
-      within(lib).getByText("Bibliothek, wird nicht ausgerollt"),
+      within(lib).getByText("Library, wird nicht ausgerollt"),
     ).toBeInTheDocument();
     expect(within(lib).queryByText("Nein")).toBeNull();
     fireEvent.click(data.getByRole("tab", { name: /Deploys/ }));

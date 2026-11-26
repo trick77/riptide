@@ -175,17 +175,66 @@ func TestLeversAndKindsAreThePages(t *testing.T) {
 	}
 }
 
+// pageText is what a language's page can show: its catalog's strings, its
+// comments left out (a word named in a comment is on no page), and its
+// facts terms (ui/src/i18n/terms.json).
+func pageText(t *testing.T, lang string) string {
+	t.Helper()
+	var lines []string
+	for _, l := range strings.Split(catalog(t, lang), "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(l), "//") {
+			lines = append(lines, l)
+		}
+	}
+	raw, err := os.ReadFile("../../../ui/src/i18n/terms.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var terms map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &terms); err != nil {
+		t.Fatal(err)
+	}
+	return strings.Join(lines, "\n") + "\n" + string(terms[lang])
+}
+
 // The model's vocabulary is the page's: every word of it stands in the
-// catalog of its language (docs/metrics.md, "Words on the page").
+// page text of its language (docs/metrics.md, "Words on the page").
 func TestVocabularyIsThePages(t *testing.T) {
 	paren := regexp.MustCompile(` \([^)]*\)`)
 	for _, lang := range []string{"de", "en"} {
-		src := strings.ToLower(catalog(t, lang))
+		src := strings.ToLower(pageText(t, lang))
 		for _, v := range vocabulary {
 			w := map[string]string{"de": v.DE, "en": v.EN}[lang]
 			for _, part := range strings.Split(paren.ReplaceAllString(w, ""), ", ") {
 				if !strings.Contains(src, strings.ToLower(part)) {
 					t.Errorf("%s: %q (%s) is not on the page", lang, part, v.Thing)
+				}
+			}
+		}
+	}
+	// The owner's rejected words: in the German never-list, and on no
+	// German page (2026-11-26).
+	de := pageText(t, "de")
+	var notDE string
+	for _, v := range vocabulary {
+		notDE += ", " + v.NotDE
+	}
+	for _, w := range []string{"Hauptbranch", "Produkt", "Bibliothek", "das Ausrollen"} {
+		if !strings.Contains(notDE, w) {
+			t.Errorf("%q is in no never-list", w)
+		}
+	}
+	for _, re := range []string{`Hauptbranch`, `Produkt(e|en|s|ansicht)?\b`, `Bibliothek`, `(das|dem|des) Ausrollen`} {
+		if m := regexp.MustCompile(re).FindString(de); m != "" {
+			t.Errorf("the German page writes %q", m)
+		}
+	}
+	// A page word is in no never-list of its own language.
+	for _, v := range vocabulary {
+		for _, c := range []struct{ word, not string }{{v.DE, v.NotDE}, {v.EN, v.NotEN}} {
+			for _, part := range strings.Split(paren.ReplaceAllString(c.word, ""), ", ") {
+				if slices.Contains(strings.Split(paren.ReplaceAllString(c.not, ""), ", "), part) {
+					t.Errorf("%s: %q is both the word and a never-word", v.Thing, part)
 				}
 			}
 		}

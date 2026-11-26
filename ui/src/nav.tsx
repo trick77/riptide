@@ -18,9 +18,24 @@ export const SECTIONS = [
 // The rest of the page, behind "more".
 export const MORE = ["deploys", "arbeitsmix", "kosten", "frameworks"] as const;
 
-// The section being read: the last of ids whose top has passed the line
-// just under the header. An IntersectionObserver says when to look again;
-// none (tests, old browsers) leaves the first marked.
+// Every section the marker follows: reading one behind "more" marks "more".
+export const PAGE_SECTIONS: readonly string[] = [...SECTIONS, ...MORE];
+
+// The section id a location hash names; a malformed escape (#%E0) is read
+// as it stands rather than throwing.
+export function sectionOf(hash: string): string {
+  const raw = hash.replace(/^#/, "");
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+// The section being read: the one whose top passed the line just under the
+// header last, by its place on the page, not its place in ids. An
+// IntersectionObserver says when to look again; none (tests, old browsers)
+// leaves the first marked.
 export function useActiveSection(
   ids: readonly string[],
   ready: boolean,
@@ -35,14 +50,22 @@ export function useActiveSection(
     const pick = () => {
       const line = headHeight() + 24;
       let cur = ids[0];
-      for (const el of els)
-        if (el.getBoundingClientRect().top <= line) cur = el.id;
+      let best = -Infinity;
+      let lowest: HTMLElement | undefined;
+      for (const el of els) {
+        const top = el.getBoundingClientRect().top;
+        if (top <= line && top > best) {
+          best = top;
+          cur = el.id;
+        }
+        if (!lowest || top > lowest.getBoundingClientRect().top) lowest = el;
+      }
       // At the very bottom the last section is the one read, however short.
       if (
         window.innerHeight + window.scrollY >=
         document.documentElement.scrollHeight - 2
       )
-        cur = els.at(-1)?.id ?? cur;
+        cur = lowest?.id ?? cur;
       setActive(cur);
     };
     const io = new IntersectionObserver(pick, {
@@ -66,6 +89,25 @@ const LINK =
 export function SectionNav({ active }: { active: string }) {
   const { t } = useTranslation();
   const more = useRef<HTMLDetailsElement>(null);
+  const inMore = (MORE as readonly string[]).includes(active);
+  // The menu closes on Escape and on a click outside it, as a menu does.
+  useEffect(() => {
+    const close = (e: Event) => {
+      const d = more.current;
+      if (!d?.open) return;
+      if (e instanceof KeyboardEvent) {
+        if (e.key !== "Escape") return;
+        d.removeAttribute("open");
+        d.querySelector("summary")?.focus();
+      } else if (!d.contains(e.target as Node)) d.removeAttribute("open");
+    };
+    document.addEventListener("keydown", close);
+    document.addEventListener("pointerdown", close);
+    return () => {
+      document.removeEventListener("keydown", close);
+      document.removeEventListener("pointerdown", close);
+    };
+  }, []);
   return (
     <nav
       aria-label={t("nav.label")}
@@ -87,17 +129,24 @@ export function SectionNav({ active }: { active: string }) {
       ))}
       <details ref={more} className="relative">
         <summary
-          className={`${LINK} cursor-pointer list-none text-muted hover:bg-active hover:text-ink [&::-webkit-details-marker]:hidden`}
+          aria-current={inMore ? "location" : undefined}
+          className={`${LINK} relative cursor-pointer list-none [&::-webkit-details-marker]:hidden ${
+            inMore
+              ? "bg-active text-ink after:absolute after:inset-x-2.5 after:-bottom-[9px] after:h-0.5 after:rounded-sm after:bg-accent"
+              : "text-muted hover:bg-active hover:text-ink"
+          }`}
         >
-          {t("nav.more")} <span aria-hidden="true">▾</span>
+          {inMore ? t(`nav.${active as (typeof MORE)[number]}`) : t("nav.more")}{" "}
+          <span aria-hidden="true">▾</span>
         </summary>
         <div className="absolute top-[calc(100%+6px)] left-0 z-40 flex min-w-[170px] flex-col rounded-ui-sm border border-elevated-border bg-elevated p-1 shadow-menu">
           {MORE.map((id) => (
             <a
               key={id}
               href={`#${id}`}
+              aria-current={active === id ? "location" : undefined}
               onClick={() => more.current?.removeAttribute("open")}
-              className={`${LINK} text-ink-dim hover:bg-active hover:text-ink`}
+              className={`${LINK} hover:bg-active hover:text-ink ${active === id ? "bg-active text-ink" : "text-ink-dim"}`}
             >
               {t(`nav.${id}`)}
             </a>

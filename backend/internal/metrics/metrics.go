@@ -140,7 +140,7 @@ func Compute(ds, prev, running *dataset.Dataset, p Params) Metrics {
 	ds, prev = classified(ds, prev)
 	m, pm := computeBoth(ds, prev, running, p)
 	f := newFilter(ds, p)
-	m.Trends = trends(m, pm, running, p, f)
+	m.Trends = trends(m, pm, ds.Meta.DataEnd, running, p, f)
 	m.Repos = repoView(ds, prev, m, pm, p, f)
 	return m
 }

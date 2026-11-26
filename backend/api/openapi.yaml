@@ -1053,10 +1053,12 @@ components:
           type: array
           description: |
             Why a week's value is null; empty where it has one. `no_data`:
-            the source had not reported by the week's start. `lost`: a lost
+            the source had not reported by the week's start. `silent`: the
+            source sent nothing from before the week's start on and stayed
+            silent 7 days or more by the read's end. `lost`: a lost
             Bitbucket silence overlaps the week's working time. `none`: no
             case to take a typical value of.
-          items: { type: string, enum: ["", no_data, lost, none] }
+          items: { type: string, enum: ["", no_data, silent, lost, none] }
 
     RepoView:
       type: object
@@ -1065,7 +1067,7 @@ components:
         stands alone where repos differ: a ranking row per repo with a merged
         PR in the period or the previous one, and a strip per number.
       additionalProperties: false
-      required: [rows, open, groups, hint_days, breach_days, spreads]
+      required: [rows, open, groups, hint_days, breach_days, rare_from, spreads]
       properties:
         rows:
           type: array
@@ -1100,6 +1102,7 @@ components:
                 description: The hidden repos past those five.
         hint_days: { type: integer, description: "The team's release_hint_days the groups were cut by." }
         breach_days: { type: integer, description: "The team's release_breach_days the groups were cut by." }
+        rare_from: { type: integer, description: "The fewest whole days the rare group holds: the day after hint_days." }
         spreads:
           type: array
           description: One strip per number; build ones per kind.
@@ -1108,12 +1111,15 @@ components:
     RepoGroupKey:
       type: string
       description: |
-        `none`: rolled out, worked on, nothing released for more than
-        release_breach_days. `rare`: last release more than
-        release_hint_days back. `unjudged`: worked on, but whether it is
-        rolled out cannot be told (`reason`). `regular`: released within
+        Where the repo's project stands against the release rule, as the
+        no_release and release_due states judge it per project. `none`:
+        worked on, the project's last release more than
+        release_breach_days back. `rare`: more than release_hint_days back.
+        `unjudged`: worked on, but whether it is rolled out cannot be told
+        (`reason`). `regular`: the project released within
         release_hint_days. `library`: never rolled out. `idle`: no counted
-        work since its last release nor within release_breach_days.
+        work since its project's last release nor within
+        release_breach_days.
       enum: [none, rare, unjudged, regular, library, idle]
 
     RepoRow:
@@ -1121,49 +1127,74 @@ components:
       description: |
         One repo's numbers over the period. A `*_prev` value is the previous
         period's, null where its sources did not see the previous period
-        whole (the comparison's `incomplete`).
+        whole or Bitbucket lost events in either period, as the comparison
+        holds.
       additionalProperties: false
       required: [repo, project, group, reason, last_release, days_since, since_lower_bound, releases,
-                 releases_per_week, releases_prev, release_weeks, to_prod, to_prod_n, to_prod_prev, not_yet, merged,
-                 merged_per_week, merged_prev, merged_weeks, batch, sized, batch_prev, pickup, pickup_n, flags]
+                 releases_per_week, releases_prev, releases_base, releases_form, release_weeks, to_prod, to_prod_n,
+                 to_prod_prev, not_yet, merged, merged_per_week, merged_prev, merged_weeks, batch, sized, batch_prev,
+                 pickup, pickup_n, flags]
       properties:
         repo: { type: string }
         project: { type: string }
         group: { $ref: "#/components/schemas/RepoGroupKey" }
         reason:
           type: [string, "null"]
-          enum: [not_reporting, infra, untraced, null]
+          enum: [not_reporting, argocd_silent, bitbucket_silent, no_prod_stage, infra, untraced, never_released, null]
           description: |
             Why its releases cannot be judged, in the unjudged group only:
-            Argo CD not reporting, only infrastructure Apps deploy it, no
-            deploy ever showed an App deploying it.
+            Argo CD not reporting; Argo CD or Bitbucket silent 7 days or more
+            at the period's end (the assessment's gate); Argo CD reporting no
+            deploy to the production stage; only infrastructure Apps deploy
+            it; no deploy ever showed an App deploying it; no App of its
+            project ever released to production (the rule judges a project
+            rolled out only).
         last_release:
           $ref: "#/components/schemas/NullableInstant"
           description: |
-            Its last release to production before the period's end: a
-            release of an App deploying it that tracing does not show leaving
-            it unchanged, as tracing knew it then.
+            Its project's last release to production before the period's
+            end, what the release rule judges. Null for a library and an
+            unjudged repo.
         days_since:
           allOf: [{ $ref: "#/components/schemas/NullableNumber" }]
           description: |
-            Whole days from `last_release` to the period's end; without one,
-            from Argo CD's first report (`since_lower_bound`). Null for a
-            library and a repo no App is known to deploy.
+            Whole days from `last_release` to the period's end
+            (`since_lower_bound`: an App's first deploy within the grace after
+            Argo CD's first event, at least that long). Null with
+            `last_release`.
         since_lower_bound: { type: boolean }
         releases:
           type: integer
           minimum: 0
           description: |
-            Such releases in the period, each GitOps revision once; an App's
-            first deploy within the grace after Argo CD's first event is none,
-            as `delivery.frequency` counts it.
+            The period's releases of the Apps deploying it that tracing does
+            not show leaving it unchanged, as tracing knew them by the
+            period's end, each GitOps revision once at its first deploy; an
+            App's first deploy within the grace after Argo CD's first event
+            is none, as `delivery.frequency` counts it.
         releases_per_week:
           allOf: [{ $ref: "#/components/schemas/NullableNumber" }]
           description: Per week over the period's weeks Argo CD reported; null under a week.
         releases_prev: { $ref: "#/components/schemas/NullableNumber" }
+        releases_base:
+          type: integer
+          minimum: 1
+          description: The weeks `releases_per_week` divides by, rounded, at least 1.
+        releases_form:
+          type: [string, "null"]
+          enum: [none, per_week, in_weeks, null]
+          description: |
+            How the row writes its releases: `none` nothing in the period,
+            `per_week` the rate from one a week on, `in_weeks` the count over
+            `releases_base` weeks. Null where it writes none: a library, or
+            Argo CD not reporting, silent, without the production stage, or
+            no App known to deploy it.
         release_weeks:
           type: array
-          description: Per entry of `trends.weeks` but the running one; null where Argo CD had not reported.
+          description: |
+            Per entry of `trends.weeks` but the running one, each revision
+            in the week of its first deploy; null where Argo CD had not
+            reported or was silent for good (`silent`).
           items: { type: [integer, "null"] }
         to_prod:
           allOf: [{ $ref: "#/components/schemas/NullableNumber" }]
@@ -1197,13 +1228,17 @@ components:
         pickup_n: { type: integer, minimum: 0 }
         flags:
           type: array
-          description: The thresholds its numbers are past, by the state they belong to.
+          description: |
+            The thresholds its numbers are past, by the state they belong to,
+            as the state's card names it: no_release and release_due its
+            project's, not_on_prod its oldest merged PR not on production. A
+            source the assessment gates flags nothing.
           items:
             type: object
             additionalProperties: false
             required: [key, tone, value]
             properties:
-              key: { type: string, enum: [no_release, release_due, slow_to_prod, first_review_wait] }
+              key: { type: string, enum: [no_release, release_due, not_on_prod, slow_to_prod, first_review_wait] }
               tone: { type: string, enum: [breach, hint] }
               value: { type: number, description: "Days, or working days for first_review_wait." }
 
@@ -1351,14 +1386,27 @@ components:
         verdict: { type: string, enum: [better, worse, same, none] }
         reason:
           type: [string, "null"]
-          enum: [low_sample, incomplete, no_value, undirected, not_reporting, null]
+          enum: [low_sample, source_started, lost, first_deploys, incomplete, no_value, undirected, not_reporting,
+                 null]
           description: |
             Why the verdict is none. `low_sample`: too few in one of the
-            periods. `incomplete`: the previous period starts before its
-            source's data, or a period has more first deploys than releases.
+            periods. `source_started`: the previous period starts before the
+            source's first data (`source`, `since`). `lost`: Bitbucket lost
+            events in either period (the first such span `from` to `to`, `to`
+            absent while it runs). `first_deploys`: a period has more first
+            deploys than releases. `incomplete`: the data covers both
+            periods, not alike (the build type first reported inside the
+            previous one, or lead times mostly placed through a lower bound).
             `no_value`: a value missing. `undirected`: no better direction;
-            `prev` is set. `not_reporting`: the source (Argo CD, for the
-            deploy numbers) does not report for the team yet.
+            `prev` is set. `not_reporting`: the source (`source`) does not
+            report for the team yet.
+        source:
+          type: string
+          enum: [bitbucket, pipeline, argocd, noergler]
+          description: The source of `source_started` and `not_reporting`; absent otherwise.
+        since: { type: string, format: date-time, description: "The source's first data, for `source_started`." }
+        from: { type: string, format: date-time, description: "Where `lost` begins." }
+        to: { type: string, format: date-time, description: "Where `lost` ends; absent while it runs." }
         magnitude:
           type: [string, "null"]
           enum: [same, minor, notable, null]

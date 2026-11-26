@@ -5,9 +5,10 @@ import terms from "./terms.json";
 // header's switch says otherwise. Swiss orthography: double s, never
 // eszett. No gendered forms: generic masculine ("der Autor", "der
 // Reviewer"). One word per thing, as docs/metrics.md "Words on the page"
-// lists them: Freigabe (not Approval), Hauptbranch (not Default-Branch),
-// Bibliothek (not Library), PR-Grösse (not Batch Size), Abschnitt (not
-// Etappe), Produkt (not Projekt), typisch (not Median).
+// lists them, the owner's choice (2026-11-26) among them: the default
+// branch, a Bitbucket project, a library and a rollout keep their usual
+// names; Freigabe for an approval, PR-Grösse for the batch size, Abschnitt
+// for a piece of the way, typisch for the median.
 export const de = {
   lang: {
     code: "DE",
@@ -15,7 +16,6 @@ export const de = {
   },
   nav: {
     label: "Bereiche",
-    ueberblick: "Überblick",
     fluss: "Fluss",
     build: "Build",
     deploys: "Deploys",
@@ -24,7 +24,7 @@ export const de = {
     daten: "Daten",
     frameworks: "Frameworks",
     einschaetzung: "Einschätzung",
-    ausliefern: "Ausliefern",
+    ausliefern: "Rollout",
     review: "Review",
     more: "Weitere",
     view: "{{product}} · KW {{from}}–{{to}}",
@@ -35,7 +35,7 @@ export const de = {
     merged: "Gemergte PRs pro Woche",
     mergedUnit: "pro Woche im Zeitraum",
     batch: "PR-Grösse pro Woche, typisch",
-    batchUnit: "Zeilen im Zeitraum",
+    batchUnit: "geänderte Zeilen pro PR, typisch",
     releases: "Releases nach {{prod}} pro Woche",
     before: "{{unit}}, vorher {{v}}",
     previous: "Vorperiode",
@@ -46,6 +46,7 @@ export const de = {
     legendRunning: "laufende Woche, noch nicht vorbei",
     gap: {
       no_data: "keine Daten: Die Quelle lieferte damals noch nichts",
+      silent: "keine Daten: Die Quelle liefert seither nichts mehr",
       lost: "Daten verloren: Bitbucket lieferte keine Daten",
       none: "kein PR mit bekannter Grösse",
     },
@@ -58,44 +59,50 @@ export const de = {
     sub: "Die Balken zeigen die Releases pro Woche, KW {{from}}–{{to}}; die Vorperiode ist hinterlegt.",
     col: {
       repo: "Repo",
-      stand: "Stand",
+      stand: "Auffällig",
       releases: "Wie oft nach {{prod}}",
       toProd: "Vom Merge bis {{prod}}, typisch",
       merged: "Gemergte PRs pro Woche",
       batch: "PR-Grösse, typisch",
     },
     group: {
-      none: "Rollt nicht aus",
-      rare: "Rollt selten aus",
+      none: "Kein Release seit über {{breach}} Tagen",
+      rare: "Letztes Release vor {{from}}–{{breach}} Tagen",
       unjudged: "Nicht beurteilbar",
-      regular: "Rollt regelmässig aus",
-      library: "Bibliotheken",
+      regular: "Release in den letzten {{hint}} Tagen",
+      library: "Libraries",
       idle: "Ohne Aktivität",
     },
     groupSub: {
-      none: "letztes Release vor über {{breach}} Tagen",
-      rare: "letztes Release vor mehr als {{hint}} und höchstens {{breach}} Tagen",
+      none: "beim Projekt des Repos, obwohl daran gearbeitet wurde",
+      rare: "beim Projekt des Repos",
       unjudged: "Die Daten zeigen nicht, ob und wann das Repo ausgerollt wird",
-      regular: "letztes Release in den letzten {{hint}} Tagen",
+      regular: "beim Projekt des Repos",
       library: "werden nie selbst ausgerollt, darum fehlt hier kein Release",
-      idle: "kein gemergter PR seit dem letzten Release und keiner in {{breach}} Tagen",
+      idle: "kein gemergter PR seit dem letzten Release des Projekts und keiner in {{breach}} Tagen",
     },
     flag: {
       no_release_one: "seit {{lower}}{{count}} Tag kein Release",
       no_release_other: "seit {{lower}}{{count}} Tagen kein Release",
-      release_due_one: "letztes Release vor {{count}} Tag",
-      release_due_other: "letztes Release vor {{count}} Tagen",
+      release_due_one: "letztes Release vor {{lower}}{{count}} Tag",
+      release_due_other: "letztes Release vor {{lower}}{{count}} Tagen",
+      not_on_prod_one: "ältester PR seit {{count}} Tag nicht auf {{prod}}",
+      not_on_prod_other: "ältester PR seit {{count}} Tagen nicht auf {{prod}}",
       slow_to_prod: "typisch {{days}} Tage bis {{prod}}",
       first_review_wait: "typisch {{days}} Arbeitstage bis zum ersten Review",
       lowerBound: "mindestens ",
     },
     reason: {
       not_reporting: "Argo CD liefert keine Daten",
+      argocd_silent: "Argo CD liefert keine Daten mehr",
+      bitbucket_silent: "Bitbucket liefert keine Daten mehr",
+      no_prod_stage: "Argo CD liefert keine Daten zur Stage {{prod}}",
       infra: "nur Infrastruktur-Apps",
       untraced: "keine App bekannt, die es ausrollt",
+      never_released: "kein Release des Projekts nach {{prod}} bekannt",
     },
     pill: {
-      library: "Bibliothek",
+      library: "Library",
       idle: "ohne Aktivität",
     },
     rel: {
@@ -103,10 +110,10 @@ export const de = {
       perWeek: "{{n}} pro Woche",
       inWeeks_one: "{{count}} Release in {{weeks}} Wochen",
       inWeeks_other: "{{count}} Releases in {{weeks}} Wochen",
-      last_one: "letztes vor {{count}} Tag",
-      last_other: "letztes vor {{count}} Tagen",
-      never_one: "keines in {{count}} Tag mit Daten",
-      never_other: "keines in {{count}} Tagen mit Daten",
+      last_one: "Projekt: letztes vor {{count}} Tag",
+      last_other: "Projekt: letztes vor {{count}} Tagen",
+      lastLower_one: "Projekt: letztes vor mindestens {{count}} Tag",
+      lastLower_other: "Projekt: letztes vor mindestens {{count}} Tagen",
     },
     lying: "kein PR auf {{prod}}",
     thinCell_one: "zu wenige ({{count}} PR)",
@@ -124,13 +131,20 @@ export const de = {
     countAll_other: "{{count}} Repos.",
     countOpen: "{{n}} von {{total}} Repos gezeigt.",
     order:
-      "Reihenfolge: zuerst die Repos, die nicht ausrollen, dann die seltenen, die nicht beurteilbaren und die regelmässigen (wer über einer Schwelle liegt, zuerst); am Schluss Bibliotheken und Repos ohne Aktivität.",
+      "Reihenfolge: zuerst die Repos, deren Projekt seit über {{breach}} Tagen kein Release hat, dann die mit einem Release vor {{from}}–{{breach}} Tagen, die nicht beurteilbaren und die übrigen (wer die Abmachung zur Zeit bis {{prod}} verletzt, zuerst); am Schluss Libraries und Repos ohne Aktivität.",
     unit: {
       perWeek: "{{n}} pro Woche",
       workingDays: "{{n}} Arbeitstage",
       lines: "{{n}} Zeilen",
     },
-    stripAria: "{{label}}: ein Punkt pro Repo, {{n}} Repos",
+    stripAria:
+      "{{label}}: ein Punkt pro Repo, {{n}} Repos. Pfeiltasten wechseln das Repo, Enter zeigt seine PRs.",
+    verdict: {
+      breach: "Abmachung verletzt",
+      hint: "Hinweis",
+      within: "innerhalb der Abmachung",
+      neutral: "",
+    },
     typicalMark: "typisch",
     same_one: "{{count}} Repo: {{value}}",
     same_other: "Alle {{count}} Repos: {{value}}",
@@ -161,14 +175,14 @@ export const de = {
     cases: {
       releases: "Releases",
       to_prod: "PRs",
-      merged: "PRs",
+      merged: "gemergten PRs",
       batch: "PRs mit bekannter Grösse",
       pickup: "PRs",
       build_duration: "Builds",
       build_success: "Builds",
     },
     note: {
-      dominant: "{{repo}} trägt {{share}} davon.",
+      dominant: "{{repo}} allein bringt {{share}} aller {{cases}} des Teams.",
       far_one: "{{count}} von {{of}} Repos liegt nahe beim typischen Repo",
       far_other: "{{count}} von {{of}} Repos liegen nahe beim typischen Repo",
       above_one: "{{count}} weit darüber",
@@ -176,7 +190,7 @@ export const de = {
       below_one: "{{count}} weit darunter",
       below_other: "{{count}} weit darunter",
       pooled:
-        "Die Zahl des Teams zählt alle {{cases}} zusammen: Repos mit vielen {{cases}} bestimmen sie. Das typische Repo liegt bei {{value}}.",
+        "Die Zahl des Teams nimmt alle {{cases}} in einen Topf: Repos mit vielen davon bestimmen sie. Das typische Repo liegt bei {{value}}.",
       pooledAdded:
         "Die Zahl des Teams zählt alle Repos zusammen; das typische Repo allein kommt auf {{value}}.",
     },
@@ -242,8 +256,8 @@ export const de = {
     runningRuns_one: "{{count}} Build",
     runningRuns_other: "{{count}} Builds",
     runningView: "Ansehen →",
-    oneProduct: "Produkt {{product}}",
-    allProductsLower: "alle Produkte",
+    oneProduct: "Projekt {{product}}",
+    allProductsLower: "alle Projekte",
     dataAsOf: "Datenstand:",
     source: "{{source}} seit {{since}}, zuletzt {{at}}",
     sourceNone: "{{source}}: keine Daten",
@@ -255,8 +269,8 @@ export const de = {
     filter: "Filter",
     period: "Zeitraum",
     weeks: "{{n}} W",
-    product: "Produkt",
-    allProducts: "Alle Produkte",
+    product: "Projekt",
+    allProducts: "Alle Projekte",
     repos_one: "{{count}} Repo",
     repos_other: "{{count}} Repos",
     reposHead: "Repos",
@@ -272,13 +286,20 @@ export const de = {
     same: "Unverändert",
     none: "kein Vergleich",
     low_sample:
-      "kein Vergleich: zu wenig Daten im Zeitraum oder in der Vorperiode",
+      "Kein Vergleich: zu wenig Daten im Zeitraum oder in der Vorperiode.",
+    source_started:
+      "Kein Vergleich: {{source}} liefert erst seit dem {{date}} Daten.",
+    lost: "Kein Vergleich: Bitbucket lieferte vom {{from}} bis {{to}} keine Daten.",
+    lostOngoing:
+      "Kein Vergleich: Bitbucket liefert seit dem {{from}} keine Daten.",
+    first_deploys:
+      "Kein Vergleich: Im Zeitraum oder in der Vorperiode überwiegen erste Deploys.",
     incomplete:
-      "kein Vergleich: Die Daten im Zeitraum oder in der Vorperiode sind lückenhaft",
+      "Kein Vergleich: Die Daten im Zeitraum und in der Vorperiode sind nicht gleich vollständig.",
     no_value:
-      "kein Vergleich: Im Zeitraum oder in der Vorperiode fehlt der Wert",
+      "Kein Vergleich: Im Zeitraum oder in der Vorperiode fehlt der Wert.",
     not_reporting:
-      "kein Vergleich: Argo CD liefert für das Team noch keine Daten",
+      "Kein Vergleich: {{source}} liefert für das Team noch keine Daten.",
     previous: "Vorperiode",
     now: "jetzt",
     before: "vorher {{v}}",
@@ -290,6 +311,9 @@ export const de = {
     aria: "Jede Zahl verglichen mit der Vorperiode",
     reason: {
       low_sample: "zu wenig Daten",
+      source_started: "Quelle erst seit Kurzem",
+      lost: "Daten verloren",
+      first_deploys: "erste Deploys überwiegen",
       incomplete: "Daten lückenhaft",
       no_value: "kein Wert",
     },
@@ -339,11 +363,11 @@ export const de = {
         silence:
           "{{source}} lieferte vom {{from}} bis {{to}} keine Daten, obwohl Builds liefen: Ereignisse gingen verloren. Darum bleiben die PR-Zahlen ohne Urteil.",
         silenceProduct:
-          "{{source}} lieferte vom {{from}} bis {{to}} keine Daten, obwohl Builds liefen: Ereignisse gingen verloren. Darum bleiben die PR-Zahlen ohne Urteil, und auch Deploys und Builds: Sie finden ihr Produkt nur über Bitbucket.",
+          "{{source}} lieferte vom {{from}} bis {{to}} keine Daten, obwohl Builds liefen: Ereignisse gingen verloren. Darum bleiben die PR-Zahlen ohne Urteil, und auch Deploys und Builds: Sie finden ihr Projekt nur über Bitbucket.",
         silenceOngoing:
           "{{source}} liefert seit dem {{from}} keine Daten, obwohl Builds laufen: Ereignisse gehen verloren. Darum bleiben die PR-Zahlen ohne Urteil.",
         silenceOngoingProduct:
-          "{{source}} liefert seit dem {{from}} keine Daten, obwohl Builds laufen: Ereignisse gehen verloren. Darum bleiben die PR-Zahlen ohne Urteil, und auch Deploys und Builds: Sie finden ihr Produkt nur über Bitbucket.",
+          "{{source}} liefert seit dem {{from}} keine Daten, obwohl Builds laufen: Ereignisse gehen verloren. Darum bleiben die PR-Zahlen ohne Urteil, und auch Deploys und Builds: Sie finden ihr Projekt nur über Bitbucket.",
         silent_end:
           "{{source}} liefert seit dem {{from}} bis zum Ende des Zeitraums keine Daten mehr. Zu diesen Zahlen sagt die Einschätzung nichts.",
       },
@@ -370,9 +394,9 @@ export const de = {
         },
       },
       librariesOnly:
-        "Dieses Produkt enthält nur Bibliotheken; sie werden nicht ausgerollt.",
+        "Dieses Projekt enthält nur Libraries; sie werden nicht ausgerollt.",
       librariesOnlyTeam:
-        "Alle PRs, die in diesen Wochen gemerged wurden, liegen in Bibliotheken; sie werden nicht ausgerollt.",
+        "Alle PRs, die in diesen Wochen gemerged wurden, liegen in Libraries; sie werden nicht ausgerollt.",
       quiet: "In diesen Wochen fällt nichts auf.",
       source: {
         bitbucket: "Bitbucket",
@@ -382,8 +406,8 @@ export const de = {
       },
       focus: "Im Fokus",
       focusBy: "nach Gewicht der Befunde",
-      scopeAll: "Team, alle Produkte",
-      scopeProduct: "Produkt {{product}}",
+      scopeAll: "Team, alle Projekte",
+      scopeProduct: "Projekt {{product}}",
       col: {
         good: "Läuft",
         bad: "Hakt",
@@ -414,8 +438,8 @@ export const de = {
           daysDat_other: "{{n}} Tagen",
         },
         unitWord: {
-          project_one: "Produkt",
-          project_other: "Produkte",
+          project_one: "Projekt",
+          project_other: "Projekte",
           repo_one: "Repo",
           repo_other: "Repos",
           app_one: "App",
@@ -426,8 +450,8 @@ export const de = {
           botBranch_other: "Bot-Branches",
         },
         of: {
-          project_one: "{{k}} von {{n}} Produkt",
-          project_other: "{{k}} von {{n}} Produkten",
+          project_one: "{{k}} von {{n}} Projekt",
+          project_other: "{{k}} von {{n}} Projekten",
           repo_one: "{{k}} von {{n}} Repo",
           repo_other: "{{k}} von {{n}} Repos",
           app_one: "{{k}} von {{n}} App",
@@ -461,7 +485,7 @@ export const de = {
             "Abmachung: mindestens ein Release nach {{prod}} pro Sprint. Gemeldet, wenn mehr als {{n}} Tag kein Release kam.",
           threshold_other:
             "Abmachung: mindestens ein Release nach {{prod}} pro Sprint. Gemeldet, wenn mehr als {{n}} Tage kein Release kam.",
-          rule: "Gezählt werden Produkte, die ausgerollt werden und an denen gearbeitet wird. Das erste bekannte Deploy einer App zählt als Release.",
+          rule: "Gezählt werden Projekte, die ausgerollt werden und an denen gearbeitet wird. Das erste bekannte Deploy einer App zählt als Release.",
         },
         release_due: {
           title: "Release nach {{prod}} bald fällig",
@@ -482,7 +506,7 @@ export const de = {
             "Abmachung: höchstens {{n}} Tag vom Merge bis {{prod}}.",
           threshold_other:
             "Abmachung: höchstens {{n}} Tage vom Merge bis {{prod}}.",
-          rule: "Gezählt werden PRs von Repos, die ausgerollt werden, ab ihrer Ankunft auf dem Hauptbranch; Bibliotheken nicht.",
+          rule: "Gezählt werden PRs von Repos, die ausgerollt werden, ab ihrer Ankunft auf dem Default-Branch; Libraries nicht.",
         },
         slow_to_prod: {
           title: "Lange Wartezeit vom Merge bis {{prod}}",
@@ -512,7 +536,7 @@ export const de = {
             "Gemeldet, wenn eine Woche höchstens {{n}} der typischen Merges hat, während am Ende der Woche {{minN}} oder mehr offen waren.",
           min_one: "{{n}} freigegebener PR",
           min_other: "{{n}} freigegebene PRs",
-          rule: "Verglichen mit der typischen Woche des Produkts. Freigegeben heisst: Die Freigabe einer Person, nicht des Autors, gilt am Ende der Woche noch, und niemand verlangt Änderungen. Warum nicht gemerged wurde, zeigen die Daten nicht.",
+          rule: "Verglichen mit der typischen Woche des Projekts. Freigegeben heisst: Die Freigabe einer Person, nicht des Autors, gilt am Ende der Woche noch, und niemand verlangt Änderungen. Warum nicht gemerged wurde, zeigen die Daten nicht.",
         },
         approved_waiting: {
           title: "Freigegeben, aber nicht gemerged",
@@ -545,13 +569,13 @@ export const de = {
           rule: "Für diese PRs lässt sich nicht sagen, ob und wann sie auf {{prod}} kamen. Die Abmachung zur Zeit bis {{prod}} ist dort nicht messbar.",
         },
         unattributed: {
-          title: "Releases nach {{prod}} ohne Produkt",
-          unit_one: "{{n}} Release nach {{prod}} keinem Produkt zuordenbar",
-          unit_other: "{{n}} Releases nach {{prod}} keinem Produkt zuordenbar",
-          rule: "Ihre Änderung im GitOps-Repo ist Bitbucket nicht bekannt. Für ihre Produkte ist die Abmachung «ein Release pro Sprint» darum nicht messbar.",
+          title: "Releases nach {{prod}} ohne Projekt",
+          unit_one: "{{n}} Release nach {{prod}} keinem Projekt zuordenbar",
+          unit_other: "{{n}} Releases nach {{prod}} keinem Projekt zuordenbar",
+          rule: "Ihre Änderung im GitOps-Repo ist Bitbucket nicht bekannt. Für ihre Projekte ist die Abmachung «ein Release pro Sprint» darum nicht messbar.",
         },
         no_prod_stage: {
-          title: "Argo CD meldet nichts nach {{prod}}",
+          title: "Argo CD liefert keine Daten zur Stage {{prod}}",
           unit: "Argo CD meldet Deploys nach {{names}}, keines nach {{prod}}",
           rule: "Die Stage-Konfiguration in riptide oder die Benachrichtigung von Argo CD stimmt nicht.",
         },
@@ -592,7 +616,7 @@ export const de = {
           rule: "PRs, die keine Entwürfe mehr sind und noch keine Reaktion einer Person haben. PRs von Bots nicht gezählt.",
         },
         trunk_failing: {
-          title: "Builds auf dem Hauptbranch lange fehlgeschlagen",
+          title: "Builds auf dem Default-Branch lange fehlgeschlagen",
           unit_one:
             "{{days}} lang fehlgeschlagen, {{count}} fehlgeschlagener Build",
           unit_other:
@@ -602,7 +626,7 @@ export const de = {
             "Gemeldet ab {{minN}} über mehr als {{n}} Arbeitstage.",
           min_one: "{{n}} fehlgeschlagenen Build",
           min_other: "{{n}} fehlgeschlagenen Builds",
-          rule: "Vom ersten fehlgeschlagenen Build bis zum nächsten erfolgreichen, pro Hauptbranch. Release-Builds nicht gezählt.",
+          rule: "Vom ersten fehlgeschlagenen Build bis zum nächsten erfolgreichen, pro Default-Branch. Release-Builds nicht gezählt.",
         },
         branch_failing: {
           title: "Builds eines Branches scheitern immer wieder",
@@ -871,7 +895,7 @@ export const de = {
         build_p50: "typischer erfolgreicher Build",
         build_wait_p50: "Warten auf einen Build-Agent",
         build_work_p50: "Bauen",
-        deploy_per_week: "Releases pro Woche",
+        deploy_per_week: "Releases nach {{prod}} pro Woche",
         deploy_success: "erfolgreiche Deploys",
         lead_time_p50: "Zeit vom ersten Commit bis {{prod}}",
         review_p50: "bereit bis zur ersten Freigabe",
@@ -880,7 +904,7 @@ export const de = {
         build_success: "erfolgreiche Builds",
         merged_per_week: "gemergte PRs pro Woche",
         batch_size: "geänderte Zeilen pro PR",
-        wip_weeks: "Wochen Arbeit offen",
+        wip_weeks: "Arbeit offen",
         feature_share: "Feature-PRs",
         untracked: "PRs ohne Jira-Key",
         wasted_share: "Review-Aufwand für verworfene PRs",
@@ -898,7 +922,7 @@ export const de = {
         state_approved_waiting: "Arbeitstage, die der älteste PR wartet",
         state_bot_loop: "fehlgeschlagene Builds in Folge",
         state_untraced: "PRs nicht zuordenbar",
-        state_unattributed: "Releases ohne Produkt",
+        state_unattributed: "Releases ohne Projekt",
         state_no_prod_stage: "gemeldete Stages",
         state_deploy_failing: "Arbeitstage ohne erfolgreiches Deploy",
         state_deploy_failures:
@@ -948,8 +972,8 @@ export const de = {
         "{{count, num}} erstes Deploy aus den ersten {{days}} Tagen der Argo-CD-Daten nicht gezählt: Ob es eine neue Version brachte, ist unbekannt",
       firstSeen_other:
         "{{count, num}} erste Deploys aus den ersten {{days}} Tagen der Argo-CD-Daten nicht gezählt: Ob sie eine neue Version brachten, ist unbekannt",
-      unattributed_one: "{{count, num}} Deploy keinem Produkt zuordenbar",
-      unattributed_other: "{{count, num}} Deploys keinem Produkt zuordenbar",
+      unattributed_one: "{{count, num}} Deploy keinem Projekt zuordenbar",
+      unattributed_other: "{{count, num}} Deploys keinem Projekt zuordenbar",
       infra_one: "{{count, num}} Deploy von Infrastruktur-Apps nicht gezählt",
       infra_other:
         "{{count, num}} Deploys von Infrastruktur-Apps nicht gezählt",
@@ -959,7 +983,7 @@ export const de = {
         "die Wochen stark schwanken oder Releases ausbleiben: Dann sammeln sich Änderungen zu grossen Releases.",
       lever:
         "kleinere Änderungen, automatisierte Deploys, kein fester Release-Termin.",
-      def: "Erfolgreiche Deploys nach {{prod}} mit neuer Version: Die Version unterscheidet sich vom vorherigen Deploy derselben App, oder es ist das erste Deploy einer App, die live geht. Eine Änderung im GitOps-Repo, die mehrere Apps aktualisiert, zählt einmal. Geteilt durch die Wochen im Zeitraum, in denen Argo CD Daten lieferte. Deploys von Infrastruktur-Apps zählen nicht: Sie gehören zu keinem Produkt des Teams.",
+      def: "Erfolgreiche Deploys nach {{prod}} mit neuer Version: Die Version unterscheidet sich vom vorherigen Deploy derselben App, oder es ist das erste Deploy einer App, die live geht. Eine Änderung im GitOps-Repo, die mehrere Apps aktualisiert, zählt einmal. Geteilt durch die Wochen im Zeitraum, in denen Argo CD Daten lieferte. Deploys von Infrastruktur-Apps zählen nicht: Sie gehören zu keinem Projekt des Teams.",
       basis: "{{releases}}, {{resyncs}} und {{firstSeen}}, aus {{syncs}}.",
       basisFirst_one: " Davon {{count}} Release als erstes Deploy einer App.",
       basisFirst_other:
@@ -973,13 +997,13 @@ export const de = {
       coverageAll:
         "Jedes Deploy ist vergleichbar: Das erste Deploy einer App nach den ersten {{days}} Tagen der Argo-CD-Daten zählt als Release.",
       coverageInfra_one:
-        " Nicht gezählt: {{count, num}} Deploy von Infrastruktur-Apps, die keinem Produkt des Teams gehören ({{apps}}).",
+        " Nicht gezählt: {{count, num}} Deploy von Infrastruktur-Apps, die keinem Projekt des Teams gehören ({{apps}}).",
       coverageInfra_other:
-        " Nicht gezählt: {{count, num}} Deploys von Infrastruktur-Apps, die keinem Produkt des Teams gehören ({{apps}}).",
+        " Nicht gezählt: {{count, num}} Deploys von Infrastruktur-Apps, die keinem Projekt des Teams gehören ({{apps}}).",
       coverageUnattributed_one:
-        " {{count, num}} Deploy ist keinem Produkt zuordenbar: Weder seine Änderung im GitOps-Repo noch ein anderes Deploy seiner App nennt eines. In der Ansicht des ganzen Teams zählt es, in keiner Produktansicht.",
+        " {{count, num}} Deploy ist keinem Projekt zuordenbar: Weder seine Änderung im GitOps-Repo noch ein anderes Deploy seiner App nennt eines. In der Ansicht des ganzen Teams zählt es, in keiner Projektansicht.",
       coverageUnattributed_other:
-        " {{count, num}} Deploys sind keinem Produkt zuordenbar: Weder ihre Änderung im GitOps-Repo noch ein anderes Deploy ihrer App nennt eines. In der Ansicht des ganzen Teams zählen sie, in keiner Produktansicht.",
+        " {{count, num}} Deploys sind keinem Projekt zuordenbar: Weder ihre Änderung im GitOps-Repo noch ein anderes Deploy ihrer App nennt eines. In der Ansicht des ganzen Teams zählen sie, in keiner Projektansicht.",
     },
     lead: {
       label: "Zeit vom ersten Commit bis {{prod}}",
@@ -997,7 +1021,7 @@ export const de = {
         "die langsamsten 10 % weit über dem typischen Wert liegen: Dann bleiben einzelne Änderungen hängen, oft bis zu einem Release-Termin.",
       lever:
         "die Abschnitte, in denen die meiste Zeit liegt. Welche es sind, zeigt «Wo wartet eine Änderung?» weiter unten.",
-      def: "Pro PR vom ersten Commit bis zum ersten Deploy nach {{prod}}, das ihn enthält. Gezählt werden die PRs, die im Zeitraum gemerged wurden und bis zu seinem Ende auf {{prod}} waren. PRs von Bots und von Bibliotheken zählen nicht.",
+      def: "Pro PR vom ersten Commit bis zum ersten Deploy nach {{prod}}, das ihn enthält. Gezählt werden die PRs, die im Zeitraum gemerged wurden und bis zu seinem Ende auf {{prod}} waren. PRs von Bots und von Libraries zählen nicht.",
       basis_one:
         "Aus {{count}} PR, gemerged im Zeitraum und bis zu seinem Ende auf {{prod}}.",
       basis_other:
@@ -1021,13 +1045,13 @@ export const de = {
     dsucc: {
       label: "Erfolgreiche Deploys",
       dora: "keine DORA-Metrik",
-      question: "Klappt das Ausrollen selbst?",
+      question: "Klappt der Rollout selbst?",
       unit: "der Deploys",
       note_one: "{{failed}} von {{count}} Deploy fehlgeschlagen",
       note_other: "{{failed}} von {{count}} Deploys fehlgeschlagen",
       direction: "höher ist besser",
       means:
-        "Ob das Ausrollen selbst klappt: Ein abgebrochenes oder fehlgeschlagenes Deploy heisst, jemand muss eingreifen.",
+        "Ob der Rollout selbst klappt: Ein abgebrochenes oder fehlgeschlagenes Deploy heisst, jemand muss eingreifen.",
       watch:
         "der Wert sinkt: Dann scheitern Deploys an Konfiguration, Ressourcen oder Abhängigkeiten.",
       lever:
@@ -1040,7 +1064,7 @@ export const de = {
         "Nur Deploys, die Argo CD gemeldet hat; Deploys von Infrastruktur-Apps zählen nicht.",
     },
     instability: {
-      label: "Ärger nach dem Ausrollen",
+      label: "Ärger nach dem Rollout",
       dora: "DORA · Change fail rate · Deployment rework rate · Failed deployment recovery time",
       question:
         "Wie oft macht ein Release Ärger, und wie schnell ist das behoben?",
@@ -1098,9 +1122,9 @@ export const de = {
     lowerBound_other:
       "{{count, num}} verfolgte PRs kamen vielleicht schon mit einem früheren Deploy auf {{prod}}, das sich keinem PR zuordnen lässt: Ihre Zeit bis {{prod}} ist ein Höchstwert.",
     library_one:
-      "{{count, num}} PR in Bibliotheken: Sie werden nicht ausgerollt und zählen bei der Zeit bis {{prod}} nicht mit.",
+      "{{count, num}} PR in Libraries, wird nicht ausgerollt und zählt bei der Zeit bis {{prod}} nicht mit.",
     library_other:
-      "{{count, num}} PRs in Bibliotheken: Sie werden nicht ausgerollt und zählen bei der Zeit bis {{prod}} nicht mit.",
+      "{{count, num}} PRs in Libraries, werden nicht ausgerollt und zählen bei der Zeit bis {{prod}} nicht mit.",
     perRepo_one: "Pro Repo ({{count}} Repo)",
     perRepo_other: "Pro Repo ({{count}} Repos)",
     colRepo: "Repo",
@@ -1108,7 +1132,7 @@ export const de = {
     colOnProd: "Auf {{prod}}",
     colNotYet: "Noch nicht auf {{prod}}",
     colNotPlaceable: "Nicht zuordenbar",
-    colLibrary: "Bibliothek",
+    colLibrary: "Library",
     oldestSince: "ältester gemerged am {{date}}",
     ridge: {
       title: "Wie die Zeit in jedem Abschnitt verteilt ist",
@@ -1204,11 +1228,11 @@ export const de = {
       housekeeping_one: "{{count, num}} Aufräum-PR nicht gezählt",
       housekeeping_other: "{{count, num}} Aufräum-PRs nicht gezählt",
       housekeepingTitle:
-        "Derselbe Titel in {{repos}} oder mehr Repos innert {{minutes}} Minuten eröffnet, ohne Freigabe einer Person und ohne Jira-Key: Pflege mit einem Werkzeug über alle Repos, keine Arbeit am Produkt.",
+        "Derselbe Titel in {{repos}} oder mehr Repos innert {{minutes}} Minuten eröffnet, ohne Freigabe einer Person und ohne Jira-Key: Pflege mit einem Werkzeug über alle Repos, keine Arbeit am Projekt.",
       umbrella_one: "{{count, num}} Merge eines Sammel-Branches nicht gezählt",
       umbrella_other: "{{count, num}} Merges von Sammel-Branches nicht gezählt",
       umbrellaTitle:
-        "Der PR brachte nur die Arbeit anderer PRs auf den Hauptbranch: Sie wurden in seinen Branch gemerged oder mit ihm. Diese PRs zählen, er selbst nicht.",
+        "Der PR brachte nur die Arbeit anderer PRs auf den Default-Branch: Sie wurden in seinen Branch gemerged oder mit ihm. Diese PRs zählen, er selbst nicht.",
       twice_one: "{{count, num}} PR doppelt, nicht gezählt",
       twice_other: "{{count, num}} PRs doppelt, nicht gezählt",
       twiceTitle:
@@ -1292,7 +1316,7 @@ export const de = {
     },
   },
   deploys: {
-    eyebrow: "Ausrollen",
+    eyebrow: "Rollout",
     title: "Wie gleichmässig kommt Code nach {{prod}}?",
     fwSpeed: "Speed, sekundär",
     cardTitle: "Releases nach {{prod}} pro Woche",
@@ -1369,7 +1393,7 @@ export const de = {
     kind: terms.de.runKind,
     kindNote: {
       release: "Builds, die die CI als Release oder Hotfix meldet",
-      main: "Hauptbranch (master oder main), kein Release",
+      main: "Default-Branch (master oder main), kein Release",
       feature:
         "feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/ und Builds von PRs",
       other:
@@ -1450,9 +1474,9 @@ export const de = {
     fwEffectiveness: "Effectiveness, Treiber",
     dataFrom: "Build-Daten ab {{date}}; die Wochen davor sind leer.",
     unattributed_one:
-      "{{count, num}} Build ohne Repo: Weder sein Commit noch sein Pipeline-Name nennt eines. In der Ansicht des ganzen Teams gezählt, in keiner Produktansicht.",
+      "{{count, num}} Build ohne Repo: Weder sein Commit noch sein Pipeline-Name nennt eines. In der Ansicht des ganzen Teams gezählt, in keiner Projektansicht.",
     unattributed_other:
-      "{{count, num}} Builds ohne Repo: Weder ihr Commit noch ihr Pipeline-Name nennt eines. In der Ansicht des ganzen Teams gezählt, in keiner Produktansicht.",
+      "{{count, num}} Builds ohne Repo: Weder ihr Commit noch ihr Pipeline-Name nennt eines. In der Ansicht des ganzen Teams gezählt, in keiner Projektansicht.",
     botRuns_one: "Bot-Builds: {{count, num}} Build, {{h}} CI-Zeit",
     botRuns_other: "Bot-Builds: {{count, num}} Builds, {{h}} CI-Zeit",
     botRunsFailed_one: ", davon {{count, num}} fehlgeschlagen ({{h}})",
@@ -1552,7 +1576,7 @@ export const de = {
       "Was kostet das Review einer Änderung, die gemerged wurde?",
     trendOnly: "nur im Verlauf lesen",
     perKlocWhy: "steigt der Wert, werden Reviews pro Änderung teurer",
-    byProduct: "Nach Produkt",
+    byProduct: "Nach Projekt",
     byRepo: "Nach Repo",
     sub: "Alle Reviews im Zeitraum, der letzte Stand pro PR",
     none: "Keine noergler-Reviews im Zeitraum.",

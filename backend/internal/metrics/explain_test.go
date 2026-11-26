@@ -237,7 +237,10 @@ func TestCompareWithThePreviousPeriod(t *testing.T) {
 	// Argo CD started inside the previous period: it reads low, no verdict.
 	late := func(ds *dataset.Dataset) { ds.Meta.DataStart.ArgoCD = agoP(30) }
 	c = Compute(leadData(12, 2, late), leadData(12, 3, late, fourWeeksBack), nil, params).Comparison
-	if c.LeadTime.Reason == nil || *c.LeadTime.Reason != ReasonIncomplete || c.DeployFreq.Verdict != ChangeNone {
+	// The page names the source and since when it reports, one reason each.
+	if c.LeadTime.Reason == nil || *c.LeadTime.Reason != ReasonStarted || c.DeployFreq.Verdict != ChangeNone ||
+		c.LeadTime.Source == nil || *c.LeadTime.Source != dataset.SourceArgoCD || c.LeadTime.Since == nil ||
+		!c.LeadTime.Since.Equal(ago(30)) || *c.DeployFreq.Reason != ReasonStarted {
 		t.Errorf("late argo = %+v / %+v", c.LeadTime, c.DeployFreq)
 	}
 
@@ -263,7 +266,7 @@ func TestCompareWithThePreviousPeriod(t *testing.T) {
 		return ds
 	}
 	c = Compute(data(releases(0)), earlier(6), nil, params).Comparison
-	if c.DeployFreq.Reason == nil || *c.DeployFreq.Reason != ReasonIncomplete {
+	if c.DeployFreq.Reason == nil || *c.DeployFreq.Reason != ReasonFirstDeploys || c.DeployFreq.Source != nil {
 		t.Errorf("first deploys = %+v", c.DeployFreq)
 	}
 	// One new App among the releases still compares.

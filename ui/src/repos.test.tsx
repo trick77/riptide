@@ -5,7 +5,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { RepoSpread } from "./api";
-import { SectionNav, useActiveSection } from "./nav";
+import { SectionNav, sectionOf, useActiveSection } from "./nav";
 import { Ranking } from "./Ranking";
 import {
   RepoStrip,
@@ -62,10 +62,69 @@ describe("repo strip", () => {
     fireEvent.keyDown(dot, { key: "Enter" });
     expect(onRepo).toHaveBeenCalledTimes(2);
     expect(onRepo).toHaveBeenCalledWith("lager/lager-ui");
+    // The verdict in words, not by colour alone.
+    expect(tip).toHaveTextContent(
+      "0.25 pro Woche · 4 Releases im Zeitraum · Hinweis",
+    );
     const apart = screen.getByRole("button", { name: /^lager\/lager-api: / });
     expect(apart).toHaveAccessibleName(
-      "lager/lager-api: kein Release im Zeitraum",
+      "lager/lager-api: kein Release im Zeitraum · Abmachung verletzt",
     );
+    expect(
+      screen.getAllByRole("button", { name: /^kasse\/kasse-api: / })[0],
+    ).toHaveAccessibleName(
+      "kasse/kasse-api: 1.0 pro Woche · 4 Releases im Zeitraum · innerhalb der Abmachung",
+    );
+  });
+
+  it("is one tab stop, the arrow keys move between its dots", () => {
+    render(<RepoStrip s={rel} label="Releases" />);
+    const dots = screen.getAllByTestId("strip-dot");
+    expect(dots.map((d) => d.getAttribute("tabindex"))).toEqual([
+      "0",
+      "-1",
+      "-1",
+      "-1",
+    ]);
+    dots[0].focus();
+    fireEvent.keyDown(dots[0], { key: "ArrowRight" });
+    expect(document.activeElement).toBe(dots[1]);
+    expect(dots[1]).toHaveAttribute("tabindex", "0");
+    expect(dots[0]).toHaveAttribute("tabindex", "-1");
+    fireEvent.keyDown(dots[1], { key: "End" });
+    expect(document.activeElement).toBe(dots[3]);
+    fireEvent.keyDown(dots[3], { key: "ArrowRight" });
+    expect(document.activeElement).toBe(dots[0]);
+  });
+
+  it("sets the threshold's label and the typical one apart where they meet", () => {
+    const prod = spreadOf(m, "to_prod")!;
+    const { container } = render(
+      <RepoStrip s={{ ...prod, typical_x: 0.7 }} label="Bis PROD" />,
+    );
+    const anchor = (text: string) =>
+      [...container.querySelectorAll("text")]
+        .find((e) => e.textContent === text)
+        ?.getAttribute("text-anchor");
+    // The mark (0.68) left of the typical line (0.7): its label reads to
+    // the left, the typical one's to the right.
+    expect(anchor("14 Tage")).toBe("end");
+    expect(anchor("typisch")).toBe("start");
+  });
+
+  it("stacks every dot of a crowded spot where it can be reached", () => {
+    const crowd = {
+      ...rel,
+      dots: Array.from({ length: 15 }, (_, i) => ({
+        ...rel.dots[0],
+        repo: `kasse/r${i}`,
+      })),
+    };
+    render(<RepoStrip s={crowd} label="Releases" />);
+    const spots = screen
+      .getAllByTestId("strip-dot")
+      .map((d) => `${d.getAttribute("cx")},${d.getAttribute("cy")}`);
+    expect(new Set(spots).size).toBe(15);
   });
 
   it("draws nothing the backend did not show", () => {
@@ -89,10 +148,10 @@ describe("repo strip", () => {
       "2 von 3 Repos liegen nahe beim typischen Repo, 1 weit darunter.",
     ]);
     expect(lines(spreadOf(m, "merged")!)).toContain(
-      "kasse/kasse-api trägt 60 % davon.",
+      "kasse/kasse-api allein bringt 60 % aller gemergten PRs des Teams.",
     );
     expect(lines(spreadOf(m, "batch")!)).toContain(
-      "Die Zahl des Teams zählt alle PRs mit bekannter Grösse zusammen: Repos mit vielen PRs mit bekannter Grösse bestimmen sie. Das typische Repo liegt bei 80 Zeilen.",
+      "Die Zahl des Teams nimmt alle PRs mit bekannter Grösse in einen Topf: Repos mit vielen davon bestimmen sie. Das typische Repo liegt bei 80 Zeilen.",
     );
     expect(lines(spreadOf(m, "to_prod")!)).toEqual([
       "Das typische Repo: 9.5 Tage, aus 2 Repos",
@@ -113,6 +172,41 @@ describe("repo strip", () => {
     expect(screen.queryByText(/typische Repo/)).toBeNull();
   });
 
+  it("says what is set apart or too thin even without a strip", () => {
+    // One repo placed, two that released nothing: no strip, still the line.
+    const { unmount } = render(
+      <StripBlock
+        s={{ ...rel, shown: false, same: null, apart: 2, thin: 0 }}
+        title="Pro Repo: Releases"
+      />,
+    );
+    expect(
+      screen.getByText("2 Repos haben im Zeitraum nichts ausgerollt."),
+    ).toBeInTheDocument();
+    unmount();
+    // Every repo too thin: the line that says so.
+    render(
+      <StripBlock
+        s={{
+          ...rel,
+          shown: false,
+          same: null,
+          apart: 0,
+          thin: 3,
+          typical: null,
+          note: null,
+          dots: [],
+        }}
+        title="Pro Repo: Releases"
+      />,
+    );
+    expect(
+      screen.getByText(
+        "3 Repos mit zu wenigen Releases für einen typischen Wert",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("writes each unit's value", () => {
     expect(unitValue(t, "days", 14)).toBe("14 Tage");
     expect(unitValue(t, "days", 2.5)).toBe("2.5 Tage");
@@ -121,6 +215,7 @@ describe("repo strip", () => {
     expect(unitValue(t, "seconds", 900)).toBe("15 min");
     expect(unitValue(t, "share", 0.95)).toBe("95 %");
     expect(unitValue(t, "per_week", 12)).toBe("12 pro Woche");
+    expect(unitValue(t, "per_week", 0)).toBe("0 pro Woche");
   });
 });
 
@@ -130,17 +225,25 @@ describe("ranking", () => {
     render(<Ranking m={metrics()} onRepo={onRepo} />);
     const rank = screen.getByTestId("ranking");
     expect(within(rank).getAllByTestId("rank-row")).toHaveLength(8);
+    // The groups say what the rule decides, cut by the team's thresholds.
     for (const g of [
-      "Rollt nicht aus",
-      "Rollt selten aus",
+      "Kein Release seit über 28 Tagen",
+      "Letztes Release vor 15–28 Tagen",
       "Nicht beurteilbar",
-      "Rollt regelmässig aus",
+      "Release in den letzten 14 Tagen",
     ])
       expect(within(rank).getAllByText(g).length).toBeGreaterThan(0);
-    // The group's rule from the team's thresholds.
     expect(
-      within(rank).getByText("letztes Release vor über 28 Tagen"),
+      within(rank).getByText(
+        "beim Projekt des Repos, obwohl daran gearbeitet wurde",
+      ),
     ).toBeInTheDocument();
+    // How a row writes its releases is the backend's: the count over its
+    // weeks under one a week, the project's last release below.
+    expect(within(rank).getByText("1 Release in 4 Wochen")).toBeInTheDocument();
+    expect(
+      within(rank).getAllByText("Projekt: letztes vor 19 Tagen").length,
+    ).toBeGreaterThan(0);
     // The pills: the release rule broken, a hint, what cannot be judged.
     expect(
       within(rank).getByText("seit 37 Tagen kein Release"),
@@ -166,10 +269,12 @@ describe("ranking", () => {
     expect(more.map((r) => r.textContent)).toEqual([
       "und 1 weiteres Repo dieser Gruppe: kasse-scan",
       expect.stringMatching(
-        /^Bibliotheken1werden nie selbst ausgerollt, darum fehlt hier kein Release.*kasse-lib$/,
+        /^Libraries1werden nie selbst ausgerollt, darum fehlt hier kein Release.*kasse-lib$/,
       ),
     ]);
-    expect(within(rank).getAllByText("Rollt regelmässig aus")).toHaveLength(1);
+    expect(
+      within(rank).getAllByText("Release in den letzten 14 Tagen"),
+    ).toHaveLength(1);
     fireEvent.click(
       within(rank).getByRole("button", { name: "alle 9 zeigen" }),
     );
@@ -249,6 +354,37 @@ describe("trend lines", () => {
 });
 
 describe("sticky header", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    // The page height a test set goes with it.
+    delete (document.documentElement as { scrollHeight?: number }).scrollHeight;
+  });
+
+  it("marks 'more' while one of its sections is read, and closes on Escape or outside", () => {
+    render(<SectionNav active="kosten" />);
+    const nav = screen.getByRole("navigation", { name: "Bereiche" });
+    const more = nav.querySelector("details")!;
+    const summary = more.querySelector("summary")!;
+    expect(summary).toHaveAttribute("aria-current", "location");
+    expect(summary).toHaveTextContent("Kosten");
+    more.open = true;
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(more.open).toBe(false);
+    more.open = true;
+    fireEvent.pointerDown(document.body);
+    expect(more.open).toBe(false);
+    more.open = true;
+    fireEvent.pointerDown(summary);
+    expect(more.open).toBe(true);
+  });
+
+  it("reads a malformed link's section as it stands", () => {
+    expect(sectionOf("#%E0")).toBe("%E0");
+    expect(sectionOf("#%")).toBe("%");
+    expect(sectionOf("#review")).toBe("review");
+    expect(sectionOf("#f%C3%BCr")).toBe("für");
+  });
+
   it("marks the section being read and keeps every link's target", () => {
     render(<SectionNav active="fluss" />);
     const nav = screen.getByRole("navigation", { name: "Bereiche" });
@@ -315,16 +451,53 @@ describe("sticky header", () => {
       seen[0]([], {} as IntersectionObserver);
     });
     expect(active).toBe("c");
-    vi.unstubAllGlobals();
+  });
+
+  it("marks by the page's order, not the list's", () => {
+    let y = 0;
+    const tops: Record<string, number> = { a: 0, z: 600, b: 1200 };
+    Object.defineProperty(document.documentElement, "scrollHeight", {
+      configurable: true,
+      value: 50_000,
+    });
+    document.body.innerHTML = "";
+    for (const id of Object.keys(tops)) {
+      const el = document.createElement("div");
+      el.id = id;
+      el.getBoundingClientRect = () => ({ top: tops[id] - y }) as DOMRect;
+      document.body.appendChild(el);
+    }
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    // "z" is behind "more", listed last, read between a and b.
+    const ids = ["a", "b", "z"] as const;
+    let active = "";
+    function Probe() {
+      active = useActiveSection(ids, true, () => 56);
+      return null;
+    }
+    render(<Probe />);
+    y = 560;
+    act(() => {
+      window.dispatchEvent(new Event("scroll"));
+    });
+    expect(active).toBe("z");
   });
 });
 
 describe("deep links", () => {
+  const scrollIntoView = Element.prototype.scrollIntoView;
   beforeEach(() => {
     window.history.replaceState(null, "", "/?w=12#review");
   });
   afterEach(() => {
     vi.unstubAllGlobals();
+    Element.prototype.scrollIntoView = scrollIntoView;
     window.history.replaceState(null, "", "/");
   });
 
