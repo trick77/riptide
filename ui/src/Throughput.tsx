@@ -50,11 +50,7 @@ export function MergedTile({ m, onRepo }: TileArgs) {
           : undefined
       }
       direction={
-        <Direction
-          arrow="up"
-          label={t("throughput.merged.direction")}
-          why={t("common.ownHistory")}
-        />
+        <Direction arrow="up" label={t("throughput.merged.direction")} />
       }
       compare={{
         change: m.comparison.merged_per_week,
@@ -94,11 +90,7 @@ export function BatchTile({ m, onRepo }: TileArgs) {
             })
       }
       direction={
-        <Direction
-          arrow="down"
-          label={t("throughput.batch.direction")}
-          why={t("common.ownHistory")}
-        />
+        <Direction arrow="down" label={t("throughput.batch.direction")} />
       }
       compare={{
         change: m.comparison.batch_size,

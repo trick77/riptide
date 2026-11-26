@@ -364,7 +364,7 @@ export function Direction({
 }: {
   arrow?: "up" | "down";
   label: string;
-  why: string;
+  why?: string;
 }) {
   return (
     <>
@@ -378,8 +378,10 @@ export function Direction({
 }
 
 // Why is what one number means and where it comes from: how to read it,
-// when to look closer, what moves it; then what it counts, from how much,
-// with which filters, and how complete the data behind it is.
+// when to look closer, what moves it (an explanation, never advice: no
+// finding stands behind it); then what it counts, from how much, with which
+// filters in words, and how complete the data behind it is. No query, table
+// or file name: the reader is a team, not riptide's developers.
 export type Why = {
   title: string;
   means?: ReactNode;
@@ -389,7 +391,6 @@ export type Why = {
   basis: ReactNode;
   filters: string[];
   coverage: ReactNode;
-  query: string;
 };
 
 export function WhyPanel({ why }: { why: Why }) {
@@ -425,7 +426,7 @@ export function WhyPanel({ why }: { why: Why }) {
           {why.filters.map((f) => (
             <span
               key={f}
-              className="rounded-md border border-accent-dim bg-accent/10 px-[7px] py-px font-mono text-[11px] text-accent-strong"
+              className="rounded-md border border-accent-dim bg-accent/10 px-[7px] py-px text-[11.5px] text-accent-strong"
             >
               {f}
             </span>
@@ -435,12 +436,6 @@ export function WhyPanel({ why }: { why: Why }) {
       <div>
         <Eyebrow>{t("why.coverage")}</Eyebrow>
         <p className="mt-1.5 mb-0 text-[13.5px] text-ink-dim">{why.coverage}</p>
-        <p className="mt-1.5 mb-0 text-[12.5px] text-muted">
-          {t("why.query")}{" "}
-          <span className="font-mono text-xs text-accent-strong">
-            {why.query}
-          </span>
-        </p>
       </div>
     </div>
   );

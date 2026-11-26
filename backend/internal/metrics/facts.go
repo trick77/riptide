@@ -110,7 +110,7 @@ var (
 	}
 	prodReasonTerm = map[string]uiTerm{
 		TraceNoMergeCommit: {"Bitbucket nannte keinen Merge-Commit", "Bitbucket named no merge commit"},
-		TraceOffTrunk: {"in einen Branch gemerged, der bis zum Periodenende nicht im Hauptbranch ankam",
+		TraceOffTrunk: {"in einen Branch gemerged, der bis zum Ende des Zeitraums nicht im Hauptbranch ankam",
 			"merged into a branch that did not reach the main branch by the period's end"},
 		TraceReleaseUnresolved: {"ein späteres Release lässt sich keinen PRs zuordnen", "a later release cannot be tied to PRs"},
 		TraceRepoUntraced:      {"kein Deploy des Repos bekannt", "no deploy of the repo known"},
@@ -139,19 +139,20 @@ func prMarks(pr dataset.PR) (uncounted *string, via, library bool) {
 // runKindTerm is a run kind's words in the runs table's Art column.
 var runKindTerm = map[string]uiTerm{
 	KindRelease: {"Releases", "Releases"},
-	KindMain:    {"Default-Branch-Builds", "Default branch builds"},
+	KindMain:    {"Hauptbranch-Builds", "Main branch builds"},
 	KindFeature: {"Feature- und Bugfix-Builds", "Feature and bugfix builds"},
 	KindOther:   {"Übrige Branches", "Other branches"},
-	KindUnknown: {"Default-Branch, Art unbekannt", "Default branch, kind unknown"},
+	KindUnknown: {"Hauptbranch, Art unbekannt", "Main branch, kind unknown"},
 }
 
-// runKindAlias is a kind's words the UI showed before 2026-11-17, still
-// searched, as prStateAlias.
+// runKindAlias is a kind's words the UI showed before (until 2026-11-17,
+// then the default-branch words until 2026-11-26), still searched, as
+// prStateAlias.
 var runKindAlias = map[string]string{
-	KindMain:    "master-Builds master builds",
+	KindMain:    "master-Builds master builds Default-Branch-Builds Default branch builds",
 	KindFeature: "Feature- und PR-Builds Feature and PR builds",
 	KindOther:   "Andere Branches",
-	KindUnknown: "master, Art unbekannt master, kind unknown",
+	KindUnknown: "master, Art unbekannt master, kind unknown Default-Branch, Art unbekannt Default branch, kind unknown",
 }
 
 // runKindTerms is a run kind's search words.
@@ -170,8 +171,20 @@ const (
 // deployTerm is a class's search terms; a failed sync's is its phase.
 var deployTerm = map[string]uiTerm{
 	DeployRelease:   {"Release", "Release"},
-	DeployFirstSeen: {"Erstdeploy", "First deploy"},
-	DeploySync:      {"Sync ohne neue Images", "Sync without new images"},
+	DeployFirstSeen: {"Erstes Deploy", "First deploy"},
+	DeploySync:      {"Deploy ohne neue Version", "Deploy without a new version"},
+}
+
+// deployAlias is a class's words the UI showed before 2026-11-26, still
+// searched, as prStateAlias.
+var deployAlias = map[string]string{
+	DeployFirstSeen: "Erstdeploy",
+	DeploySync:      "Sync ohne neue Images Sync without new images",
+}
+
+// deployTerms is a class's search words.
+func deployTerms(class string) string {
+	return strings.TrimSpace(deployTerm[class].both() + " " + deployAlias[class])
 }
 
 // deployClass is what a deploy counts as, with its search term: the class
@@ -187,13 +200,13 @@ func deployClass(d dataset.Deploy) (string, string) {
 	case classRelease:
 		class = DeployRelease
 	case classFirstRelease:
-		return DeployRelease, deployTerm[DeployRelease].both() + " " + deployTerm[DeployFirstSeen].both()
+		return DeployRelease, deployTerms(DeployRelease) + " " + deployTerms(DeployFirstSeen)
 	case classFirstSeen:
 		class = DeployFirstSeen
 	case classSync:
 		class = DeploySync
 	}
-	return class, deployTerm[class].both()
+	return class, deployTerms(class)
 }
 
 // factDeploy is a deploy table row's deploy, classified on first use.
@@ -416,7 +429,9 @@ type RunFact struct {
 }
 
 // flakyTerm is a flaky run's mark on screen, searched in both languages.
-var flakyTerm = uiTerm{"Flaky", "Flaky"}
+// The German mark was "Flaky" until 2026-11-26; the English one still is,
+// so an old ?q= link still finds the row.
+var flakyTerm = uiTerm{"Unzuverlässig", "Flaky"}
 
 // Run outcomes: a status that plainly says succeeded or failed, which the
 // UI words in the viewer's language. Every other status (UNSTABLE, ABORTED,

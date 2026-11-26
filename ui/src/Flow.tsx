@@ -355,11 +355,10 @@ export function Flow({ m, why, onWhy, onFacts }: Props) {
       basis: t("flow.review.basis", { count: r.review.n }),
       filters: [
         t("flow.review.filterReviewer"),
-        "non_human_identities",
+        t("common.withoutBots"),
         t("common.withoutGitOps"),
       ],
       coverage: t("flow.review.coverage"),
-      query: "docs/metrics.md · Lead-time breakdown query",
     },
     touch: {
       title: t("flow.touch.label"),
@@ -377,7 +376,6 @@ export function Flow({ m, why, onWhy, onFacts }: Props) {
         t("common.withoutGitOps"),
       ],
       coverage: t("flow.touch.coverage"),
-      query: "docs/metrics.md · Lead-time breakdown query",
     },
     cycle: {
       title: t("flow.cycle.label"),
@@ -401,7 +399,6 @@ export function Flow({ m, why, onWhy, onFacts }: Props) {
         seen: m.throughput.coverage.opened.count,
         total: m.throughput.coverage.opened.n,
       }),
-      query: "docs/metrics.md · PR cycle time",
     },
     open: {
       title: t("open.jammed.label"),
@@ -416,15 +413,10 @@ export function Flow({ m, why, onWhy, onFacts }: Props) {
         count: m.open_prs.open,
         at: dateTime(m.open_prs.at),
       }),
-      filters: [
-        t("common.withoutGitOps"),
-        t("common.withoutBots"),
-        "non_human_identities",
-      ],
+      filters: [t("common.withoutGitOps"), t("common.withoutBots")],
       coverage: t("open.why.coverage", {
         inactive: m.open_prs.inactive_days,
       }),
-      query: "docs/metrics.md · Open PR age",
     },
   };
   const open = why && whys[why] ? whys[why] : null;
@@ -468,11 +460,7 @@ export function Flow({ m, why, onWhy, onFacts }: Props) {
                 count: r.review.n,
               })}
               direction={
-                <Direction
-                  arrow="down"
-                  label={t("common.shorterBetter")}
-                  why={t("common.ownHistory")}
-                />
+                <Direction arrow="down" label={t("common.shorterBetter")} />
               }
               compare={{
                 change: c.review_time,

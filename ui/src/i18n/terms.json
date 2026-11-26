@@ -18,7 +18,7 @@
     "deployClass": {
       "release": "Release",
       "first_seen": "First deploy",
-      "sync": "Sync without new images"
+      "sync": "Deploy without a new version"
     },
     "changeType": {
       "feature": "Feature",
@@ -38,10 +38,10 @@
     "running": "This week",
     "runKind": {
       "release": "Releases",
-      "main": "Default branch builds",
+      "main": "Main branch builds",
       "feature": "Feature and bugfix builds",
       "other": "Other branches",
-      "unknown": "Default branch, kind unknown"
+      "unknown": "Main branch, kind unknown"
     },
     "notCounted": {
       "umbrella": "Not counted: umbrella-branch merge",
@@ -83,8 +83,8 @@
     },
     "deployClass": {
       "release": "Release",
-      "first_seen": "Erstdeploy",
-      "sync": "Sync ohne neue Images"
+      "first_seen": "Erstes Deploy",
+      "sync": "Deploy ohne neue Version"
     },
     "changeType": {
       "feature": "Feature",
@@ -100,14 +100,14 @@
       "succeeded": "Erfolgreich",
       "failed": "Fehlgeschlagen"
     },
-    "flaky": "Flaky",
+    "flaky": "Unzuverlässig",
     "running": "Laufende Woche",
     "runKind": {
       "release": "Releases",
-      "main": "Default-Branch-Builds",
+      "main": "Hauptbranch-Builds",
       "feature": "Feature- und Bugfix-Builds",
       "other": "Übrige Branches",
-      "unknown": "Default-Branch, Art unbekannt"
+      "unknown": "Hauptbranch, Art unbekannt"
     },
     "notCounted": {
       "umbrella": "Nicht gezählt: Merge eines Sammel-Branches",
@@ -124,7 +124,7 @@
     },
     "prodReason": {
       "no_merge_commit": "Bitbucket nannte keinen Merge-Commit",
-      "off_trunk": "in einen Branch gemerged, der bis zum Periodenende nicht im Hauptbranch ankam",
+      "off_trunk": "in einen Branch gemerged, der bis zum Ende des Zeitraums nicht im Hauptbranch ankam",
       "release_unresolved": "ein späteres Release lässt sich keinen PRs zuordnen",
       "repo_untraced": "kein Deploy des Repos bekannt",
       "in_silence": "eine Lücke in den Daten"

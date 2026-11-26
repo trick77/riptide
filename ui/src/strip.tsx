@@ -34,7 +34,9 @@ function rows(t: TFunction, m: Metrics): Row[] {
   const out: Row[] = [
     {
       key: "deploy_frequency",
-      label: t("overview.freq.label"),
+      label: t("trends.releases", {
+        prod: stage(m.delivery.production_stage),
+      }),
       change: c.deploy_frequency,
       now: freq.syncs ? num(freq.per_week, 1) : "–",
       format: (v) => num(v, 1),

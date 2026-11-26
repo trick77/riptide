@@ -3,8 +3,11 @@
 // build. Grouped by section. Numbers arrive formatted (format.ts, de-CH in
 // both languages): a catalog never formats.
 //
+// One word per thing, as docs/metrics.md "Words on the page" lists them.
 // DORA, SPACE, DevEx, Core 4 and Flow terms are the frameworks' own English
-// names in both languages. Pill words start with a capital in both.
+// names in both languages, and only as a tile's small reference line or in
+// the frameworks map, never as a title. Pill words start with a capital in
+// both.
 //
 // The words the facts search matches (PR states, deploy classes, change
 // types) live in terms.json: the backend's search keeps a copy of them
@@ -49,17 +52,17 @@ export const en = {
     legendWeek: "per week",
     legendRunning: "running week, not over yet",
     gap: {
-      no_data: "no data: the source did not report yet",
+      no_data: "no data: the source sent nothing yet back then",
       lost: "data lost: Bitbucket sent no data",
-      none: "no PR with a size",
+      none: "no PR with a known size",
     },
   },
   repos: {
     head: "Per repo",
     headText:
-      "Each repo judged on its own, never an average over fast and slow ones. A click shows the repo's PRs in the data.",
+      "Each repo is judged on its own, never averaged with others. A click on a row shows the repo's PRs in the data below.",
     title: "Repos, what stands out first",
-    sub: "Bars: releases per week, CW {{from}}–{{to}}, the previous period shaded.",
+    sub: "The bars show releases per week, CW {{from}}–{{to}}; the previous period is shaded.",
     col: {
       repo: "Repo",
       stand: "Status",
@@ -73,15 +76,16 @@ export const en = {
       rare: "Rolling out rarely",
       unjudged: "Cannot be judged",
       regular: "Rolling out regularly",
-      library: "Not rolled out",
+      library: "Libraries",
       idle: "No activity",
     },
     groupSub: {
       none: "last release more than {{breach}} days ago",
       rare: "last release more than {{hint}} and at most {{breach}} days ago",
-      unjudged: "the data does not show whether and when it is rolled out",
+      unjudged:
+        "the data does not show whether and when the repo is rolled out",
       regular: "last release within the last {{hint}} days",
-      library: "library: work no deploy rolls out",
+      library: "never rolled out themselves, so no release is missing here",
       idle: "no merged PR since the last release and none in {{breach}} days",
     },
     flag: {
@@ -99,7 +103,7 @@ export const en = {
       untraced: "no App known to roll it out",
     },
     pill: {
-      library: "not rolled out",
+      library: "Library",
       idle: "no activity",
     },
     rel: {
@@ -112,14 +116,15 @@ export const en = {
       never_one: "none in {{count}} day with data",
       never_other: "none in {{count}} days with data",
     },
-    lying: "still waiting",
+    lying: "no PR on {{prod}}",
     thinCell_one: "too few ({{count}} PR)",
     thinCell_other: "too few ({{count}} PRs)",
     notYet_one: "{{count}} PR not on {{prod}} yet",
     notYet_other: "{{count}} PRs not on {{prod}} yet",
     rowTitle: "Show the PRs of {{repo}} in the data",
     mergedAria: "Merged PRs per week in {{repo}}",
-    moreOf: "more:",
+    restOf_one: "and {{count}} more repo of this group:",
+    restOf_other: "and {{count}} more repos of this group:",
     andMore: "and {{n}} more",
     all: "show all {{n}}",
     less: "show the first {{n}} only",
@@ -127,7 +132,7 @@ export const en = {
     countAll_other: "{{count}} repos.",
     countOpen: "{{n}} of {{total}} repos shown.",
     order:
-      "Order: not rolling out, rarely, cannot be judged, regularly (past a threshold first), library, no activity.",
+      "Order: first the repos that do not roll out, then the rare ones, those that cannot be judged and the regular ones (past a threshold first); last the libraries and repos without activity.",
     unit: {
       perWeek: "{{n}} per week",
       workingDays: "{{n}} working days",
@@ -137,13 +142,13 @@ export const en = {
     typicalMark: "typical",
     same_one: "{{count}} repo: {{value}}",
     same_other: "All {{count}} repos: {{value}}",
-    apartLine_one: "{{count}} repo rolled out nothing in the period",
-    apartLine_other: "{{count}} repos rolled out nothing in the period",
-    typical_one: "Typical repo: {{value}}, of {{count}} repo",
-    typical_other: "Typical repo: {{value}}, of {{count}} repos",
+    apartLine_one: "{{count}} repo rolled out nothing in the period.",
+    apartLine_other: "{{count}} repos rolled out nothing in the period.",
+    typical_one: "The typical repo: {{value}}, of {{count}} repo",
+    typical_other: "The typical repo: {{value}}, of {{count}} repos",
     apart: {
-      releases: "nothing rolled out",
-      to_prod: "nothing rolled out",
+      releases: "no release in the period",
+      to_prod: "no PR rolled out",
     },
     n: {
       releases_one: "{{count}} release in the period",
@@ -152,8 +157,8 @@ export const en = {
       to_prod_other: "{{count}} PRs",
       merged_one: "{{count}} merged PR",
       merged_other: "{{count}} merged PRs",
-      batch_one: "{{count}} PR with a size",
-      batch_other: "{{count}} PRs with a size",
+      batch_one: "{{count}} PR with a known size",
+      batch_other: "{{count}} PRs with a known size",
       pickup_one: "{{count}} PR",
       pickup_other: "{{count}} PRs",
       build_duration_one: "{{count}} successful build",
@@ -165,7 +170,7 @@ export const en = {
       releases: "releases",
       to_prod: "PRs",
       merged: "PRs",
-      batch: "PRs with a size",
+      batch: "PRs with a known size",
       pickup: "PRs",
       build_duration: "builds",
       build_success: "builds",
@@ -191,7 +196,7 @@ export const en = {
       merged: "Per repo: merged PRs per week",
       batch: "Per repo: PR size, typical",
       pickup: "Per repo: wait for the first review, typical",
-      buildSuccess: "Per repo: successful",
+      buildSuccess: "Per repo: share of successful builds",
       buildDuration: "Per repo: a successful build's duration, typical",
     },
   },
@@ -201,25 +206,25 @@ export const en = {
     nOf: "{{n}} of {{total}}",
     nPRs_one: "{{count}} PR",
     nPRs_other: "{{count}} PRs",
-    lever: "Lever",
-    typical: "{{unit}}, typical value",
+    lever: "What moves the number",
+    typical: "{{unit}}, typical",
     slowest: "the slowest 10 %: over {{p90}}",
     lowSample: "not very reliable",
     noMergedPRs: "No merged PRs in the period.",
     shorterBetter: "shorter is better",
-    ownHistory: "compare only with your own history",
-    noDirection: "no direction",
+    ownHistory: "Compare each number only with the team's own history.",
+    noDirection: "no target",
     withoutBots: "without bots",
     withoutGitOps: "without GitOps repos",
     // Counted nouns, for sentences that hold more than one count.
     releases_one: "{{count}} release",
     releases_other: "{{count}} releases",
-    resyncs_one: "{{count}} sync without new images",
-    resyncs_other: "{{count}} syncs without new images",
+    resyncs_one: "{{count}} deploy without a new version",
+    resyncs_other: "{{count}} deploys without a new version",
     firstDeploys_one: "{{count}} first deploy",
     firstDeploys_other: "{{count}} first deploys",
-    revisions_one: "{{count}} revision",
-    revisions_other: "{{count}} revisions",
+    revisions_one: "{{count}} change in the GitOps repo",
+    revisions_other: "{{count}} changes in the GitOps repo",
   },
   units: {
     s: "{{n}} s",
@@ -236,7 +241,7 @@ export const en = {
     scopeAlone:
       "Team {{team}}, {{product}} · CW {{from}}–{{to}} · {{start}} to {{end}}",
     running:
-      "This week, CW {{kw}}, so far: {{releases}}, {{merged}}, {{runs}}. Counted in no number on this page; only the open PRs are as of now.",
+      "This week, CW {{kw}}, so far: {{releases}}, {{merged}}, {{runs}}. It counts in no number on this page; only the open PRs show the state of now.",
     runningReleases_one: "{{count}} release",
     runningReleases_other: "{{count}} releases",
     runningMerged_one: "{{count}} merged PR",
@@ -262,7 +267,7 @@ export const en = {
     repos_one: "{{count}} repo",
     repos_other: "{{count}} repos",
     reposHead: "Repos",
-    appsHead: "Argo apps",
+    appsHead: "Argo CD apps",
     none: "none",
     loadFailed: "Could not load the data: {{msg}}",
     noTeam: "No team is configured.",
@@ -273,35 +278,35 @@ export const en = {
     worse: "Worse",
     same: "Unchanged",
     none: "no comparison",
-    low_sample: "no comparison: too little data in one of the two periods",
+    low_sample:
+      "no comparison: too little data in the period or the previous period",
     incomplete:
-      "no comparison: the previous period's data is incomplete, or first deploys dominate",
-    no_value: "no comparison: a value is missing",
-    not_reporting: "no comparison: Argo CD does not report for the team yet",
+      "no comparison: the data of the period or the previous period has gaps",
+    no_value: "no comparison: the period or the previous period has no value",
+    not_reporting: "no comparison: Argo CD sends no data for the team yet",
     previous: "Previous period",
     now: "now",
     before: "before {{v}}",
-    undirected: "no direction",
+    undirected: "no verdict: here neither more nor less is better",
   },
   strip: {
-    title: "Against the previous period",
-    text: "Worse to the left, better to the right; the length is the size of the change, capped at halving or doubling. Numbers without a direction are left out.",
-    aria: "Each number against the previous period",
+    title: "Compared with the previous period",
+    text: "Worse to the left, better to the right. The longer the bar, the bigger the change; at halving or doubling it is full. Numbers without a target are left out: for them neither more nor less is better.",
+    aria: "Each number compared with the previous period",
     reason: {
       low_sample: "too little data",
-      incomplete: "previous period incomplete",
+      incomplete: "data has gaps",
       no_value: "no value",
     },
-    buildSuccess: "Success rate, {{kind}}",
+    buildSuccess: "Successful builds, {{kind}}",
   },
   why: {
     button: "What does this mean?",
     means: "What does this mean? · {{title}}",
     watch: "Look closer when",
-    def: "Source · definition",
+    def: "How it is counted",
     basis: "Data basis",
-    coverage: "Coverage",
-    query: "Query:",
+    coverage: "Completeness",
   },
   frameworksLabel: "Classification",
   chart: {
@@ -336,15 +341,15 @@ export const en = {
       limit: {
         starts: "{{source}} has only sent data since {{date}}.",
         silence:
-          "{{source}} sent no data from {{from}} to {{to}} while builds ran: events were lost. The PR numbers stay without a verdict.",
+          "{{source}} sent no data from {{from}} to {{to}} while builds ran: events were lost. So the PR numbers stay without a verdict.",
         silenceProduct:
-          "{{source}} sent no data from {{from}} to {{to}} while builds ran: events were lost. The PR numbers stay without a verdict, and with them deploys and builds: they reach the product through Bitbucket.",
+          "{{source}} sent no data from {{from}} to {{to}} while builds ran: events were lost. So the PR numbers stay without a verdict, and deploys and builds too: they find their product only through Bitbucket.",
         silenceOngoing:
-          "{{source}} has sent no data since {{from}} while builds run: events are being lost. The PR numbers stay without a verdict.",
+          "{{source}} has sent no data since {{from}} while builds run: events are being lost. So the PR numbers stay without a verdict.",
         silenceOngoingProduct:
-          "{{source}} has sent no data since {{from}} while builds run: events are being lost. The PR numbers stay without a verdict, and with them deploys and builds: they reach the product through Bitbucket.",
+          "{{source}} has sent no data since {{from}} while builds run: events are being lost. So the PR numbers stay without a verdict, and deploys and builds too: they find their product only through Bitbucket.",
         silent_end:
-          "{{source}} has sent no data since {{from}}, up to the end of the period: its numbers are left out.",
+          "{{source}} has sent no data since {{from}}, up to the end of the period. The assessment says nothing about these numbers.",
       },
       reason: {
         no_baseline:
@@ -408,8 +413,8 @@ export const en = {
           daysDat_other: "{{n}} days",
         },
         unitWord: {
-          project_one: "project",
-          project_other: "projects",
+          project_one: "product",
+          project_other: "products",
           repo_one: "repo",
           repo_other: "repos",
           app_one: "App",
@@ -420,8 +425,8 @@ export const en = {
           botBranch_other: "bot branches",
         },
         of: {
-          project_one: "{{k}} of {{n}} project",
-          project_other: "{{k}} of {{n}} projects",
+          project_one: "{{k}} of {{n}} product",
+          project_other: "{{k}} of {{n}} products",
           repo_one: "{{k}} of {{n}} repo",
           repo_other: "{{k}} of {{n}} repos",
           app_one: "{{k}} of {{n}} App",
@@ -455,7 +460,7 @@ export const en = {
             "Agreement: at least one release to {{prod}} per sprint. Reported when no release came for more than {{n}} day.",
           threshold_other:
             "Agreement: at least one release to {{prod}} per sprint. Reported when no release came for more than {{n}} days.",
-          rule: "Counted are projects that are rolled out and worked on. An App's first known deploy counts as a release.",
+          rule: "Counted are products that are rolled out and worked on. An App's first known deploy counts as a release.",
         },
         release_due: {
           title: "Release to {{prod}} due soon",
@@ -467,7 +472,7 @@ export const en = {
           rule: "Still within the agreement: a hint before it is broken.",
         },
         not_on_prod: {
-          title: "Merged PRs wait long for {{prod}}",
+          title: "Merged PRs not on {{prod}} for long",
           unit_one: "{{count}} merged PR not on {{prod}} yet, for {{n}} days",
           unit_other:
             "{{count}} merged PRs not on {{prod}} yet, the oldest for {{n}} days",
@@ -497,14 +502,14 @@ export const en = {
           unit_other:
             "week {{week}}: {{count}} PRs merged instead of typically {{typical}}, while {{n}} approved PRs were open at the week's end ({{names}})",
           unitLost_one:
-            "week {{week}}: {{count}} PR merged instead of typically {{typical}} (leaving out the days Bitbucket delivered no data), while {{n}} approved PRs were open at the week's end ({{names}})",
+            "week {{week}}: {{count}} PR merged instead of typically {{typical}} (leaving out the days Bitbucket sent no data), while {{n}} approved PRs were open at the week's end ({{names}})",
           unitLost_other:
-            "week {{week}}: {{count}} PRs merged instead of typically {{typical}} (leaving out the days Bitbucket delivered no data), while {{n}} approved PRs were open at the week's end ({{names}})",
+            "week {{week}}: {{count}} PRs merged instead of typically {{typical}} (leaving out the days Bitbucket sent no data), while {{n}} approved PRs were open at the week's end ({{names}})",
           threshold:
             "Reported when a week has at most {{n}} of the typical merges while {{minN}} or more were open at the week's end.",
           min_one: "{{n}} approved PR",
           min_other: "{{n}} approved PRs",
-          rule: "Against the project's typical week. Approved means a person other than the author approved it, the approval still stands at the week's end, and nobody asks for changes. Why nothing was merged is not in the data.",
+          rule: "Against the product's typical week. Approved means a person other than the author approved it, the approval still stands at the week's end, and nobody asks for changes. Why nothing was merged the data does not show.",
         },
         approved_waiting: {
           title: "Approved, but not merged",
@@ -535,15 +540,15 @@ export const en = {
           rule: "For these PRs riptide cannot tell whether and when they reached {{prod}}. The agreement on the time to {{prod}} is not measurable there.",
         },
         unattributed: {
-          title: "Releases to {{prod}} without a project",
-          unit_one: "{{n}} release to {{prod}} belongs to no project",
-          unit_other: "{{n}} releases to {{prod}} belong to no project",
-          rule: "Their GitOps commit is unknown to Bitbucket. For their projects the agreement of one release per sprint is not measurable.",
+          title: "Releases to {{prod}} without a product",
+          unit_one: "{{n}} release to {{prod}} belongs to no product",
+          unit_other: "{{n}} releases to {{prod}} belong to no product",
+          rule: "Their change in the GitOps repo is unknown to Bitbucket. So for their products the agreement of one release per sprint is not measurable.",
         },
         no_prod_stage: {
           title: "Argo CD reports nothing to {{prod}}",
           unit: "Argo CD reports deploys to {{names}}, none to {{prod}}",
-          rule: "Check the stage configuration or Argo CD's notification.",
+          rule: "The stage configuration in riptide or Argo CD's notification is off.",
         },
         deploy_failing: {
           title: "Last deploy to {{prod}} failed",
@@ -772,15 +777,15 @@ export const en = {
         slower_build: "got slower",
         failing_more: "fails more often",
         change: "notable change",
-        agent_wait: "agent wait",
+        agent_wait: "waiting for build agents",
         resolved: "resolved",
         question: "question",
         state: "finding",
       },
       title: {
-        data_gap: "{{source}} silent",
+        data_gap: "{{source}} sends no data",
         pr_jam: "{{repo}}: PRs pile up",
-        slower_build: "{{repo}}: {{kind}} slower than last period",
+        slower_build: "{{repo}}: {{kind}} slower than in the previous period",
         failing_more: "{{repo}}: {{kind}} fail more often",
         changeGood: "{{label}}: notably better",
         changeBad: "{{label}}: notably worse",
@@ -790,26 +795,26 @@ export const en = {
       },
       rule: {
         data_gap:
-          "The source stopped reporting before the period's end; nothing about it says anything about the work.",
+          "The source stopped sending data before the end of the period. So its numbers say nothing about the team's work.",
         pr_jam:
-          "Four or more PRs open a week or longer, drafts not counted. Why they wait is not in the data: a freeze, a dependency, holidays or nobody feeling responsible.",
+          "Four or more PRs open a week or longer, drafts not counted. Why they wait the data does not show: a merge stop, a dependency, holidays or nobody feeling responsible.",
         slower_build:
-          "The typical succeeded build takes one and a half times as long as last period or longer: slower than the repo itself, not than others. What inside the build got slower is not in the data.",
+          "The typical successful build takes at least one and a half times as long as in the previous period. The repo is compared with itself, not with others. What inside the build got slower the data does not show.",
         failing_more:
-          "Fails far more often than in the previous period. Whether tests, infrastructure or real breakage is not in the data.",
+          "Builds fail far more often than in the previous period. Whether tests, infrastructure or real breakage, the data does not show.",
         changeGood:
-          "Moved past the notable threshold against the previous period.",
+          "Notably better than in the previous period: past the threshold for a notable change.",
         changeBad:
-          "Moved past the notable threshold against the previous period. Why is not in the data.",
+          "Notably worse than in the previous period: past the threshold for a notable change. Why, the data does not show.",
         agent_wait:
-          "{{share}} of the typical build time or more, and at least {{minutes}} minutes, is waiting for an agent: the platform's capacity, not the build.",
+          "For {{share}} of the typical build time or more, and at least {{minutes}} minutes, the build waits for a free build agent. That is the platform's capacity, not the build.",
         resolved:
           "The latest assessment raised it; now the value is back where it was before, or better.",
         resolvedState:
-          "A week ago this still held here. Not any more: clearly below the limit again, or over, like a merge pause or failed builds a card may still show with their date.",
+          "A week ago this still held here, now no more: the value is clearly below the limit again, or the merge pause or the run of failed builds is over. The card shows it with its date.",
       },
       factsOf: "View the facts of {{repo}} →",
-      driver: "Driver: {{repo}} carries {{share}} of the rise",
+      driver: "Mostly {{repo}}: {{share}} of the rise",
       retro: "Retro",
       retroBox: "For the next retro",
       copy: "Copy as Markdown",
@@ -828,16 +833,16 @@ export const en = {
         walk_prs:
           "walk through the PRs one by one: review, merge, close or park them on purpose",
         ask_why_waiting:
-          "find out what they wait on: a freeze, a dependency, or nobody feeling responsible",
+          "find out what they wait on: a merge stop, a dependency, or nobody feeling responsible",
         inspect_build_log:
           "look in the build log of the slowest builds which step takes the time",
         inspect_failures:
-          "look at the failed builds: the same failure each time, or a different one",
-        platform_agents: "raise the agent capacity with the platform team",
+          "look at the failed builds: the same failure each time, or a different one?",
+        platform_agents: "talk with the platform team about more build agents",
         find_what_changed:
           "first find out what changed, then agree on something",
         name_what_helped: "name what helped, so it stays",
-        check_source: "check the source's connection",
+        check_source: "check how the source is connected to riptide",
         plan_release:
           "plan the next release to {{prod}}, or name what holds it",
         inspect_deploys:
@@ -848,44 +853,44 @@ export const en = {
           "go through the branches: delete the finished ones, open a PR or park the rest on purpose",
       },
       label: {
-        silent_days: "silent",
+        silent_days: "days without data",
         open_long: "PRs open ≥ 7 days",
         open: "open PRs",
         age_p50: "typical age",
         failure_rate: "builds failed",
         wasted: "CI time in failed builds",
         runs: "builds",
-        build_p50: "typical succeeded build",
-        build_wait_p50: "waiting for an agent",
+        build_p50: "typical successful build",
+        build_wait_p50: "waiting for a build agent",
         build_work_p50: "building",
         deploy_per_week: "releases per week",
-        deploy_success: "deploys succeeded",
-        lead_time_p50: "lead time",
-        review_p50: "ready to approval",
+        deploy_success: "successful deploys",
+        lead_time_p50: "time from first commit to {{prod}}",
+        review_p50: "ready to first approval",
         within_day: "merged within a day",
         jammed_repos: "jammed repos",
-        build_success: "builds succeeded",
-        merged_per_week: "PRs merged per week",
+        build_success: "successful builds",
+        merged_per_week: "merged PRs per week",
         batch_size: "changed lines per PR",
-        wip_weeks: "of work standing open",
+        wip_weeks: "weeks of work standing open",
         feature_share: "feature PRs",
         untracked: "PRs without a Jira key",
         wasted_share: "review spend on dropped PRs",
         cost_per_kloc: "review spend per 1000 lines",
         open_prs: "open PRs",
-        first_touch: "approvals without a prior comment",
+        first_touch: "approvals without a comment before",
         state_units: "named",
         state_judged: "judged",
         state_threshold: "the team's threshold",
         state_no_release: "days since the last release",
         state_release_due: "days since the last release",
-        state_not_on_prod: "days the oldest PR waits",
+        state_not_on_prod: "days since the oldest PR's merge",
         state_slow_to_prod: "typical days to {{prod}}",
         state_merge_pause: "approved PRs open at the week's end",
         state_approved_waiting: "working days the oldest PR waits",
         state_bot_loop: "failed builds in a row",
         state_untraced: "PRs not placeable",
-        state_unattributed: "releases without a project",
+        state_unattributed: "releases without a product",
         state_no_prod_stage: "stages reported",
         state_deploy_failing: "working days without a successful deploy",
         state_deploy_failures: "times deploys failed in a row",
@@ -913,24 +918,26 @@ export const en = {
       },
     },
     sinceNote:
-      "Argo CD only reports since {{date}}: the weeks before are empty, the rate applies from then on.",
+      "Argo CD only sends data since {{date}}: the weeks before are empty, the value per week applies from then on.",
     sinceLow: " Less than a week of data: not very reliable.",
-    throughput: "Throughput and instability",
+    throughput:
+      "How often, how fast and how reliably does code reach {{prod}}?",
+    throughputText: "Typical means: half of the cases lie above, half below.",
     freq: {
-      label: "Deployment frequency",
-      dora: "DORA · Deployment frequency · Throughput",
-      question: "How often does new code go to {{prod}}?",
-      unit: "releases per week, on average",
+      label: "Releases to {{prod}}",
+      dora: "DORA · Deployment frequency",
+      question: "How often does new code reach {{prod}}?",
+      unit: "per week, on average",
       note_one: "{{count}} release in the period",
       note_other: "{{count}} releases in the period",
       noDeploys: "no deploys in the period",
-      notReporting: "Argo CD does not report for the team yet",
+      notReporting: "Argo CD sends no data for the team yet",
       direction: "more often is better",
       directionWhy: "smaller releases, less risk per release",
       firstSeen_one:
-        "{{count, num}} first deploy in the first {{days}} days of Argo CD data: whether it brought a new version is unknown; not counted",
+        "{{count, num}} first deploy in the first {{days}} days of Argo CD data not counted: whether it brought a new version is unknown",
       firstSeen_other:
-        "{{count, num}} first deploys in the first {{days}} days of Argo CD data: whether they brought a new version is unknown; not counted",
+        "{{count, num}} first deploys in the first {{days}} days of Argo CD data not counted: whether they brought a new version is unknown",
       unattributed_one: "{{count, num}} deploy not attributable to a product",
       unattributed_other:
         "{{count, num}} deploys not attributable to a product",
@@ -940,16 +947,16 @@ export const en = {
         "How often new code reaches the users. Frequent small releases carry little risk per release and bring feedback early.",
       watch:
         "the weeks swing widely or releases stop: then changes pile up into big releases.",
-      lever:
-        "smaller changes, automated deploys, no fixed release date for PROD.",
-      def: "Successful deploys to {{prod}} with a new version: the version differs from the previous deploy of the same Argo app, or it is the first deploy of an app going live. Counted once per GitOps revision, divided by the weeks in the period in which Argo CD reported. Deploys of infrastructure apps, whose deploys never belonged to a product of the team, do not count.",
-      basis:
-        "{{releases}}, {{resyncs}} and {{firstSeen}} from {{syncs}}. A release that updates several apps through the same GitOps revision counts once.",
+      lever: "smaller changes, automated deploys, no fixed release date.",
+      def: "Successful deploys to {{prod}} with a new version: the version differs from the previous deploy of the same app, or it is the first deploy of an app going live. A change in the GitOps repo that updates several apps counts once. Divided by the weeks in the period in which Argo CD sent data. Deploys of infrastructure apps do not count: they belong to no product of the team.",
+      basis: "{{releases}}, {{resyncs}} and {{firstSeen}}, from {{syncs}}.",
       basisFirst_one: " Of them, {{count}} release as an app's first deploy.",
       basisFirst_other:
         " Of them, {{count}} releases as an app's first deploy.",
-      filterImages: "images ≠ previous deploy",
-      filterRevision: "per revision",
+      filterSucceeded: "successful deploys only",
+      filterStage: "{{prod}} only",
+      filterImages: "with a new version only",
+      filterRevision: "once per change in the GitOps repo",
       coverageFirst:
         "In the first {{days}} days of Argo CD data an app's first deploy has no predecessor: whether it brought a new version is unknown, so it does not count as a release. After that an app's first deploy counts as a release: the app goes live.",
       coverageAll:
@@ -959,14 +966,14 @@ export const en = {
       coverageInfra_other:
         " Not counted: {{count, num}} deploys of infrastructure apps that belong to no product of the team ({{apps}}).",
       coverageUnattributed_one:
-        " {{count, num}} deploy belongs to no product: neither its GitOps commit nor another deploy of its app names one. It counts in the team view, in no product view.",
+        " {{count, num}} deploy belongs to no product: neither its change in the GitOps repo nor another deploy of its app names one. It counts in the whole team's view, in no product view.",
       coverageUnattributed_other:
-        " {{count, num}} deploys belong to no product: neither their GitOps commit nor another deploy of their app names one. They count in the team view, in no product view.",
+        " {{count, num}} deploys belong to no product: neither their change in the GitOps repo nor another deploy of their app names one. They count in the whole team's view, in no product view.",
     },
     lead: {
-      label: "Lead time to {{prod}}",
-      dora: "DORA · Change lead time · Throughput",
-      question: "How long does a PR take from its first commit to {{prod}}?",
+      label: "Time from first commit to {{prod}}",
+      dora: "DORA · Change lead time",
+      question: "How long until a PR's work reaches the users?",
       noHuman: "no merged PR traced to {{prod}}",
       slowest_one: "the slowest 10 %: over {{p90}} · from {{count}} PR",
       slowest_other: "the slowest 10 %: over {{p90}} · from {{count}} PRs",
@@ -975,19 +982,19 @@ export const en = {
       means:
         "The time in which a finished change helps no user yet. Long means: feedback comes late, failures are hard to pin to a change, releases grow big.",
       watch:
-        "the slowest 10 % sit far above the typical value: then single changes get stuck, often behind a release date.",
+        "the slowest 10 % sit far above the typical value: then single changes get stuck, often until a release date.",
       lever:
-        "Where the time goes is shown by the flow below; that is where the lever is, not in the short stages.",
-      def: "Per PR, from its first commit to the first deploy to {{prod}} that contains it. The PRs merged in the period that were on {{prod}} by its end. Bots' PRs and libraries' PRs do not count.",
+        "the sections where most of the time goes. Which ones they are, “Where does a change wait?” shows further down.",
+      def: "Per PR, from its first commit to the first deploy to {{prod}} that contains it. Counted are the PRs merged in the period that were on {{prod}} by its end. Bots' PRs and libraries' PRs do not count.",
       basis_one:
         "From {{count}} PR, merged in the period and on {{prod}} by its end.",
       basis_other:
         "From {{count}} PRs, merged in the period and on {{prod}} by its end.",
       filterBots: "no bots",
       coverage_one:
-        "{{traced, num}} of {{count, num}} merged PR traced to {{prod}}: through the compare link in the release commit or the version a build built. A release with neither is missing here.",
+        "{{traced, num}} of {{count, num}} merged PR traced to {{prod}}: found by the compare link in the release commit or by the version a build built. A release with neither is missing here.",
       coverage_other:
-        "{{traced, num}} of {{count, num}} merged PRs traced to {{prod}}: through the compare link in the release commit or the version a build built. A release with neither is missing here.",
+        "{{traced, num}} of {{count, num}} merged PRs traced to {{prod}}: found by the compare link in the release commit or by the version a build built. A release with neither is missing here.",
       traced_one:
         "{{traced, num}} of {{count, num}} merged PR traced to {{prod}}",
       traced_other:
@@ -995,12 +1002,12 @@ export const en = {
       notYet_one: "{{count, num}} not on {{prod}} yet",
       notYet_other: "{{count, num}} not on {{prod}} yet",
       unmeasured_one:
-        "{{count, num}} of them with no known start, not counted in the time",
+        "{{count, num}} of them with no known first commit, not counted in the time",
       unmeasured_other:
-        "{{count, num}} of them with no known start, not counted in the time",
+        "{{count, num}} of them with no known first commit, not counted in the time",
     },
     dsucc: {
-      label: "Deploy success",
+      label: "Successful deploys",
       dora: "not a DORA metric",
       question: "Does the rollout itself work?",
       unit: "of deploys",
@@ -1012,20 +1019,20 @@ export const en = {
       watch:
         "the value drops: then deploys fail on configuration, resources or dependencies.",
       lever:
-        "look at the failed deploys under “Data”; it is mostly the same app or the same cause.",
-      def: "Share of deploys to {{prod}} with operation_phase Succeeded among all finished deploys; Failed and Error count as failed. Not a DORA metric: the change fail rate counts deploys after which someone has to step in, even when the deploy succeeded.",
-      basis:
-        "{{finished}} finished deploys, {{failed}} of them failed (Failed or Error).",
+        "the apps' configuration, resources and dependencies; the failed deploys are under “Data” below, mostly the same app or the same cause.",
+      def: "Share of deploys to {{prod}} Argo CD reports as successful among all finished deploys. Failed ones and ones aborted with an error count as failed. Not a DORA metric: the change fail rate counts deploys after which someone has to step in, even when the deploy itself succeeded.",
+      basis: "{{finished}} finished deploys, {{failed}} of them failed.",
+      filterFinished: "finished deploys only",
       coverage:
         "Only deploys Argo CD reported; deploys of infrastructure apps do not count.",
     },
     instability: {
-      label: "Instability",
+      label: "Trouble after a rollout",
       dora: "DORA · Change fail rate · Deployment rework rate · Failed deployment recovery time",
       question:
-        "How often does a deployment cause trouble, and how fast is it fixed?",
+        "How often does a release cause trouble, and how fast is it fixed?",
       value: "not measured",
-      text: "Needs an incident source, which is missing.",
+      text: "For that riptide would need to know which release caused an incident. That source is still missing.",
     },
   },
   flow: {
@@ -1033,14 +1040,14 @@ export const en = {
       coding: "Coding",
       codingDesc: "first commit → PR ready",
       review: "Review",
-      reviewDesc: "PR ready → approval",
+      reviewDesc: "PR ready → first approval",
       merge: "Merge",
       mergeDesc: "approval → merged",
       toPre: "To {{pre}}",
       toPreDesc: "merged → on {{pre}}",
       toProdPre: "From {{pre}} to {{prod}}",
       toProd: "From merge to {{prod}}",
-      toProdDescPre: "on {{pre}} (without: merged) → on {{prod}}",
+      toProdDescPre: "on {{pre}}, else from merge → on {{prod}}",
       toProdDesc: "merged → on {{prod}}",
     },
     bucket: {
@@ -1049,21 +1056,21 @@ export const en = {
       upTo: "up to {{d}}",
       from: "from {{d}}",
     },
-    chainTitle: "Share of each stage in the time to {{prod}}",
+    chainTitle: "Share of each section in the time to {{prod}}",
     chainSub:
-      "Per merged PR in repos that are rolled out, typical duration per stage; the lead time above counts the same PRs to {{prod}}.",
-    leadTo: "Lead time to {{env}}:",
-    typicalSlowest: "typical value · the slowest 10 %: over {{p90}}",
+      "The typical duration of each section, for the merged PRs of the repos that are rolled out. They are the same PRs as in the time from first commit to {{prod}} above.",
+    leadTo: "From first commit to {{env}}:",
+    typicalSlowest: "typical · the slowest 10 %: over {{p90}}",
     shareAria: "Share of the time to {{prod}}: {{parts}}",
     ofTime: "· {{share}} of the time",
-    hot: "The lever is at “{{name}}”",
+    hot: "Most of the time is in “{{name}}”",
     hotRest: ": {{share}} of the time to {{prod}}.",
     noProd:
-      "No change traced to {{prod}} in this period: shares exist only over the whole way.",
+      "No PR could be traced to {{prod}} in this period. So there are no shares of the time to {{prod}}.",
     chainNote_one:
-      "Only PRs mapped to a deploy reach the last two stages: {{traced, num}} of {{count, num}} merged PR traced to {{prod}}.",
+      "The last two sections count only PRs that can be tied to a deploy: {{traced, num}} of {{count, num}} merged PR traced to {{prod}}.",
     chainNote_other:
-      "Only PRs mapped to a deploy reach the last two stages: {{traced, num}} of {{count, num}} merged PRs traced to {{prod}}.",
+      "The last two sections count only PRs that can be tied to a deploy: {{traced, num}} of {{count, num}} merged PRs traced to {{prod}}.",
     notYet_one:
       "{{count, num}} merged PR not on {{prod}} yet, merged on {{date}}.",
     notYet_other:
@@ -1076,9 +1083,9 @@ export const en = {
     lowerBound_other:
       "{{count, num}} traced PRs may have reached {{prod}} with an earlier deploy that cannot be tied to a PR: their time to {{prod}} is an upper bound.",
     library_one:
-      "{{count, num}} PR in libraries, never rolled out: in no count to {{prod}}.",
+      "{{count, num}} PR in libraries: they are never rolled out and do not count in the time to {{prod}}.",
     library_other:
-      "{{count, num}} PRs in libraries, never rolled out: in no count to {{prod}}.",
+      "{{count, num}} PRs in libraries: they are never rolled out and do not count in the time to {{prod}}.",
     perRepo_one: "Per repo ({{count}} repo)",
     perRepo_other: "Per repo ({{count}} repos)",
     colRepo: "Repo",
@@ -1089,14 +1096,14 @@ export const en = {
     colLibrary: "Library",
     oldestSince: "oldest merged on {{date}}",
     ridge: {
-      title: "How the time spreads within each stage",
-      sub: "The same PRs as above, time on a log scale. Line: typical value, dashed: from there the slowest 10 %.",
-      caption: "Wait per stage",
-      colStage: "Stage",
+      title: "How the time spreads within each section",
+      sub: "The same PRs as above, time on a log scale. Solid line: typical; dashed: from there the slowest 10 %.",
+      caption: "Wait per section",
+      colStage: "Section",
       few: "under {{min}} PRs: single PRs instead of a curve",
       none: "no PRs",
       tipN: "PRs",
-      tipTypical: "typical value",
+      tipTypical: "typical",
       tipSlowest: "the slowest 10 %: over",
       tick: {
         min: "{{n}} min",
@@ -1107,13 +1114,13 @@ export const en = {
       note: "The far left also counts shorter waits, the far right longer ones.",
     },
     people: "People",
-    eyebrow: "From commit to {{prod}} · app repos only",
+    eyebrow: "From first commit to {{prod}} · only repos that are rolled out",
     title: "Where does a change wait?",
-    lead: "The time to the user, split into stages.",
+    lead: "The time to the user, split into sections.",
     fwLeadTime: "Change lead time, broken down",
     reviewTitle: "Review: fast, but how thorough?",
     review: {
-      label: "Review time",
+      label: "Time to approval",
       question: "How long does a PR wait for its first approval?",
       note_one: "the slowest 10 %: over {{p90}} · {{count}} PR",
       note_other: "the slowest 10 %: over {{p90}} · {{count}} PRs",
@@ -1122,27 +1129,27 @@ export const en = {
       watch:
         "the slowest 10 % sit far above the typical value: single PRs are left lying, often big ones or ones without a clear reviewer.",
       lever:
-        "agree on review times in the team, keep PRs small, name reviewers right when opening.",
-      def: "From PR ready (opened; for drafts ready_for_review) to the first approval by a human reviewer.",
+        "Whether the team agreed on review times, how small the PRs are, and whether a reviewer is named right when a PR is opened.",
+      def: "From the moment the PR is ready (opened; for a draft: marked ready) to the first approval by a reviewer who is a person.",
       basis_one: "{{count}} PR with an approval.",
       basis_other: "{{count}} PRs with an approval.",
-      filterReviewer: "reviewer ≠ PR author",
-      coverage: "Complete for Bitbucket events.",
+      filterReviewer: "reviewer is not the author",
+      coverage: "Complete, as far as Bitbucket sent data.",
     },
     touch: {
       label: "Approval without comment",
       question: "How often is the approval the reviewer's first reaction?",
-      directionWhy: "a conversation starter, not a target",
+      directionWhy: "a conversation starter",
       means:
         "How often the approval is the reviewer's first reaction. High means: review without visible discussion in Bitbucket.",
       watch:
         "the value rises together with very short review times: then changes may be waved through.",
       lever:
-        "no target. Discuss in the team whether big changes are discussed elsewhere.",
-      def: "Share of approved PRs whose first reviewer contact is the approval itself.",
+        "discussions outside Bitbucket, pairing, small PRs that need no comment.",
+      def: "Share of approved PRs where the approval is the reviewer's first contact with the PR.",
       basis: "{{n}} of {{total}} approved PRs.",
-      filterComments: "without bot comments",
-      coverage: "Riptide does not see spoken reviews and pairing.",
+      filterComments: "without bots' comments",
+      coverage: "riptide does not see spoken reviews and pairing.",
     },
     cycle: {
       label: "Merged within 24 h",
@@ -1155,31 +1162,32 @@ export const en = {
         "How many PRs are merged within 24 hours of opening. After that the author has mostly moved on; questions then cost double.",
       watch:
         "many PRs stay open for more than three days: mostly big PRs or ones waiting on someone.",
-      lever: "cut PRs smaller, ask for review early.",
-      def: "pr:merged minus pr:opened per PR, key (repo_full_name, pr_id). The PR cycle time is typically {{p50}}, the slowest 10 % over {{p90}}.",
-      basis: "{{count}} of {{n}} human PRs, merged in the period.",
-      filterMerged: "pr:merged in the period",
+      lever: "smaller PRs, reviews asked for early.",
+      def: "Per PR, the time from opening to merge. Typically it takes {{p50}}, the slowest 10 % over {{p90}}.",
+      basis: "{{count}} of {{n}} people's PRs, merged in the period.",
+      filterMerged: "merged in the period",
       coverage:
-        "PRs opened before the data began have no pr:opened and are missing. Seen opened: {{seen, num}} of {{total, num}} merged.",
+        "PRs opened before the data began are missing: when they were opened is unknown. Seen opened: {{seen, num}} of {{total, num}} merged.",
     },
     histHead: "PRs by time from opening to merge",
     histLine: " · the line marks 24 h",
-    histAria: "PR cycle time: {{parts}}",
+    histAria: "Time from opening to merge: {{parts}}",
   },
   throughput: {
-    head: "Flow: how much gets done, in what portions",
-    scope: "People's PRs only: no stage promotions, no bots.",
+    head: "How much work gets done, and in what portions?",
+    scope:
+      "People's PRs only: no bots, and no PRs that only lift a version to the next stage.",
     merged: {
-      label: "PR throughput",
-      framework: "Flow · Flow velocity",
-      question: "How many PRs does the team merge per week?",
-      unit: "PRs per week",
+      label: "Merged PRs per week",
+      framework: "Flow Framework · Flow velocity",
+      question: "How many PRs does the team finish with a merge per week?",
+      unit: "per week, on average",
       note_one: "{{count, num}} PR merged in the period",
       note_other: "{{count, num}} PRs merged in the period",
       housekeeping_one: "{{count, num}} housekeeping PR not counted",
       housekeeping_other: "{{count, num}} housekeeping PRs not counted",
       housekeepingTitle:
-        "The same title opened in {{repos}} or more repos within {{minutes}} minutes, without a person's approval and without a ticket key: upkeep across all repos with a tool, no work on the product.",
+        "The same title opened in {{repos}} or more repos within {{minutes}} minutes, without a person's approval and without a Jira key: upkeep across all repos with a tool, no work on the product.",
       umbrella_one: "{{count, num}} umbrella-branch merge not counted",
       umbrella_other: "{{count, num}} umbrella-branch merges not counted",
       umbrellaTitle:
@@ -1189,15 +1197,15 @@ export const en = {
       twiceTitle:
         "The same branch already went into an umbrella branch with another PR and counts there. When the umbrella branch was merged, this PR was marked merged too: the same work, counted once.",
       since:
-        "Bitbucket has only sent data since {{date}}: the weeks before are empty, the rate applies from then on.",
+        "Bitbucket has only sent data since {{date}}: the weeks before are empty, the value per week applies from then on.",
       direction: "more is better",
     },
     batch: {
-      label: "Batch size",
+      label: "PR size",
       framework: "DORA capability · Working in small batches",
       question: "How large is a typical PR?",
       unit: "changed lines per PR, typical",
-      note: "largest 10 % from {{p90}} lines · typically {{files}} files · size known for {{n}} of {{total}}",
+      note: "the largest 10 %: from {{p90}} lines · typically {{files}} files · size known for {{n}} of {{total}} PRs",
       none: "No PR sizes in the period.",
       direction: "smaller is better",
     },
@@ -1226,9 +1234,9 @@ export const en = {
     },
     longWaitOn: "The long-open ones wait on:",
     inactive_one:
-      "{{count}} PR inactive: no event for {{days}} days, in no number above. A lost merge event looks the same.",
+      "{{count}} PR inactive: nothing in Bitbucket for {{days}} days, so in no number above. A merge Bitbucket did not report would look the same.",
     inactive_other:
-      "{{count}} PRs inactive: no event for {{days}} days, in no number above. A lost merge event looks the same.",
+      "{{count}} PRs inactive: nothing in Bitbucket for {{days}} days, so in no number above. A merge Bitbucket did not report would look the same.",
     unknown_one:
       "{{count, num}} PR in an unknown state: last seen before an outage in which Bitbucket sent no data; whether it was merged or closed since is unknown. In no number above.",
     unknown_other:
@@ -1238,7 +1246,7 @@ export const en = {
     colRepo: "Repo",
     colOpen: "Open",
     colLong: "≥ {{days}} d",
-    colMedian: "Median age",
+    colMedian: "Age, typical",
     colWaiting: "Waiting on",
     colInactive: "Inactive",
     viewPRs: "View PRs →",
@@ -1258,8 +1266,8 @@ export const en = {
       watch:
         "several long-open PRs in the same repo wait for a first review: a reviewer is missing there, or the PRs are too big.",
       lever:
-        "name reviewers when opening, bring old PRs up in the daily, close PRs nobody needs anymore.",
-      def: "PRs open now, those opened this week included; compared with those open at the previous period's end: opened before, neither merged, declined nor deleted. Age from its last turn ready for review, else from its creation: time as a draft does not count, a draft has no age. Long open from {{days}} days, a jam from {{min}} long-open ones in the same repo. A draft is never long open and never forgotten: it waits on its author. Per repo the median age, never the oldest: one alone decides that.",
+        "Whether a reviewer is named when a PR is opened, whether old PRs come up in the daily, and whether PRs nobody needs any more get closed.",
+      def: "PRs open now, those opened this week included; compared with those open at the previous period's end. The age counts from its last turn to “ready for review”, else from its opening: time as a draft does not count, a draft has no age. Long open from {{days}} days, a jam from {{min}} long-open ones in the same repo. A draft is never long open and never forgotten: it waits on its author. Per repo the typical age, never the oldest one's: a single PR should not decide it.",
       basis_one: "{{count}} open PR, as of {{at}}.",
       basis_other: "{{count}} open PRs, as of {{at}}.",
       coverage:
@@ -1277,12 +1285,12 @@ export const en = {
     releases: "Releases",
     typical: "typical week: {{n}}",
     aria: "Releases to {{prod}} per week: {{parts}}",
-    note: "{{resyncs}} do not count. {{firstSeen}} in the first {{days}} days of Argo CD data do not count either: whether they brought a new version is unknown. The typical week: the middle value of the whole weeks in which Argo CD reported.",
+    note: "{{resyncs}} do not count. {{firstSeen}} in the first {{days}} days of Argo CD data do not count either: whether they brought a new version is unknown. The typical week is the middle value of the whole weeks in which Argo CD sent data.",
   },
   calendar: {
     cardTitle: "Releases to {{prod}} per day",
     cardSub:
-      "Each release on the day of its first deployment; on the right, each weekday's releases per whole day with data",
+      "Each release on the day of its first deploy; on the right, each weekday's releases per whole day with data",
     none: "no release",
     four: "4 and more",
     noData: "no data",
@@ -1314,7 +1322,7 @@ export const en = {
     other: "Other / no prefix",
     eyebrow: "Work mix",
     title: "What is the team working on?",
-    lead: "By branch prefix, as a share of PRs, not of time.",
+    lead: "By the branch's prefix, as a share of the PRs, not of time.",
     fwImpact: "Impact, proxy for “time on new work”",
     cardTitle: "Merged PRs by type",
     cardSub_one: "{{count}} PR in the period, without bots",
@@ -1326,9 +1334,9 @@ export const en = {
     untrackedText: "({{n}} of {{total}}): key forgotten, or unplanned work?",
   },
   heat: {
-    title: "Failure rate per repo and week",
+    title: "Share of failed builds per repo and week",
     sub: "A red row means: this repo. A red column means: everyone at once, more likely the infrastructure.",
-    aria: "Failure rate per repo and week, {{kind}}",
+    aria: "Share of failed builds per repo and week, {{kind}}",
     failed_one: "{{failed}} of {{count}} build failed",
     failed_other: "{{failed}} of {{count}} builds failed",
     noVerdict: "under {{min}} builds: no verdict",
@@ -1343,22 +1351,22 @@ export const en = {
     // Searched by the backend too: terms.json.
     kind: terms.en.runKind,
     kindNote: {
-      release: "build_type release or hotfix",
-      main: "master or main, no release",
+      release: "builds the CI reports as a release or hotfix",
+      main: "main branch (master or main), no release",
       feature:
-        "feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/ and PR builds",
+        "feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/ and PRs' builds",
       other:
-        "docs/ and doc/ (often without a build), release/… without a release, nightlies, other naming schemes",
-      unknown: "before the first build_type report",
+        "docs/ and doc/ (often without a build), release/… without a release, nightly builds, other naming schemes",
+      unknown: "before the CI reported which kind of build it is",
     },
     prefixes: "Most frequent prefixes",
     noBranch: "no branch in the pipeline name",
     featureMissingTitle: "Feature and bugfix builds: no build recognised",
     featureMissing_one:
-      "Recognised are branches starting feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/ and PR builds. {{count}} build on a branch without a known prefix is under “Other branches” (release/, docs/, doc/, nightlies and bots not counted), likely a feature build of the team.",
+      "Recognised are branches starting feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/ and PRs' builds. {{count}} build on a branch without a known prefix is under “Other branches” (release/, docs/, doc/, nightly builds and bots not counted), likely a feature build of the team.",
     featureMissing_other:
-      "Recognised are branches starting feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/ and PR builds. {{count}} builds on branches without a known prefix are under “Other branches” (release/, docs/, doc/, nightlies and bots not counted), likely the team's feature builds.",
-    sparkAria: "Success rate per week, {{kind}}: {{parts}}",
+      "Recognised are branches starting feature/, feat/, bugfix/, fix/, hotfix/, chore/, refactor/ and PRs' builds. {{count}} builds on branches without a known prefix are under “Other branches” (release/, docs/, doc/, nightly builds and bots not counted), likely the team's feature builds.",
+    sparkAria: "Share of successful builds per week, {{kind}}: {{parts}}",
     successful: "successful",
     typicalDuration: "typical successful build, all repos",
     repos:
@@ -1366,10 +1374,10 @@ export const en = {
     reposNone: "Repos: no comparison with the previous period",
     redRuns: "in failed builds, of {{h}} CI time",
     waitingTitle:
-      "Typical value over {{n}} of the {{total}} builds that report when they got an agent",
+      "Typical value over {{n}} of {{total}} builds: only these report when they got a build agent",
     waiting:
-      "of which typically {{wait}} waiting for an agent, {{build}} building",
-    scale: "CW {{kw}} · success, scale {{low}}–100 %",
+      "of which typically {{wait}} waiting for a build agent, {{build}} building",
+    scale: "CW {{kw}} · successful, scale {{low}}–100 %",
     runs_one: "{{count}} build",
     runs_other: "{{count}} builds",
     noVerdict: " + {{n}} without a result",
@@ -1382,10 +1390,10 @@ export const en = {
     flakyNoRed: "No failed build, so none flaky",
     unjudged_one: " · {{count}} build without a commit not judged",
     unjudged_other: " · {{count}} builds without a commit not judged",
-    flakyRate: "Flaky rate {{rate}} of builds with a commit",
+    flakyRate: "Flaky: {{rate}} of builds with a commit",
     viewFlaky: "View flaky builds →",
     flakyTitle:
-      "Flaky: a build fails, a later build of the same pipeline on the same commit succeeds. A lower bound: retries inside a build, commits built once and reruns after the period's end are missing. Whether tests or infrastructure failed is not in the data.",
+      "Flaky: a build fails, a later build of the same pipeline on the same commit succeeds. A lower bound: retries inside a build, commits built once and retries after the period's end are missing. Whether tests or infrastructure failed the data does not show.",
     repoFlaky: "{{n}} flaky",
     repoFlakyTitle:
       "{{h}} of it in builds a later build on the same commit made succeed",
@@ -1396,36 +1404,38 @@ export const en = {
     reliable: "Got more reliable",
     faster: "Got faster",
     fasterText: "previous period {{prev}} → now {{p50}}",
-    fine: "Unremarkable",
+    fine: "No finding",
     noCompare: "No comparison",
     noCompareNoValue:
       "no comparable builds of this kind in the previous period",
     noCompareIncomplete: "build data of the previous period incomplete",
-    noCompareLowSample: "under {{min}} builds in one of the two periods",
+    noCompareLowSample:
+      "under {{min}} builds in the period or the previous period",
     fineText: "{{p50}}, {{rate}} failed",
     fineWait: " · {{wait}} waiting, {{build}} building",
-    repoWait: "Typically {{wait}} waiting for an agent, {{build}} building",
+    repoWait:
+      "Typically {{wait}} waiting for a build agent, {{build}} building",
     group_one: "{{count}} build from {{repos}} repos started {{when}}",
     group_other: "{{count}} builds from {{repos}} repos started {{when}}",
     groupSameDay: "on {{day}} between {{from}} and {{to}}",
     groupSpan: "between {{from}} and {{to}}",
     groupRest:
-      ": that points to the infrastructure (agents gone, a waiting input step), not to the repos.",
+      ": that points to the infrastructure (build agents gone, a step waiting for input), not to the repos.",
     colPipeline: "Pipeline",
     colKind: "Kind",
     colStart: "Start",
     colDuration: "Duration",
     colWaiting: "Waiting",
     colFactor: "× typical",
-    noAgent: "The build does not report when it got an agent",
+    noAgent: "The build does not report when it got a build agent",
     eyebrow: "CI · Jenkins · Tekton · each kind of build on its own",
     title: "How fast and reliable is the feedback?",
     fwEffectiveness: "Effectiveness, driver",
     dataFrom: "Build data from {{date}}; the weeks before are empty.",
     unattributed_one:
-      "{{count, num}} build without a repo: neither its commit nor its pipeline name names one. Counted in the team view, in no product view.",
+      "{{count, num}} build without a repo: neither its commit nor its pipeline name names one. Counted in the whole team's view, in no product view.",
     unattributed_other:
-      "{{count, num}} builds without a repo: neither their commit nor their pipeline name names one. Counted in the team view, in no product view.",
+      "{{count, num}} builds without a repo: neither their commit nor their pipeline name names one. Counted in the whole team's view, in no product view.",
     botRuns_one: "Bot builds: {{count, num}} build, {{h}} of CI time",
     botRuns_other: "Bot builds: {{count, num}} builds, {{h}} of CI time",
     botRunsFailed_one: ", {{count, num}} of them failed ({{h}})",
@@ -1433,7 +1443,7 @@ export const en = {
     botRunsRest: ". A cost, no finding: in no other number of this section.",
     noRuns: "No finished builds in the period.",
     legend:
-      "Successful: SUCCESS (Tekton: Succeeded, Completed). Failed: FAILURE, UNSTABLE or Failed. Without a result (ABORTED, NOT_BUILT): no build that counts, only CI time; a Jenkins timeout() also ends ABORTED.",
+      "Successful: SUCCESS (Tekton: Succeeded, Completed). Failed: FAILURE, UNSTABLE or Failed. Without a result (ABORTED, NOT_BUILT): no build that counts, only CI time; a timeout in Jenkins also ends as ABORTED.",
     hotspotsTitle: "Repos that slow down the feedback",
     hotspotsSub:
       "Each repo against its own builds of the same kind in the previous period",
@@ -1450,9 +1460,9 @@ export const en = {
     colSlowest: "Slowest 10 %",
     colWaitBuild: "Waiting / building",
     colRuns: "Builds",
-    noAgentRepo: "None of the builds reports when it got an agent",
+    noAgentRepo: "None of the builds reports when it got a build agent",
     hotspotsRule:
-      "Fails more often: rate at least {{failing}}× the previous period's and {{points}} points above it, at most halfway between it and 100 %, with {{failures}} failed builds or more. Got slower: typical duration at least {{slow}}× the previous period's. Both from {{min}} builds in both periods.",
+      "Fails more often: the share of failed builds is at least {{failing}} times the previous period's and {{points}} points above it (with a share already high, half the way to 100 % suffices), with {{failures}} failed builds or more. Got slower: the typical duration is at least {{slow}} times the previous period's. Both from {{min}} builds in the period and the previous period.",
     stuckTitle: "Stuck builds",
     stuckSub:
       "Builds over {{factor}}× the typical duration of their kind and over {{min}}",
@@ -1487,21 +1497,21 @@ export const en = {
       reposOther_one: "{{count}} more",
       reposOther_other: "{{count}} more",
       reposAria: "CI time by repo: {{parts}}",
-      rule: "Failed: FAILURE, UNSTABLE, Failed. Flaky: failed as well, but a later build of the same pipeline succeeded on the same commit. Without a result: ABORTED, NOT_BUILT, Tekton's None, Jenkins timeouts included. Outliers: {{outliers}} (a repo with enough builds of its own also over its own typical duration). An outlier counts only as an outlier, whatever its result, so the hours here include the outliers the cards above leave out. Each kind's bands show its own split; a node's height only the amount, no comparison between kinds.",
+      rule: "Failed: FAILURE, UNSTABLE, Failed. Flaky: failed as well, but a later build of the same pipeline succeeded on the same commit. Without a result: ABORTED, NOT_BUILT, Tekton's None, timeouts in Jenkins included. Outliers: {{outliers}} (a repo with enough builds of its own also over its own typical duration). An outlier counts only as an outlier, whatever its result, so the hours here include the outliers the cards above leave out. Each kind's bands show its own split; a node's height only the amount, no comparison between kinds.",
     },
   },
   quiver: {
-    aria: "{{kind}}: each repo from the previous period to now, typical duration against failure rate",
+    aria: "{{kind}}: each repo from the previous period to now, typical duration against the share of failed builds",
     xAxis: "Typical duration (log) →",
-    yAxis: "↑ Failure rate",
+    yAxis: "↑ Share failed",
     slower: "▲ ×{{factor}} duration",
-    failingMore: "▲ failure rate {{prev}} → {{rate}}",
+    failingMore: "▲ failed {{prev}} → {{rate}}",
     median: "Typical",
-    rate: "Failure rate",
+    rate: "Share failed",
     runs: "Builds",
     ci: "CI time",
     legend:
-      "Arrow: previous period → now; a dot in or at the circle: barely moved · filled circle without a dot: only the typical duration or only the failure rate compares · circle area: share of this kind's CI time · red: got slower or fails more often, as below · dashed: no comparison.",
+      "Arrow: previous period → now; a dot in or at the circle: barely moved · filled circle without a dot: only the typical duration or only the share of failed builds compares · circle area: share of this kind's CI time · red: got slower or fails more often, as below · dashed: no comparison.",
     unplotted_one:
       "{{count}} repo of this kind is not drawn: past the list, without a build with a result, or without a typical duration.",
     unplotted_other:
@@ -1525,7 +1535,7 @@ export const en = {
     perKlocWhy: "if the value rises, reviews get more expensive per change",
     byProduct: "By product",
     byRepo: "By repo",
-    sub: "All reviews in the period, latest rollup per PR",
+    sub: "All reviews in the period, the latest state per PR",
     none: "No noergler reviews in the period.",
     reviewedRepos: "Only repos noergler reviews: {{n}} in the period.",
   },
@@ -1553,26 +1563,26 @@ export const en = {
     openPR: "Open the PR in Bitbucket",
     colRepo: "Repo",
     colType: "Type",
-    colReview: "Review",
-    colCycle: "Cycle",
+    colReview: "To approval",
+    colCycle: "To merge",
     colToProd: "to {{prod}}",
     colStatus: "Status",
     colAt: "Time",
-    colApp: "Argo app",
+    colApp: "Argo CD app",
     colStage: "Stage",
-    colRevision: "Revision",
-    colNewImages: "New images",
+    colRevision: "GitOps commit",
+    colNewImages: "New version",
     colCountsAs: "Counts as",
     colPipeline: "Pipeline",
     colRun: "Build",
     colKind: "Kind",
     colCommit: "Commit",
     colDuration: "Duration",
-    colImages: "Images",
+    colImages: "Built versions",
     onProdAt: "On {{prod}} since {{date}},",
     route: {
-      compare: "found through the compare link in the release commit.",
-      image: "found through the version a build built.",
+      compare: "found by the compare link in the release commit.",
+      image: "found by the version a build built.",
     },
     atMostTitle:
       "At most: the PR may have reached {{prod}} with an earlier deploy that cannot be tied to PRs.",
@@ -1580,17 +1590,17 @@ export const en = {
   },
   frameworks: {
     eyebrow: "Classification",
-    title: "Which frameworks Riptide covers",
+    title: "Which frameworks riptide covers",
     lead: "Measurable without a survey: two of the five DORA metrics, DX Core 4 in part.",
     row: {
-      freq: "Deployment frequency",
-      lead: "Lead time to PROD",
-      stages: "Flow by stage",
-      dsucc: "Deploy success",
-      review: "Review time, merged within 24 h",
+      freq: "Releases to {{prod}} per week",
+      lead: "Time from first commit to {{prod}}",
+      stages: "Flow by section",
+      dsucc: "Successful deploys",
+      review: "Time to approval, merged within 24 h",
       touch: "Approval without comment",
-      merged: "PR throughput",
-      batch: "Batch size",
+      merged: "Merged PRs per week",
+      batch: "PR size",
       mix: "Work mix, without a Jira key",
       build: "Build: success, duration, failed builds",
       costs: "Cost of the AI reviews",
@@ -1609,9 +1619,9 @@ export const en = {
       effHandoffs: "Efficiency & flow (handoffs, waiting time)",
       flowEffApprox: "Flow efficiency, approximated",
       dsuccNot:
-        "not a DORA metric: counts sync failures, not the change fail rate",
+        "not a DORA metric: counts failed deploys, not the change fail rate",
       diffsTeam:
-        "Speed measures “diffs per engineer”: Riptide counts per team, never per person",
+        "Speed measures “diffs per engineer”: riptide counts per team, never per person",
       activity: "Activity",
       flowVelocity: "Flow velocity",
       smallBatches: "Capability “Working in small batches”",

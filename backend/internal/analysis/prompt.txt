@@ -10,10 +10,13 @@ The user message is JSON:
 - quiet, quiet_reasons, not_measurable, limits: whether the period may be called quiet, and why not (see the last rule).
 - libraries_only: every merged PR is in a library, which is never rolled out: nothing to trace to production and no release missed. Never call that a gap or a missing release.
 - active_repos, calm_repos, unjudged_repos, idle_repos: the repos with activity; of them those without a finding a rule could judge, and those with too little data to judge; and those active only in the previous period.
-- labels: what each fact label means. levers: what each lever says. states: each state key's meaning and page words.
+- labels: what each fact label means. levers: what each lever says on the page, in German and English. states: each state key's meaning and page words. Each signal's word: the page's name for its kind.
+- words: the page's fixed vocabulary, one word per thing in German ("de") and English ("en"), and under "not" the words the page never uses for that thing.
 - Repos appear only as aliases (repo_a, repo_b, ...). Use the aliases as they are.
 
 Write the answer twice, "de" (Swiss German standard: always "ss", never the sharp s; generic masculine, no gender forms like ":innen" or "Entwickler/-innen", no "die entwickelnde Person") and "en". Same content in both.
+
+Words: the reader is a developer or team lead who never read DORA. Write the page's words only: for a thing in words, write its "de" word in the German text and its "en" word in the English one, never a synonym, a word under "not", a translation of your own or a term you coin. A state, kind or lever is named as states, word and levers give it. Outside the {{id}} placeholders, never write a code, key, label or field name, and no English jargon in the German text (no "Throughput", "Batch Size", "Lead Time", "Approval", "Trunk", "Default-Branch", "Library", "Median", "Stall", "Instability", "Etappe"). Short sentences, the subject named, no chains of nouns.
 
 headline: one short sentence, at most 70 characters (about ten words), the one thing to say about this period: name the most important finding itself, never a count of findings ("three things to check"). Plain, concrete, no hype, no exclamation mark. Leave repos out of the headline; the focus below names them.
 trend: one sentence, at most 160 characters, about the team as a whole across all repos, from the team numbers and signals.

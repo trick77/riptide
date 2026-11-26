@@ -25,14 +25,10 @@ function GroupHead({
   g,
   count,
   m,
-  sub = true,
 }: {
   g: RepoGroupKey;
   count: number;
   m: Metrics;
-  // The group's rule in words; the closed ranking's summary line has
-  // said it above already.
-  sub?: boolean;
 }) {
   const { t } = useTranslation();
   const r = m.repos;
@@ -46,14 +42,12 @@ function GroupHead({
         {t(`repos.group.${g}`)}
       </span>
       <span className="font-mono text-[12.5px] text-muted">{count}</span>
-      {sub && (
-        <span className="text-xs text-faint">
-          {t(`repos.groupSub.${g}`, {
-            hint: r.hint_days,
-            breach: r.breach_days,
-          })}
-        </span>
-      )}
+      <span className="text-xs text-faint">
+        {t(`repos.groupSub.${g}`, {
+          hint: r.hint_days,
+          breach: r.breach_days,
+        })}
+      </span>
     </div>
   );
 }
@@ -257,7 +251,7 @@ export function Ranking({
     else if (r.to_prod_n > 0)
       prodCell = { v: t("repos.thinCell", { count: r.to_prod_n }) };
     else if (r.group === "none")
-      prodCell = { v: t("repos.lying"), tone: "text-danger-ink" };
+      prodCell = { v: t("repos.lying", { prod }), tone: "text-danger-ink" };
     else prodCell = { v: "–" };
     if (r.not_yet > 0)
       prodCell.sub = [
@@ -347,6 +341,8 @@ export function Ranking({
     v.groups
       .filter((g) => g.hidden.length)
       .forEach((g) => {
+        // A group with rows above folds its rest into one line that reads
+        // as that group's rest; a group with none shown gets its head.
         const partly = shown.some((r) => r.group === g.key);
         const names = g.hidden.map((x) => x.slice(x.indexOf("/") + 1));
         body.push(
@@ -355,15 +351,13 @@ export function Ranking({
               colSpan={7}
               className="border-b border-border-soft px-3 py-2 text-[13px] text-muted"
             >
-              <span className="mr-2.5 inline-flex">
-                <GroupHead
-                  g={g.key}
-                  count={g.hidden_count}
-                  m={m}
-                  sub={!partly}
-                />
-              </span>
-              {partly && `${t("repos.moreOf")} `}
+              {partly ? (
+                `${t("repos.restOf", { count: g.hidden_count })} `
+              ) : (
+                <span className="mr-2.5 inline-flex">
+                  <GroupHead g={g.key} count={g.hidden_count} m={m} />
+                </span>
+              )}
               {names.join(", ")}
               {g.more > 0 && ` ${t("repos.andMore", { n: g.more })}`}
             </td>

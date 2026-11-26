@@ -141,14 +141,15 @@ describe("App", () => {
     await screen.findByRole("tablist", { name: "Faktentabelle" });
     for (const h of [
       "Einschätzung",
-      "Gegen die Vorperiode",
-      "Throughput und Instability",
+      "Verglichen mit der Vorperiode",
+      "Wie oft, wie schnell und wie verlässlich kommt Code nach PROD?",
+      "Wie viel Arbeit wird fertig, und in welchen Portionen?",
       "Wo wartet eine Änderung?",
       "Wie schnell und verlässlich ist das Feedback?",
       "Wie gleichmässig kommt Code nach PROD?",
       "Woran arbeitet das Team?",
       "Was kosten die KI-Reviews?",
-      "Welche Frameworks Riptide abdeckt",
+      "Welche Frameworks riptide abdeckt",
     ]) {
       expect(screen.getByRole("heading", { name: h })).toBeInTheDocument();
     }
@@ -228,20 +229,32 @@ describe("App", () => {
       screen.getByText("1 von 4 Deploys fehlgeschlagen"),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/^1 Erstdeploy aus den ersten 14 Tagen/),
+      screen.getByText(/^1 erstes Deploy aus den ersten 14 Tagen/),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Lead Time bis INTG:/)).toBeInTheDocument();
+    expect(screen.getByText(/Vom ersten Commit bis INTG:/)).toBeInTheDocument();
     expect(screen.getAllByText(/wenig belastbar/).length).toBeGreaterThan(0);
-    // The DORA names, and the side Riptide cannot measure.
+    // The DORA names only as the reference line under a plain title, and
+    // the side riptide cannot measure, in plain words.
+    expect(screen.getByText("DORA · Change lead time")).toBeInTheDocument();
     expect(
-      screen.getByText("DORA · Change lead time · Throughput"),
-    ).toBeInTheDocument();
+      screen.getAllByText("Zeit vom ersten Commit bis PROD").length,
+    ).toBeGreaterThan(0);
+    expect(document.body.textContent).not.toMatch(
+      /Throughput und|PR Throughput|Batch Size|Deploy-Frequenz|Lead Time bis/,
+    );
+    expect(screen.getByText("Ärger nach dem Ausrollen")).toBeInTheDocument();
     expect(screen.getByText("nicht gemessen")).toBeInTheDocument();
+    // "Typisch" is explained once, where the numbers start; the own-history
+    // rule is said there once, never on every tile.
+    expect(
+      screen.getByText(/^Typisch heisst: Die Hälfte der Fälle liegt darüber/),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText(/nur mit dem eigenen Verlauf/).length).toBe(1);
     // The mean is said to be one; the line is the typical week.
     expect(screen.getByText("typische Woche: 1.0")).toBeInTheDocument();
-    expect(
-      screen.getAllByText("Releases pro Woche, im Schnitt").length,
-    ).toBeGreaterThan(0);
+    expect(screen.getAllByText("pro Woche, im Schnitt").length).toBeGreaterThan(
+      0,
+    );
   });
 
   it("explains a number on demand, one at a time", async () => {
@@ -251,15 +264,27 @@ describe("App", () => {
     const whys = screen.getAllByRole("button", { name: "Was heisst das?" });
     fireEvent.click(whys[0]);
     expect(
-      screen.getByRole("region", { name: "Was heisst das? · Deploy-Frequenz" }),
+      screen.getByRole("region", {
+        name: "Was heisst das? · Releases nach PROD",
+      }),
     ).toBeInTheDocument();
-    expect(screen.getByText("pro revision")).toBeInTheDocument();
+    // The filters in words, no query, table or file name.
+    for (const f of [
+      "nur erfolgreiche Deploys",
+      "nur PROD",
+      "einmal pro Änderung im GitOps-Repo",
+    ])
+      expect(screen.getByText(f)).toBeInTheDocument();
+    expect(screen.queryByText(/operation_phase|\.md|argocd_events/)).toBeNull();
     expect(screen.getByText("Genauer hinschauen, wenn")).toBeInTheDocument();
+    // What moves a number is an explanation, never advice.
+    expect(screen.getByText("Was die Zahl bewegt")).toBeInTheDocument();
+    expect(screen.queryByText("Hebel")).toBeNull();
     for (const [i, title] of [
-      [1, "Lead Time bis PROD"],
-      [2, "Deploy-Erfolg"],
-      [3, "Review-Zeit"],
-      [4, "Approval ohne Kommentar"],
+      [1, "Zeit vom ersten Commit bis PROD"],
+      [2, "Erfolgreiche Deploys"],
+      [3, "Zeit bis zur Freigabe"],
+      [4, "Freigabe ohne Kommentar"],
       [5, "Innert 24 h gemerged"],
     ] as const) {
       fireEvent.click(whys[i]);
@@ -286,15 +311,21 @@ describe("App", () => {
     // verdict at the foot; never "Vorperiode X → jetzt Y" again.
     expect(document.body.textContent).not.toMatch(/Vorperiode [^→]* → jetzt/);
     expect(screen.getAllByText("Unverändert").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("ohne Richtung").length).toBeGreaterThan(0);
     expect(
       screen.getAllByText(
-        "kein Vergleich: zu wenig Daten in einer der beiden Perioden",
+        "kein Urteil: Hier ist weder mehr noch weniger besser",
       ).length,
     ).toBeGreaterThan(0);
     expect(
+      screen.getAllByText(
+        "kein Vergleich: zu wenig Daten im Zeitraum oder in der Vorperiode",
+      ).length,
+    ).toBeGreaterThan(0);
+    // One reason for three causes (data not covering the previous period,
+    // lost events, first deploys): a sentence true for each.
+    expect(
       screen.getByText(
-        "kein Vergleich: die Daten der Vorperiode sind nicht vollständig, oder Erstdeploys überwiegen",
+        "kein Vergleich: Die Daten im Zeitraum oder in der Vorperiode sind lückenhaft",
       ),
     ).toBeInTheDocument();
     expect(
@@ -320,7 +351,7 @@ describe("App", () => {
     render(<App />);
     expect(
       await screen.findByText(
-        /3 von 3 gemergten PRs bis PROD verfolgt · 2 davon ohne bekannten Start, nicht in der Zeit/,
+        /3 von 3 gemergten PRs bis PROD verfolgt · 2 davon ohne bekannten ersten Commit, nicht in der Zeit/,
       ),
     ).toBeInTheDocument();
   });
@@ -344,9 +375,9 @@ describe("App", () => {
     expect(scope.textContent).toContain(
       `bis 15.11.2026 · verglichen mit den 4 Wochen davor, ${fullDate(new Date(m.comparison.from))} bis 18.10.2026`,
     );
-    const line = screen.getByText(/^Laufende Woche KW/);
+    const line = screen.getByText(/^Laufende Woche, KW/);
     expect(line.textContent).toBe(
-      `Laufende Woche KW ${m.running_week.week.kw} bis jetzt: 1 Release, 2 PRs gemerged, 1 Build. Zählt in keiner Zahl dieser Seite mit; nur die offenen PRs sind Stand jetzt. Ansehen →`,
+      `Laufende Woche, KW ${m.running_week.week.kw}, bis jetzt: 1 Release, 2 PRs gemerged, 1 Build. Sie zählt in keiner Zahl dieser Seite mit; nur die offenen PRs zeigen den Stand von jetzt. Ansehen →`,
     );
     // Its link searches the facts for the mark the rows carry.
     fireEvent.click(within(line).getByRole("button", { name: "Ansehen →" }));
@@ -391,7 +422,7 @@ describe("App", () => {
       name: "Was diese Einschätzung einschränkt",
     });
     expect(limits.textContent).toBe(
-      "Argo CD lieferte seit dem 06.11.2026 bis zum Ende des Zeitraums keine Daten mehr: Aussagen dazu ausgelassen.",
+      "Argo CD liefert seit dem 06.11.2026 bis zum Ende des Zeitraums keine Daten mehr. Zu diesen Zahlen sagt die Einschätzung nichts.",
     );
     // The tally beside the headline, the backend's counts, what is stuck
     // first, the question, then the repos: none called unremarkable.
@@ -443,10 +474,10 @@ describe("App", () => {
     expect(p.getByText(/die PRs einzeln durchgehen/)).toBeInTheDocument();
     // Team-wide, each card in its column.
     expect(
-      p.getByText("PRs gemerged pro Woche: deutlich besser"),
+      p.getByText("Gemergte PRs pro Woche: deutlich besser"),
     ).toBeInTheDocument();
     expect(
-      p.getByText("Treiber: kasse/kasse-api trägt 70 % der Zunahme"),
+      p.getByText("Vor allem kasse/kasse-api: 70 % der Zunahme"),
     ).toBeInTheDocument();
     expect(
       p.getByText("kasse/policy (scheitert öfter): erledigt"),
@@ -485,18 +516,18 @@ describe("App", () => {
     expect(panel.textContent).not.toMatch(/Vergleich|erledigt\./);
     expect(
       p.getByText(
-        "kasse/kasse-api: PRs stauen sich; bereit bis Approval: deutlich schlechter",
+        "kasse/kasse-api: PRs stauen sich; Bereit bis zur ersten Freigabe: deutlich schlechter",
       ),
     ).toBeInTheDocument();
     expect(
-      p.getByText("PRs gemerged pro Woche: deutlich besser"),
+      p.getByText("Gemergte PRs pro Woche: deutlich besser"),
     ).toBeInTheDocument();
     // Where the CI time goes is the build section's, not an assessment.
     expect(panel.textContent).not.toMatch(/CI-Zeit/);
     // The question to talk about, no retro questions of a model.
     expect(
       p.getByText(
-        "64 % Approvals ohne vorherigen Kommentar: Passt das zu unserer Art zu reviewen?",
+        "64 % Freigaben ohne Kommentar davor: Passt das zu unserer Art zu reviewen?",
       ),
     ).toBeInTheDocument();
   });
@@ -1030,7 +1061,7 @@ describe("App", () => {
     // On PROD: the time, the route and the day in its tooltip; through a
     // lower bound "höchstens", as it may have gone out earlier.
     const onProd = (await row("b")).getByTitle(/^Auf PROD seit /);
-    expect(onProd.title).toMatch(/Compare-Link/);
+    expect(onProd.title).toMatch(/Vergleichs-Link/);
     expect(onProd.textContent).toBe(dur(0.8 * 86400));
     const atMost = (await row("e")).getByTitle(/^Auf PROD seit /);
     expect(atMost.textContent).toBe(`höchstens ${dur(0.8 * 86400)}`);
@@ -1382,7 +1413,7 @@ describe("App", () => {
     expect(panel).not.toMatch(/overview\.assess/);
     expect(panel).toMatch(/Ohne Freigabe gemerged: erledigt/);
     expect(panel).toMatch(
-      /Vor einer Woche traf das hier noch zu\. Jetzt nicht mehr: wieder klar unter der Grenze, oder vorbei wie eine Merge-Pause/,
+      /Vor einer Woche traf das hier noch zu, jetzt nicht mehr: Der Wert liegt wieder klar unter der Grenze, oder die Merge-Pause/,
     );
     // Hints and what cannot be judged say they are no finding.
     expect(
@@ -1391,7 +1422,7 @@ describe("App", () => {
     const red = within(
       p.getByText("Lange kein Release nach PROD").closest("article")!,
     );
-    expect(red.getByText("4 von 9 Projekten")).toBeInTheDocument();
+    expect(red.getByText("4 von 9 Produkten")).toBeInTheDocument();
     // Each unit: its name, then its number in the state's words.
     expect(
       red.getByText(
@@ -1422,7 +1453,7 @@ describe("App", () => {
     // Since when, as of when, the agreement with the team's own number.
     expect(
       red.getByText(
-        /^spätestens seit dem 02\.10\.2026 · Stand 08\.11\.2026 · 1 Projekt mit zu wenig Daten$/,
+        /^spätestens seit dem 02\.10\.2026 · Stand 08\.11\.2026 · 1 Produkt mit zu wenig Daten$/,
       ),
     ).toBeInTheDocument();
     expect(
@@ -1803,7 +1834,7 @@ describe("App", () => {
     expect(window.location.search).toBe("?product=portal");
     await screen.findByText(/Team team-a, Produkt portal/);
     expect(metricsCalls(calls).at(-1)).toMatch(/&product=portal$/);
-    expect(screen.getByText("Argo-Apps")).toBeInTheDocument();
+    expect(screen.getByText("Argo-CD-Apps")).toBeInTheDocument();
     expect(screen.getByText("keine")).toBeInTheDocument();
     expect(screen.getByText("keine Deploys im Zeitraum")).toBeInTheDocument();
     expect(
@@ -1896,7 +1927,7 @@ describe("App", () => {
     expect(
       await within(tabs).findByRole("tab", { name: /Deploys 5/ }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Erstdeploy")).toBeInTheDocument();
+    expect(screen.getByText("Erstes Deploy")).toBeInTheDocument();
     expect(screen.getByText("Failed")).toBeInTheDocument();
     expect(screen.getAllByText("kasse-api:1.1").length).toBeGreaterThan(0);
     fireEvent.click(within(tabs).getByRole("tab", { name: /Builds/ }));
@@ -1933,7 +1964,7 @@ describe("App", () => {
     ).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("Kein Vergleich")).toBeInTheDocument();
     expect(
-      screen.getByText(/unter 10 Builds in einer der beiden Perioden;/),
+      screen.getByText(/unter 10 Builds im Zeitraum oder in der Vorperiode;/),
     ).toBeInTheDocument();
     expect(
       screen.getAllByText("Repos: kein Vergleich mit der Vorperiode"),
@@ -1943,7 +1974,9 @@ describe("App", () => {
       within(kinds).getByRole("button", { name: "Releases" }),
     ).toHaveAttribute("aria-pressed", "true");
     expect(
-      screen.getAllByRole("img", { name: /^Erfolgsquote pro Woche/ }),
+      screen.getAllByRole("img", {
+        name: /^Anteil erfolgreicher Builds pro Woche/,
+      }),
     ).toHaveLength(3);
     fireEvent.mouseEnter(
       screen
@@ -2115,7 +2148,7 @@ describe("App", () => {
     );
     expect(screen.getByText("2.0 h")).toBeInTheDocument();
     // The red time's flaky part, counted by the backend.
-    expect(screen.getByText("3 flaky")).toHaveAttribute(
+    expect(screen.getByText("3 unzuverlässig")).toHaveAttribute(
       "title",
       "0.8 h davon in Builds, die ein späterer Build auf demselben Commit erfolgreich machte",
     );
@@ -2146,7 +2179,7 @@ describe("App", () => {
       "stroke-dasharray",
     );
     expect(
-      within(quiver).getByText("kasse/flaky-api ▲ Fehlerquote 10 % → 40 %"),
+      within(quiver).getByText("kasse/flaky-api ▲ fehlgeschlagen 10 % → 40 %"),
     ).toBeInTheDocument();
     expect(
       within(quiver).getByText("kasse/slow-api ▲ ×3.0 Dauer"),
@@ -2160,7 +2193,7 @@ describe("App", () => {
     fireEvent.mouseEnter(hit("kasse/slow-api"));
     expect(within(quiver).queryByRole("tooltip")).toBeNull();
     expect(screen.getByRole("tooltip")).toHaveTextContent(
-      /kasse\/slow-apiTypisch10 min → 30 minFehlerquote0 % → 0 %Builds12CI-Zeit6.0 h$/,
+      /kasse\/slow-apiTypisch10 min → 30 minAnteil fehlgeschlagen0 % → 0 %Builds12CI-Zeit6.0 h$/,
     );
     fireEvent.mouseLeave(hit("kasse/slow-api"));
     // By keyboard too, the tooltip's content as the target's name.
@@ -2214,19 +2247,21 @@ describe("App", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("#7")).toBeInTheDocument();
     // The agent wait, beside the duration, only where runs report it.
-    expect(screen.getByTitle(/^Typischer Wert über 4 der /)).toHaveTextContent(
-      "davon typischerweise 7 min Warten auf einen Agent, 3 min Bauen",
+    expect(screen.getByTitle(/^Typischer Wert über 4 von /)).toHaveTextContent(
+      "davon typisch 7 min Warten auf einen Build-Agent, 3 min Bauen",
     );
     // In the build section; the assessment's agent-wait card is its own.
     const build = document.getElementById("build")!;
-    expect(within(build).getAllByText(/Warten auf einen Agent/)).toHaveLength(
-      1,
-    );
+    expect(
+      within(build).getAllByText(/Warten auf einen Build-Agent/),
+    ).toHaveLength(1);
     expect(
       screen.getByText("#7").parentElement?.parentElement,
     ).toHaveTextContent("20.0 h");
     expect(
-      screen.getByTitle("Der Build meldet nicht, wann er einen Agent bekam"),
+      screen.getByTitle(
+        "Der Build meldet nicht, wann er einen Build-Agent bekam",
+      ),
     ).toHaveTextContent("–");
   });
 
@@ -2280,13 +2315,13 @@ describe("App", () => {
     expect(steady).toHaveTextContent(/25 min30 min2 min \/ 23 min12/);
     expect(
       screen.getByTitle(
-        "Typischer Wert über 6 der 12 Builds, die melden, wann sie einen Agent bekamen",
+        "Typischer Wert über 6 von 12 Builds: Nur diese melden, wann sie einen Build-Agent bekamen",
       ),
     ).toBeInTheDocument();
     const mono = screen.getByText("kasse/mono").closest(".contents");
     expect(
       within(mono as HTMLElement).getByTitle(
-        "Keiner der Builds meldet, wann er einen Agent bekam",
+        "Keiner der Builds meldet, wann er einen Build-Agent bekam",
       ),
     ).toHaveTextContent("–");
     // In the backend's order, its link last.
@@ -2334,10 +2369,12 @@ describe("App", () => {
       return m;
     });
     render(<App />);
-    await screen.findByText("Fehlerquote pro Repo und Woche");
+    await screen.findByText(
+      "Anteil fehlgeschlagener Builds pro Repo und Woche",
+    );
     // The numbers as a table for assistive tech, the grid hidden from it.
     const table = screen.getByRole("table", {
-      name: "Fehlerquote pro Repo und Woche, Feature- und Bugfix-Builds",
+      name: "Anteil fehlgeschlagener Builds pro Repo und Woche, Feature- und Bugfix-Builds",
     });
     expect(
       within(table).getByRole("row", { name: /^übrige Repos/ }),
@@ -2584,7 +2621,7 @@ describe("App", () => {
     // no feature builds, none hiding: the first kind
     const kinds = screen.getByRole("group", { name: "Build-Art" });
     expect(
-      within(kinds).getByRole("button", { name: "Default-Branch-Builds" }),
+      within(kinds).getByRole("button", { name: "Hauptbranch-Builds" }),
     ).toHaveAttribute("aria-pressed", "true");
   });
 
@@ -2594,20 +2631,20 @@ describe("App", () => {
     // the card itself, not the hotspots' button of the same name, and
     // twice as wide as the others
     const spark = await screen.findByLabelText(
-      /^Erfolgsquote pro Woche, Feature- und Bugfix-Builds/,
+      /^Anteil erfolgreicher Builds pro Woche, Feature- und Bugfix-Builds/,
     );
     expect(spark.closest(".md\\:col-span-2")).not.toBeNull();
     expect(screen.queryByText(/kein Build erkannt/)).toBeNull();
     // the cards in the backend's order, before the hotspots' kind buttons
     const names = screen
       .getAllByText(
-        /^(Feature- und Bugfix-Builds|Default-Branch-Builds|Releases)$/,
+        /^(Feature- und Bugfix-Builds|Hauptbranch-Builds|Releases)$/,
       )
       .slice(0, 3)
       .map((e) => e.textContent);
     expect(names).toEqual([
       "Feature- und Bugfix-Builds",
-      "Default-Branch-Builds",
+      "Hauptbranch-Builds",
       "Releases",
     ]);
   });
@@ -2644,7 +2681,7 @@ describe("App", () => {
     });
     render(<App />);
     expect(
-      await screen.findByText("vor der ersten build_type-Meldung"),
+      await screen.findByText("bevor die CI meldete, welche Art Build es ist"),
     ).toBeInTheDocument();
     expect(screen.getByText(/Build-Daten ab 09\.11\.2026/)).toBeInTheDocument();
     expect(
@@ -2705,7 +2742,9 @@ describe("App", () => {
     render(<App />);
     // The tile and the calendar, which draws no day as one without a release.
     expect(
-      await screen.findAllByText("Argo CD meldet für das Team noch nicht"),
+      await screen.findAllByText(
+        "Argo CD liefert für das Team noch keine Daten",
+      ),
     ).toHaveLength(2);
     expect(screen.queryAllByTestId("day-cell")).toHaveLength(0);
   });
@@ -2726,7 +2765,9 @@ describe("App", () => {
     // On the overview's tile and under the deploy section's head, where its
     // change stands too.
     expect(
-      await screen.findAllByText(/Argo CD meldet erst seit 07\.11\.2026/),
+      await screen.findAllByText(
+        /Argo CD liefert erst seit dem 07\.11\.2026 Daten/,
+      ),
     ).toHaveLength(2);
     expect(screen.queryByText(/wenig belastbar\.$/)).toBeNull();
   });
@@ -2789,7 +2830,7 @@ describe("App", () => {
     render(<App />);
     expect(
       await screen.findByText(
-        "1 fehlgeschlagener Build flaky: danach erfolgreich auf demselben Commit (100 % der fehlgeschlagenen, < 0.1 h)",
+        "1 fehlgeschlagener Build unzuverlässig: danach auf demselben Commit erfolgreich (100 % der fehlgeschlagenen, < 0.1 h)",
       ),
     ).toBeInTheDocument();
     const red = screen.getByText(
@@ -2836,12 +2877,12 @@ describe("App", () => {
     render(<App />);
     expect(
       await screen.findByText(
-        "2 fehlgeschlagene Builds flaky: danach erfolgreich auf demselben Commit (50 % der fehlgeschlagenen, 0.5 h) · 1 Build ohne Commit nicht beurteilt",
+        "2 fehlgeschlagene Builds unzuverlässig: danach auf demselben Commit erfolgreich (50 % der fehlgeschlagenen, 0.5 h) · 1 Build ohne Commit nicht beurteilt",
       ),
     ).toBeInTheDocument();
     // The rate, the previous one under it as everywhere, the verdict below.
     const worse = screen.getByText(
-      "Flaky-Quote 10 % der Builds mit Commit",
+      "Unzuverlässig: 10 % der Builds mit Commit",
     ).parentElement!;
     expect(within(worse).getByText("vorher 2 %")).toHaveClass(
       "text-danger-ink",
@@ -2850,14 +2891,16 @@ describe("App", () => {
       within(worse.parentElement!).getByText("Schlechter"),
     ).toBeInTheDocument();
     const better = screen.getByText(
-      "Flaky-Quote 0 % der Builds mit Commit",
+      "Unzuverlässig: 0 % der Builds mit Commit",
     ).parentElement!;
     expect(within(better).getByText("vorher 10 %")).toHaveClass("text-online");
     expect(
       within(better.parentElement!).getByText("Besser"),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Kein fehlgeschlagener Build, also auch kein flaky"),
+      screen.getByText(
+        "Kein fehlgeschlagener Build, also auch kein unzuverlässiger",
+      ),
     ).toBeInTheDocument();
     // A kind with failed builds but none flaky says so.
     expect(
@@ -2866,11 +2909,13 @@ describe("App", () => {
       ).length,
     ).toBeGreaterThan(0);
     fireEvent.click(
-      screen.getByRole("button", { name: /Flaky-Builds ansehen/ }),
+      screen.getByRole("button", { name: /Unzuverlässige Builds ansehen/ }),
     );
+    // "flaky" finds the rows in either language: the English mark is
+    // searched too.
     await waitFor(() => expect(factsCalls(calls).at(-1)).toMatch(/&q=flaky$/));
     const runs = (await screen.findByText("#11")).closest("tr")!;
-    expect(within(runs).getByText("Flaky")).toBeInTheDocument();
+    expect(within(runs).getByText("Unzuverlässig")).toBeInTheDocument();
     expect(within(runs).getByText("eeeeeeee")).toBeInTheDocument();
   });
 
@@ -2923,7 +2968,7 @@ describe("open PRs", () => {
     expect(screen.getByText("Repos im Stau")).toBeInTheDocument();
     expect(screen.getByText("mit 3 lang offenen PRs")).toBeInTheDocument();
     expect(screen.getByText("insgesamt 3 PRs lang offen")).toBeInTheDocument();
-    expect(screen.getByText("typischerweise 9.0 Tage alt")).toBeInTheDocument();
+    expect(screen.getByText("typisch 9.0 Tage alt")).toBeInTheDocument();
     // The repo's median age, never its oldest PR's.
     expect(screen.getByText("12.0 Tage")).toBeInTheDocument();
     // In the backend's order, chart and table, zero counts left out; the
@@ -2950,7 +2995,7 @@ describe("open PRs", () => {
     expect(onFacts).toHaveBeenCalledWith("prs", "kasse/kasse-api");
     // The inactive ones apart, their link a search for their word.
     expect(
-      screen.getByText(/^1 PR inaktiv: seit 30 Tagen kein Event/),
+      screen.getByText(/^1 PR inaktiv: seit 30 Tagen nichts mehr in Bitbucket/),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Ansehen →" }));
     expect(onFacts).toHaveBeenCalledWith("prs", "Inaktiv");
@@ -3306,7 +3351,7 @@ describe("open PRs", () => {
     );
     render(<App />);
     expect(
-      await screen.findByText("Inaktiv · 60.0 Tage ohne Event"),
+      await screen.findByText("Inaktiv · 60.0 Tage ohne Ereignis"),
     ).toBeInTheDocument();
   });
 
@@ -3382,7 +3427,7 @@ describe("flow", () => {
     expect(screen.queryByText(/Bis null/)).toBeNull();
     expect(screen.getByText("gemerged → auf PROD")).toBeInTheDocument();
     // Without a stage before PROD the stretch is named from the merge.
-    expect(screen.getAllByText("Ab Merge bis PROD").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Vom Merge bis PROD").length).toBeGreaterThan(0);
     // No stage is hot: no lever named.
     expect(screen.queryByText(/Der Hebel liegt/)).toBeNull();
   });
@@ -3416,7 +3461,7 @@ describe("flow", () => {
       />,
     );
     expect(
-      screen.getByText(/keine Änderung bis PROD verfolgt/),
+      screen.getByText(/liess sich kein PR bis PROD verfolgen/),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("img", { name: /Anteil an der Zeit/ }),
@@ -3481,8 +3526,8 @@ describe("flow", () => {
     expect(screen.getAllByText("keine PRs")).toHaveLength(2);
     // Typical value and slowest 10 % labelled on the hot stage only, in
     // the app's words, never "Median" / "p90".
-    expect(screen.getByText("1.0 Tage, typischer Wert")).toBeInTheDocument();
-    expect(screen.getAllByText(/^[\d.]+ \S+, typischer Wert$/)).toHaveLength(1);
+    expect(screen.getByText("1.0 Tage, typisch")).toBeInTheDocument();
+    expect(screen.getAllByText(/^[\d.]+ \S+, typisch$/)).toHaveLength(1);
     expect(document.body.textContent).not.toMatch(/Median 1|p90/);
     expect(screen.getByText("4 W")).toBeInTheDocument();
     fireEvent.mouseEnter(rows[4]);
@@ -3490,7 +3535,7 @@ describe("flow", () => {
     const tip = screen.getByRole("tooltip", { hidden: true });
     expect(tip).toHaveTextContent("Von INTG bis PROD");
     expect(tip).toHaveTextContent("PRs3");
-    expect(tip).toHaveTextContent("typischer Wert16.8 h");
+    expect(tip).toHaveTextContent("typisch16.8 h");
     expect(tip).toHaveTextContent("die langsamsten 10 %: über16.8 h");
     expect(document.body.textContent).not.toMatch(/NaN/);
     // Assistive tech gets the numbers once, as a table; a stage without
@@ -3567,7 +3612,7 @@ describe("flow", () => {
     expect(new Set(dots).size).toBe(7);
     expect(
       screen.getByText(
-        `16.8 h, typischer Wert${String.fromCharCode(0x2002)}·${String.fromCharCode(0x2002)}die langsamsten 10 %: über 16.8 h`,
+        `16.8 h, typisch${String.fromCharCode(0x2002)}·${String.fromCharCode(0x2002)}die langsamsten 10 %: über 16.8 h`,
         { normalizer: (s) => s },
       ),
     ).toBeInTheDocument();
@@ -3606,11 +3651,23 @@ describe("throughput", () => {
         <TrendCard m={m} />
       </>,
     );
+    // The tile's label, first; the trend card below names its line alike.
     const merged = screen
-      .getByText("PR Throughput")
+      .getAllByText("Gemergte PRs pro Woche", { selector: "span" })[0]
       .closest("div")!.parentElement!;
     expect(within(merged).getByText("11.8")).toBeInTheDocument();
-    expect(within(merged).getByText("PRs pro Woche")).toBeInTheDocument();
+    expect(
+      within(merged).getByText("pro Woche, im Schnitt"),
+    ).toBeInTheDocument();
+    // The flow framework's name only as the reference line.
+    expect(
+      within(merged).getByText("Flow Framework · Flow velocity"),
+    ).toBeInTheDocument();
+    expect(
+      within(merged).getByText(
+        "Wie viele PRs schliesst das Team pro Woche mit einem Merge ab?",
+      ),
+    ).toBeInTheDocument();
     // What the count leaves out, each reason only when it left one out,
     // its meaning on hover, counts in Swiss format. PRs into a feature
     // branch count: no word of them.
@@ -3635,17 +3692,19 @@ describe("throughput", () => {
     // Bitbucket started inside the period: the rate is since then.
     expect(
       within(merged).getByText(
-        "Bitbucket liefert erst seit dem 21.10.2026 Daten: Die Wochen davor sind leer, die Rate gilt ab dann.",
+        "Bitbucket liefert erst seit dem 21.10.2026 Daten: Die Wochen davor sind leer, der Wert pro Woche gilt ab dann.",
       ),
     ).toBeInTheDocument();
     expect(within(merged).getByText("vorher 0.5")).toBeInTheDocument();
     expect(within(merged).getByText("Besser")).toBeInTheDocument();
 
-    const batch = screen.getByText("Batch Size").closest("div")!.parentElement!;
+    const batch = screen
+      .getByText("PR-Grösse", { selector: "span" })
+      .closest("div")!.parentElement!;
     expect(within(batch).getByText("87")).toBeInTheDocument();
     expect(
       within(batch).getByText(
-        "grösste 10 % ab 412 Zeilen · typisch 5 Dateien · Grösse bekannt bei 40 von 47",
+        "die grössten 10 %: ab 412 Zeilen · typisch 5 Dateien · Grösse bekannt bei 40 von 47 PRs",
       ),
     ).toBeInTheDocument();
     expect(within(batch).getByText("vorher 80")).toBeInTheDocument();
@@ -3733,24 +3792,31 @@ describe("strip", () => {
     // throughput, batch size, jammed, three kinds; first touch and open PRs
     // have no direction.
     expect(rows).toHaveLength(12);
-    expect(within(rows[6]).getByText("PR Throughput")).toBeInTheDocument();
+    expect(
+      within(rows[0]).getByText("Releases nach PROD pro Woche"),
+    ).toBeInTheDocument();
+    expect(
+      within(rows[6]).getByText("Gemergte PRs pro Woche"),
+    ).toBeInTheDocument();
     expect(within(rows[6]).getAllByText("0.8")[0]).toBeInTheDocument();
-    expect(within(rows[7]).getByText("Batch Size")).toBeInTheDocument();
+    expect(within(rows[7]).getByText("PR-Grösse")).toBeInTheDocument();
     expect(within(rows[7]).getByText("140")).toBeInTheDocument();
     // A long label wraps, never cut off with an ellipsis.
     for (const row of rows)
       expect(row.firstElementChild!.className).not.toMatch(/truncate/);
-    expect(screen.queryByText("Approval ohne Kommentar")).toBeNull();
+    expect(screen.queryByText("Freigabe ohne Kommentar")).toBeNull();
     expect(screen.queryByText("Offene PRs")).toBeNull();
     expect(screen.getByText("◀ Schlechter")).toBeInTheDocument();
 
     const lead = rows[1];
-    expect(within(lead).getByText("Lead Time bis PROD")).toBeInTheDocument();
+    expect(
+      within(lead).getByText("Zeit vom ersten Commit bis PROD"),
+    ).toBeInTheDocument();
     const now = within(lead).getByText("2.0 Tage");
     expect(now).toHaveClass("text-danger-ink");
     expect(now.style.right).toContain("50%");
     const bar = within(lead).getByRole("img", {
-      name: "Lead Time bis PROD: 2.0 Tage, Schlechter",
+      name: "Zeit vom ersten Commit bis PROD: 2.0 Tage, Schlechter",
     });
     expect(bar).toHaveAttribute("tabindex", "0");
 
@@ -3762,13 +3828,15 @@ describe("strip", () => {
     );
     expect(better.style.left).toContain("50%");
 
-    expect(within(rows[2]).getByText("Vorperiode unvollständig")).toBeVisible();
+    expect(within(rows[2]).getByText("Daten lückenhaft")).toBeVisible();
     expect(within(rows[5]).getByText("zu wenig Daten")).toBeInTheDocument();
-    expect(within(rows[9]).getByText("Erfolgsquote, Releases")).toBeVisible();
+    expect(
+      within(rows[9]).getByText("Erfolgreiche Builds, Releases"),
+    ).toBeVisible();
 
     fireEvent.mouseEnter(bar);
     const tip = screen.getByRole("tooltip");
-    expect(tip).toHaveTextContent("Lead Time bis PROD");
+    expect(tip).toHaveTextContent("Zeit vom ersten Commit bis PROD");
     expect(tip).toHaveTextContent("jetzt2.0 Tage");
     expect(tip).toHaveTextContent("Vorperiode1.0 Tage");
     expect(tip).toHaveTextContent("Schlechter");
@@ -3783,7 +3851,9 @@ describe("strip", () => {
     fireEvent.focus(bar);
     fireEvent.mouseEnter(reviewBar);
     expect(screen.getAllByRole("tooltip")).toHaveLength(1);
-    expect(screen.getByRole("tooltip")).toHaveTextContent("Review-Zeit");
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      "Zeit bis zur Freigabe",
+    );
     expect(reviewBar).toHaveAttribute("aria-describedby");
     expect(bar).not.toHaveAttribute("aria-describedby");
     fireEvent.mouseLeave(reviewBar);
@@ -3818,7 +3888,7 @@ describe("strip", () => {
     );
     const rows = screen.getAllByTestId("strip-row");
     expect(rows).toHaveLength(10);
-    expect(screen.queryByText("Deploy-Frequenz")).toBeNull();
+    expect(screen.queryByText("Releases nach PROD pro Woche")).toBeNull();
     expect(screen.queryByText("Innert 24 h gemerged")).toBeNull();
     expect(within(rows[3]).getByText("zu wenig Daten")).toBeVisible();
   });
@@ -3838,7 +3908,7 @@ describe("strip", () => {
     );
     const freq = screen.getAllByTestId("strip-row")[0];
     expect(
-      within(freq).getByText("Argo CD meldet für das Team noch nicht"),
+      within(freq).getByText("Argo CD liefert für das Team noch keine Daten"),
     ).toBeVisible();
   });
 });
@@ -4041,7 +4111,7 @@ describe("calendar", () => {
     const cal = await screen.findByTestId("calendar");
     expect(cal).toHaveAttribute("aria-hidden", "true");
     const table = screen.getByRole("table", {
-      name: "Releases auf PROD pro Tag; 3 Tage ohne Daten",
+      name: "Releases nach PROD pro Tag; 3 Tage ohne Daten",
     });
     // Rows are weekdays, columns the 4 weeks: Wednesday of KW 46 is the
     // third row's last cell.
@@ -4171,7 +4241,7 @@ describe("limits", () => {
     expect([...note.children].map((c) => c.textContent)).toEqual([
       "Noch kein voller Vergleich mit der Vorperiode: Nicht jede Zahl hat dort einen vergleichbaren Wert.",
       "Die CI liefert erst seit dem 21.10.2026 Daten.",
-      "Bitbucket lieferte vom 05.11.2026 bis 09.11.2026 keine Daten, obwohl Builds liefen: Ereignisse gingen verloren. Die PR-Zahlen bleiben ohne Urteil.",
+      "Bitbucket lieferte vom 05.11.2026 bis 09.11.2026 keine Daten, obwohl Builds liefen: Ereignisse gingen verloren. Darum bleiben die PR-Zahlen ohne Urteil.",
       "Nicht messbar: 7 PRs wurden in diesen Wochen gemerged, keiner liess sich bis PROD verfolgen.",
     ]);
     expect(panel.textContent).not.toMatch(
@@ -4290,8 +4360,8 @@ describe("limits", () => {
       name: "Was diese Einschätzung einschränkt",
     });
     expect([...note.children].map((c) => c.textContent)).toEqual([
-      "Bitbucket lieferte vom 05.11.2026 bis 09.11.2026 keine Daten, obwohl Builds liefen: Ereignisse gingen verloren. Die PR-Zahlen bleiben ohne Urteil, und mit ihnen Deploys und Builds: Sie kommen über Bitbucket zum Produkt.",
-      "Bitbucket liefert seit dem 12.11.2026 keine Daten, obwohl Builds laufen: Ereignisse gehen verloren. Die PR-Zahlen bleiben ohne Urteil, und mit ihnen Deploys und Builds: Sie kommen über Bitbucket zum Produkt.",
+      "Bitbucket lieferte vom 05.11.2026 bis 09.11.2026 keine Daten, obwohl Builds liefen: Ereignisse gingen verloren. Darum bleiben die PR-Zahlen ohne Urteil, und auch Deploys und Builds: Sie finden ihr Produkt nur über Bitbucket.",
+      "Bitbucket liefert seit dem 12.11.2026 keine Daten, obwohl Builds laufen: Ereignisse gehen verloren. Darum bleiben die PR-Zahlen ohne Urteil, und auch Deploys und Builds: Sie finden ihr Produkt nur über Bitbucket.",
     ]);
   });
 
@@ -4385,7 +4455,7 @@ describe("limits", () => {
     const panel = await screen.findByTestId("assessment");
     expect(
       within(panel).getByText(
-        "40 % der typischen Build-Zeit oder mehr, und mindestens 3 Minuten, ist Warten auf einen Agent: die Kapazität der Plattform, nicht der Build.",
+        "40 % der typischen Build-Zeit oder mehr, und mindestens 3 Minuten, wartet der Build auf einen freien Build-Agent. Das liegt an der Kapazität der Plattform, nicht am Build.",
       ),
     ).toBeInTheDocument();
   });
@@ -4410,7 +4480,7 @@ describe("limits", () => {
     // No wording of its own: the rules' titles, no headline.
     expect(p.queryByRole("heading", { level: 3 })).toBeNull();
     expect(
-      p.getByText("PRs gemerged pro Woche: deutlich besser"),
+      p.getByText("Gemergte PRs pro Woche: deutlich besser"),
     ).toBeInTheDocument();
   });
 
@@ -4505,7 +4575,7 @@ describe("limits", () => {
     // A product with deploys of its own: they are not why it shows none.
     fireEvent.click(within(products).getByRole("button", { name: /kasse/ }));
     expect(
-      await screen.findByText(/Releases? im Zeitraum/),
+      await screen.findByText(/^\d+ Releases? im Zeitraum/),
     ).toBeInTheDocument();
     expect(
       screen.queryByText("2 Deploys keinem Produkt zuordenbar"),
@@ -4566,7 +4636,7 @@ describe("limits", () => {
     expect(onFacts).toHaveBeenCalledWith("prs", "Unbekannt");
     expect(
       screen.getByText(
-        "5 Builds ohne Repo: Weder ihr Commit noch ihr Pipeline-Name nennt eines. In der Teamansicht gezählt, in keiner Produktansicht.",
+        "5 Builds ohne Repo: Weder ihr Commit noch ihr Pipeline-Name nennt eines. In der Ansicht des ganzen Teams gezählt, in keiner Produktansicht.",
       ),
     ).toBeInTheDocument();
     // Bots' builds as what they cost, CI time, never a finding.
@@ -4591,7 +4661,9 @@ describe("limits", () => {
     expect(traced).toMatch(
       /1 verfolgter PR kam vielleicht schon mit einem früheren Deploy auf PROD, das sich keinem PR zuordnen lässt: Seine Zeit bis PROD ist ein Höchstwert\./,
     );
-    expect(traced).toMatch(/3 PRs in Bibliotheken, werden nicht ausgerollt/);
+    expect(traced).toMatch(
+      /3 PRs in Bibliotheken: Sie werden nicht ausgerollt/,
+    );
   });
 
   // No merged PR to trace: no "0 of 0" under the line that says so.
@@ -4667,7 +4739,7 @@ describe("limits", () => {
     await screen.findByRole("tablist", { name: "Faktentabelle" });
     const data = within(document.getElementById("daten")!);
     expect(await data.findByText("Unbekannt")).toBeInTheDocument();
-    expect(data.getByText("9.0 Tage ohne Event")).toBeInTheDocument();
+    expect(data.getByText("9.0 Tage ohne Ereignis")).toBeInTheDocument();
     const housekeeping = data.getByText("Nicht gezählt: Aufräum-PR");
     expect(housekeeping.closest("tr")).toHaveAttribute("data-dim");
     const umbrella = data.getByText(
@@ -4686,7 +4758,7 @@ describe("limits", () => {
     fireEvent.click(data.getByRole("tab", { name: /Deploys/ }));
     const first = (await data.findByText("kasse-neu")).closest("tr")!;
     expect(within(first).getByText("Release")).toBeInTheDocument();
-    expect(within(first).getByText("Erstdeploy")).toBeInTheDocument();
+    expect(within(first).getByText("Erstes Deploy")).toBeInTheDocument();
     expect(data.getByText("Error")).toBeInTheDocument();
     const infra = data.getByText("log-shipper").closest("tr")!;
     expect(

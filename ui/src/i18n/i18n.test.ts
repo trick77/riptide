@@ -403,7 +403,7 @@ describe("state wording", () => {
         unit({ value: 1, count: 1 }),
         "PROD",
       ),
-    ).toBe("1 Release nach PROD keinem Projekt zuordenbar");
+    ).toBe("1 Release nach PROD keinem Produkt zuordenbar");
   });
   it("names a resolved state by its title", () => {
     const title = signalTitle(

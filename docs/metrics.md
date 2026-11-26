@@ -460,6 +460,56 @@ Deploys reach the commit through the image reference — `pipeline_events.image_
 against `argocd_events.payload->'images'` — as described in
 [Correlating deploys back to commits](correlating-deploys-to-commits.md).
 
+## Words on the page
+
+One word per thing, in every heading, tile, card, tooltip and in the
+assessment the language model writes (its prompt gets this list from
+`internal/analysis/glossary.go`, `vocabulary`). The page is read by team
+leads and developers who never read DORA: a sentence names its subject,
+says what a number means, and holds no code identifier, config key, file
+path, SQL or JSON field (a threshold's key may stand in a tooltip). DORA
+and Flow Framework names stay only as the small grey reference line under
+a tile, never as its title. "Typisch" is explained once, where the
+delivery numbers start. German is Swiss (ss, never the sharp s), generic
+masculine, stages upper case through `{{prod}}`, never written out.
+
+| Thing | German | English | Not on the page |
+|---|---|---|---|
+| a PR merged into its repo | gemergter PR, gemerged | merged PR, merged | "merged das Team" |
+| PRs merged per week | Gemergte PRs pro Woche | Merged PRs per week | PR Throughput (Flow velocity: reference line only) |
+| changed lines of a PR | PR-Grösse | PR size | Batch Size (Working in small batches: reference line only) |
+| a deploy with a new version | Release nach PROD | release to PROD | |
+| how often releases come | Releases nach PROD pro Woche | Releases to PROD per week | Deploy-Frequenz (Deployment frequency: reference line only) |
+| one Argo CD sync of an App | das Deploy | deploy | Sync, Deployment |
+| what a deploy brings | Version | version | Image |
+| a deploy that brings no new version | Deploy ohne neue Version | deploy without a new version | Sync ohne neue Images, Re-Sync |
+| an App's first deploy | erstes Deploy | first deploy | Erstdeploy |
+| first commit to production | Zeit vom ersten Commit bis PROD | time from first commit to PROD | Lead Time as a title (Change lead time: reference line only) |
+| a piece of that way | Abschnitt | section | Etappe, Stufe |
+| INTG, SYST, PROD | Stage | stage | Stufe, Umgebung |
+| bring code to PROD | ausrollen | roll out | |
+| the repo's main line | Hauptbranch | main branch | Default-Branch, Trunk, master |
+| a person's OK on a PR | Freigabe, freigegeben | approval, approved | Approval, approved (in German) |
+| a repo no deploy ships | Bibliothek | library | Library (in German) |
+| the median | typisch (half above, half below) | typical | Median, p50 |
+| the 90th percentile | die langsamsten 10 % | the slowest 10 % | p90 |
+| the weeks shown / before | Zeitraum, Vorperiode | period, previous period | Periode, Periodenende |
+| a Bitbucket project | Produkt | product | Projekt |
+| a source stops sending | liefert keine Daten | sends no data | meldet nichts, Stall |
+| a CI run | Build | build | Lauf, Run |
+| a build's result | erfolgreich, fehlgeschlagen | succeeded, failed | grün, rot |
+| failed, then passed on the same commit | unzuverlässig | flaky | Flaky (in German) |
+| a repo without merged work | ohne Aktivität | no activity | inaktiv |
+| a PR without events for weeks | inaktiv | inactive | |
+| the team's own threshold | Abmachung | agreement | |
+| what a rule found | Befund, Hinweis, nicht beurteilbar | finding, hint, cannot be judged | |
+| what to do about a finding | nächster Schritt | next step | Hebel |
+| trouble after a rollout | Ärger nach dem Ausrollen | trouble after a rollout | Instability |
+
+A renamed word the facts table shows stays searchable under its old name
+(`*Alias` in `internal/metrics/facts.go`), so a shared `?q=` link keeps
+finding its rows.
+
 ## How the UI's numbers are computed
 
 The backend computes every number the UI shows; the UI renders and formats,

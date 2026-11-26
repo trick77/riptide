@@ -13,7 +13,7 @@ import { Costs } from "./Costs";
 import { Deploys, Mix } from "./Deploys";
 import { Facts } from "./Facts";
 import { Flow } from "./Flow";
-import { dateTime, fullDate, fullDay } from "./format";
+import { dateTime, fullDate, fullDay, stage } from "./format";
 import { FrameworkMap } from "./FrameworkMap";
 import { SECTIONS, SectionNav, useActiveSection } from "./nav";
 import { Overview } from "./Overview";
@@ -532,7 +532,7 @@ export default function App() {
               tab={state.tab}
               onTab={(tab) => set({ tab })}
             />
-            <FrameworkMap />
+            <FrameworkMap prod={stage(m.delivery.production_stage)} />
           </>
         )}
       </main>

@@ -80,7 +80,7 @@ export function Deploys({ m }: { m: Metrics }) {
               {freq.argo_reporting && (
                 <>
                   <HeadNumber
-                    label={t("overview.freq.label")}
+                    label={t("overview.freq.label", { prod })}
                     value={freq.syncs ? num(freq.per_week, 1) : "–"}
                     unit={freq.syncs ? t("overview.freq.unit") : undefined}
                     change={m.comparison.deploy_frequency}
