@@ -162,6 +162,9 @@ type StateUnit struct {
 	LowerBound bool       `json:"lower_bound"`
 	// Week is the calendar week of a dated state (a merge pause).
 	Week *Week `json:"week"`
+	// Lost: a lost Bitbucket silence took working time out of the unit's
+	// week; Typical is scaled to the time left (a merge pause).
+	Lost bool `json:"lost"`
 	// Names are what the unit holds: a project's Apps, the repos of a
 	// week's waiting PRs.
 	Names []string `json:"names"`
@@ -483,7 +486,8 @@ func firing(e stateEval) map[string]bool {
 // the assessment before this one, from the same reads: a unit that fired
 // then and is still within HysteresisShare of the threshold is held; a
 // state that fired then and fires on none of its units now is "gelöst"
-// where every unit it named is clear on evidence, "nicht mehr messbar"
+// where every unit it named is clear on evidence and its card was red then
+// (a hint resolves silently), "nicht mehr messbar"
 // where one can no longer be judged, and neither where a unit fell idle or
 // went (a project nobody works on is no news). A lasting state is red once
 // a unit has held it two sprints: from its onset where the data tells, else
@@ -494,11 +498,14 @@ func (a *assessor) stateSignals() {
 	all := func(string) bool { return true }
 	cur := a.evalAt(a.instant(0), all)
 	// The weeks back, the latest first: what the assessments before this one
-	// named (hysteresis, resolution) and a lasting state's two sprints.
-	back := make([]map[string]stateEval, lastingSamples)
-	for w := range back {
-		back[w] = a.evalAt(a.instant(w+1), all)
+	// named (hysteresis, resolution) and a lasting state's two sprints. One
+	// week more than those read for now: whether a state was red a week
+	// back takes its own two sprints before it.
+	read := make([]map[string]stateEval, lastingSamples+1)
+	for w := range read {
+		read[w] = a.evalAt(a.instant(w+1), all)
 	}
+	back := read[:lastingSamples]
 	for _, r := range a.rules() {
 		for _, key := range r.keys {
 			if e, ok := cur[key]; ok {
@@ -506,15 +513,21 @@ func (a *assessor) stateSignals() {
 			}
 		}
 	}
+	weekBack := a.instant(1).end
 	for _, r := range a.rules() {
 		for _, key := range r.keys {
 			p, ok := back[0][key]
-			switch {
-			case !ok:
-			case p.episodic:
-				a.settled(p, ongoing(p), cur[key])
-			default:
-				a.settled(p, named(back, key), cur[key])
+			if !ok {
+				continue
+			}
+			// Only a state red a week back is news once resolved: a hint
+			// then resolves silently.
+			_, tone := a.unitsAt(p, named(read[1:], key), weekBack, read[1:])
+			red := tone == ToneAttention
+			if p.episodic {
+				a.settled(p, ongoing(p), cur[key], red)
+			} else {
+				a.settled(p, named(back, key), cur[key], red)
 			}
 		}
 	}
@@ -569,7 +582,8 @@ func firedAt(e stateEval, name string) bool {
 // judge turns e into its signal: a unit the week before named and still
 // within e.lower of the threshold held, the firing units ranked, worst
 // three, since, a lasting state red where a unit held it two sprints
-// (back: the weeks before, the latest first). No unit firing: nothing.
+// (back: the weeks before, the latest first), a hint where every unit is
+// only held (unitsAt). No unit firing: nothing.
 func (a *assessor) judge(e stateEval, named map[string]bool, back []map[string]stateEval) {
 	id := SignalState + ":" + e.key
 	var fire []StateUnit
@@ -577,12 +591,8 @@ func (a *assessor) judge(e stateEval, named map[string]bool, back []map[string]s
 	if e.threshold.Key != "" {
 		card.Threshold = ptr(e.threshold)
 	}
-	end := a.p.Period.To
-	tone := e.tone
-	for _, u := range e.units {
-		if u.status == unitClear && e.lower > 0 && named[u.Name] && u.Value >= e.lower {
-			u.status, u.Held = unitFires, true
-		}
+	units, tone := a.unitsAt(e, named, a.p.Period.To, back)
+	for _, u := range units {
 		// A repo's or an App's rows are found by its name; a state names
 		// another search where the unit's name finds nothing.
 		if u.Query == nil && e.facts != "" && u.Name != "" && (e.unit == UnitRepo || e.unit == UnitApp) {
@@ -593,13 +603,6 @@ func (a *assessor) judge(e stateEval, named map[string]bool, back []map[string]s
 			card.Judged++
 			if u.Names == nil {
 				u.Names = []string{}
-			}
-			// Only a unit past the threshold itself, not one held within the
-			// hysteresis, has held a lasting state two sprints: the card names
-			// which (TwoSprints) and turns red.
-			if e.lasting && !u.Held && a.heldTwoSprints(e.key, u, end, back) {
-				u.TwoSprints = true
-				tone = ToneAttention
 			}
 			fire = append(fire, u.StateUnit)
 		case unitClear, unitEscalated:
@@ -651,6 +654,40 @@ func (a *assessor) judge(e stateEval, named map[string]bool, back []map[string]s
 		s.score = float64(card.Count)/float64(card.Judged)*100 + min(worst/max(e.threshold.Value, 1), 99)
 	}
 	a.add(s)
+}
+
+// unitsAt are e's units as its card shows them at end (named: the units
+// the week before named; back: the weeks before end, the latest first): a
+// unit named then and still within e.lower of the threshold held, a
+// lasting state's unit past the threshold itself that held it two sprints
+// marked (TwoSprints). tone is the card's: e's, red where a unit held two
+// sprints, and a hint where every unit it names is only held: none past
+// the threshold, no agreement broken now, whatever the state's tone.
+func (a *assessor) unitsAt(e stateEval, named map[string]bool, end time.Time,
+	back []map[string]stateEval) ([]stateUnit, string) {
+	units := slices.Clone(e.units)
+	tone, past := e.tone, false
+	for i := range units {
+		u := &units[i]
+		if u.status == unitClear && e.lower > 0 && named[u.Name] && u.Value >= e.lower {
+			u.status, u.Held = unitFires, true
+		}
+		if u.status != unitFires || u.Held {
+			continue
+		}
+		past = true
+		// Only a unit past the threshold itself, not one held within the
+		// hysteresis, has held a lasting state two sprints.
+		if e.lasting && a.heldTwoSprints(e.key, *u, end, back) {
+			u.TwoSprints = true
+			tone = ToneAttention
+		}
+	}
+	held := slices.ContainsFunc(units, func(u stateUnit) bool { return u.Held })
+	if held && !past && tone != ToneLimit {
+		tone = ToneHint
+	}
+	return units, tone
 }
 
 // heldTwoSprints reports whether a lasting state's firing unit u has held
@@ -716,8 +753,9 @@ func (a *assessor) calmLine(e stateEval, fire []StateUnit) {
 // fell idle, went, or escalated into a sibling state. Once: a week on, the
 // instant before no longer raised it. An episodic state is judged by its
 // running episodes (ongoing): over on every unit now, it is "gelöst" though
-// an ended episode still shows on its card.
-func (a *assessor) settled(prev stateEval, named map[string]bool, cur stateEval) {
+// an ended episode still shows on its card. "Gelöst" is news only where
+// the card was red a week back (red): a hint then resolves silently.
+func (a *assessor) settled(prev stateEval, named map[string]bool, cur stateEval, red bool) {
 	if len(named) == 0 || a.gaps[prev.source] {
 		return
 	}
@@ -776,7 +814,7 @@ func (a *assessor) settled(prev stateEval, named map[string]bool, cur stateEval)
 			ID: sid, Kind: SignalState, Tone: ToneLimit, Source: prev.source, Weight: tierLimit, State: &card,
 			Facts: []Fact{plain(sid+".count", "state_units", UnitCount, f64(len(unjudged)))},
 		})
-	case clear == len(named):
+	case clear == len(named) && red:
 		s := Signal{ID: SignalResolved + ":" + id, Kind: SignalResolved, Tone: ToneGood, Weight: 2, Metric: ptr(id),
 			Source: prev.source}
 		s.Facts = []Fact{plain(s.ID+".count", "state_units", UnitCount, f64(len(named)))}

@@ -329,6 +329,10 @@ export const de = {
             "KW {{week}}: {{count}} PR gemerged statt typisch {{typical}}, während am Ende der Woche {{n}} freigegebene PRs offen waren ({{names}})",
           unit_other:
             "KW {{week}}: {{count}} PRs gemerged statt typisch {{typical}}, während am Ende der Woche {{n}} freigegebene PRs offen waren ({{names}})",
+          unitLost_one:
+            "KW {{week}}: {{count}} PR gemerged statt typisch {{typical}} (ohne die Tage, an denen Bitbucket keine Daten lieferte), während am Ende der Woche {{n}} freigegebene PRs offen waren ({{names}})",
+          unitLost_other:
+            "KW {{week}}: {{count}} PRs gemerged statt typisch {{typical}} (ohne die Tage, an denen Bitbucket keine Daten lieferte), während am Ende der Woche {{n}} freigegebene PRs offen waren ({{names}})",
           threshold:
             "Gemeldet, wenn eine Woche höchstens {{n}} der typischen Merges hat, während am Ende der Woche {{minN}} oder mehr offen waren.",
           min_one: "{{n}} freigegebener PR",
@@ -564,7 +568,7 @@ export const de = {
         unmeasurable: {
           title: "{{was}}: nicht mehr messbar",
           unit: "",
-          rule: "Vor einer Woche hat riptide es hier festgestellt; jetzt reichen die Daten nicht, um es zu beurteilen. Das heisst nicht, dass es gelöst ist.",
+          rule: "Vor einer Woche traf das hier noch zu; jetzt reichen die Daten nicht, um es zu beurteilen. Das heisst nicht, dass es gelöst ist.",
         },
       },
       tallyLabel: "Bilanz",
@@ -639,7 +643,7 @@ export const de = {
         resolved:
           "Die letzte Einschätzung hat es aufgeworfen; jetzt ist der Wert zurück auf dem Stand davor oder besser.",
         resolvedState:
-          "Vor einer Woche hat riptide es hier festgestellt; jetzt gilt es für keine damals genannte Einheit mehr: wieder klar unter der Grenze, oder vorbei wie eine Merge-Pause oder fehlgeschlagene Builds, die eine Karte mit ihrem Datum noch zeigen kann.",
+          "Vor einer Woche traf das hier noch zu. Jetzt nicht mehr: wieder klar unter der Grenze, oder vorbei wie eine Merge-Pause oder fehlgeschlagene Builds, die eine Karte mit ihrem Datum noch zeigen kann.",
       },
       factsOf: "Fakten zu {{repo}} ansehen →",
       driver: "Treiber: {{repo}} trägt {{share}} der Zunahme",

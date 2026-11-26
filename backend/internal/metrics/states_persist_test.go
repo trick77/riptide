@@ -59,6 +59,41 @@ func TestLastingRedNeedsFiringWeeks(t *testing.T) {
 	}
 }
 
+// Whether a sampled lasting state was red a week back reads the four weeks
+// before that instant: red then (30-minute feature builds for weeks), short
+// builds now, "gelöst"; past the threshold only in the weeks just before,
+// a hint then, short builds now resolve silently.
+func TestSampledRedAWeekBackResolves(t *testing.T) {
+	id := SignalResolved + ":" + SignalState + ":" + StateLongBuilds
+	build := func(longFrom, longTo float64) (*dataset.Dataset, *dataset.Dataset) {
+		ds := stateData()
+		prev := &dataset.Dataset{Meta: ds.Meta, Apps: ds.Apps}
+		id := 0
+		for i := range 20 {
+			id++
+			ds.Runs = append(ds.Runs, featureRun(id, 0.3+float64(i)*0.3, 300))
+		}
+		for day := longFrom; day < longTo; day += 2.5 {
+			id++
+			r := featureRun(id, day, 1800)
+			if day < 28 {
+				ds.Runs = append(ds.Runs, r)
+			} else {
+				prev.Runs = append(prev.Runs, r)
+			}
+		}
+		return ds, prev
+	}
+	ds, prev := build(7.5, 56)
+	if a := assessBoth(t, ds, prev, nil); stateSignal(a, StateLongBuilds) != nil || !hasSignal(a, id, ToneGood) {
+		t.Errorf("red a week back, short now = %v, want gelöst", sigIDs(a.Signals))
+	}
+	ds, prev = build(7.5, 22)
+	if a := assessBoth(t, ds, prev, nil); slices.ContainsFunc(a.Signals, func(s Signal) bool { return s.Kind == SignalResolved }) {
+		t.Errorf("a hint a week back, short now = %v, want nothing resolved", sigIDs(a.Signals))
+	}
+}
+
 // One unit held two sprints turns the card red: the card marks it, not the
 // fresh ones beside it.
 func TestTwoSprintsMarksItsUnit(t *testing.T) {
@@ -106,16 +141,26 @@ func TestApprovedUntouchedStaysCounted(t *testing.T) {
 			t.Errorf("approved %v days back, still open: announced gelöst", age)
 		}
 	}
-	// Merged now: "gelöst".
-	ds := stateData(func(d *dataset.Dataset) {
-		d.PRs = []dataset.PR{merged(1, 3)}
-		d.Approvals = []dataset.Approval{
-			approval("kasse/kasse-api", 10, 32, ptr(2.0)), approval("kasse/kasse-api", 11, 32, ptr(2.0)),
-		}
-	})
-	if a := assessStates(t, ds, nil, History{}); stateSignal(a, StateApprovedWaiting) != nil ||
-		!hasSignal(a, SignalResolved+":"+SignalState+":"+StateApprovedWaiting, ToneGood) {
+	// Merged now, red a week back (waiting past the threshold two sprints
+	// then): "gelöst".
+	bothMerged := func(age float64) *dataset.Dataset {
+		return stateData(func(d *dataset.Dataset) {
+			d.PRs = []dataset.PR{merged(1, 3)}
+			d.Approvals = []dataset.Approval{
+				approval("kasse/kasse-api", 10, age, ptr(2.0)), approval("kasse/kasse-api", 11, age, ptr(2.0)),
+			}
+		})
+	}
+	resolved := SignalResolved + ":" + SignalState + ":" + StateApprovedWaiting
+	if a := assessStates(t, bothMerged(40), nil, History{}); stateSignal(a, StateApprovedWaiting) != nil ||
+		!hasSignal(a, resolved, ToneGood) {
 		t.Errorf("both merged = %v, want gelöst", sigIDs(a.Signals))
+	}
+	// A hint a week back (waiting under two sprints then): merged now, it
+	// resolves silently, no "erledigt" for a report nobody saw red.
+	if a := assessStates(t, bothMerged(32), nil, History{}); stateSignal(a, StateApprovedWaiting) != nil ||
+		slices.ContainsFunc(a.Signals, func(s Signal) bool { return s.Kind == SignalResolved }) {
+		t.Errorf("a hint merged = %v, want nothing", sigIDs(a.Signals))
 	}
 }
 
@@ -206,8 +251,8 @@ func TestEpisodeResolvedTheWeekAfter(t *testing.T) {
 }
 
 // A feature branch's run of failures ended weeks ago is no news when its
-// week leaves the view; one running a week ago and green since is
-// "gelöst".
+// week leaves the view; one running a week ago and green since was a hint
+// then: over, it resolves silently.
 func TestBranchFailingResolvedTheWeekAfter(t *testing.T) {
 	id := SignalResolved + ":" + SignalState + ":" + StateBranchFailing
 	feature := func(r *dataset.Run) {
@@ -228,17 +273,17 @@ func TestBranchFailingResolvedTheWeekAfter(t *testing.T) {
 	if a := assessBoth(t, ds, prev, nil); hasSignal(a, id, ToneGood) {
 		t.Errorf("a run over for weeks announced gelöst now: %v", sigIDs(a.Signals))
 	}
-	// Failing a week ago, green since.
+	// Failing a week ago, green since: its dated card, no "gelöst".
 	ds = stateData(func(d *dataset.Dataset) {
 		d.Runs = append(streak(11), mainRun(20, false, 4, feature))
 	})
-	if a := assessStates(t, ds, nil, History{}); !hasSignal(a, id, ToneGood) {
-		t.Errorf("a run over since this week = %v, want gelöst", sigIDs(a.Signals))
+	if a := assessStates(t, ds, nil, History{}); stateSignal(a, StateBranchFailing) == nil || hasSignal(a, id, ToneGood) {
+		t.Errorf("a run over since this week = %v, want its card, no gelöst", sigIDs(a.Signals))
 	}
 }
 
 // A bot's loop is an episode alike: over for weeks, no news when it leaves
-// the view; looping a week ago and green since, "gelöst".
+// the view; looping a week ago and green since, a hint then, silent.
 func TestBotLoopResolvedTheWeekAfter(t *testing.T) {
 	id := SignalResolved + ":" + SignalState + ":" + StateBotLoop
 	at := func(days float64) func(*dataset.Run) {
@@ -266,8 +311,8 @@ func TestBotLoopResolvedTheWeekAfter(t *testing.T) {
 	ds = stateData(func(d *dataset.Dataset) {
 		d.Runs = append(loop(10), botRun(30, false, at(4)))
 	})
-	if a := assessStates(t, ds, nil, History{}); !hasSignal(a, id, ToneGood) {
-		t.Errorf("a loop over since this week = %v, want gelöst", sigIDs(a.Signals))
+	if a := assessStates(t, ds, nil, History{}); stateSignal(a, StateBotLoop) == nil || hasSignal(a, id, ToneGood) {
+		t.Errorf("a loop over since this week = %v, want its card, no gelöst", sigIDs(a.Signals))
 	}
 }
 

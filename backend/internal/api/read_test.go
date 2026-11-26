@@ -420,7 +420,7 @@ func TestStateCardsMatchOpenAPISpec(t *testing.T) {
 	pause := card(metrics.StateMergePause, metrics.UnitProject,
 		&metrics.StateThreshold{Key: "merge_pause_share", Value: 0.2, Unit: metrics.ThresholdShare,
 			MinKey: ptrTo("merge_pause_waiting"), Min: ptrTo(3)},
-		unit("kasse", func(u *metrics.StateUnit) { u.Week, u.Typical, u.Held = &week, ptrTo(7.5), true }))
+		unit("kasse", func(u *metrics.StateUnit) { u.Week, u.Typical, u.Held, u.Lost = &week, ptrTo(6.5), true, true }))
 	// A lasting state red for the unit that held it two sprints, with a span.
 	branches := card(metrics.StateBranchOpen, metrics.UnitRepo,
 		&metrics.StateThreshold{Key: "branch_open_days", Value: 14, Unit: metrics.ThresholdDays,
@@ -449,7 +449,7 @@ func TestStateCardsMatchOpenAPISpec(t *testing.T) {
 	expectStatus(t, w, http.StatusOK)
 	validateResponse(t, specRouter(t), http.MethodGet, "/api/analysis", w)
 	for _, want := range []string{`"key":"no_release"`, `"threshold":null`, `"within":5`, `"within_unit":"working_days"`,
-		`"two_sprints":true`, `"was":"approved_waiting"`, `"reason":"in_silence"`} {
+		`"two_sprints":true`, `"lost":true`, `"was":"approved_waiting"`, `"reason":"in_silence"`} {
 		if !strings.Contains(w.Body.String(), want) {
 			t.Errorf("no %s in %s", want, w.Body)
 		}

@@ -176,7 +176,9 @@ const minBaselineWeeks = 3
 // merge), nor one on a PR untouched for OpenInactiveDays by then (given up
 // long ago), nor one whose merge may lie in a lost silence since it. A lost
 // Bitbucket silence takes its working time out of the week (its merges are
-// not there, nor can the typical week expect them); a baseline week it
+// not there, nor can the typical week expect them): the unit's Typical is
+// what is left, Lost says so, and a week left expecting fewer than
+// MergePauseMinTypical is not judged; a baseline week it
 // covers by more than a fifth, or one before the look-back, is no baseline.
 // Read as of the week's end: a closed week reads the same whenever it is
 // read. The latest pause of a project is its unit, an episode; one in the
@@ -196,10 +198,11 @@ func (a *assessor) mergePauseState(at stateAt) []stateEval {
 		waits[ap.Project] = append(waits[ap.Project], ap)
 	}
 	// covered is the share of the week's working time Bitbucket reported
-	// and the look-back holds.
-	covered := func(start, end time.Time) float64 {
+	// and the look-back holds, and whether a lost silence took working time
+	// out of it.
+	covered := func(start, end time.Time) (float64, bool) {
 		if bb == nil || !bb.Before(end) || start.Before(a.states.from) {
-			return 0
+			return 0, false
 		}
 		from := start
 		if bb.After(from) {
@@ -207,9 +210,9 @@ func (a *assessor) mergePauseState(at stateAt) []stateEval {
 		}
 		all := workingDays(start, end, loc)
 		if all <= 0 {
-			return 0
+			return 0, false
 		}
-		in := workingDays(from, end, loc)
+		in, gap := workingDays(from, end, loc), 0.0
 		for _, s := range lost {
 			f, t := s.From, s.To
 			if f.Before(from) {
@@ -218,9 +221,9 @@ func (a *assessor) mergePauseState(at stateAt) []stateEval {
 			if t.After(end) {
 				t = end
 			}
-			in -= workingDays(f, t, loc)
+			gap += workingDays(f, t, loc)
 		}
-		return max(in, 0) / all
+		return max(in-gap, 0) / all, gap > 0
 	}
 	count := func(ts []time.Time, start, end time.Time) int {
 		n := 0
@@ -256,11 +259,11 @@ func (a *assessor) mergePauseState(at stateAt) []stateEval {
 			var base []float64
 			for k := 1; k <= th.MergePauseWeeks; k++ {
 				bs, be := start.AddDate(0, 0, -7*k), start.AddDate(0, 0, -7*(k-1))
-				if covered(bs, be) >= 0.8 {
+				if c, _ := covered(bs, be); c >= 0.8 {
 					base = append(base, float64(count(merges[p], bs, be)))
 				}
 			}
-			f := covered(start, end)
+			f, gap := covered(start, end)
 			if len(base) < minBaselineWeeks || f < 0.2 {
 				unjudged = true
 				if i == last {
@@ -276,11 +279,22 @@ func (a *assessor) mergePauseState(at stateAt) []stateEval {
 				}
 				continue
 			}
+			// What the week could hold of its typical merges outside a lost
+			// silence: too little left to expect, and merges riptide never
+			// heard of could make the pause, so the week is not judged.
+			expect := typical * f
+			if expect < th.MergePauseMinTypical {
+				unjudged = true
+				if i == last {
+					u.after = afterUnknown
+				}
+				continue
+			}
 			if u.status == unitIdle {
 				u.status = unitClear
 			}
 			n := count(merges[p], start, end)
-			if float64(n) > th.MergePauseShare*typical*f {
+			if float64(n) > th.MergePauseShare*expect {
 				continue
 			}
 			var held []string
@@ -303,8 +317,8 @@ func (a *assessor) mergePauseState(at stateAt) []stateEval {
 			}
 			slices.Sort(held)
 			week := w
-			u.status, u.Value, u.Count, u.Typical = unitFires, float64(waiting), ptr(n), ptr(typical)
-			u.Since, u.Week, u.Names = ptr(w.Start), &week, held
+			u.status, u.Value, u.Count, u.Typical = unitFires, float64(waiting), ptr(n), ptr(round1(expect))
+			u.Since, u.Week, u.Names, u.Lost = ptr(w.Start), &week, held, gap
 			u.ongoing = i == last
 			if i == last {
 				e.tier = tierNow

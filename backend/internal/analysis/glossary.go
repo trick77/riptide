@@ -64,7 +64,7 @@ var kinds = map[string]kindGloss{
 		[]string{LeverPlatformAgents},
 	},
 	metrics.SignalResolved: {
-		"A problem an earlier assessment of this window raised is back at or better than its value before it was raised (a jam: clearly below four long-open PRs; a state: judged clear again, or its dated episode over, a merge pause or a run of failed builds, which its card may still show with its date). metric names the signal it was. No step: say what is back, do not recommend.",
+		"A problem an earlier assessment of this window raised is back at or better than its value before it was raised (a jam: clearly below four long-open PRs; a state: red a week before, judged clear again, or its dated episode over, a merge pause or a run of failed builds, which its card may still show with its date). metric names the signal it was. No step: say what is back, do not recommend.",
 		nil,
 	},
 	metrics.SignalState: {
@@ -106,7 +106,7 @@ var states = map[string]StateGloss{
 		"Releases nach {{prod}} ohne Projekt", "Releases to {{prod}} without a project"},
 	metrics.StateNoProdStage: {"Argo CD reports deploys, but none to the production stage: the stage configuration or the notification is off.",
 		"Argo CD meldet nichts nach {{prod}}", "Argo CD reports nothing to {{prod}}"},
-	metrics.StateUnmeasurable: {"A state (state.was) the assessment a week before raised can no longer be judged for units it named: the data no longer tells. It has no numbers to word. Never call it solved, never a problem of the team.",
+	metrics.StateUnmeasurable: {"A state (state.was) that held a week before can no longer be judged for units it named then: the data no longer tells. It has no numbers to word. Never call it solved, never a problem of the team.",
 		"Nicht mehr messbar", "No longer measurable"},
 	metrics.StateDeployFailing: {"An App's last deploy to production failed and none succeeded since, for longer than the threshold.",
 		"Letztes Deploy nach {{prod}} fehlgeschlagen", "Last deploy to {{prod}} failed"},

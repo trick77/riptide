@@ -430,6 +430,43 @@ func TestMergePause(t *testing.T) {
 	}
 }
 
+// A lost Bitbucket silence takes its working time out of the week and its
+// expectation: the unit states the typical week scaled to what is left and
+// says so (Lost); too little left to expect, the week is not judged.
+func TestMergePauseLostSilence(t *testing.T) {
+	week := func(lostTo float64) *dataset.Dataset {
+		ds := pauseData(0)
+		// Approved Friday noon, after the silence; merged after the end.
+		for i := range 3 {
+			ds.Approvals = append(ds.Approvals, approval("kasse/kasse-api", int64(400+i), 2.5, ptr(-4.0)))
+		}
+		ds.Meta.Silences = []dataset.Silence{{Source: dataset.SourceBitbucket, From: endAgo(7), To: endAgo(lostTo),
+			Lost: true, UnseenRuns: 2}}
+		return ds
+	}
+	// Monday and Tuesday lost: three of five working days left, typically
+	// 8 × 3/5.
+	x := stateSignal(assessStates(t, week(5), nil, History{}), StateMergePause)
+	if x == nil {
+		t.Fatal("no pause after a two-day silence")
+	}
+	if u := x.State.Units[0]; !u.Lost || u.Typical == nil || *u.Typical != 4.8 || *u.Count != 0 || u.Value != 3 {
+		t.Errorf("pause = %+v typical %v, want 0 merges of typically 4.8 (scaled), lost, 3 waiting", u, u.Typical)
+	}
+	// Without a silence: the unscaled typical week, nothing lost.
+	ds := week(5)
+	ds.Meta.Silences = nil
+	if x := stateSignal(assessStates(t, ds, nil, History{}), StateMergePause); x == nil || x.State.Units[0].Lost ||
+		*x.State.Units[0].Typical != 8 {
+		t.Errorf("pause without a silence = %+v, want typically 8, nothing lost", x)
+	}
+	// Monday to Thursday lost: 8 × 1/5 left, under merge_pause_min_typical:
+	// merges riptide never heard of could make the pause. Not judged.
+	if x := stateSignal(assessStates(t, week(3), nil, History{}), StateMergePause); x != nil {
+		t.Errorf("a week mostly lost judged a pause: %+v", x.State.Units)
+	}
+}
+
 // A merge pause reads the week as of its end, whenever it is read: PRs
 // approved Friday afternoon and merged Monday were open and approved at the
 // week's end, however short their wait; merged on Sunday, they were not.
@@ -608,8 +645,9 @@ func TestStateHysteresisAndResolution(t *testing.T) {
 }
 
 // A held unit stays held while its number stays in the band, week after
-// week, and is "gelöst" once it drops below it: fired two weeks back (#1 at
-// 16 days), in the band a week back (#2 at 13) and now (#3 at 12).
+// week: fired two weeks back (#1 at 16 days), in the band a week back (#2
+// at 13) and now (#3 at 12). Only held a week back, the card was a hint
+// then: below the band now, it resolves silently.
 func TestStateHeldAcrossWeeks(t *testing.T) {
 	id := SignalState + ":" + StateNotOnProd
 	ds := stateData(func(d *dataset.Dataset) {
@@ -620,11 +658,65 @@ func TestStateHeldAcrossWeeks(t *testing.T) {
 	if x == nil || !x.State.Units[0].Held || x.State.Units[0].Value != 12 {
 		t.Errorf("card = %+v, want kasse-api still held at 12 days", x)
 	}
-	// Below the band now: "gelöst", not silently gone.
 	ds.PRs[2] = merged(3, 8)
 	a := assessStates(t, ds, nil, History{})
-	if stateSignal(a, StateNotOnProd) != nil || !hasSignal(a, SignalResolved+":"+id, ToneGood) {
-		t.Errorf("signals %v, want the held state resolved", sigIDs(a.Signals))
+	if stateSignal(a, StateNotOnProd) != nil || hasSignal(a, SignalResolved+":"+id, ToneGood) {
+		t.Errorf("signals %v, want neither the card nor gelöst", sigIDs(a.Signals))
+	}
+}
+
+// A card on which no unit is past the threshold, every unit only held
+// within the hysteresis, breaks no agreement now: a hint whatever the
+// state's tone, never red, and it takes no red team number's worsening
+// onto it. One unit past the threshold beside it keeps the card red.
+func TestHeldOnlyCardIsAHint(t *testing.T) {
+	// A week before, #1 had lain 18 days (fired); it shipped 2 days ago.
+	// Now the oldest, #2, has lain 12 days: under 14, above 80 % of it.
+	ds := stateData(func(d *dataset.Dataset) {
+		d.Releases = []dataset.AppRelease{release("kasse-prod", 2, false)}
+		d.PRs = []dataset.PR{merged(1, 25, shippedOn(2)), merged(2, 12)}
+	})
+	a := assessStates(t, ds, nil, History{})
+	x := stateSignal(a, StateNotOnProd)
+	if x == nil || x.Tone != ToneHint || !x.State.Units[0].Held {
+		t.Fatalf("held only = %+v, want a hint", x)
+	}
+	if slices.ContainsFunc(a.Signals, func(s Signal) bool { return s.Tone == ToneAttention }) {
+		t.Errorf("signals %v, want nothing red", sigIDs(a.Signals))
+	}
+	// A red worsening of the lead time stays a card of its own: a hint
+	// covers nothing.
+	as := &assessor{out: []Signal{*x, {ID: "change:lead_time", Kind: SignalChange, Tone: ToneAttention,
+		Metric: ptr("lead_time")}}}
+	as.foldChanges()
+	if len(as.out) != 2 {
+		t.Errorf("a held-only card folded the lead time: %v", sigIDs(as.out))
+	}
+	// Another repo past the threshold now: red, the held unit beside it.
+	ds.Traces["kasse/kasse-web"] = dataset.RepoTrace{DeployedSince: endAgoP(150)}
+	ds.PRs = append(ds.PRs, merged(3, 20, func(p *dataset.PR) { p.Repo = "kasse/kasse-web" }))
+	x = stateSignal(assessStates(t, ds, nil, History{}), StateNotOnProd)
+	if x == nil || x.Tone != ToneAttention || x.State.Count != 2 ||
+		!slices.ContainsFunc(x.State.Units, func(u StateUnit) bool { return u.Held }) {
+		t.Errorf("one past, one held = %+v, want red with both", x)
+	}
+}
+
+// A state that was only a hint a week back resolves silently: a release
+// due a week back, released since.
+func TestHintResolvesSilently(t *testing.T) {
+	ds := stateData(func(d *dataset.Dataset) {
+		d.Releases = []dataset.AppRelease{release("kasse-prod", 24, false), release("kasse-prod", 2, false)}
+		d.PRs = []dataset.PR{merged(1, 10, shippedOn(2)), merged(2, 3)}
+	})
+	a := assessStates(t, ds, nil, History{})
+	if stateSignal(a, StateReleaseDue) != nil || slices.ContainsFunc(a.Signals, func(s Signal) bool { return s.Kind == SignalResolved }) {
+		t.Errorf("signals %v, want no card and no gelöst", sigIDs(a.Signals))
+	}
+	// Past the breach a week back (red), released since: "gelöst".
+	ds.Releases[0] = release("kasse-prod", 38, false)
+	if a := assessStates(t, ds, nil, History{}); !hasSignal(a, SignalResolved+":"+SignalState+":"+StateNoRelease, ToneGood) {
+		t.Errorf("signals %v, want no_release resolved", sigIDs(a.Signals))
 	}
 }
 

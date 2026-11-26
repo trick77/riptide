@@ -1343,13 +1343,14 @@ describe("App", () => {
     expect(
       p.getByRole("heading", { name: "Nicht beurteilbar" }),
     ).toBeInTheDocument();
-    // An unknown unit kind shows no catalog key; a state resolved says its
-    // units are clear again, not that a number is back.
+    // An unknown unit kind shows no catalog key; a state resolved says it
+    // held a week ago and no longer does, not that a number is back nor
+    // that anything was reported.
     const panel = (await screen.findByTestId("assessment")).textContent ?? "";
     expect(panel).not.toMatch(/overview\.assess/);
     expect(panel).toMatch(/Ohne Freigabe gemerged: erledigt/);
     expect(panel).toMatch(
-      /Vor einer Woche hat riptide es hier festgestellt; jetzt gilt es für keine damals genannte Einheit mehr: wieder klar unter der Grenze, oder vorbei wie eine Merge-Pause/,
+      /Vor einer Woche traf das hier noch zu\. Jetzt nicht mehr: wieder klar unter der Grenze, oder vorbei wie eine Merge-Pause/,
     );
     // Hints and what cannot be judged say they are no finding.
     expect(
