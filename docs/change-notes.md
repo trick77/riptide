@@ -7,6 +7,25 @@ repository.
 Real account handles, hostnames and tokens belong in the mounted
 `riptide.json` / team-keys Secret, never in this file: the repository is public.
 
+## 2026-11-26 — lead time per PR, traced to production
+
+**Migration 0017** adds the view `repo_trunks` and redefines
+`commit_sightings` (same columns): a repo's trunk is master, main or the
+branch most of its merged PRs go into, no longer master alone. No index,
+no table change: an old pod keeps working, its per-commit lead-time read
+somewhat slower while both run.
+
+**The lead time is per PR now**, from its first commit to the first
+production deploy that shipped it, over the PRs merged in the period; the
+per-commit number and its bot line are gone. Many more PRs reach
+production: a release whose compare link starts before riptide's data, a
+repo whose trunk is main, and an image's build are traced too (see
+[dora-lead-time.md](dora-lead-time.md)).
+
+**Closed periods are frozen at their end**: a deploy after it moves no
+number of the period. Numbers of past periods change once with this
+change; stored analyses keep their wording until assessed again.
+
 ## 2026-11-25 — counting as it happened, and saying what is missing
 
 **Migrations 0012 to 0016** build five indexes, one per migration, so a

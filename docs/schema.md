@@ -2,7 +2,7 @@
 
 # Database schema
 
-5 tables, 4 views; the diagram is at the end. Go types are the `model.go` structs whose rows they hold.
+5 tables, 5 views; the diagram is at the end. Go types are the `model.go` structs whose rows they hold.
 
 ## argocd_events
 
@@ -204,6 +204,7 @@ Checks:
 - `deploy_commit_ranges` (view)
 - `lead_time_changes` (view)
 - `noergler_pr_rollups` (view)
+- `repo_trunks` (view)
 
 ## Types not stored as rows
 

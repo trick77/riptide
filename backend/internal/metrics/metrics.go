@@ -64,7 +64,10 @@ type Metrics struct {
 	Product   *string  `json:"product"`
 	Delivery  Delivery `json:"delivery"`
 	LeadChain Chain    `json:"lead_chain"`
-	Review    Review   `json:"review"`
+	// Coverage is how the period's merged PRs reached production by its
+	// end: placed, not yet, not placeable and why, per repo too.
+	Coverage Coverage `json:"coverage"`
+	Review   Review   `json:"review"`
 	// Throughput is the merged PRs per week and their size.
 	Throughput Throughput `json:"throughput"`
 	OpenPRs    OpenPRs    `json:"open_prs"`
@@ -175,13 +178,14 @@ func lostEvents(ds, prev *dataset.Dataset) bool {
 // compute is the page's sections over one period; base as build takes it.
 func compute(ds *dataset.Dataset, period Period, f filter, base *baseline) Metrics {
 	humans := mergedPRs(ds, period, f)
-	ch := chain(ds, humans)
+	ch := chain(ds, humans, period.To)
 	m := Metrics{
 		Meta:       ds.Meta,
 		Period:     period,
 		Products:   ds.Products,
-		Delivery:   delivery(ds, period, f, ch),
+		Delivery:   delivery(ds, humans, period, f, ch),
 		LeadChain:  leadChain(ch),
+		Coverage:   coverage(ds, humans, period),
 		Review:     review(humans, period, ch),
 		Throughput: throughput(ds, humans, period, f),
 		OpenPRs:    openSection(ds, f),
@@ -244,7 +248,11 @@ type DeployFrequency struct {
 	// than dataset.FirstDeployGrace after Argo CD first reported: an App
 	// going live.
 	FirstReleases int `json:"first_releases"`
-	Syncs         int `json:"syncs"`
+	// ReleasesUnresolved are the Releases tracing resolved no stretch of
+	// any repo for (dataset.Deploy.Traced): what they shipped no one can
+	// name ("n Releases ohne zuordenbare PRs").
+	ReleasesUnresolved int `json:"releases_unresolved"`
+	Syncs              int `json:"syncs"`
 	// FirstSeen are the App's first deploys within dataset.FirstDeployGrace
 	// of Argo CD's first event: release or re-sync, unknown.
 	FirstSeen int `json:"first_seen"`
@@ -410,8 +418,10 @@ func deployFrequency(ds *dataset.Dataset, p Period, f filter, env string) Deploy
 	}
 	class := map[string]int{}
 	firstAt := map[string]time.Time{}
+	traced := map[string]bool{}
 	var order []string
 	for _, d := range ok {
+		traced[d.Revision] = traced[d.Revision] || d.Traced
 		c := revisionClass(d)
 		prev, seen := class[d.Revision]
 		if !seen {
@@ -445,6 +455,9 @@ func deployFrequency(ds *dataset.Dataset, p Period, f filter, env string) Deploy
 			w.Release++
 			out.Releases++
 			out.releaseAt = append(out.releaseAt, firstAt[rev])
+			if !traced[rev] {
+				out.ReleasesUnresolved++
+			}
 			if class[rev] == classFirstRelease {
 				w.FirstRelease++
 				out.FirstReleases++
@@ -512,32 +525,45 @@ func environments(ds *dataset.Dataset, f filter) []string {
 	return out
 }
 
-// LeadTimes is the per-commit lead time to one environment.
+// LeadTimes is the lead time to one environment, per PR
+// (docs/dora-lead-time.md): the people's PRs merged in the period
+// (mergedPRs) that reached the environment by its end, each from its first
+// commit (leadStart) to its first deploy there. The unit is the PR, never
+// the commit (owner's decision, 2026-11); bots' PRs are in no number.
 type LeadTimes struct {
 	Environment string `json:"environment"`
-	Human       Spread `json:"human"`
-	Bot         Spread `json:"bot"`
-	// LowSample: fewer than 10 human commits, but some.
+	// Human is over those PRs; N is how many ("aus n PRs").
+	Human Spread `json:"human"`
+	// LowerBound are Human's PRs placed by a stretch whose start was a lower
+	// bound: they may have gone out earlier, their time reads long.
+	LowerBound int `json:"lower_bound"`
+	// LowSample: fewer than 10 PRs, but some.
 	LowSample bool `json:"low_sample"`
 }
 
-// leadTime is per commit, first deploy to the environment in the window:
-// merge commits and release tooling left out, bots on their own line
-// (docs/dora-lead-time.md). The dataset's window is the period.
-func leadTime(ds *dataset.Dataset, f filter, env string) LeadTimes {
-	var human, bot []float64
-	for _, l := range ds.LeadTimes {
-		if l.Environment != env || !f.inKey(l.Project) || l.IsMerge || l.ServiceAccount {
+// leadTime is per PR of humans (mergedPRs), first commit to the first
+// deploy to env before cutoff, the period's end; a library's PR is never
+// rolled out.
+func leadTime(humans []dataset.PR, env string, cutoff time.Time) LeadTimes {
+	var waits []float64
+	lower := 0
+	for _, pr := range humans {
+		if pr.Library {
 			continue
 		}
-		if l.Bot {
-			bot = append(bot, float64(l.LeadTimeS))
-		} else {
-			human = append(human, float64(l.LeadTimeS))
+		e := firstDeployBefore(pr, env, cutoff)
+		if e == nil {
+			continue
+		}
+		if w := wait(leadStart(pr), &e.FirstDeployedAt); w != nil {
+			waits = append(waits, *w)
+			if e.LowerBound {
+				lower++
+			}
 		}
 	}
-	h := spread(human)
-	return LeadTimes{Environment: env, Human: h, Bot: spread(bot), LowSample: h.N > 0 && h.N < lowSample}
+	h := spread(waits)
+	return LeadTimes{Environment: env, Human: h, LowerBound: lower, LowSample: h.N > 0 && h.N < lowSample}
 }
 
 // Delivery is the DORA section.
@@ -551,7 +577,7 @@ type Delivery struct {
 	LeadTimePre    *LeadTimes      `json:"lead_time_pre"`
 }
 
-func delivery(ds *dataset.Dataset, p Period, f filter, ch rawChain) Delivery {
+func delivery(ds *dataset.Dataset, humans []dataset.PR, p Period, f filter, ch rawChain) Delivery {
 	prod := ds.Meta.ProductionStage
 	pre := ch.preEnvironment
 	if pre == nil {
@@ -566,10 +592,10 @@ func delivery(ds *dataset.Dataset, p Period, f filter, ch rawChain) Delivery {
 		ProductionStage: prod,
 		PreEnvironment:  pre,
 		Frequency:       deployFrequency(ds, p, f, prod),
-		LeadTime:        leadTime(ds, f, prod),
+		LeadTime:        leadTime(humans, prod, p.To),
 	}
 	if pre != nil {
-		d.LeadTimePre = ptr(leadTime(ds, f, *pre))
+		d.LeadTimePre = ptr(leadTime(humans, *pre, p.To))
 	}
 	return d
 }
@@ -646,18 +672,30 @@ type rawChain struct {
 	approved, approvedOnFirstTouch int
 }
 
+// firstDeploy is the PR's first deploy to env, whenever: the facts' (they
+// read to now).
 func firstDeploy(pr dataset.PR, env string) *time.Time {
+	if e := firstDeployBefore(pr, env, time.Time{}); e != nil {
+		return ptr(e.FirstDeployedAt)
+	}
+	return nil
+}
+
+// firstDeployBefore is the PR's first deploy to env before cutoff (zero:
+// any time), nil without one: a closed period reads none after its end.
+func firstDeployBefore(pr dataset.PR, env string, cutoff time.Time) *dataset.EnvironmentDeploy {
 	for _, e := range pr.Environments {
-		if e.Environment == env {
-			return ptr(e.FirstDeployedAt)
+		if e.Environment == env && (cutoff.IsZero() || e.FirstDeployedAt.Before(cutoff)) {
+			return &e
 		}
 	}
 	return nil
 }
 
 // chain is the lead-time breakdown query, per human PR merged in the period
-// (humans, from mergedPRs).
-func chain(ds *dataset.Dataset, humans []dataset.PR) rawChain {
+// (humans, from mergedPRs), its deploys those before cutoff, the period's
+// end: a closed period does not move when a later deploy arrives.
+func chain(ds *dataset.Dataset, humans []dataset.PR, cutoff time.Time) rawChain {
 	prod := ds.Meta.ProductionStage
 	var prs []dataset.PR
 	for _, pr := range humans {
@@ -665,12 +703,12 @@ func chain(ds *dataset.Dataset, humans []dataset.PR) rawChain {
 			prs = append(prs, pr)
 		}
 	}
-	// The stage before production: the one the merge commits reached first
-	// most often, ties by name.
+	// The stage before production: the one the PRs reached first most
+	// often, ties by name.
 	pre := map[string]int{}
 	for _, pr := range prs {
 		for _, e := range pr.Environments {
-			if e.Environment != prod {
+			if e.Environment != prod && e.FirstDeployedAt.Before(cutoff) {
 				pre[e.Environment]++
 				break
 			}
@@ -693,11 +731,15 @@ func chain(ds *dataset.Dataset, humans []dataset.PR) rawChain {
 		add(StageCoding, pr.FirstCommitAt, pr.ReadyAt)
 		add(StageReview, pr.ReadyAt, pr.ApprovedAt)
 		add(StageMerge, pr.ApprovedAt, pr.MergedAt)
-		var preAt *time.Time
+		var preAt, prodAt *time.Time
 		if preEnv != nil {
-			preAt = firstDeploy(pr, *preEnv)
+			if e := firstDeployBefore(pr, *preEnv, cutoff); e != nil {
+				preAt = &e.FirstDeployedAt
+			}
 		}
-		prodAt := firstDeploy(pr, prod)
+		if e := firstDeployBefore(pr, prod, cutoff); e != nil {
+			prodAt = &e.FirstDeployedAt
+		}
 		// The stage before production counts only when it came before
 		// production: a hotfix deployed to production first and carried to
 		// the earlier stage by a later release went past it.
@@ -1066,9 +1108,10 @@ type Throughput struct {
 // number can read: a PR missing here is missing from that number, not a
 // PR that took no time.
 type PRCoverage struct {
-	// ToProd: its merge commit's first production deploy is known, so it
-	// is in the time to production. Of Merged less Throughput.Library: a
-	// library's PR is never rolled out, so never one not traced.
+	// ToProd: a production deploy before the period's end shipped it
+	// (Coverage.OnProd), so it is in the time to production. Of Merged
+	// less Throughput.Library (Coverage.Merged): a library's PR is never
+	// rolled out, so never one not traced.
 	ToProd Share `json:"to_prod"`
 	// Sized: noergler's rollup gives its size (prSize), so it is in the
 	// batch size.
@@ -1136,7 +1179,7 @@ func throughput(ds *dataset.Dataset, humans []dataset.PR, p Period, f filter) Th
 		switch {
 		case pr.Library:
 			out.Library++
-		case firstDeploy(pr, ds.Meta.ProductionStage) != nil:
+		case firstDeployBefore(pr, ds.Meta.ProductionStage, p.To) != nil:
 			toProd++
 		}
 		if pr.OpenedAt != nil {

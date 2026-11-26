@@ -165,6 +165,12 @@ first_commits AS (
 ),
 chain AS (
   SELECT p.*, fc.first_commit_at,
+         -- Merged into another branch than the trunk (a feature or umbrella
+         -- branch). Merged work all the same: it was reviewed and merged. A
+         -- target the payload does not name counts as the trunk.
+         p.target_branch IS NOT NULL AND p.target_branch NOT IN ('master', 'main')
+           AND NOT EXISTS (SELECT 1 FROM trunks t
+                            WHERE t.repo_full_name = p.repo_full_name AND t.trunk = p.target_branch) AS off_trunk,
          -- Reviewer touches after the clock start, the opener, bots and
          -- declared non-humans excluded (docs/metrics.md, pickup-time query), oldest
          -- first. Go drops the authors riptide's automation detection
@@ -236,12 +242,18 @@ SELECT c.repo_full_name AS repo,
        r.files_changed,
        c.target_branch,
        coalesce(c.source_ref, '') AS source_ref,
-       -- Merged into another branch than the trunk (a feature or umbrella
-       -- branch). Merged work all the same: it was reviewed and merged. A
-       -- target the payload does not name counts as the trunk.
-       c.target_branch IS NOT NULL AND c.target_branch NOT IN ('master', 'main')
-         AND NOT EXISTS (SELECT 1 FROM trunks t
-                          WHERE t.repo_full_name = c.repo_full_name AND t.trunk = c.target_branch) AS off_trunk,
+       c.off_trunk,
+       -- When its work reached the trunk, and which trunk branch (NULL: the
+       -- payload names none), what Go places it on production by
+       -- (dataset.trace): a PR into the trunk by its merge commit's first
+       -- push (Bitbucket's merge pushes it in the same second; its merge when
+       -- that push was not seen); a PR into another branch by the first PR
+       -- merged from that branch into a trunk at or after it (its umbrella),
+       -- by that one's merge commit alike, one level deep. NULL without a
+       -- merge commit: Go places a PR an umbrella's merge marked merged by
+       -- the umbrella's.
+       u.trunk_at,
+       u.trunk_branch,
        -- The openers of the other merged PRs of the repo into this one's
        -- source branch: Go makes it an umbrella when one is a person's. It
        -- carries their work, which they count; it is none of its own.
@@ -273,6 +285,32 @@ SELECT c.repo_full_name AS repo,
                  = lower(regexp_replace(btrim(c.opened_title), '\s+', ' ', 'g')))
        ELSE '[]'::jsonb END AS siblings
 FROM chain c
+LEFT JOIN LATERAL (
+  SELECT coalesce((SELECT min(e.occurred_at)
+                     FROM bitbucket_events e
+                    WHERE e.commit_sha = lower(c.merge_commit) AND e.repo_full_name = c.repo_full_name
+                      AND e.event_type = 'repo:refs_changed'), c.merged_at) AS trunk_at,
+         c.target_branch AS trunk_branch
+  WHERE c.merged_at IS NOT NULL AND c.merge_commit IS NOT NULL AND NOT c.off_trunk
+  UNION ALL
+  SELECT coalesce((SELECT min(e.occurred_at)
+                     FROM bitbucket_events e
+                    WHERE e.commit_sha = lower(m.merge_commit) AND e.repo_full_name = c.repo_full_name
+                      AND e.event_type = 'repo:refs_changed'), m.merged_at),
+         m.target
+  FROM (SELECT x.occurred_at AS merged_at,
+               x.payload->'pullRequest'->'properties'->'mergeCommit'->>'id' AS merge_commit,
+               lower(x.payload->'pullRequest'->'toRef'->>'displayId') AS target
+          FROM bitbucket_events x
+         -- PR events store the source branch, lowercased, as branch_name.
+         WHERE x.repo_full_name = c.repo_full_name AND x.branch_name = c.target_branch
+           AND x.event_type = 'pr:merged' AND x.pr_id <> c.pr_id AND x.occurred_at >= c.merged_at
+         ORDER BY x.occurred_at, x.id
+         LIMIT 1) m
+  WHERE c.merged_at IS NOT NULL AND c.off_trunk AND m.merge_commit IS NOT NULL
+    AND (m.target IN ('master', 'main')
+         OR EXISTS (SELECT 1 FROM trunks t WHERE t.repo_full_name = c.repo_full_name AND t.trunk = m.target))
+) u ON true
 -- pr_key is '<repo_full_name>#<pr_id>', lowercased at ingest.
 LEFT JOIN noergler_pr_rollups r
   ON r.pr_key = lower(c.repo_full_name) || '#' || c.pr_id AND r.outcome = 'merged'

@@ -234,50 +234,47 @@ func TestDataset(t *testing.T) {
 		}
 	})
 
-	t.Run("lead times", func(t *testing.T) {
-		// Keyed by environment and commit author, each author's flags
-		// sorted: dev-anna has two commits, 1 and the merge 2.
-		got := map[string][]string{}
-		for _, l := range d.LeadTimes {
-			flags := ""
-			for _, f := range []struct {
-				on   bool
-				name string
-			}{{l.IsMerge, "merge"}, {l.ServiceAccount, "service"}, {l.Bot, "bot"}} {
-				if f.on {
-					flags += f.name
-				}
-			}
-			if flags == "" {
-				flags = "-"
-			}
-			key := l.Environment + ":" + l.Author
-			got[key] = append(got[key], flags)
-			if l.Repo != kasseAPI || l.Project != "kasse" {
-				t.Errorf("lead time repo = %s %s", l.Repo, l.Project)
+	t.Run("tracing", func(t *testing.T) {
+		byID := map[int64]dataset.PR{}
+		for _, p := range d.PRs {
+			if p.Repo == kasseAPI {
+				byID[p.PRID] = p
 			}
 		}
-		want := map[string]string{}
-		for _, env := range []string{"intg", "prod"} {
-			for author, flags := range map[string]string{"dev-anna": "-,merge", "renovate-bot": "bot",
-				"deploy-bot": "bot", "ci-helper": "bot", "ci-release": "service"} {
-				want[env+":"+author] = flags
+		// Each PR reached the trunk with its merge commit's push; #7's is the
+		// tip of a push listing four other commits. The seed's PR events
+		// name no target branch: any trunk branch.
+		if p := byID[7]; !eqTime(p.TrunkAt, ts(days(1).Add(5*time.Hour))) || p.TrunkBranch != nil {
+			t.Errorf("pr 7 trunk = %v %s", p.TrunkAt, str(p.TrunkBranch))
+		}
+		if p := byID[5]; !eqTime(p.TrunkAt, ts(days(2).Add(time.Hour))) {
+			t.Errorf("pr 5 trunk = %v", p.TrunkAt)
+		}
+		// The release commit's compare link, both ends on the trunk: exact.
+		for _, e := range byID[7].Environments {
+			if e.Route != dataset.RouteCompare || e.LowerBound {
+				t.Errorf("pr 7 %s = %+v", e.Environment, e)
 			}
 		}
-		if len(got) != len(want) {
-			t.Fatalf("lead times = %v", got)
+		// kasse-api's images go to kasse-prod from its first deploy on; the
+		// release that went out after #5 carried nothing of its.
+		rt, ok := d.Traces[kasseAPI]
+		if !ok || !eqTime(rt.DeployedSince, ts(days(-10))) {
+			t.Fatalf("kasse-api trace = %+v", rt)
 		}
-		for k, v := range want {
-			slices.Sort(got[k])
-			if g := strings.Join(got[k], ","); g != v {
-				t.Errorf("%s = %q, want %q", k, g, v)
-			}
+		var rels []string
+		for _, r := range rt.Releases {
+			rels = append(rels, r.Environment+"@"+r.At.Sub(t0).String())
 		}
-		for _, l := range d.LeadTimes {
-			if l.Environment == "prod" && l.Author == "dev-anna" && !l.IsMerge &&
-				l.LeadTimeS != int64((days(3).Sub(hours(19))).Seconds()) {
-				t.Errorf("lead time = %+v", l)
-			}
+		if strings.Join(rels, " ") != "prod@-240h0m0s intg@48h0m0s prod@72h0m0s" {
+			t.Errorf("releases = %v", rels)
+		}
+		traced := map[string]bool{}
+		for _, dep := range d.Deploys {
+			traced[dep.App+"@"+dep.At.Sub(t0).String()] = dep.Traced
+		}
+		if !traced["kasse-intg@48h0m0s"] || !traced["kasse-prod@72h0m0s"] || traced["portal-prod@144h0m0s"] {
+			t.Errorf("traced = %v", traced)
 		}
 	})
 
@@ -395,14 +392,6 @@ func TestDatasetWindow(t *testing.T) {
 	if len(d.PRs) != 0 || len(d.Runs) != 1 || len(d.Reviews) != 0 {
 		t.Errorf("prs %d, runs %d, reviews %d", len(d.PRs), len(d.Runs), len(d.Reviews))
 	}
-	for _, l := range d.LeadTimes {
-		if l.Environment != "prod" {
-			t.Errorf("lead time outside the window: %+v", l)
-		}
-	}
-	if len(d.LeadTimes) != 6 {
-		t.Errorf("lead times = %d", len(d.LeadTimes))
-	}
 	// A past window's source ends at its latest event before the window's
 	// end, the deploy at exactly day 4 aside, so a closed period can tell a
 	// source that went quiet within it; its start stays all history.
@@ -411,7 +400,7 @@ func TestDatasetWindow(t *testing.T) {
 	}
 	// Nothing at all: every section is an empty list, never null.
 	empty := load(t, st, days(100), days(101))
-	if empty.PRs == nil || empty.Deploys == nil || empty.LeadTimes == nil || empty.Runs == nil ||
+	if empty.PRs == nil || empty.Deploys == nil || empty.Traces == nil || empty.Runs == nil ||
 		empty.Reviews == nil || empty.Products == nil {
 		t.Errorf("empty dataset has nil sections: %+v", empty)
 	}
@@ -426,9 +415,14 @@ func TestDatasetTeamIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(d.PRs) != 1 || d.PRs[0].Repo != ledger || len(d.Deploys) != 1 || d.Deploys[0].App != "ledger-prod" ||
-		len(d.Runs) != 1 || len(d.Reviews) != 1 || len(d.LeadTimes) != 0 {
-		t.Errorf("other team = %d prs, %d deploys, %d runs, %d reviews, %d lead times",
-			len(d.PRs), len(d.Deploys), len(d.Runs), len(d.Reviews), len(d.LeadTimes))
+		len(d.Runs) != 1 || len(d.Reviews) != 1 {
+		t.Errorf("other team = %d prs, %d deploys, %d runs, %d reviews",
+			len(d.PRs), len(d.Deploys), len(d.Runs), len(d.Reviews))
+	}
+	// checkout's release, whose compare link names kasse-api, places none
+	// of the other team's: the ledger PR has no deploy.
+	if len(d.PRs[0].Environments) != 0 || len(d.Traces) != 0 {
+		t.Errorf("other team placed = %+v, traces %+v", d.PRs[0].Environments, d.Traces)
 	}
 	// Its pipelines never sent a build_type: not collected, unlike checkout's.
 	if d.Meta.BuildDataFrom == nil || d.Meta.BuildTypeFrom != nil {
@@ -491,7 +485,8 @@ func TestDatasetFirstCommitOnAReusedBranch(t *testing.T) {
 }
 
 // A PR merged in the window keeps the stages it reached after the window's
-// end: environments have no upper bound, the lead_times section has.
+// end: environments have no upper bound in the dataset; metrics read them
+// up to the period's end (a closed period does not move).
 func TestDatasetEnvironmentsAfterTheWindow(t *testing.T) {
 	st, pool := migrated(t)
 	seed(t, pool)
@@ -509,9 +504,6 @@ func TestDatasetEnvironmentsAfterTheWindow(t *testing.T) {
 	if e := p7.Environments; len(e) != 2 || e[0].Environment != "intg" || !e[0].FirstDeployedAt.Equal(days(2)) ||
 		e[1].Environment != "prod" || !e[1].FirstDeployedAt.Equal(days(3)) {
 		t.Errorf("environments = %v", p7.Environments)
-	}
-	if len(d.LeadTimes) != 0 {
-		t.Errorf("lead times past the window: %d", len(d.LeadTimes))
 	}
 }
 
@@ -720,7 +712,8 @@ func TestDatasetDeployWithoutImages(t *testing.T) {
 	}
 }
 
-// The facts tables' read skips the lead times and the reviews, nothing else.
+// The facts tables' read skips the reviews, nothing else: its PRs are
+// placed as the page's are.
 func TestDatasetFactsOnly(t *testing.T) {
 	st, pool := migrated(t)
 	seed(t, pool)
@@ -732,14 +725,19 @@ func TestDatasetFactsOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(full.LeadTimes) == 0 || len(full.Reviews) == 0 {
-		t.Fatalf("seed has no lead times or reviews: %d/%d", len(full.LeadTimes), len(full.Reviews))
+	if len(full.Reviews) == 0 {
+		t.Fatalf("seed has no reviews: %d", len(full.Reviews))
 	}
-	if d.LeadTimes == nil || len(d.LeadTimes) != 0 || d.Reviews == nil || len(d.Reviews) != 0 {
-		t.Errorf("facts only read lead times %d, reviews %d", len(d.LeadTimes), len(d.Reviews))
+	if d.Reviews == nil || len(d.Reviews) != 0 {
+		t.Errorf("facts only read reviews %d", len(d.Reviews))
 	}
 	if len(d.PRs) != len(full.PRs) || len(d.Deploys) != len(full.Deploys) || len(d.Runs) != len(full.Runs) {
 		t.Errorf("facts only lost rows: %d/%d/%d", len(d.PRs), len(d.Deploys), len(d.Runs))
+	}
+	for i, pr := range d.PRs {
+		if len(pr.Environments) != len(full.PRs[i].Environments) {
+			t.Errorf("facts only placed #%d %v, the page %v", pr.PRID, pr.Environments, full.PRs[i].Environments)
+		}
 	}
 }
 
@@ -804,8 +802,6 @@ func TestDatasetExcludedProject(t *testing.T) {
 			projectsOf(d.Deploys, func(x dataset.Deploy) *string { return x.Project })},
 		{"runs", projectsOf(full.Runs, func(x dataset.Run) *string { return x.Project }),
 			projectsOf(d.Runs, func(x dataset.Run) *string { return x.Project })},
-		{"lead times", projectsOf(full.LeadTimes, func(x dataset.LeadTime) *string { return &x.Project }),
-			projectsOf(d.LeadTimes, func(x dataset.LeadTime) *string { return &x.Project })},
 		{"reviews", projectsOf(full.Reviews, func(x dataset.Review) *string { return x.Project }),
 			projectsOf(d.Reviews, func(x dataset.Review) *string { return x.Project })},
 	} {

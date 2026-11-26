@@ -129,11 +129,12 @@ describe("catalogs", () => {
   });
 
   // A Denglish participle ends in -ed, never -t: gemerged, as in
-  // ../noergler (user, 2026-11-15). Its inflected forms read worse still,
-  // so a sentence is rephrased rather than "gemergte".
+  // ../noergler (user, 2026-11-15). The adjective before a noun is the
+  // page's word for the PR counts: "gemergte PRs" (owner's decision,
+  // 2026-11).
   it("write gemerged, never gemergt", () => {
     for (const [k, v] of Object.entries(deLeaves)) {
-      expect([k, /gemergt/i.exec(v)?.[0] ?? null]).toEqual([k, null]);
+      expect([k, /gemergt\b/i.exec(v)?.[0] ?? null]).toEqual([k, null]);
     }
   });
 });

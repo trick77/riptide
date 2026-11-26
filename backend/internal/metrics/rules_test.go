@@ -85,11 +85,12 @@ func TestQuietReasons(t *testing.T) {
 		{"quiet", noop, noop, []string{}},
 		{"a forgotten PR", forgotten, noop, []string{}},
 		{"a team without noergler", noNoergler, noNoergler, []string{}},
-		// Every number compared here is Bitbucket's: with its events lost,
-		// none is, and nothing else was.
-		{"bitbucket lost events now", silence(dataset.SourceBitbucket, 3, mid), noop, []string{QuietNoBaseline, QuietSourceGap}},
+		// With Bitbucket's events lost, none of its numbers is compared; the
+		// lead time, per PR on production, still is: a PR whose merge was
+		// lost is missing from it, the others' times are right.
+		{"bitbucket lost events now", silence(dataset.SourceBitbucket, 3, mid), noop, []string{QuietSourceGap}},
 		{"bitbucket lost events before", noop, silence(dataset.SourceBitbucket, 3, prev.From.Add(5*24*time.Hour)),
-			[]string{QuietNoBaseline, QuietSourceGap}},
+			[]string{QuietSourceGap}},
 		{"bitbucket silent, nothing unseen", silence(dataset.SourceBitbucket, 0, mid), noop, []string{}},
 		{"noergler silent mid-period", silence(dataset.SourceNoergler, 0, mid), noop, []string{}},
 		{"argocd silent mid-period", silence(dataset.SourceArgoCD, 0, mid), noop, []string{}},

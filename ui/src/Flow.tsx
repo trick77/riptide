@@ -208,6 +208,8 @@ function Chain({ m }: { m: Metrics }) {
               traced: m.throughput.coverage.to_prod.count,
               count: m.throughput.coverage.to_prod.n,
             })}
+          {m.coverage.not_yet > 0 &&
+            " " + t("flow.notYet", { count: m.coverage.not_yet, prod })}
           {m.throughput.coverage.to_prod.n > 0 &&
             m.throughput.library > 0 &&
             " "}

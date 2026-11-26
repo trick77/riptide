@@ -56,7 +56,7 @@ func each(load func(context.Context, string, metrics.Period) (*dataset.Dataset, 
 func jammed(_ context.Context, team string, p metrics.Period) (*dataset.Dataset, error) {
 	ds := &dataset.Dataset{
 		Meta: dataset.Meta{Team: team, From: p.From, To: p.To, GeneratedAt: p.To, ProductionStage: "prod"},
-		PRs:  []dataset.PR{}, Deploys: []dataset.Deploy{}, LeadTimes: []dataset.LeadTime{}, Runs: []dataset.Run{},
+		PRs:  []dataset.PR{}, Deploys: []dataset.Deploy{}, Runs: []dataset.Run{},
 		Reviews:  []dataset.Review{},
 		Products: []dataset.Product{{Key: "kasse", Repos: []string{"kasse/kasse-api"}, Apps: []string{}}},
 	}

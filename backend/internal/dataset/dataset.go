@@ -1,6 +1,7 @@
 // Package dataset reads the per-team facts package metrics computes every
-// number from: one row per PR, deploy, shipped commit, CI run and noergler
-// review in a window, never an aggregate. The rules are docs/metrics.md's
+// number from: one row per PR, deploy, CI run and noergler review in a
+// window, each PR placed on the deploys that shipped it (trace.go), never an
+// aggregate. The rules are docs/metrics.md's
 // queries, one embedded .sql file per section; product, GitOps and bot
 // derivations come from the data, never from name lists. HTTP, parameters
 // and config belong to package api.
@@ -37,7 +38,6 @@ var (
 	metaSQL       = query("meta.sql")
 	prsSQL        = query("prs.sql")
 	deploysSQL    = query("deploys.sql")
-	changesSQL    = query("changes.sql")
 	runsSQL       = query("runs.sql")
 	reviewsSQL    = query("reviews.sql")
 	openPRsSQL    = query("open_prs.sql")
@@ -47,6 +47,11 @@ var (
 	repoStartsSQL = query("repo_starts.sql")
 	appsSQL       = query("apps.sql")
 	librariesSQL  = query("libraries.sql")
+
+	traceDeploysSQL   = query("trace_deploys.sql")
+	traceReleasesSQL  = query("trace_releases.sql")
+	traceRunsSQL      = query("trace_runs.sql")
+	tracePositionsSQL = query("trace_positions.sql")
 )
 
 const (
@@ -163,13 +168,13 @@ type Params struct {
 	BotBranch func(branch string) bool
 	// Now stamps meta.generated_at.
 	Now time.Time
-	// FactsOnly skips the lead times and the reviews: the facts tables read
-	// none, and a search reads the dataset again on every pause. Products
-	// then miss what only those two show.
+	// FactsOnly skips the reviews: the facts tables read none, and a
+	// search reads the dataset again on every pause. Products then miss
+	// what only those show.
 	FactsOnly bool
-	// CountsOnly skips the PRs' environments and the library repos
-	// (PR.Environments empty, PR.Library false): the running week's read
-	// counts its merged PRs, releases and runs, nothing traced.
+	// CountsOnly skips the tracing and the library repos (PR.Environments
+	// empty, PR.Library false, no Traces): the running week's read counts
+	// its merged PRs, releases and runs, nothing traced.
 	CountsOnly bool
 	// Shared are the reads every window of one page shares (LoadShared),
 	// read once for all of them; nil reads them for this window alone.
@@ -183,13 +188,16 @@ type Params struct {
 
 // Dataset is one team's facts for a window.
 type Dataset struct {
-	Meta      Meta       `json:"meta"`
-	Products  []Product  `json:"products"`
-	PRs       []PR       `json:"prs"`
-	Deploys   []Deploy   `json:"deploys"`
-	LeadTimes []LeadTime `json:"lead_times"`
-	Runs      []Run      `json:"runs"`
-	Reviews   []Review   `json:"reviews"`
+	Meta     Meta      `json:"meta"`
+	Products []Product `json:"products"`
+	PRs      []PR      `json:"prs"`
+	Deploys  []Deploy  `json:"deploys"`
+	Runs     []Run     `json:"runs"`
+	Reviews  []Review  `json:"reviews"`
+	// Traces are tracing's knowledge of each repo the window's PRs are in
+	// (RepoTrace): whether an App deploys it, and its Apps' releases. What
+	// tells a PR not on production yet from one tracing cannot place.
+	Traces map[string]RepoTrace `json:"-"`
 	// OpenPRs are the PRs open at the window's end, whenever opened.
 	OpenPRs []OpenPR `json:"open_prs"`
 	// GitOpsRepos are every GitOps repo (sql/gitops.sql), not the window's
@@ -331,10 +339,18 @@ type PR struct {
 	MergedAt             *time.Time `json:"merged_at" db:"merged_at"`
 	FirstCommitAt        *time.Time `json:"first_commit_at" db:"first_commit_at"`
 	MergeCommit          *string    `json:"merge_commit" db:"merge_commit"`
-	// Environments is the merge commit's first deploy per environment, from
-	// lead_time_changes, earliest first, with no window end. A list, not
-	// intg/prod fields: the stages are whatever namespaces the team deploys
-	// to, and only production_stage is configured.
+	// TrunkAt is when its work reached the trunk (sql/prs.sql): its merge
+	// commit's first push, its umbrella's, or, merged when an umbrella's
+	// merge brought it in (ImplicitMerge), the umbrella's; nil when nothing
+	// tells (no merge commit, or merged into a branch no PR went on from).
+	// TrunkBranch is the trunk branch, nil when the payload names none.
+	TrunkAt     *time.Time `json:"trunk_at" db:"trunk_at"`
+	TrunkBranch *string    `json:"trunk_branch" db:"trunk_branch"`
+	// Environments are its first deploy per environment whose stretch holds
+	// TrunkAt (trace.go), earliest first, with no window end: a closed
+	// period reads only those before its end. A list, not intg/prod fields:
+	// the stages are whatever namespaces the team deploys to, and only
+	// production_stage is configured.
 	Environments []EnvironmentDeploy `json:"environments" db:"-"`
 	// LinesAdded, LinesRemoved and FilesChanged are the merged PR's size as
 	// noergler's final rollup counts it; nil without one.
@@ -457,15 +473,22 @@ type touch struct {
 	DisplayName string    `json:"display_name"`
 }
 
-// EnvironmentDeploy is a commit's first deploy to one environment.
+// EnvironmentDeploy is a PR's first deploy to one environment: the route
+// its stretch was found by (RouteCompare, RouteImage), and whether that
+// stretch's start was a lower bound (Stretch.LowerBound: the PR may have
+// gone out earlier, with a deploy tracing could not resolve).
 type EnvironmentDeploy struct {
 	Environment     string    `json:"environment"`
 	FirstDeployedAt time.Time `json:"first_deployed_at"`
+	Route           string    `json:"route"`
+	LowerBound      bool      `json:"lower_bound"`
 }
 
 // Deploy is one finished Argo CD sync. Kind is nil on a failed sync
 // (Phase Failed or Error).
 type Deploy struct {
+	// ID is the Argo CD event's: what tracing's stretches name.
+	ID          int64   `json:"-" db:"id"`
 	App         string  `json:"app" db:"app"`
 	Project     *string `json:"project" db:"project"`
 	Environment *string `json:"environment" db:"environment"`
@@ -489,21 +512,9 @@ type Deploy struct {
 	// no product of the team's. In no judged number (owner's decision,
 	// 2026-11). Project, where the revision names none, is the App's.
 	Infra bool `json:"infra" db:"-"`
-}
-
-// LeadTime is one commit's first deploy to one environment.
-type LeadTime struct {
-	Repo           string `json:"repo" db:"repo"`
-	Project        string `json:"project" db:"project"`
-	Environment    string `json:"environment" db:"environment"`
-	LeadTimeS      int64  `json:"lead_time_s" db:"lead_time_s"`
-	IsMerge        bool   `json:"is_merge" db:"is_merge"`
-	ServiceAccount bool   `json:"service_account" db:"service_account"`
-	Bot            bool   `json:"bot" db:"-"`
-	// Read for the bot flag, never sent: no author names leave the API.
-	DeclaredBot       bool   `json:"-" db:"declared_bot"`
-	Author            string `json:"-" db:"author"`
-	AuthorDisplayName string `json:"-" db:"author_display_name"`
+	// Traced: tracing resolved a stretch of some repo for it (trace.go),
+	// maybe empty; a release without one shipped PRs no one can name.
+	Traced bool `json:"-" db:"-"`
 }
 
 // Run is one finished CI run.
@@ -567,44 +578,36 @@ type SharedParams struct {
 	ClassEnds []time.Time
 	Now       time.Time
 	Libraries bool
-	// Changes reads the team's changes first deployed (sql/changes.sql): a
-	// window with lead times or its PRs' stage times needs them.
-	Changes bool
+	// Trace reads the team's tracing input (trace.go): a window whose PRs
+	// are placed on the deploys that shipped them needs it.
+	Trace bool
 }
 
 // Shared are the reads every window of one page request uses alike, read
 // once for all of them: the GitOps repos, the team's first event per source,
 // the silences from the earliest window's look-back to now, the Apps as of
-// each class end, the library evidence and the changes first deployed.
-// Never kept past the request: metrics are computed on read.
+// each class end, the library evidence and the tracing's stretches. Never
+// kept past the request: metrics are computed on read.
 type Shared struct {
 	gitops    []string
 	starts    SourceTimes
 	silences  []Silence
 	apps      map[time.Time][]App
 	libraries *libraryEvidence
-	changes   []change
-	// changed: changes were read.
-	changed bool
+	// trace is nil unless SharedParams.Trace.
+	trace *trace
 	// repoStarts is noergler's first event per repository, lowercased.
 	repoStarts map[string]time.Time
 }
 
-// change is a row of sql/changes.sql: a commit's first deploy to one
-// environment, with its lead time.
-type change struct {
-	LeadTime
-	CommitSHA       string    `db:"commit_sha"`
-	FirstDeployedAt time.Time `db:"first_deployed_at"`
-}
-
-// LoadShared reads a page request's Shared: the changes, the costliest
-// read, side by side with the rest, each in a read-only snapshot.
+// LoadShared reads a page request's Shared: the tracing input side by side
+// with the rest, each in a read-only snapshot; the stretches are built once
+// both are there (the silences mark the releases lost events may explain).
 func LoadShared(ctx context.Context, db DB, p SharedParams) (*Shared, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var sh *Shared
-	var changes []change
+	var in *traceInput
 	var errs [2]error
 	var wg sync.WaitGroup
 	wg.Go(func() {
@@ -618,12 +621,12 @@ func LoadShared(ctx context.Context, db DB, p SharedParams) (*Shared, error) {
 			cancel()
 		}
 	})
-	if p.Changes {
+	if p.Trace {
 		wg.Go(func() {
 			tx, err := begin(ctx, db)
 			if err == nil {
 				defer func() { _ = tx.Rollback(ctx) }()
-				changes, err = all[change](ctx, tx, "changes", changesSQL, p.Team)
+				in, err = loadTrace(ctx, tx, p.Team)
 			}
 			if errs[1] = err; err != nil {
 				cancel()
@@ -639,7 +642,9 @@ func LoadShared(ctx context.Context, db DB, p SharedParams) (*Shared, error) {
 	if err := errors.Join(errs[:]...); err != nil {
 		return nil, err
 	}
-	sh.changes, sh.changed = changes, p.Changes
+	if p.Trace {
+		sh.trace = buildTrace(in, sh.silences)
+	}
 	return sh, nil
 }
 
@@ -711,11 +716,12 @@ func loadShared(ctx context.Context, tx pgx.Tx, p SharedParams) (*Shared, error)
 			return nil, err
 		}
 	}
-	if p.Changes {
-		if sh.changes, err = all[change](ctx, tx, "changes", changesSQL, p.Team); err != nil {
+	if p.Trace {
+		in, err := loadTrace(ctx, tx, p.Team)
+		if err != nil {
 			return nil, err
 		}
-		sh.changed = true
+		sh.trace = buildTrace(in, sh.silences)
 	}
 	starts, err := all[repoStartRow](ctx, tx, "repo_starts", repoStartsSQL, p.Team)
 	if err != nil {
@@ -743,12 +749,12 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 	sh := p.Shared
 	if sh == nil {
 		if sh, err = loadShared(ctx, tx, SharedParams{Team: p.Team, From: p.From, ClassEnds: []time.Time{classAt}, Now: p.Now,
-			Libraries: !p.CountsOnly, Changes: !p.CountsOnly || !p.FactsOnly}); err != nil {
+			Libraries: !p.CountsOnly, Trace: !p.CountsOnly}); err != nil {
 			return nil, err
 		}
 	}
-	if (!p.CountsOnly || !p.FactsOnly) && !sh.changed {
-		return nil, errors.New("dataset: the shared read has no changes")
+	if !p.CountsOnly && sh.trace == nil {
+		return nil, errors.New("dataset: the shared read has no tracing")
 	}
 	apps, ok := sh.apps[classAt]
 	if !ok {
@@ -791,14 +797,8 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 	if d.Runs, err = all[Run](ctx, tx, "runs", runsSQL, p.Team, p.From, p.To, d.GitOpsRepos); err != nil {
 		return nil, err
 	}
-	d.LeadTimes, d.Reviews = []LeadTime{}, []Review{}
+	d.Reviews = []Review{}
 	if !p.FactsOnly {
-		// Every change first deployed in the window, the shared read's order.
-		for _, c := range sh.changes {
-			if !c.FirstDeployedAt.Before(p.From) && c.FirstDeployedAt.Before(p.To) {
-				d.LeadTimes = append(d.LeadTimes, c.LeadTime)
-			}
-		}
 		if d.Reviews, err = all[Review](ctx, tx, "reviews", reviewsSQL, p.Team, p.From, p.To, d.GitOpsRepos); err != nil {
 			return nil, err
 		}
@@ -812,10 +812,6 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 
 	automated := func(login, displayName string) bool {
 		return p.Automated != nil && p.Automated(login, displayName)
-	}
-	for i := range d.LeadTimes {
-		l := &d.LeadTimes[i]
-		l.Bot = l.DeclaredBot || automated(l.Author, l.AuthorDisplayName)
 	}
 	for i := range d.PRs {
 		reviewed(&d.PRs[i], automated)
@@ -838,21 +834,14 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 	if !p.FactsOnly {
 		d.Meta.RepoStarts = repoStarts(d, sh.repoStarts)
 	}
-	shipped := []change{}
-	if !p.CountsOnly {
-		merges := map[string]bool{}
-		for _, pr := range d.PRs {
-			if pr.MergeCommit != nil {
-				merges[*pr.MergeCommit] = true
-			}
+	if p.CountsOnly {
+		d.Traces = map[string]RepoTrace{}
+		for i := range d.PRs {
+			d.PRs[i].Environments = []EnvironmentDeploy{}
 		}
-		for _, c := range sh.changes {
-			if merges[c.CommitSHA] {
-				shipped = append(shipped, c)
-			}
-		}
+	} else {
+		place(d, sh.trace)
 	}
-	attachEnvironments(d.PRs, shipped)
 	// The facts too: their column to production must not say "no" for a
 	// library's PR.
 	if !p.CountsOnly && sh.libraries != nil {
@@ -1234,7 +1223,7 @@ func (e *libraryEvidence) library(repo string) bool {
 
 // markLibraries flags the merged PRs of library repos (libraryEvidence). A
 // repo one of whose PRs in the window reached any stage is none, whatever
-// the evidence: its merge commit was rolled out. After attachEnvironments.
+// the evidence: its merge commit was rolled out. After place.
 func markLibraries(d *Dataset, e *libraryEvidence) {
 	traced := map[string]bool{}
 	for _, pr := range d.PRs {
@@ -1313,6 +1302,10 @@ func markImplicitMerges(prs []PR) {
 			}
 			for _, i := range group {
 				prs[i].ImplicitMerge = i != keep
+				// It reached the trunk with the merge that brought it in.
+				if i != keep && keep >= 0 && prs[i].TrunkAt == nil {
+					prs[i].TrunkAt, prs[i].TrunkBranch = prs[keep].TrunkAt, prs[keep].TrunkBranch
+				}
 			}
 			if keep >= 0 && !prs[keep].Bot && slices.ContainsFunc(group, func(i int) bool { return i != keep && !prs[i].Bot }) {
 				prs[keep].Umbrella = true
@@ -1398,7 +1391,6 @@ func exclude(d *Dataset, excluded func(string) bool) {
 	d.OpenPRs = slices.DeleteFunc(d.OpenPRs, func(x OpenPR) bool { return excluded(x.Project) })
 	d.Deploys = slices.DeleteFunc(d.Deploys, func(x Deploy) bool { return out(x.Project) })
 	d.Runs = slices.DeleteFunc(d.Runs, func(x Run) bool { return out(x.Project) })
-	d.LeadTimes = slices.DeleteFunc(d.LeadTimes, func(x LeadTime) bool { return excluded(x.Project) })
 	d.Reviews = slices.DeleteFunc(d.Reviews, func(x Review) bool { return out(x.Project) })
 }
 
@@ -1423,7 +1415,8 @@ func (d *Dataset) utc() {
 	ptrs := append(append(d.Meta.DataStart.ptrs(), d.Meta.DataEnd.ptrs()...), d.Meta.BuildDataFrom, d.Meta.BuildTypeFrom)
 	for i := range d.PRs {
 		p := &d.PRs[i]
-		ptrs = append(ptrs, p.ClosedAt, p.OpenedAt, p.ReadyAt, p.FirstReviewAt, p.ApprovedAt, p.MergedAt, p.FirstCommitAt)
+		ptrs = append(ptrs, p.ClosedAt, p.OpenedAt, p.ReadyAt, p.FirstReviewAt, p.ApprovedAt, p.MergedAt, p.FirstCommitAt,
+			p.TrunkAt)
 		for j := range p.Environments {
 			ptrs = append(ptrs, &p.Environments[j].FirstDeployedAt)
 		}
@@ -1526,27 +1519,6 @@ func reviewedOpen(pr *OpenPR, automated func(login, displayName string) bool) {
 	}
 }
 
-// attachEnvironments gives every PR its merge commit's first deploy per
-// environment. docs/metrics.md's breakdown query looks each one up in
-// lead_time_changes; here the view is read once per page request for all
-// of them (sql/changes.sql). Both SHAs arrive lowercased from SQL.
-func attachEnvironments(prs []PR, shipped []change) {
-	byCommit := map[string][]EnvironmentDeploy{}
-	for _, s := range shipped {
-		byCommit[s.CommitSHA] = append(byCommit[s.CommitSHA], EnvironmentDeploy{Environment: s.Environment, FirstDeployedAt: s.FirstDeployedAt})
-	}
-	for i := range prs {
-		envs := []EnvironmentDeploy{}
-		if prs[i].MergeCommit != nil {
-			envs = append(envs, byCommit[*prs[i].MergeCommit]...)
-		}
-		slices.SortFunc(envs, func(a, b EnvironmentDeploy) int {
-			return cmp.Or(a.FirstDeployedAt.Compare(b.FirstDeployedAt), cmp.Compare(a.Environment, b.Environment))
-		})
-		prs[i].Environments = envs
-	}
-}
-
 // products lists every project key the window's rows name, with the repos
 // and Apps seen under it. An App's project is its GitOps repo's.
 func products(d *Dataset) []Product {
@@ -1566,9 +1538,6 @@ func products(d *Dataset) []Product {
 	}
 	for _, p := range d.OpenPRs {
 		add(repos, p.Project, p.Repo)
-	}
-	for _, l := range d.LeadTimes {
-		add(repos, l.Project, l.Repo)
 	}
 	for _, r := range d.Runs {
 		if r.Repo != nil && r.Project != nil {

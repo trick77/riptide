@@ -56,7 +56,8 @@ revision_projects AS (
   SELECT r.revision, /*{{revision_project}}*/ AS project
   FROM revisions r
 )
-SELECT a.app_name AS app,
+SELECT a.id,
+       a.app_name AS app,
        rp.project,
        a.environment,
        a.revision,

@@ -942,10 +942,11 @@ components:
     Metrics:
       type: object
       additionalProperties: false
-      required: [meta, period, products, product, delivery, lead_chain, review, throughput, open_prs, build,
+      required: [meta, period, products, product, delivery, lead_chain, coverage, review, throughput, open_prs, build,
                  costs, comparison, running_week]
       properties:
         running_week: { $ref: "#/components/schemas/RunningWeek" }
+        coverage: { $ref: "#/components/schemas/Coverage" }
         meta: { $ref: "#/components/schemas/Meta" }
         period: { $ref: "#/components/schemas/Period" }
         products:
@@ -1203,9 +1204,10 @@ components:
         to_prod:
           $ref: "#/components/schemas/Share"
           description: |
-            Its merge commit's first production deploy is known (time to
-            production). Its `n` leaves out the library repos' PRs
-            (Throughput's `library`): never rolled out, so none untraced.
+            A production deploy before the period's end shipped it (time to
+            production): `coverage.on_prod` of `coverage.merged`. Its `n`
+            leaves out the library repos' PRs (Throughput's `library`):
+            never rolled out, so none untraced.
         sized:
           $ref: "#/components/schemas/Share"
           description: The AI reviewer's rollup gives its size (batch size).
@@ -1269,7 +1271,7 @@ components:
         are classed by the Apps as of the period's end alike, as the
         assessment classes them; the running week by its own.
       additionalProperties: false
-      required: [releases, first_releases, syncs, first_seen, grace_days, resyncs, per_week, low_sample, since,
+      required: [releases, first_releases, releases_unresolved, syncs, first_seen, grace_days, resyncs, per_week, low_sample, since,
                  weeks, succeeded, failed, finished, success_rate, argo_reporting, median_week, days,
                  no_data_days, weekdays, unattributed, maybe_unattributed, infra, infra_apps]
       properties:
@@ -1280,6 +1282,11 @@ components:
             than `grace_days` after Argo CD first reported for the team
             included.
         first_releases: { type: integer, description: "Of `releases`, those that were an App's first deploy." }
+        releases_unresolved:
+          type: integer
+          description: |
+            Of `releases`, those tracing resolved no stretch of any repo for:
+            what they shipped no one can name.
         syncs: { type: integer, description: All revisions. }
         first_seen:
           type: integer
@@ -1388,14 +1395,97 @@ components:
 
     LeadTimes:
       type: object
-      description: Per commit to its first deploy on the environment; merges and service accounts out, bots apart.
+      description: |
+        Per PR: the people's PRs merged in the period that reached the
+        environment by the period's end, from the PR's first commit (else its
+        opening) to its first deploy there. Bots' PRs and library repos'
+        PRs are in none.
       additionalProperties: false
-      required: [environment, human, bot, low_sample]
+      required: [environment, human, lower_bound, low_sample]
       properties:
         environment: { type: string }
-        human: { $ref: "#/components/schemas/Spread" }
-        bot: { $ref: "#/components/schemas/Spread" }
-        low_sample: { type: boolean, description: "Fewer than 10 human commits, but some." }
+        human:
+          $ref: "#/components/schemas/Spread"
+          description: Over those PRs; `n` is how many.
+        lower_bound:
+          type: integer
+          description: |
+            Of `human`'s PRs, those placed by a stretch whose start was a lower
+            bound: they may have gone out earlier, their time reads long.
+        low_sample: { type: boolean, description: "Fewer than 10 PRs, but some." }
+
+    TraceReasons:
+      type: object
+      description: The PRs tracing cannot place, by the first reason that applies.
+      additionalProperties: false
+      required: [no_merge_commit, release_unresolved, repo_untraced, in_silence]
+      properties:
+        no_merge_commit:
+          type: integer
+          description: The payload names no merge commit and no umbrella brought it in.
+        release_unresolved:
+          type: integer
+          description: A release of its repo's Apps since it reached the trunk could not be resolved; it may have shipped it.
+        repo_untraced:
+          type: integer
+          description: No deploy ever showed an App deploys its repo.
+        in_silence:
+          type: integer
+          description: |
+            A release that may have shipped it lay in or within a week after a
+            lost Bitbucket silence, or Argo CD did not report yet when it
+            reached the trunk.
+
+    Coverage:
+      type: object
+      description: |
+        How the period's merged PRs (`throughput.merged`'s) reached production
+        by the period's end, frozen there: a later deploy never changes a
+        closed period. `merged` = `on_prod` + `not_yet` + `not_placeable`.
+        Library PRs are outside `merged`. `repos` lists every repo with a
+        merged PR, library repos too: the most PRs not yet on production
+        first, then the oldest of them, then the most not placeable, then by
+        name.
+      additionalProperties: false
+      required: [merged, on_prod, lower_bound, not_yet, oldest_not_yet, not_placeable, reasons, library, repos]
+      properties:
+        merged: { type: integer, description: The merged PRs of repos that are rolled out. }
+        on_prod: { type: integer, description: Shipped to production by the period's end. }
+        lower_bound:
+          type: integer
+          description: Of `on_prod`, placed by a stretch whose start was a lower bound (they may have gone out earlier).
+        not_yet:
+          type: integer
+          description: |
+            Provably not on production at the period's end: every release of
+            their repo's Apps since they reached the trunk was resolved and
+            held none of them, or there was none.
+        oldest_not_yet:
+          $ref: "#/components/schemas/NullableInstant"
+          description: The merge of the oldest of `not_yet`.
+        not_placeable: { type: integer, description: "Tracing cannot tell; `reasons` say why." }
+        reasons: { $ref: "#/components/schemas/TraceReasons" }
+        library: { type: integer, description: "Merged PRs of library repos, never rolled out." }
+        repos:
+          type: array
+          items: { $ref: "#/components/schemas/RepoCoverage" }
+
+    RepoCoverage:
+      type: object
+      description: One repo's part of `Coverage`, the same counts.
+      additionalProperties: false
+      required: [repo, project, merged, on_prod, lower_bound, not_yet, oldest_not_yet, not_placeable, reasons, library]
+      properties:
+        repo: { type: string }
+        project: { type: string }
+        merged: { type: integer }
+        on_prod: { type: integer }
+        lower_bound: { type: integer }
+        not_yet: { type: integer }
+        oldest_not_yet: { $ref: "#/components/schemas/NullableInstant" }
+        not_placeable: { type: integer }
+        reasons: { $ref: "#/components/schemas/TraceReasons" }
+        library: { type: integer }
 
     LeadChain:
       type: object
@@ -2158,7 +2248,8 @@ components:
         week, newest merge or opening first.
       additionalProperties: false
       required: [repo, pr_id, url, title, title_parts, jira_prefix, jira_more, gitops, change_type, state, not_counted,
-                 via_umbrella, library, review_s, cycle_s, merged_at, prod_at, to_prod_s, age_s, waiting, idle_s, running]
+                 via_umbrella, library, review_s, cycle_s, merged_at, prod_at, to_prod_s, prod_state, prod_reason,
+                 prod_route, prod_lower_bound, age_s, waiting, idle_s, running]
       properties:
         running:
           type: boolean
@@ -2212,8 +2303,31 @@ components:
         merged_at: { $ref: "#/components/schemas/NullableInstant" }
         prod_at:
           $ref: "#/components/schemas/NullableInstant"
-          description: The merge commit's first production deploy.
+          description: The first production deploy that shipped it, whenever (the facts read to now).
         to_prod_s: { $ref: "#/components/schemas/NullableSeconds" }
+        prod_state:
+          type: [string, "null"]
+          enum: [on_prod, not_yet, not_placeable, null]
+          description: |
+            Where a merged PR stands on production now: shipped, provably not
+            yet, or not placeable. Null for every other PR, a library's and a
+            promotion's included.
+        prod_reason:
+          type: [string, "null"]
+          enum: [no_merge_commit, release_unresolved, repo_untraced, in_silence, null]
+          description: Why tracing cannot place it (`TraceReasons`); null unless `prod_state` is `not_placeable`.
+        prod_route:
+          type: [string, "null"]
+          enum: [compare, image, null]
+          description: |
+            How its first production deploy was found: a compare link in the
+            GitOps release commit, or the run that built a deployed image.
+            Null when not on production.
+        prod_lower_bound:
+          type: boolean
+          description: |
+            That deploy's stretch started at a lower bound: it may have gone
+            out earlier, with a deploy tracing could not resolve.
         age_s:
           $ref: "#/components/schemas/NullableSeconds"
           description: A PR open now, its age since its last turn ready; null for a draft and every other PR.

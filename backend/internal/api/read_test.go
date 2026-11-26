@@ -221,8 +221,9 @@ func TestReadMatchesOpenAPISpec(t *testing.T) {
 		Products: []dataset.Product{{Key: "kasse", Repos: []string{"kasse/kasse-api"}, Apps: []string{"kasse-prod"}}},
 		PRs: []dataset.PR{{Repo: "kasse/kasse-api", Project: "kasse", PRID: 7, Title: s("Rabattregeln"), ChangeType: s("feature"),
 			JiraKeys: []string{"KAS-7"}, State: "merged", OpenedAt: &before, ReadyAt: &before, FirstReviewAt: &before, ApprovedAt: &before,
-			ApprovedOnFirstTouch: true, MergedAt: &at, FirstCommitAt: &before, MergeCommit: s("abc1234"),
-			Environments: []dataset.EnvironmentDeploy{{Environment: "intg", FirstDeployedAt: at}, {Environment: "prod", FirstDeployedAt: at}}},
+			ApprovedOnFirstTouch: true, MergedAt: &at, FirstCommitAt: &before, MergeCommit: s("abc1234"), TrunkAt: &at,
+			Environments: []dataset.EnvironmentDeploy{{Environment: "intg", FirstDeployedAt: at, Route: dataset.RouteImage},
+				{Environment: "prod", FirstDeployedAt: at, Route: dataset.RouteCompare, LowerBound: true}}},
 			// Merged into a feature branch: counted, marked.
 			{Repo: "kasse/kasse-api", Project: "kasse", PRID: 8, Title: s("Teilschritt"), State: "merged", OpenedAt: &before,
 				MergedAt: &at, TargetBranch: s("feature/umbau"), OffTrunk: true},
@@ -244,7 +245,7 @@ func TestReadMatchesOpenAPISpec(t *testing.T) {
 				NewImages: []string{}},
 			{App: "log-shipper", Environment: s("prod"), Revision: "fed4321", At: at, Phase: "Succeeded",
 				Images: []string{"reg/m:1"}, Kind: s("release"), NewImages: []string{"reg/m:1"}, Infra: true}},
-		LeadTimes: []dataset.LeadTime{{Repo: "kasse/kasse-api", Project: "kasse", Environment: "prod", LeadTimeS: 3600}},
+		Traces: map[string]dataset.RepoTrace{"kasse/kasse-api": {DeployedSince: &before}},
 		Reviews: []dataset.Review{{Repo: s("kasse/kasse-api"), Project: s("kasse"),
 			Outcome: s("merged"), CostUSD: s("0.123456"), LinesAdded: n(1), LinesRemoved: n(1)}},
 	}

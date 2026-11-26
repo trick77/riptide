@@ -157,7 +157,7 @@ func TestDirected(t *testing.T) {
 		}
 	}
 	params := Params{Period: p4(), Previous: PreviousPeriod(4, now, zurich)}
-	cmp := Compute(leadData(12, 2), leadData(12, 3), nil, params).Comparison
+	cmp := Compute(leadData(12, 2), leadData(12, 3, fourWeeksBack), nil, params).Comparison
 	for name, c := range map[string]Change{
 		"first touch": cmp.FirstTouch, "untracked": cmp.Untracked, "open PRs": cmp.OpenPRs,
 		"cost per KLOC": cmp.CostPerKloc, "wasted share": cmp.WastedShare,
@@ -177,7 +177,7 @@ func TestDirected(t *testing.T) {
 
 	// Argo CD silent for the team: nothing measured, not too few.
 	silent := func(ds *dataset.Dataset) { ds.Meta.DataStart.ArgoCD = nil }
-	cmp = Compute(leadData(12, 2, silent), leadData(12, 3, silent), nil, params).Comparison
+	cmp = Compute(leadData(12, 2, silent), leadData(12, 3, silent, fourWeeksBack), nil, params).Comparison
 	for name, c := range map[string]Change{"frequency": cmp.DeployFreq, "success": cmp.DeploySuccess} {
 		if c.Reason == nil || *c.Reason != ReasonNotReporting || !c.Directed || c.Score != nil {
 			t.Errorf("silent argo %s: %+v", name, c)
@@ -185,20 +185,39 @@ func TestDirected(t *testing.T) {
 	}
 }
 
-// leadData is n human commits to prod, each taking days.
+// leadData is count of the people's PRs on prod, each taking days from
+// its first commit, merged in p4() without a review.
 func leadData(count int, days float64, mod ...func(*dataset.Dataset)) *dataset.Dataset {
 	return data(append([]func(*dataset.Dataset){func(ds *dataset.Dataset) {
-		for range count {
-			ds.LeadTimes = append(ds.LeadTimes, leadTimeRow(func(l *dataset.LeadTime) {
-				l.LeadTimeS = int64(days * 86400)
+		for i := range count {
+			ds.PRs = append(ds.PRs, shipped(days*86400, func(p *dataset.PR) {
+				p.PRID, p.ReadyAt, p.FirstReviewAt, p.ApprovedAt, p.ApprovedOnFirstTouch = int64(100+i), nil, nil, nil, false
 			}))
 		}
 	}}, mod...)...)
 }
 
+// fourWeeksBack moves every PR of the dataset four weeks back, into the
+// period before p4().
+func fourWeeksBack(ds *dataset.Dataset) {
+	back := func(t *time.Time) *time.Time {
+		if t == nil {
+			return nil
+		}
+		return ptr(t.AddDate(0, 0, -28))
+	}
+	for i := range ds.PRs {
+		p := &ds.PRs[i]
+		p.OpenedAt, p.MergedAt, p.TrunkAt, p.FirstCommitAt = back(p.OpenedAt), back(p.MergedAt), back(p.TrunkAt), back(p.FirstCommitAt)
+		for j := range p.Environments {
+			p.Environments[j].FirstDeployedAt = *back(&p.Environments[j].FirstDeployedAt)
+		}
+	}
+}
+
 func TestCompareWithThePreviousPeriod(t *testing.T) {
 	params := Params{Period: p4(), Previous: PreviousPeriod(4, now, zurich)}
-	m := Compute(leadData(12, 2), leadData(12, 3), nil, params)
+	m := Compute(leadData(12, 2), leadData(12, 3, fourWeeksBack), nil, params)
 	c := m.Comparison
 	if !c.From.Equal(params.Previous.From) || !c.To.Equal(params.Previous.To) {
 		t.Errorf("period = %v..%v", c.From, c.To)
@@ -217,7 +236,7 @@ func TestCompareWithThePreviousPeriod(t *testing.T) {
 
 	// Argo CD started inside the previous period: it reads low, no verdict.
 	late := func(ds *dataset.Dataset) { ds.Meta.DataStart.ArgoCD = agoP(30) }
-	c = Compute(leadData(12, 2, late), leadData(12, 3, late), nil, params).Comparison
+	c = Compute(leadData(12, 2, late), leadData(12, 3, late, fourWeeksBack), nil, params).Comparison
 	if c.LeadTime.Reason == nil || *c.LeadTime.Reason != ReasonIncomplete || c.DeployFreq.Verdict != ChangeNone {
 		t.Errorf("late argo = %+v / %+v", c.LeadTime, c.DeployFreq)
 	}

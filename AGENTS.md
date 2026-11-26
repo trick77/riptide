@@ -23,9 +23,9 @@ cd backend && go test -race ./...    # DB tests skip without SHIP_TEST_DSN (comp
 - **LLM analysis: Go judges, the model words.** Signals, verdicts and focus repos come from `metrics.Assess`. The model sees aliased repos, writes numbers only as `{{fact}}` and picks levers only as glossary keys. A lever never presumes a cause riptide cannot see: tests in a build, a merge freeze behind a jam (user). Here only `mimo-v2.6-pro`; `gpt-6.1-sol` lives in the infra repo, through LiteLLM.
 - **Judge only what the team causes**: infrastructure Apps and bot builds never raise a finding. No calm word (nothing stands out, unremarkable, nothing stuck) unless `Assessment.Quiet`: measured and compared (owner, 2026-11).
 - **No computation in the browser.** `internal/metrics` computes every number, bucket, percentile, threshold, classification, sort, search and top-N; the UI renders, formats (de-CH) and scales charts only. One source of truth, tested in Go against real Postgres. Weeks are the viewer's calendar: the UI sends `tz`.
-- **Deploy↔commit join = full image reference**, per `docs/correlating-deploys-to-commits.md`. Image **tags are not SHAs**: measured 0 of 4 936 refs, all semver; never parse a SHA out of a tag.
+- **Deploy↔commit join: release-commit compare links first, then the full image reference** (identical strings), per `docs/correlating-deploys-to-commits.md`. Image **tags are not SHAs**: measured 0 of 4 936 refs, all semver; never parse a SHA out of a tag.
 - **Read "Reading the event tables" in `docs/metrics.md` before any query.** `repo:refs_changed` is ref movement (~15 000 of 16 295 master events were release tooling), and `change_type` means something only on PR events. Never infer intent from an event-type name.
-- **Lead time per `docs/dora-lead-time.md`**: per commit, bots their own line. Never quote the newest-commit-per-release shortcut: measured 26.7 h against a real 193.6 h.
+- **Lead time per PR, first commit to PROD** (owner), placed per `docs/dora-lead-time.md`; commit counts are never a basis. A closed period reads deploys up to its end only. Never quote the newest-commit-per-release shortcut: measured 26.7 h against a real 193.6 h.
 - **`change_type` on Bitbucket events only.** Never denormalise onto pipeline / Argo rows; join on read.
 - **Automation: config is the last resort.** Senders declare themselves (`reviewer_handle` / `actor_handle` + kind); `automation` entries only for accounts nobody reports.
 - **CI events are source-tagged, not source-routed**: every CI posts to `POST /webhooks/pipeline` → `pipeline_events`, told apart by `source`. No per-CI tables or endpoints.
@@ -59,7 +59,7 @@ cd backend && go test -race ./...    # DB tests skip without SHIP_TEST_DSN (comp
 - **German and English, de-CH number and date formats in both** (user, 2026-11-15: "datumsformat ändert sich nicht, das bleibt immer CH"). Language switch kept identical to ../noergler's (user: "an beiden orten einheitlich"). Facts search matches both languages' words, so a shared `?q=` link works for every reader.
 - **Stages always upper case on screen** (INTG, SYST, PROD), filter lines included, via `stage()` in `format.ts`; data, API and config keep Argo CD's case (user, 2026-11-16: "immer wenn wir im ui eine stage zeigen, ist sie gross").
 - **Build numbers never across run kinds.** User: releases skip tests, feature builds fail more.
-- **Compare a team with its previous period only**, never DORA levels, survey distributions or other teams: DORA dropped its levels in 2025, survey numbers go stale (user: outdated "wollen wir auf keinen fall"). DORA terms as dora.dev names them now.
+- **Judge a team against its previous period or its own agreements** (owner: thresholds in config), never DORA levels, survey distributions, other teams or outside benchmarks: DORA dropped its levels in 2025, survey numbers go stale (user: outdated "wollen wir auf keinen fall"). DORA terms as dora.dev names them now.
 - Screenshots or numbers from a real import never into the repo or a PR.
 
 ## Out of v1

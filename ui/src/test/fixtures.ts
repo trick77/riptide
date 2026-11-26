@@ -54,8 +54,6 @@ export const spread = (n: number, p50: number, p90 = p50): Spread => ({
 // No run reports its agent time: n 0, nulls rather than 0.
 export const noSpread = (): Spread => ({ n: 0, p50: null, p90: null });
 
-const none: Spread = { n: 0, p50: null, p90: null };
-
 // The backend's stage histogram edges: 5 min to 28 days, log-spaced.
 export const STAGE_BOUNDS = [
   300, 452, 680, 1023, 1540, 2317, 3488, 5249, 7901, 11892, 17899, 26940, 40548,
@@ -275,6 +273,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       frequency: {
         releases: 1,
         first_releases: 0,
+        releases_unresolved: 0,
         syncs: 3,
         first_seen: 1,
         grace_days: 14,
@@ -300,15 +299,49 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       lead_time: {
         environment: "prod",
         human: spread(1, 2 * 86400),
-        bot: spread(1, 600),
+        lower_bound: 0,
         low_sample: true,
       },
       lead_time_pre: {
         environment: "intg",
         human: spread(1, 3 * 3600),
-        bot: none,
+        lower_bound: 0,
         low_sample: true,
       },
+    },
+    coverage: {
+      merged: 1,
+      on_prod: 1,
+      lower_bound: 0,
+      not_yet: 0,
+      oldest_not_yet: null,
+      not_placeable: 0,
+      reasons: {
+        no_merge_commit: 0,
+        release_unresolved: 0,
+        repo_untraced: 0,
+        in_silence: 0,
+      },
+      library: 0,
+      repos: [
+        {
+          repo: "kasse/kasse-api",
+          project: "kasse",
+          merged: 1,
+          on_prod: 1,
+          lower_bound: 0,
+          not_yet: 0,
+          oldest_not_yet: null,
+          not_placeable: 0,
+          reasons: {
+            no_merge_commit: 0,
+            release_unresolved: 0,
+            repo_untraced: 0,
+            in_silence: 0,
+          },
+          library: 0,
+        },
+      ],
     },
     lead_chain: {
       stages: [
@@ -630,6 +663,10 @@ export function prFact(o: Partial<PRFact> = {}): PRFact {
     merged_at: ago(1.8),
     prod_at: ago(1),
     to_prod_s: 0.8 * 86400,
+    prod_state: "on_prod",
+    prod_reason: null,
+    prod_route: "compare",
+    prod_lower_bound: false,
     age_s: null,
     waiting: null,
     idle_s: null,
@@ -698,6 +735,8 @@ export function facts(o: Partial<Facts> = {}): Facts {
       merged_at: null,
       prod_at: null,
       to_prod_s: null,
+      prod_state: null,
+      prod_route: null,
       age_s: 2 * 86400,
       waiting: "first_review",
       idle_s: 86400,

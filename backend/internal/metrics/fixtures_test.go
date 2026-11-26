@@ -54,7 +54,8 @@ func pr(mod ...func(*dataset.PR)) dataset.PR {
 		Repo: "kasse/kasse-api", Project: "kasse", PRID: 1, Title: s("Pay by card"), ChangeType: s("feature"),
 		JiraKeys: []string{"KAS-1"}, State: "merged", OpenedAt: agoP(2), ReadyAt: agoP(2), FirstReviewAt: agoP(1.9),
 		ApprovedAt: agoP(1.9), ApprovedOnFirstTouch: true, MergedAt: agoP(1.8), FirstCommitAt: agoP(3),
-		MergeCommit: s(strings.Repeat("a", 40)), Environments: []dataset.EnvironmentDeploy{},
+		MergeCommit: s(strings.Repeat("a", 40)), TrunkAt: agoP(1.8), TrunkBranch: s("master"),
+		Environments: []dataset.EnvironmentDeploy{},
 	}
 	for _, m := range mod {
 		m(&p)
@@ -73,14 +74,14 @@ func deploy(mod ...func(*dataset.Deploy)) dataset.Deploy {
 	return d
 }
 
-func leadTimeRow(mod ...func(*dataset.LeadTime)) dataset.LeadTime {
-	l := dataset.LeadTime{
-		Repo: "kasse/kasse-api", Project: "kasse", Environment: "prod", LeadTimeS: 2 * 86400,
-	}
-	for _, m := range mod {
-		m(&l)
-	}
-	return l
+// shipped is a merged PR on production: deployed there an hour ago, its
+// first commit seconds before.
+func shipped(seconds float64, mod ...func(*dataset.PR)) dataset.PR {
+	at := ago(1.0 / 24)
+	return pr(append([]func(*dataset.PR){func(p *dataset.PR) {
+		p.FirstCommitAt = ptr(at.Add(-time.Duration(seconds * float64(time.Second))))
+		p.Environments = []dataset.EnvironmentDeploy{{Environment: "prod", FirstDeployedAt: at, Route: dataset.RouteCompare}}
+	}}, mod...)...)
 }
 
 func run(mod ...func(*dataset.Run)) dataset.Run {
@@ -119,8 +120,8 @@ func data(mod ...func(*dataset.Dataset)) *dataset.Dataset {
 			{Key: "kasse", Repos: []string{"kasse/kasse-api", "kasse/kasse-gitops"}, Apps: []string{"kasse-prod"}},
 			{Key: "portal", Repos: []string{"portal/portal-web"}, Apps: []string{}},
 		},
-		PRs: []dataset.PR{}, Deploys: []dataset.Deploy{}, LeadTimes: []dataset.LeadTime{},
-		Runs: []dataset.Run{}, Reviews: []dataset.Review{},
+		PRs: []dataset.PR{}, Deploys: []dataset.Deploy{}, Runs: []dataset.Run{}, Reviews: []dataset.Review{},
+		Traces: map[string]dataset.RepoTrace{},
 	}
 	for _, m := range mod {
 		m(ds)
@@ -130,7 +131,7 @@ func data(mod ...func(*dataset.Dataset)) *dataset.Dataset {
 
 // chainOf and reviewOf are the sections as Compute builds them.
 func chainOf(ds *dataset.Dataset, p Period, f filter) rawChain {
-	return chain(ds, mergedPRs(ds, p, f))
+	return chain(ds, mergedPRs(ds, p, f), p.To)
 }
 
 func reviewOf(ds *dataset.Dataset, p Period, f filter) Review {
