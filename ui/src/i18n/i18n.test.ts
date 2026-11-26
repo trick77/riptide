@@ -111,6 +111,7 @@ describe("state cards", () => {
     lower_bound: false,
     week: {
       kw: 45,
+      year: 2026,
       start: "2026-11-02T00:00:00Z",
       end: "2026-11-09T00:00:00Z",
     },
@@ -371,6 +372,7 @@ describe("state wording", () => {
     const c = card("merge_pause", { value: 0.2, min: 3, unit: "share" });
     const week = {
       kw: 45,
+      year: 2026,
       start: "2026-11-02T00:00:00Z",
       end: "2026-11-09T00:00:00Z",
     };
@@ -491,5 +493,47 @@ describe("catalogs", () => {
     for (const [k, v] of Object.entries(deLeaves)) {
       expect([k, /gemergt\b/i.exec(v)?.[0] ?? null]).toEqual([k, null]);
     }
+  });
+
+  // A threshold a team configures, or a constant the backend sends, is
+  // never written into a text: a team with its own sees its own, and a
+  // changed constant cannot leave the page contradicting itself. Numbers
+  // that define a measure are no threshold: the slowest 10 %, a share's
+  // 0 and 100 %, per 1000 lines, a bucket keyed to the backend's bound.
+  it("write no threshold into a text", () => {
+    // A number, written or in words, before a unit, "or more" between.
+    const number =
+      /(?:[≥>]\s*)?(?:\d+|\b(?:eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|one|two|three|four|five|six|seven|eight|nine|ten)\b)(?:\s+(?:oder mehr|or more))?\s*(?:Arbeitstag\w*|Tag\w*|Minute\w*|Stunden|Zeilen|PRs?\b|Woche\w*|Builds?\b|Repos?\b|days?\b|working days?|hours?\b|minutes?\b|lines\b|weeks?\b|%)/gi;
+    // A factor in words.
+    const factor =
+      /\b(?:anderthalbmal|doppelt so|dreimal|one and a half times|twice as|three times)\b/gi;
+    // The measure a number defines, by what stands right before it: the
+    // slowest 10 %, per 1000 lines, merged within 24 hours (the measure's
+    // own name, no threshold a team sets).
+    const measure =
+      /(?:langsamsten|grössten|ältesten|Langsamste|slowest|largest|oldest|Slowest|pro|per|innert|within) $/;
+    const found: string[] = [];
+    for (const [lang, all] of [
+      ["de", deLeaves],
+      ["en", enLeaves],
+    ] as const) {
+      for (const [k, v] of Object.entries(all)) {
+        for (const m of [...v.matchAll(number), ...v.matchAll(factor)]) {
+          const before = v.slice(Math.max(0, m.index - 16), m.index);
+          // A plural's one form ("1 Build hing"), a share's ends, a
+          // measure's definition, a bucket named by the backend's bound.
+          if (
+            (k.endsWith("_one") && m[0].startsWith("1 ")) ||
+            m[0] === "0 %" ||
+            m[0] === "100 %" ||
+            measure.test(before) ||
+            /^flow\.bucket\./.test(k)
+          )
+            continue;
+          found.push(`${lang} ${k}: ${m[0]}`);
+        }
+      }
+    }
+    expect(found).toEqual([]);
   });
 });

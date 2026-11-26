@@ -32,6 +32,7 @@ import {
   num,
   pct,
   stage,
+  weekSpan,
 } from "./format";
 import { SEP, WAIT_FILL, WAITS } from "./shared";
 import type { Tab } from "./state";
@@ -159,7 +160,7 @@ function stamp(iso: string, lang: string): string {
 function weeksLabel(t: TFunction, a: AssessmentData): string {
   const w = a.period.weeks;
   if (!w.length) return "";
-  return t("overview.assess.weeks", { from: w[0].kw, to: w[w.length - 1].kw });
+  return weekSpan(t, w[0], w[w.length - 1]);
 }
 
 // The period's calendar days: its first Monday to its last Sunday, in the
@@ -248,8 +249,10 @@ function changeKey(s: Signal): "changeBad" | "changeGood" {
   return s.tone === "good" ? "changeGood" : "changeBad";
 }
 
-// The rule's numbers come from the backend where it has them: the agent
-// wait's floor (Build.agent_wait_min_s) and share.
+// The rule's numbers come from the backend, never the text: the agent
+// wait's floor (Build.agent_wait_min_s) and share, the jam's count and days
+// (OpenPRs.jam_min, long_days), a slower build's factor
+// (Hotspots.slow_factor).
 function ruleText(t: TFunction, s: Signal, m: Metrics): string {
   if (s.kind === "change") return t(`overview.assess.rule.${changeKey(s)}`);
   // A state resolves when its units are clear again, judged anew from the
@@ -265,6 +268,9 @@ function ruleText(t: TFunction, s: Signal, m: Metrics): string {
     defaultValue: "",
     minutes: num(m.build.agent_wait_min_s / 60),
     share: pct(m.build.agent_wait_share),
+    min: m.open_prs.jam_min,
+    days: m.open_prs.long_days,
+    factor: num(m.build.hotspots.slow_factor, 1),
   });
 }
 

@@ -12,11 +12,14 @@ var Windows = []int{4, 12, 26}
 func ValidWindow(weeks int) bool { return slices.Contains(Windows, weeks) }
 
 // Week is one calendar week, Monday 00:00 to Monday 00:00 in the viewer's
-// zone, with its ISO 8601 number.
+// zone, with its ISO 8601 number and the ISO year that number counts in
+// (KW 1 may start in December): a span of weeks across a new year names
+// its years.
 type Week struct {
 	Start time.Time `json:"start"`
 	End   time.Time `json:"end"`
 	KW    int       `json:"kw"`
+	Year  int       `json:"year"`
 }
 
 // Period is a window of whole calendar weeks in the viewer's zone. The page
@@ -78,8 +81,8 @@ func periodFrom(first time.Time, weeks int, to time.Time) Period {
 	list := make([]Week, weeks)
 	for i := range list {
 		start := first.AddDate(0, 0, 7*i)
-		_, kw := start.ISOWeek()
-		list[i] = Week{Start: start.UTC(), End: start.AddDate(0, 0, 7).UTC(), KW: kw}
+		year, kw := start.ISOWeek()
+		list[i] = Week{Start: start.UTC(), End: start.AddDate(0, 0, 7).UTC(), KW: kw, Year: year}
 	}
 	return Period{
 		From:    first.UTC(),

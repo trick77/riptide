@@ -27,11 +27,11 @@ export const de = {
     ausliefern: "Rollout",
     review: "Review",
     more: "Weitere",
-    view: "{{product}} · KW {{from}}–{{to}}",
+    view: "{{product}} · {{span}}",
   },
   trends: {
     title: "Gemergte PRs und PR-Grösse pro Woche",
-    sub: "Nur PRs von Menschen, ohne Bots. KW {{from}}–{{to}}: Vorperiode, Zeitraum und die laufende Woche.",
+    sub: "Nur PRs von Menschen, ohne Bots. {{span}}: Vorperiode, Zeitraum und die laufende Woche.",
     merged: "Gemergte PRs pro Woche",
     mergedUnit: "pro Woche im Zeitraum",
     batch: "PR-Grösse pro Woche, typisch",
@@ -41,7 +41,7 @@ export const de = {
     previous: "Vorperiode",
     period: "Zeitraum",
     running: "laufende Woche, bis jetzt",
-    legendPrevious: "Vorperiode, KW {{from}}–{{to}}",
+    legendPrevious: "Vorperiode, {{span}}",
     legendWeek: "pro Woche",
     legendRunning: "laufende Woche, noch nicht vorbei",
     gap: {
@@ -56,7 +56,7 @@ export const de = {
     headText:
       "Jedes Repo wird für sich beurteilt, nie im Schnitt mit anderen. Ein Klick auf eine Zeile zeigt die PRs des Repos unten in den Daten.",
     title: "Repos, das Auffällige zuerst",
-    sub: "Die Balken zeigen die Releases pro Woche, KW {{from}}–{{to}}; die Vorperiode ist hinterlegt.",
+    sub: "Die Balken zeigen die Releases pro Woche, {{span}}; die Vorperiode ist hinterlegt.",
     col: {
       repo: "Repo",
       stand: "Auffällig",
@@ -66,18 +66,18 @@ export const de = {
       batch: "PR-Grösse, typisch",
     },
     group: {
-      none: "Kein Release seit über {{breach}} Tagen",
-      rare: "Letztes Release vor {{from}}–{{breach}} Tagen",
+      none: "Projekt ohne Release seit über {{breach}} Tagen",
+      never: "Noch kein {{prod}}-Release",
+      rare: "Letztes Release des Projekts vor {{from}}–{{breach}} Tagen",
       unjudged: "Nicht beurteilbar",
-      regular: "Release in den letzten {{hint}} Tagen",
+      regular: "Projekt mit Release in den letzten {{hint}} Tagen",
       library: "Libraries",
       idle: "Ohne Aktivität",
     },
     groupSub: {
-      none: "beim Projekt des Repos, obwohl daran gearbeitet wurde",
-      rare: "beim Projekt des Repos",
+      none: "obwohl daran gearbeitet wurde",
+      never: "Das Projekt kam laut den Daten noch nie nach {{prod}}",
       unjudged: "Die Daten zeigen nicht, ob und wann das Repo ausgerollt wird",
-      regular: "beim Projekt des Repos",
       library: "werden nie selbst ausgerollt, darum fehlt hier kein Release",
       idle: "kein gemergter PR seit dem letzten Release des Projekts und keiner in {{breach}} Tagen",
     },
@@ -99,7 +99,6 @@ export const de = {
       no_prod_stage: "Argo CD liefert keine Daten zur Stage {{prod}}",
       infra: "nur Infrastruktur-Apps",
       untraced: "keine App bekannt, die es ausrollt",
-      never_released: "kein Release des Projekts nach {{prod}} bekannt",
     },
     pill: {
       library: "Library",
@@ -108,8 +107,11 @@ export const de = {
     rel: {
       none: "keines im Zeitraum",
       perWeek: "{{n}} pro Woche",
-      inWeeks_one: "{{count}} Release in {{weeks}} Wochen",
-      inWeeks_other: "{{count}} Releases in {{weeks}} Wochen",
+      inWeeks_one: "{{count}} Release in {{weeks}}",
+      inWeeks_other: "{{count}} Releases in {{weeks}}",
+      weeks_one: "{{count}} Woche",
+      weeks_other: "{{count}} Wochen",
+      never: "noch kein {{prod}}-Release des Projekts",
       last_one: "Projekt: letztes vor {{count}} Tag",
       last_other: "Projekt: letztes vor {{count}} Tagen",
       lastLower_one: "Projekt: letztes vor mindestens {{count}} Tag",
@@ -131,7 +133,7 @@ export const de = {
     countAll_other: "{{count}} Repos.",
     countOpen: "{{n}} von {{total}} Repos gezeigt.",
     order:
-      "Reihenfolge: zuerst die Repos, deren Projekt seit über {{breach}} Tagen kein Release hat, dann die mit einem Release vor {{from}}–{{breach}} Tagen, die nicht beurteilbaren und die übrigen (wer die Abmachung zur Zeit bis {{prod}} verletzt, zuerst); am Schluss Libraries und Repos ohne Aktivität.",
+      "Reihenfolge: zuerst die Repos, deren Projekt seit über {{breach}} Tagen kein Release hat, dann die, deren Projekt noch nie nach {{prod}} kam, die mit einem Release des Projekts vor {{from}}–{{breach}} Tagen, die nicht beurteilbaren und die übrigen (wer die Abmachung zur Zeit bis {{prod}} verletzt, zuerst); am Schluss Libraries und Repos ohne Aktivität.",
     unit: {
       perWeek: "{{n}} pro Woche",
       workingDays: "{{n}} Arbeitstage",
@@ -210,6 +212,8 @@ export const de = {
   },
   common: {
     cw: "KW {{kw}}",
+    cwSpan: "KW {{from}}–{{to}}",
+    cwSpanYears: "KW {{from}}/{{fromYear}}–KW {{to}}/{{toYear}}",
     hours: "{{n}} h",
     nOf: "{{n}} von {{total}}",
     nPRs_one: "{{count}} PR",
@@ -244,9 +248,8 @@ export const de = {
     print: "Drucken / PDF",
     title: "Engineering-Metriken",
     scope:
-      "Team {{team}}, {{product}} · KW {{from}}–{{to}} · {{start}} bis {{end}} · verglichen mit den {{weeks}} Wochen davor, {{prevStart}} bis {{prevEnd}}",
-    scopeAlone:
-      "Team {{team}}, {{product}} · KW {{from}}–{{to}} · {{start}} bis {{end}}",
+      "Team {{team}}, {{product}} · {{span}} · {{start}} bis {{end}} · verglichen mit den {{weeks}} Wochen davor, {{prevStart}} bis {{prevEnd}}",
+    scopeAlone: "Team {{team}}, {{product}} · {{span}} · {{start}} bis {{end}}",
     running:
       "Laufende Woche, KW {{kw}}, bis jetzt: {{releases}}, {{merged}}, {{runs}}. Sie zählt in keiner Zahl dieser Seite mit; nur die offenen PRs zeigen den Stand von jetzt.",
     runningReleases_one: "{{count}} Release",
@@ -316,6 +319,7 @@ export const de = {
       first_deploys: "erste Deploys überwiegen",
       incomplete: "Daten lückenhaft",
       no_value: "kein Wert",
+      not_reporting: "{{source}} liefert keine Daten",
     },
     buildSuccess: "Erfolgreiche Builds, {{kind}}",
   },
@@ -337,7 +341,6 @@ export const de = {
     intro:
       "Was die letzten {{weeks}} ganzen Wochen zeigen, und wo sich am meisten bewegt.",
     assess: {
-      weeks: "KW {{from}}–{{to}}",
       ask: "↻ Neu einschätzen",
       askFirst: "Jetzt einschätzen",
       running: "läuft …",
@@ -828,9 +831,9 @@ export const de = {
         data_gap:
           "Die Quelle liefert schon vor dem Ende des Zeitraums keine Daten mehr. Ihre Zahlen sagen darum nichts über die Arbeit des Teams.",
         pr_jam:
-          "Vier oder mehr PRs seit einer Woche oder länger offen, Entwürfe nicht gezählt. Warum sie liegen, zeigen die Daten nicht: ein Merge-Stopp, eine Abhängigkeit, Ferien oder niemand fühlt sich zuständig.",
+          "{{min}} oder mehr PRs seit {{days}} Tagen oder länger offen, Entwürfe nicht gezählt. Warum sie liegen, zeigen die Daten nicht: ein Merge-Stopp, eine Abhängigkeit, Ferien oder niemand fühlt sich zuständig.",
         slower_build:
-          "Der typische erfolgreiche Build dauert mindestens anderthalbmal so lang wie in der Vorperiode. Verglichen wird das Repo mit sich selbst, nicht mit anderen. Was im Build langsamer wurde, zeigen die Daten nicht.",
+          "Der typische erfolgreiche Build dauert mindestens {{factor}}-mal so lang wie in der Vorperiode. Verglichen wird das Repo mit sich selbst, nicht mit anderen. Was im Build langsamer wurde, zeigen die Daten nicht.",
         failing_more:
           "Builds scheitern viel öfter als in der Vorperiode. Ob Tests, Infrastruktur oder echte Fehler, zeigen die Daten nicht.",
         changeGood:
@@ -886,7 +889,7 @@ export const de = {
       },
       label: {
         silent_days: "Tage ohne Daten",
-        open_long: "PRs ≥ 7 Tage offen",
+        open_long: "lange offene PRs",
         open: "offene PRs",
         age_p50: "typisches Alter",
         failure_rate: "Builds fehlgeschlagen",
@@ -1014,7 +1017,7 @@ export const de = {
       slowest_one: "die langsamsten 10 %: über {{p90}} · aus {{count}} PR",
       slowest_other: "die langsamsten 10 %: über {{p90}} · aus {{count}} PRs",
       directionWhy: "schnellere Rückmeldung von echten Nutzern",
-      lowSample: "Weniger als 10 PRs: wenig belastbar",
+      lowSample: "Weniger als {{n}} PRs: wenig belastbar",
       means:
         "Die Zeit, in der eine fertige Änderung noch keinem Nutzer hilft. Lang heisst: Rückmeldungen kommen spät, Fehler lassen sich schwer einer Änderung zuordnen, Releases werden gross.",
       watch:
@@ -1201,7 +1204,7 @@ export const de = {
       means:
         "Wie viele PRs innert 24 Stunden nach dem Öffnen gemerged sind. Danach ist der Autor meist schon bei der nächsten Aufgabe; Rückfragen kosten dann doppelt.",
       watch:
-        "viele PRs über drei Tage offen sind: Das sind meist grosse PRs oder solche, die auf jemanden warten.",
+        "viele PRs über {{days}} Tage offen sind: Das sind meist grosse PRs oder solche, die auf jemanden warten.",
       lever: "kleinere PRs, früh angefragte Reviews.",
       def: "Pro PR die Zeit vom Öffnen bis zum Merge. Typisch dauert das {{p50}}, die langsamsten 10 % über {{p90}}.",
       basis: "{{count}} von {{n}} PRs von Menschen, gemerged im Zeitraum.",
@@ -1451,6 +1454,10 @@ export const de = {
     noCompareNoValue:
       "keine vergleichbaren Builds dieser Art in der Vorperiode",
     noCompareIncomplete: "Build-Daten der Vorperiode unvollständig",
+    noCompareStarted: "{{source}} liefert erst seit dem {{date}} Daten",
+    noCompareNotReporting: "{{source}} liefert keine Daten",
+    noCompareLost: "Bitbucket lieferte vom {{from}} bis {{to}} keine Daten",
+    noCompareLostOngoing: "Bitbucket liefert seit dem {{from}} keine Daten",
     noCompareLowSample:
       "unter {{min}} Builds im Zeitraum oder in der Vorperiode",
     fineText: "{{p50}}, {{rate}} fehlgeschlagen",

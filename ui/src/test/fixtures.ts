@@ -49,6 +49,7 @@ export function weeks(n: number): Week[] {
       start: new Date(start).toISOString(),
       end: new Date(start + 7 * DAY).toISOString(),
       kw: 46 - (n - 1 - i),
+      year: 2026,
     };
   });
 }
@@ -211,6 +212,7 @@ export function trends(n = 4): Trends {
       start: run.end,
       end: new Date(Date.parse(run.end) + 7 * DAY).toISOString(),
       kw: run.kw + 1,
+      year: run.year,
       running: true,
     });
   const series = (vals: (number | null)[], gaps: TrendGap[]): TrendSeries => ({
@@ -607,6 +609,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
         lower_bound: 0,
         unmeasured: 0,
         low_sample: true,
+        low_sample_n: 10,
       },
       lead_time_pre: {
         environment: "intg",
@@ -614,6 +617,7 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
         lower_bound: 0,
         unmeasured: 0,
         low_sample: true,
+        low_sample_n: 10,
       },
     },
     coverage: {
@@ -931,7 +935,12 @@ export function metrics(n = 4, o: Partial<Metrics> = {}): Metrics {
       ],
     },
     running_week: {
-      week: { start: w[n - 1].end, end: w[n - 1].end, kw: w[n - 1].kw + 1 },
+      week: {
+        start: w[n - 1].end,
+        end: w[n - 1].end,
+        kw: w[n - 1].kw + 1,
+        year: w[n - 1].year,
+      },
       to: w[n - 1].end,
       releases: 1,
       merged: 2,

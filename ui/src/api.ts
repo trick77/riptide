@@ -45,7 +45,8 @@ export type Silence = {
 
 export type Product = { key: string; repos: string[]; apps: string[] };
 
-export type Week = { start: string; end: string; kw: number };
+// year: the ISO year kw counts in; 0 in an assessment stored before it.
+export type Week = { start: string; end: string; kw: number; year: number };
 
 // last_day: the last calendar day before `to`, YYYY-MM-DD, the backend's.
 export type Period = {
@@ -128,7 +129,9 @@ export type LeadTimes = {
   // Traced there too, but without a start (no pushed commit, no opening):
   // in no time. human.n + unmeasured = the PRs traced there.
   unmeasured: number;
+  // Fewer than low_sample_n PRs, but some: the count the page writes.
   low_sample: boolean;
+  low_sample_n: number;
 };
 
 // Why tracing cannot place a merged PR, the first reason that applies.
@@ -607,8 +610,10 @@ export type Trends = {
   releases: TrendSeries;
 };
 
+// never: its project never released to production as far as the data
+// goes; no breach, no card.
 export type RepoGroupKey =
-  "none" | "rare" | "unjudged" | "regular" | "library" | "idle";
+  "none" | "never" | "rare" | "unjudged" | "regular" | "library" | "idle";
 
 // A threshold a repo's number is past, as the state's card names it:
 // no_release and release_due its project's.
@@ -629,8 +634,7 @@ export type RepoReason =
   | "bitbucket_silent"
   | "no_prod_stage"
   | "infra"
-  | "untraced"
-  | "never_released";
+  | "untraced";
 
 // One repo's numbers over the period; null where too few cases.
 export type RepoRow = {

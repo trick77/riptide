@@ -14,7 +14,7 @@ import {
   spreadOf,
   unitValue,
 } from "./repostrip";
-import { num } from "./format";
+import { num, weekSpan } from "./format";
 import i18n from "./i18n";
 import { analysisStatus, facts, metrics, trends } from "./test/fixtures";
 import { TrendChart } from "./trends";
@@ -44,6 +44,25 @@ describe("repo strip", () => {
     // The caption reads alone: what is missing, and when.
     expect(screen.getByText("kein Release im Zeitraum")).toBeInTheDocument();
     expect(screen.getByText("typisch")).toBeInTheDocument();
+  });
+
+  // A repo's own releases have no threshold of its own: the backend sends
+  // every dot neutral and sets apart each repo without one, which reads
+  // as such, never as an agreement broken.
+  it("keeps a dot set apart neutral where the backend judges none", () => {
+    const neutral: RepoSpread = {
+      ...rel,
+      dots: rel.dots.map((d) => ({ ...d, verdict: "neutral" })),
+    };
+    render(<RepoStrip s={neutral} label="Releases" />);
+    const apart = screen.getByRole("button", { name: /^lager\/lager-api: / });
+    expect(apart).toHaveAccessibleName(
+      "lager/lager-api: kein Release im Zeitraum",
+    );
+    expect(apart.getAttribute("stroke")).not.toMatch(/danger/);
+    expect(
+      screen.getByText("kein Release im Zeitraum").getAttribute("fill"),
+    ).toBe("var(--color-muted)");
   });
 
   it("names the repo and its value on hover and focus, opens it on click and Enter", () => {
@@ -225,19 +244,21 @@ describe("ranking", () => {
     render(<Ranking m={metrics()} onRepo={onRepo} />);
     const rank = screen.getByTestId("ranking");
     expect(within(rank).getAllByTestId("rank-row")).toHaveLength(8);
-    // The groups say what the rule decides, cut by the team's thresholds.
+    // The groups say what the rule decides, cut by the team's thresholds,
+    // and that it is the project's release in the heading itself.
     for (const g of [
-      "Kein Release seit über 28 Tagen",
-      "Letztes Release vor 15–28 Tagen",
+      "Projekt ohne Release seit über 28 Tagen",
+      "Letztes Release des Projekts vor 15–28 Tagen",
       "Nicht beurteilbar",
-      "Release in den letzten 14 Tagen",
+      "Projekt mit Release in den letzten 14 Tagen",
     ])
       expect(within(rank).getAllByText(g).length).toBeGreaterThan(0);
     expect(
-      within(rank).getByText(
-        "beim Projekt des Repos, obwohl daran gearbeitet wurde",
-      ),
+      within(rank).getByText("obwohl daran gearbeitet wurde"),
     ).toBeInTheDocument();
+    expect(within(rank).queryByText(/beim Projekt des Repos/)).toBeNull();
+    // A heading that says all has no sub-line, never a key.
+    expect(rank.textContent).not.toMatch(/repos\.groupSub/);
     // How a row writes its releases is the backend's: the count over its
     // weeks under one a week, the project's last release below.
     expect(within(rank).getByText("1 Release in 4 Wochen")).toBeInTheDocument();
@@ -273,7 +294,7 @@ describe("ranking", () => {
       ),
     ]);
     expect(
-      within(rank).getAllByText("Release in den letzten 14 Tagen"),
+      within(rank).getAllByText("Projekt mit Release in den letzten 14 Tagen"),
     ).toHaveLength(1);
     fireEvent.click(
       within(rank).getByRole("button", { name: "alle 9 zeigen" }),
@@ -300,6 +321,115 @@ describe("ranking", () => {
       />,
     );
     expect(container).toBeEmptyDOMElement();
+  });
+
+  // A project never rolled out is no breach (owner, 2026-11-26): its own
+  // group right after the breach, neutral; the row says so where the
+  // others name the project's last release, and its waiting work keeps
+  // its red flag.
+  it("sets a project never rolled out apart, neutral", () => {
+    const m = metrics();
+    const v = m.repos;
+    const never = {
+      ...v.rows[0],
+      repo: "post/post-api",
+      project: "post",
+      group: "never" as const,
+      last_release: null,
+      days_since: null,
+      merged: 5,
+      flags: [
+        { key: "not_on_prod" as const, tone: "breach" as const, value: 20 },
+      ],
+    };
+    render(
+      <Ranking
+        m={{
+          ...m,
+          repos: {
+            ...v,
+            rows: [v.rows[0], never, ...v.rows.slice(1)],
+            open: 9,
+            groups: [
+              v.groups[0],
+              { key: "never", count: 1, hidden_count: 0, hidden: [], more: 0 },
+              ...v.groups.slice(1),
+            ],
+          },
+        }}
+        onRepo={() => {}}
+      />,
+    );
+    const rank = screen.getByTestId("ranking");
+    const head = within(rank).getByText("Noch kein PROD-Release");
+    expect(head.parentElement!.querySelector("span")!.className).not.toMatch(
+      /bg-danger/,
+    );
+    const row = within(rank).getAllByTestId("rank-row")[1];
+    expect(row).toHaveTextContent("noch kein PROD-Release des Projekts");
+    expect(row).toHaveTextContent("ältester PR seit 20 Tagen nicht auf PROD");
+    // Nothing of it on production, said without the breach's red.
+    const lying = within(row).getByText("kein PR auf PROD");
+    expect(lying.className).not.toMatch(/danger/);
+    expect(
+      within(rank).queryByText(/kein Release des Projekts nach/),
+    ).toBeNull();
+  });
+
+  // The count over the weeks reads as German counts them, and a rate of
+  // none is 0, as the strips write it.
+  it("writes one week and none as such", () => {
+    const m = metrics();
+    const v = m.repos;
+    const first = {
+      ...v.rows[3],
+      releases: 1,
+      releases_per_week: null,
+      releases_base: 1,
+      releases_form: "in_weeks" as const,
+      merged: 0,
+      merged_per_week: 0,
+    };
+    render(
+      <Ranking
+        m={{ ...m, repos: { ...v, rows: [first], open: 1, groups: [] } }}
+        onRepo={() => {}}
+      />,
+    );
+    const row = screen.getByTestId("rank-row");
+    expect(row).toHaveTextContent("1 Release in 1 Woche");
+    expect(row).not.toHaveTextContent("1 Wochen");
+    expect(row).not.toHaveTextContent("0.00");
+  });
+
+  // A span across a new year names both years, so 52 weeks never read as
+  // "KW 48–47"; within one year the short form stays.
+  it("names the years of a span across a new year", () => {
+    const m = metrics();
+    const weeks = m.trends.weeks.map((w, i) => ({
+      ...w,
+      year: i < m.trends.split ? 2025 : 2026,
+    }));
+    render(
+      <Ranking
+        m={{ ...m, trends: { ...m.trends, weeks } }}
+        onRepo={() => {}}
+      />,
+    );
+    const first = weeks[0].kw;
+    const last = weeks.filter((w) => !w.running).at(-1)!.kw;
+    expect(
+      screen.getByText(
+        `Die Balken zeigen die Releases pro Woche, KW ${first}/2025–KW ${last}/2026; die Vorperiode ist hinterlegt.`,
+      ),
+    ).toBeInTheDocument();
+    expect(weekSpan(t, weeks[4], weeks[7])).toBe(
+      `KW ${weeks[4].kw}–${weeks[7].kw}`,
+    );
+    // An assessment stored before the year: the short form.
+    expect(weekSpan(t, { ...weeks[0], year: 0 }, weeks[7])).toBe(
+      `KW ${first}–${weeks[7].kw}`,
+    );
   });
 });
 

@@ -573,7 +573,9 @@ source's first data after the previous period began; `source`, `since`),
 `to`), `first_deploys` (more first deploys than releases in a period,
 deploy frequency only), `incomplete` (covered, not alike: the build type
 first reported inside the previous period, or lead times mostly placed
-through a lower bound).
+through a lower bound). Each repo's build comparison names the same cause
+as its kind's numbers. `not_reporting` names its `source` too: any source
+may be the one without data, not only Argo CD.
 
 Deploy frequency also comes per calendar day in the viewer's zone, the
 period's weeks Monday first: each release on the day of its first deploy in
@@ -726,7 +728,7 @@ month and one shipping five times a day read as "twice a week". `repos`
 sets the period's numbers out per repo of the view, each repo with a merged
 PR in the period or the previous one, from the rows the request already
 holds (both periods' PRs, tracing's releases, the build section's runs per
-repo):
+repo), plus the states' look-back (below):
 
 - The release rule is per project (owner: at least one release to
   production per sprint per project), so a repo's group is its project's
@@ -736,26 +738,39 @@ repo):
   `release_breach_days`: a release in the last 14 days (`regular`), 15 to
   28 days back (`rare`), more (`none`, the rule broken). A row is flagged
   for a state exactly where the state's card names it or its project: never
-  red where the card raises nothing. A repo its project's last release left
+  red where the card raises nothing, in every view. So whether anyone works
+  on a repo and what of it waits for production read the PRs the states
+  read: people's merged PRs from 26 weeks before the period's end on
+  (`StateLookbackFrom`), whatever the view's length. A 26-week view's
+  previous period lies past that and flags nothing; a 4- or 12-week view
+  reads the look-back before its previous period too, a lean read beside
+  the others (PRs and deploys only), as the analysis does. A repo only the
+  look-back holds gets a row where a flag names it, none otherwise. One
+  gap stays: a card's hysteresis (a unit named a week before kept just
+  under its threshold) no row shows. A repo its project's last release left
   unchanged, its merged work waiting longer than `not_on_prod_days`, is
-  flagged `not_on_prod` (its oldest PR not on production, both periods'
-  PRs read), not a missed release. Not judged: a library (never rolled
-  out), a repo nobody works on (no counted merge since its project's last
-  release nor within `release_breach_days`), and, as `unjudged` with a
-  reason, the assessment's gates: Argo CD not reporting, Argo CD or
-  Bitbucket silent 7 days at the period's end, Argo CD reporting no deploy
-  to the production stage; then one only infrastructure Apps deploy, one
-  no App is known to deploy, one whose project never released to
-  production as far as the data goes (the rule judges a project rolled out
-  only; its waiting work is `not_on_prod`'s). A gated source flags nothing
-  and judges no dot. Never judged as regular for want of data.
+  flagged `not_on_prod` (its oldest PR not on production), not a missed
+  release. A project none of whose Apps ever released to production as far
+  as the data goes is no breach (the rule judges a project rolled out
+  only, owner 2026-11-26): its worked-on repos form their own group,
+  `never`, right after `none`, neutral; their waiting work is
+  `not_on_prod`'s, red as ever. Not judged: a library (never rolled out), a
+  repo nobody works on (no counted merge since its project's last release
+  nor within `release_breach_days`), and, as `unjudged` with a reason, the
+  assessment's gates: Argo CD not reporting, Argo CD or Bitbucket silent 7
+  days at the period's end, Argo CD reporting no deploy to the production
+  stage; then one only infrastructure Apps deploy, one no App is known to
+  deploy. A gated source flags nothing and judges no dot. Never judged as
+  regular for want of data.
 - A repo's own releases are its Apps' releases to production that tracing
-  does not show leaving it unchanged, read as tracing knew them by the
+  does not show leaving it unchanged, an infrastructure App's none (the
+  team's frequency counts none either), read as tracing knew them by the
   period's end, each GitOps revision once, in the week of its first deploy;
   an App's first deploy within the grace after Argo CD's first event counts
   as no release, as the team's frequency has it. `releases_form` says how
   the row writes them (none, per week from one a week, else the count over
-  `releases_base` weeks), null where Argo CD cannot tell.
+  `releases_base` weeks), null where Argo CD cannot tell or only
+  infrastructure Apps deploy the repo.
 - The wait from the trunk to production, the typical pickup to the first
   review and a build kind's typical duration and failures are the states'
   own numbers (`slow_to_prod`, `first_review_wait`, `long_builds`,
@@ -767,8 +782,8 @@ repo):
   the releases and the wait to production neither), as the comparison
   holds.
 
-The ranking orders the groups none, rare, unjudged, regular, library,
-idle; the longest without a release first, within regular those past a red
+The ranking orders the groups none, never, rare, unjudged, regular,
+library, idle; the longest without a release first, within regular those past a red
 threshold (`not_on_prod`, `slow_to_prod`) first, then the slowest to
 production. It opens 8 rows, or all of
 them when fewer than 3 would stay hidden, and names the first 5 hidden per
@@ -783,9 +798,12 @@ largest value, the values centred (900 s and 902 s stay together, never at
 opposite ends); ticks on round values of the unit. A build kind's duration
 is drawn at the minutes it is judged on. Each dot's verdict is against the team's threshold where the number
 has one (`breach` where its state is the rule broken, `hint` where it is a
-hint), `neutral` where it has none. A repo that released nothing in the
-period while not rolling out (`none`) is set apart at the strip's end, not
-placed at zero. Placed repos at one value only make no strip (every dot on
+hint), `neutral` where it has none. A repo's releases have no threshold of
+their own: the rule is its project's, said in the ranking's group and flag,
+so every dot on the releases strip is `neutral`, and every repo with no
+release in the period is set apart at the strip's end, not placed at zero,
+whatever its project's standing. On the wait to production a repo of the
+`none` group whose merged PRs none reached production is set apart, red. Placed repos at one value only make no strip (every dot on
 one spot reads as a picture of nothing): `same` carries the value for a line
 instead. The typical repo is the median of the placed repos. A note says what the team's number hides,
 from 3 repos with a value on: one repo carrying half of the team's own

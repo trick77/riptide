@@ -184,9 +184,9 @@ func (d Deps) load(ctx context.Context, v view, from, to time.Time, kind readKin
 // end classes them all (ClassAt), with the reads they share done once; the
 // running week, when given, classed by its own end. Side by side; the first
 // to fail cancels the others, and its error, not the cancellation, is
-// returned. states: the assessment's read, whose shared read takes the
-// approvals and whose periods past the second are the look-back of its
-// states (readEarlier).
+// returned. Periods past the second are the look-back of the states, read
+// lean (readEarlier). states: the assessment's read, whose shared read
+// takes the approvals.
 func (d Deps) periods(ctx context.Context, v view, ps []metrics.Period, running *metrics.Period,
 	states bool) ([]*dataset.Dataset, *dataset.Dataset, error) {
 	ctx, cancel := context.WithCancel(ctx)
@@ -215,7 +215,7 @@ func (d Deps) periods(ctx context.Context, v view, ps []metrics.Period, running 
 	var wg sync.WaitGroup
 	for i, p := range ps {
 		kind := readFull
-		if states && i >= 2 {
+		if i >= 2 {
 			kind = readEarlier
 		}
 		wg.Go(func() {
@@ -288,14 +288,24 @@ func (d Deps) metrics(w http.ResponseWriter, r *http.Request) {
 	// The period, the previous one to compare with, and the week running
 	// now (open PRs as they are, its counts): three reads side by side, the
 	// reads they share done once before. Not one longer read: lead times and
-	// costs take the dataset's bounds as their window.
-	ds, running, err := d.periods(r.Context(), v, []metrics.Period{v.params.Period, v.params.Previous}, &v.params.Running,
-		false)
+	// costs take the dataset's bounds as their window. The states' look-back
+	// before the previous period, where it reaches further (StatePeriod), a
+	// lean read beside them: the per-repo view's flags read the PRs the
+	// assessment's cards read.
+	ps := []metrics.Period{v.params.Period, v.params.Previous}
+	if look := metrics.StatePeriod(v.params.Period, v.params.Previous); look != nil {
+		ps = append(ps, *look)
+	}
+	ds, running, err := d.periods(r.Context(), v, ps, &v.params.Running, false)
 	if err != nil {
 		d.failed(w, r, v.team, err)
 		return
 	}
-	m := metrics.Compute(ds[0], ds[1], running, v.params)
+	p := v.params
+	if len(ds) > 2 {
+		p.Earlier = ds[2]
+	}
+	m := metrics.Compute(ds[0], ds[1], running, p)
 	d.Log.InfoContext(r.Context(), "metrics_served", "team", v.team, "from", v.params.Period.From,
 		"to", v.params.Period.To, "duration_ms", time.Since(started).Milliseconds())
 	httpapi.WriteJSON(w, http.StatusOK, m)

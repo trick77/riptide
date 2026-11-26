@@ -239,6 +239,17 @@ func TestVocabularyIsThePages(t *testing.T) {
 			}
 		}
 	}
+	// A state's title says the vocabulary's word for its thing, or the model
+	// is told one word and handed another to quote: flaky builds.
+	for _, v := range vocabulary {
+		if v.Thing != "failed, then passed on the same commit" {
+			continue
+		}
+		g := states[metrics.StateFlakyBuilds]
+		if !strings.Contains(strings.ToLower(g.DE), v.DE) || !strings.Contains(strings.ToLower(g.EN), v.EN) {
+			t.Errorf("flaky builds titled %q / %q, the word is %q / %q", g.DE, g.EN, v.DE, v.EN)
+		}
+	}
 	// The prompt tells the model to keep to it.
 	if !strings.Contains(promptText, "- words: the page's fixed vocabulary") || !strings.Contains(promptText, "Write the page's words only") {
 		t.Errorf("the prompt does not hold the model to the page's words")

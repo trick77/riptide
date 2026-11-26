@@ -425,9 +425,10 @@ type baseline struct {
 	repos repoNamer
 	// kinds is Build.repos of the previous period; nil while computing it.
 	kinds map[string]map[string]*repoRuns
-	// incomplete: the previous period is not covered by the run data, or
-	// its runs fall into other kinds (see buildsIncomplete).
-	incomplete bool
+	// why the previous period's runs compare with nothing, as the kinds'
+	// numbers name it (buildsWhy, or Bitbucket's lost events in a product
+	// view); nil where they compare.
+	why *Change
 	// previous: computing the previous period itself, which nobody draws,
 	// so no heatmap.
 	previous bool
@@ -1266,23 +1267,24 @@ func (kr kindRuns) byRepo() map[string]*repoRuns {
 }
 
 // against judges the repo's runs rr against its own of the previous
-// period, prev (nil without any), and sets its flags.
-func (h *RepoHotspot) against(rr, prev *repoRuns, incomplete bool) {
-	if prev == nil && !incomplete {
+// period, prev (nil without any), and sets its flags; why is why the
+// periods do not compare (baseline.why), the kinds' own reason.
+func (h *RepoHotspot) against(rr, prev *repoRuns, why *Change) {
+	if prev == nil && why == nil {
 		h.DurationChange, h.FailureChange = repoDurationMetric.none(ReasonNoValue), repoFailureMetric.none(ReasonNoValue)
 		return
 	}
 	if prev == nil {
 		prev = &repoRuns{}
 	}
-	h.DurationChange = repoDurationMetric.judge(side{Median(rr.durations), rr.timed >= HotspotMinRuns},
-		side{Median(prev.durations), prev.timed >= HotspotMinRuns}, incomplete)
+	h.DurationChange = repoDurationMetric.judgeWhy(side{Median(rr.durations), rr.timed >= HotspotMinRuns},
+		side{Median(prev.durations), prev.timed >= HotspotMinRuns}, why)
 	if p := h.DurationChange.Prev; p != nil && *p > 0 {
 		h.Factor = ptr(*h.Duration.P50 / *p)
 		h.Slow = *h.Factor+eps >= SlowFactor
 	}
-	h.FailureChange = repoFailureMetric.judge(side{h.FailureRate, rr.counted >= HotspotMinRuns},
-		side{ratio(prev.failures, prev.counted), prev.counted >= HotspotMinRuns}, incomplete)
+	h.FailureChange = repoFailureMetric.judgeWhy(side{h.FailureRate, rr.counted >= HotspotMinRuns},
+		side{ratio(prev.failures, prev.counted), prev.counted >= HotspotMinRuns}, why)
 	if p := h.FailureChange.Prev; p != nil {
 		h.FailingMore = h.Failures >= FailingMoreMinFailures && *h.FailureRate+eps >= failingMoreThreshold(*p)
 	}
@@ -1326,7 +1328,7 @@ func kindHotspots(
 			FailureRate: ratio(rr.failures, rr.counted), WastedSeconds: rr.wasted, CISeconds: rr.ci,
 			FlakyRuns: rr.flaky, FlakySeconds: rr.flakySecs,
 		}
-		h.against(rr, prev[repo], base.incomplete)
+		h.against(rr, prev[repo], base.why)
 		h.Compared = h.DurationChange.Prev != nil || h.FailureChange.Prev != nil
 		h.PrevComplete = h.DurationChange.Prev != nil && h.FailureChange.Prev != nil
 		h.Plotted = h.Duration.P50 != nil && h.FailureRate != nil

@@ -258,7 +258,11 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
                 why={t("overview.lead.directionWhy")}
               />
             }
-            warn={lt.low_sample ? t("overview.lead.lowSample") : undefined}
+            warn={
+              lt.low_sample
+                ? t("overview.lead.lowSample", { n: lt.low_sample_n })
+                : undefined
+            }
             compare={{
               change: c.lead_time,
               format: dur,

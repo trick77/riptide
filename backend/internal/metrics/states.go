@@ -961,13 +961,12 @@ func newStateInput(a *assessor) *stateInput {
 			in.traces[repo] = t
 		}
 		for _, pr := range ds.PRs {
-			key := pr.Repo + "#" + strconv.FormatInt(pr.PRID, 10)
+			key := prKey(pr)
 			if !seenAll[key] {
 				seenAll[key] = true
 				all.PRs = append(all.PRs, pr)
 			}
-			if seen[key] || pr.GitOps || pr.Bot || pr.State != "merged" || pr.MergedAt == nil || !a.f.inKey(pr.Project) ||
-				pr.MergedAt.Before(in.from) {
+			if seen[key] || !statePR(pr, a.f, in.from) {
 				continue
 			}
 			seen[key] = true
@@ -991,6 +990,19 @@ func newStateInput(a *assessor) *stateInput {
 	in.view.Traces = in.traces
 	in.infra = infraRepos(a.ds, in.traces)
 	return in
+}
+
+// prKey names a PR across the windows read: one PR is read by one window,
+// but a window's bounds are no promise.
+func prKey(pr dataset.PR) string { return pr.Repo + "#" + strconv.FormatInt(pr.PRID, 10) }
+
+// statePR reports whether pr is one of the PRs the states read: a person's
+// merged PR of the view (f) merged from the look-back's start (from,
+// StateLookbackFrom) on. The per-repo view reads the same, so a row's flags
+// are its cards'.
+func statePR(pr dataset.PR, f filter, from time.Time) bool {
+	return !pr.GitOps && !pr.Bot && pr.State == "merged" && pr.MergedAt != nil && f.inKey(pr.Project) &&
+		!pr.MergedAt.Before(from)
 }
 
 // placed is pr placed on production at cutoff, by the traces of every
