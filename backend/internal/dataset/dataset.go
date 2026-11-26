@@ -42,6 +42,7 @@ var (
 	reviewsSQL    = query("reviews.sql")
 	openPRsSQL    = query("open_prs.sql")
 	gitopsSQL     = query("gitops.sql")
+	peopleSQL     = query("people.sql")
 	silencesSQL   = query("silences.sql")
 	reposSQL      = query("repos.sql")
 	repoStartsSQL = query("repo_starts.sql")
@@ -49,8 +50,10 @@ var (
 	librariesSQL  = query("libraries.sql")
 	approvalsSQL  = query("approvals.sql")
 	branchesSQL   = query("branches.sql")
-	// branchOwnersSQL is read on every page (Shared.owners).
+	// branchOwnersSQL and peoplePRsSQL are read on every page (Shared.owners,
+	// Shared.peoples).
 	branchOwnersSQL = query("branch_owners.sql")
+	peoplePRsSQL    = query("people_prs.sql")
 
 	traceDeploysSQL   = query("trace_deploys.sql")
 	traceReleasesSQL  = query("trace_releases.sql")
@@ -168,7 +171,8 @@ type Params struct {
 	// sees them; a row without a project stays. nil excludes nothing.
 	Excluded func(project string) bool
 	// BotBranch is config's automation branch_prefixes: a CI run of such a
-	// branch (lowercased) is a bot's (Run.Bot). nil knows none.
+	// branch (lowercased) is a bot's (Run.Bot), but for a person's PR's
+	// (peoplesPR). nil knows none.
 	BotBranch func(branch string) bool
 	// Now stamps meta.generated_at.
 	Now time.Time
@@ -292,6 +296,52 @@ func (o BranchOwner) bot(automated func(login, displayName string) bool) bool {
 	})
 }
 
+// peoplesPR is a PR a person opened from a bot's branch (sql/people_prs.sql,
+// which states the rule): the person's work, not the bot's. Its PR-<n>
+// builds and its branch's builds after From (the branch's earlier PR
+// closed; nil: any before) up to Until (its close; nil: open) are the
+// team's, unless riptide's automation detection takes its opener for a bot,
+// as it does every PR's opener (Params.Automated).
+type peoplesPR struct {
+	Repo        string     `db:"repo"`
+	Branch      string     `db:"branch"`
+	PRID        int64      `db:"pr_id"`
+	Author      string     `db:"author"`
+	DisplayName string     `db:"display_name"`
+	From        *time.Time `db:"from_at"`
+	Until       *time.Time `db:"until_at"`
+}
+
+// peoples are the peoplesPRs whose opener is no bot by riptide's automation
+// detection: by PR (prKey) and by branch (branchKey).
+type peoples struct {
+	prs      map[string]bool
+	branches map[string][]peoplesPR
+}
+
+// prKey keys a repo's PR as a Jenkins PR build names its branch.
+func prKey(repo string, id int64) string { return repo + "\x00pr-" + strconv.FormatInt(id, 10) }
+
+// persons are sh.peoples whose opener is a person by automated.
+func (sh *Shared) persons(automated func(login, displayName string) bool) peoples {
+	out := peoples{prs: map[string]bool{}, branches: map[string][]peoplesPR{}}
+	for _, p := range sh.peoples {
+		if automated(p.Author, p.DisplayName) {
+			continue
+		}
+		out.prs[prKey(p.Repo, p.PRID)] = true
+		out.branches[branchKey(p.Repo, p.Branch)] = append(out.branches[branchKey(p.Repo, p.Branch)], p)
+	}
+	return out
+}
+
+// built reports whether a build of repo's branch at at is a person's PR's.
+func (ps peoples) built(repo, branch string, at time.Time) bool {
+	return slices.ContainsFunc(ps.branches[branchKey(repo, branch)], func(p peoplesPR) bool {
+		return (p.From == nil || at.After(*p.From)) && (p.Until == nil || !at.After(*p.Until))
+	})
+}
+
 // ApprovalLookback is how far before SharedParams.ApprovalsFrom an
 // approval is read: a PR approved then and still waiting there counts. One
 // approved before is not read at all, whether or not it still waits: the
@@ -306,7 +356,8 @@ type Approval struct {
 	Project string `db:"project"`
 	PRID    int64  `db:"pr_id"`
 	// Bot: a bot's PR (ingest flag, a declared non-human, or riptide's
-	// automation detection on its author), out of every state.
+	// automation detection on its author), out of every state. A person's
+	// PR from a bot's branch is none (sql/people.sql).
 	Bot               bool       `db:"bot"`
 	Opener            string     `db:"opener"`
 	OpenerDisplayName string     `db:"opener_display_name"`
@@ -829,7 +880,8 @@ type Run struct {
 	// GitOps: a run in a GitOps repo, a stage promotion's check.
 	GitOps bool `json:"gitops" db:"gitops"`
 	// Bot: a bot's branch built, by the config's automation branch_prefixes
-	// (Params.BotBranch), or a bot PR's PR-<n>. In no build number: a bot's
+	// (Params.BotBranch), or a bot PR's PR-<n>; never a build a person's PR
+	// from a bot's branch owns (peoplesPR). In no build number: a bot's
 	// failed build is no quality problem of the team's (owner, 2026-11).
 	Bot bool `json:"bot" db:"-"`
 }
@@ -880,7 +932,10 @@ type SharedParams struct {
 // each class end, the library evidence and the tracing's stretches. Never
 // kept past the request: metrics are computed on read.
 type Shared struct {
-	gitops    []string
+	gitops []string
+	// people are the accounts whose PR from a bot's branch is their own
+	// (sql/people.sql), lowercased logins, handed to the PR queries.
+	people    []string
 	starts    SourceTimes
 	silences  []Silence
 	apps      map[time.Time][]App
@@ -897,6 +952,10 @@ type Shared struct {
 	// (sql/branch_owners.sql), read on every page: a bot's branch's builds
 	// are a bot's in every number (markBotRuns).
 	owners []BranchOwner
+	// peoples are the PRs people opened from bots' branches, over all
+	// history (sql/people_prs.sql): their builds are the team's
+	// (markBotRuns).
+	peoples []peoplesPR
 }
 
 // LoadShared reads a page request's Shared: the tracing input side by side
@@ -983,6 +1042,11 @@ func loadShared(ctx context.Context, tx pgx.Tx, p SharedParams) (*Shared, error)
 		gitops = []string{}
 	}
 	sh.gitops = gitops
+	var people []string
+	if err := tx.QueryRow(ctx, peopleSQL, p.Team).Scan(&people); err != nil {
+		return nil, fmt.Errorf("dataset people: %w", err)
+	}
+	sh.people = people
 	meta, err := one[metaRow](ctx, tx, "meta", metaSQL, p.Team, nil)
 	if err != nil {
 		return nil, err
@@ -1034,6 +1098,9 @@ func loadShared(ctx context.Context, tx pgx.Tx, p SharedParams) (*Shared, error)
 	if sh.owners, err = all[BranchOwner](ctx, tx, "branch_owners", branchOwnersSQL, p.Team, p.From, sh.gitops); err != nil {
 		return nil, err
 	}
+	if sh.peoples, err = all[peoplesPR](ctx, tx, "people_prs", peoplePRsSQL, p.Team, sh.people); err != nil {
+		return nil, err
+	}
 	sh.approvals, sh.branches = []Approval{}, []BranchLife{}
 	if p.States {
 		since := p.ApprovalsFrom
@@ -1041,7 +1108,7 @@ func loadShared(ctx context.Context, tx pgx.Tx, p SharedParams) (*Shared, error)
 			since = p.From
 		}
 		if sh.approvals, err = all[Approval](ctx, tx, "approvals", approvalsSQL, p.Team, since.Add(-ApprovalLookback),
-			sh.gitops); err != nil {
+			sh.gitops, sh.people); err != nil {
 			return nil, err
 		}
 		automated := func(login, displayName string) bool {
@@ -1132,12 +1199,13 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 	d.Meta.RepoStarts = []RepoStart{}
 
 	d.GitOpsRepos = sh.gitops
-	if d.PRs, err = all[PR](ctx, tx, "prs", prsSQL, p.Team, p.From, p.To, d.GitOpsRepos, HousekeepingWindow.Seconds()); err != nil {
+	if d.PRs, err = all[PR](ctx, tx, "prs", prsSQL, p.Team, p.From, p.To, d.GitOpsRepos, HousekeepingWindow.Seconds(),
+		sh.people); err != nil {
 		return nil, err
 	}
 	d.OpenPRs, d.Runs = []OpenPR{}, []Run{}
 	if !p.Lean {
-		if d.OpenPRs, err = all[OpenPR](ctx, tx, "open_prs", openPRsSQL, p.Team, p.To, d.GitOpsRepos); err != nil {
+		if d.OpenPRs, err = all[OpenPR](ctx, tx, "open_prs", openPRsSQL, p.Team, p.To, d.GitOpsRepos, sh.people); err != nil {
 			return nil, err
 		}
 	}
@@ -1194,7 +1262,7 @@ func Load(ctx context.Context, db DB, p Params) (*Dataset, error) {
 		d.Runs[i].Branch = Branch(d.Runs[i].PipelineName)
 		d.Runs[i].BranchKind = BranchKind(d.Runs[i].Branch)
 	}
-	markBotRuns(d, p.BotBranch, sh.botBranches(automated))
+	markBotRuns(d, p.BotBranch, sh.botBranches(automated), sh.persons(automated))
 	if !p.FactsOnly {
 		d.Meta.RepoStarts = repoStarts(d, sh.repoStarts)
 	}
@@ -1507,19 +1575,22 @@ func (d *Dataset) Classified(apps []App) *Dataset {
 // markBotRuns flags the runs of a bot's branch (botBranch, the config's
 // prefixes; bots, the branches whose pushes show a bot's or a tool's,
 // branchKey) and the PR-<n> builds of the dataset's bot PRs: a Jenkins PR
-// build names its PR, not the bot's branch.
-func markBotRuns(d *Dataset, botBranch func(string) bool, bots map[string]bool) {
-	key := func(repo string, id int64) string { return repo + "\x00pr-" + strconv.FormatInt(id, 10) }
+// build names its PR, not the bot's branch. Builds follow the PR (owner,
+// 2026-11): a person's PR from a bot's branch (people) owns its PR-<n>
+// builds and its branch's builds over its life, started before its opening
+// too; the same branch's builds for the bot's PRs before or after it stay
+// the bot's.
+func markBotRuns(d *Dataset, botBranch func(string) bool, bots map[string]bool, people peoples) {
 	botPRs := map[string]bool{}
 	for _, pr := range d.PRs {
 		// A PR from a bot's or a tool's branch is built as PR-<n> too.
-		if pr.Bot || (pr.SourceRef != "" && bots[branchKey(pr.Repo, pr.SourceRef)]) {
-			botPRs[key(pr.Repo, pr.PRID)] = true
+		if pr.Bot || (pr.SourceRef != "" && bots[branchKey(pr.Repo, pr.SourceRef)] && !people.prs[prKey(pr.Repo, pr.PRID)]) {
+			botPRs[prKey(pr.Repo, pr.PRID)] = true
 		}
 	}
 	for _, pr := range d.OpenPRs {
 		if pr.Bot {
-			botPRs[key(pr.Repo, pr.PRID)] = true
+			botPRs[prKey(pr.Repo, pr.PRID)] = true
 		}
 	}
 	for i := range d.Runs {
@@ -1527,7 +1598,19 @@ func markBotRuns(d *Dataset, botBranch func(string) bool, bots map[string]bool) 
 		branch := strings.ToLower(r.Branch)
 		r.Bot = (botBranch != nil && branch != "" && botBranch(branch)) ||
 			(r.Repo != nil && botPRs[*r.Repo+"\x00"+branch]) || (r.Repo != nil && branch != "" && bots[branchKey(*r.Repo, branch)])
+		if r.Bot && r.Repo != nil && people.built(*r.Repo, branch, runStart(*r)) {
+			r.Bot = false
+		}
 	}
+}
+
+// runStart is when r started, else when it finished: the code it built is
+// the branch's then.
+func runStart(r Run) time.Time {
+	if r.StartedAt != nil {
+		return *r.StartedAt
+	}
+	return r.OccurredAt
 }
 
 // libraryEvidence is sql/libraries.sql's row: what tells a library repo, one

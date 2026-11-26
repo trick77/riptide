@@ -8,10 +8,14 @@
 -- stage promotion, not work) and `bot`. The UI drops what it does not count.
 -- `bot` here is the ingest-time flag and sender declarations; Go adds
 -- riptide's automation detection on the opener's login and display name, as
--- for commits. The merge commit's deploys are joined in Go.
+-- for commits. The ingest flag of a person's PR from a bot's branch is the
+-- branch's, never the person's (sql/people.sql): flagged, opened by one of
+-- $6, the PR is no bot's, and its reviewers are judged by their accounts
+-- alone. The merge commit's deploys are joined in Go.
 --
 -- $1 team, $2 window start (inclusive), $3 window end (exclusive), $4 the
--- GitOps repos (sql/gitops.sql), $5 dataset.HousekeepingWindow in seconds.
+-- GitOps repos (sql/gitops.sql), $5 dataset.HousekeepingWindow in seconds,
+-- $6 the people (sql/people.sql).
 WITH non_human_identities AS (
   -- Accounts senders declared as non-human (docs/metrics.md, pickup-time query):
   -- is_automated is decided at ingest, so rows written before an identity
@@ -87,12 +91,13 @@ prs AS (
 ),
 -- Every merged PR's target branch in the window's repos, over their whole
 -- history (the repo index, then their pr:merged events), and who opened it:
--- a bot's PR into a branch makes no umbrella of it, as Go tells a bot.
+-- a bot's PR into a branch makes no umbrella of it, as Go tells a bot. A
+-- person's from a bot's branch is the person's ($6).
 targets AS MATERIALIZED (
   SELECT e.repo_full_name, e.pr_id,
          lower(e.payload->'pullRequest'->'toRef'->>'displayId') AS target,
          e.author, e.author_display_name,
-         e.is_automated
+         (e.is_automated AND NOT coalesce(lower(e.author) = ANY($6::text[]), false))
            OR EXISTS (SELECT 1 FROM non_human_identities n
                        WHERE n.handle IN (lower(e.author), lower(e.author_display_name))) AS bot
   FROM bitbucket_events e
@@ -166,7 +171,7 @@ first_commits AS (
   GROUP BY b.repo_full_name, b.pr_id
 ),
 chain AS (
-  SELECT p.*, fc.first_commit_at,
+  SELECT p.*, fc.first_commit_at, pb.person_on_bot_branch,
          -- Merged into another branch than the trunk (a feature or umbrella
          -- branch). Merged work all the same: it was reviewed and merged. A
          -- target the payload does not name counts as the trunk.
@@ -177,19 +182,26 @@ chain AS (
          -- declared non-humans excluded (docs/metrics.md, pickup-time query), oldest
          -- first. Go drops the authors riptide's automation detection
          -- recognises today and takes first_review_at and approved_at from
-         -- what is left, so both count the same reviewers.
+         -- what is left, so both count the same reviewers. On a person's PR
+         -- from a bot's branch every event carries the branch's flag: a
+         -- reviewer there is a bot by its account alone, a SERVICE one
+         -- (which the branch's flag hid at ingest) here.
          (SELECT coalesce(/*{{touches}}*/, '[]'::jsonb)
             FROM bitbucket_events e
            WHERE e.repo_full_name = p.repo_full_name AND e.pr_id = p.pr_id
              AND e.event_type IN (/*{{touch_events}}*/)
              AND lower(e.author) IS DISTINCT FROM lower(p.pr_opener)
-             AND NOT e.is_automated
+             AND (NOT e.is_automated
+                  OR (pb.person_on_bot_branch AND upper(coalesce(e.payload->'actor'->>'type', '')) <> 'SERVICE'))
              AND NOT EXISTS (SELECT 1 FROM non_human_identities n
                               WHERE n.handle IN (lower(e.author), lower(e.author_display_name)))
              AND e.occurred_at >= p.ready_at) AS touches
   FROM prs p
   LEFT JOIN first_commits fc
     ON fc.repo_full_name = p.repo_full_name AND fc.pr_id = p.pr_id
+  -- Flagged at ingest, opened by a person ($6): its flag is the branch's.
+  CROSS JOIN LATERAL (SELECT coalesce(p.automated AND lower(p.pr_opener) = ANY($6::text[]), false)
+                             AS person_on_bot_branch) pb
 )
 SELECT c.repo_full_name AS repo,
        split_part(c.repo_full_name, '/', 1) AS project,
@@ -199,7 +211,7 @@ SELECT c.repo_full_name AS repo,
        -- none for a PR deleted since: its page is gone
        CASE WHEN c.deleted_at IS NULL THEN c.url END AS url,
        c.repo_full_name = ANY($4::text[]) AS gitops,
-       coalesce(c.automated, false)
+       (coalesce(c.automated, false) AND NOT c.person_on_bot_branch)
          OR EXISTS (SELECT 1 FROM non_human_identities n
                      WHERE n.handle IN (lower(c.pr_opener), lower(c.pr_opener_display_name))) AS bot,
        c.change_type,
@@ -304,12 +316,14 @@ SELECT c.repo_full_name AS repo,
        -- the team's repos within $5 seconds of its opening, itself included:
        -- what Go counts housekeeping from (dataset.HousekeepingWindow), over
        -- all history, so a batch opened across a period's edge is one batch
-       -- in both periods.
+       -- in both periods. A person's opening from a bot's branch is the
+       -- person's ($6).
        CASE WHEN c.merged_at IS NOT NULL AND c.opened_at IS NOT NULL AND c.opened_title IS NOT NULL THEN
          (SELECT coalesce(jsonb_agg(jsonb_build_object('repo', o.repo_full_name, 'at', o.occurred_at,
                                                        'author', coalesce(o.author, ''),
                                                        'display_name', coalesce(o.author_display_name, ''),
-                                                       'bot', o.is_automated
+                                                       'bot', (o.is_automated
+                                                               AND NOT coalesce(lower(o.author) = ANY($6::text[]), false))
                                                               OR o.repo_full_name = ANY($4::text[])
                                                               OR EXISTS (SELECT 1 FROM non_human_identities n
                                                                           WHERE n.handle IN (lower(o.author), lower(o.author_display_name))))

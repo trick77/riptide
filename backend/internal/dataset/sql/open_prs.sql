@@ -24,13 +24,16 @@
 -- opened before ingestion started has one too; else its pr:opened. The age
 -- runs from ready_since, its last turn ready (see there), not from it.
 -- GitOps repos left out (stage promotions, docs/metrics.md). `bot` and the
--- touches as in prs.sql: Go adds riptide's automation detection and drops
--- the opener's own and pre-ready touches.
+-- touches as in prs.sql, a person's PR from a bot's branch included: Go adds
+-- riptide's automation detection and drops the opener's own and pre-ready
+-- touches.
 --
 -- One pass over the team's PR events, their scalars only; a payload is read
--- for one event per open PR alone.
+-- for one event per open PR alone, and for a flagged touch's actor on a
+-- person's PR from a bot's branch.
 --
--- $1 team, $2 the instant T, $3 the GitOps repos (sql/gitops.sql).
+-- $1 team, $2 the instant T, $3 the GitOps repos (sql/gitops.sql), $4 the
+-- people (sql/people.sql).
 WITH non_human_identities AS (
   -- Accounts senders declared as non-human (docs/metrics.md, pickup-time query).
 /*{{non_human_identities}}*/
@@ -42,6 +45,7 @@ pr_events AS MATERIALIZED (
          upper(x.pr->>'state') AS state,
          coalesce(x.pr->>'draft', 'false') = 'true' AS draft,
          x.pr->>'createdDate' AS created_ms,
+         x.pr->'author'->'user'->>'name' AS pr_author,
          EXISTS (SELECT 1 FROM non_human_identities n
                   WHERE n.handle IN (lower(e.author), lower(e.author_display_name))) AS declared_non_human
   FROM bitbucket_events e
@@ -69,13 +73,24 @@ status AS (
          (array_agg(id ORDER BY occurred_at, id) FILTER (WHERE NOT before))[1] AS next_id,
          (array_agg(event_type ORDER BY occurred_at, id) FILTER (WHERE NOT before))[1] AS next_type,
          (array_agg(state ORDER BY occurred_at, id) FILTER (WHERE NOT before))[1] AS next_state,
-         max(CASE WHEN created_ms ~ '^\d{1,15}$' THEN to_timestamp(created_ms::bigint / 1000.0) END) AS created_at
+         max(CASE WHEN created_ms ~ '^\d{1,15}$' THEN to_timestamp(created_ms::bigint / 1000.0) END) AS created_at,
+         -- Ingest-time automation as prs.sql reads it, on pr:opened; a PR
+         -- opened before ingestion has none, so then on what its side sends
+         -- (pushes, edits), never the reviewers'.
+         coalesce(bool_or(is_automated) FILTER (WHERE event_type = 'pr:opened'),
+                  bool_or(is_automated) FILTER (WHERE event_type IN
+                      ('pr:modified', 'pr:ready_for_review', 'pr:back_to_draft', 'pr:from_ref_updated', 'pr:merged')),
+                  false) AS automated,
+         coalesce(max(author) FILTER (WHERE event_type = 'pr:opened'), max(pr_author)) AS opener
   FROM pr_events
   GROUP BY repo_full_name, pr_id
 ),
 open_keys AS (
   SELECT s.repo_full_name, s.pr_id, s.seen, s.created_at, s.latest_at, s.deleted_ever,
-         coalesce(s.latest_id, s.next_id) AS payload_id
+         coalesce(s.latest_id, s.next_id) AS payload_id, s.automated,
+         -- Flagged and opened by a person ($4): the flag is a bot's
+         -- branch's.
+         coalesce(s.automated AND lower(s.opener) = ANY($4::text[]), false) AS person_on_bot_branch
   FROM status s
   WHERE CASE WHEN s.seen
              THEN NOT s.closed AND s.latest_type <> 'pr:declined'
@@ -95,13 +110,6 @@ details AS (
          max(e.occurred_at) FILTER (WHERE e.before AND e.draft) AS last_draft_at,
          max(e.author) FILTER (WHERE e.event_type = 'pr:opened') AS opened_author,
          max(e.author_display_name) FILTER (WHERE e.event_type = 'pr:opened') AS opened_display_name,
-         -- Ingest-time automation as prs.sql reads it, on pr:opened; a PR
-         -- opened before ingestion has none, so then on what its side sends
-         -- (pushes, edits), never the reviewers'.
-         coalesce(bool_or(e.is_automated) FILTER (WHERE e.event_type = 'pr:opened'),
-                  bool_or(e.is_automated) FILTER (WHERE e.event_type IN
-                      ('pr:modified', 'pr:ready_for_review', 'pr:back_to_draft', 'pr:from_ref_updated', 'pr:merged')),
-                  false) AS automated,
          -- change_type means something on PR events only, and every PR
          -- event stores the source branch.
          coalesce(max(e.change_type) FILTER (WHERE e.event_type = 'pr:opened'),
@@ -110,11 +118,17 @@ details AS (
          -- Keys hold no space: joined, an aggregate of one row per PR.
          max(array_to_string(e.jira_keys, ' ')) FILTER (WHERE e.event_type = 'pr:opened') AS opened_jira_keys,
          -- Reviewer touches before T, bots and declared non-humans out,
-         -- oldest first.
+         -- oldest first. On a person's PR from a bot's branch a reviewer is
+         -- a bot by its account alone (prs.sql): a SERVICE one, which the
+         -- branch's flag hid at ingest, its payload read for that alone.
          coalesce(/*{{touches}}*/
                   FILTER (WHERE e.before
                             AND e.event_type IN (/*{{touch_events}}*/)
-                            AND NOT e.is_automated AND NOT coalesce(e.declared_non_human, false)),
+                            AND (NOT e.is_automated
+                                 OR (o.person_on_bot_branch
+                                     AND (SELECT upper(coalesce(b.payload->'actor'->>'type', '')) <> 'SERVICE'
+                                            FROM bitbucket_events b WHERE b.id = e.id)))
+                            AND NOT coalesce(e.declared_non_human, false)),
                   '[]'::jsonb) AS touches
   FROM open_keys o
   JOIN pr_events e ON e.repo_full_name = o.repo_full_name AND e.pr_id = o.pr_id
@@ -123,7 +137,7 @@ details AS (
 prs AS (
   SELECT o.repo_full_name, o.pr_id, o.seen, o.created_at, o.latest_at, o.deleted_ever, d.opened_event_at, d.ready_event_at,
          d.last_draft_at, d.opened_author,
-         d.opened_display_name, d.automated, d.change_type, d.touches, d.opened_jira_keys,
+         d.opened_display_name, o.automated, o.person_on_bot_branch, d.change_type, d.touches, d.opened_jira_keys,
          l.payload->'pullRequest' AS pull, l.jira_keys AS latest_jira_keys,
          -- A PR not seen before T: what it looked like then is unknown.
          o.seen AND coalesce(l.payload->'pullRequest'->>'draft', 'false') = 'true' AS draft
@@ -137,7 +151,7 @@ SELECT p.repo_full_name AS repo,
        p.pull->>'title' AS title,
        -- The PR's page as Bitbucket links it; Go keeps only an http(s) URL.
        CASE WHEN NOT p.deleted_ever THEN p.pull->'links'->'self'->0->>'href' END AS url,
-       p.automated
+       (p.automated AND NOT p.person_on_bot_branch)
          OR EXISTS (SELECT 1 FROM non_human_identities n
                      WHERE n.handle IN (lower(coalesce(p.opened_author, p.pull->'author'->'user'->>'name')),
                                         lower(coalesce(p.opened_display_name, p.pull->'author'->'user'->>'displayName'))))

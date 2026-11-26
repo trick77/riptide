@@ -14,8 +14,11 @@
 -- payload carries neither list; Go then reads the event itself). Go keeps
 -- the people other than the author (dataset.Approval.Spans, NeedsWork).
 -- `activity` are every PR event's times: what tells a PR nobody touches.
+-- `bot` and the reviewers' as in prs.sql, a person's PR from a bot's branch
+-- included.
 --
--- $1 team, $2 approvals since, $3 the GitOps repos (sql/gitops.sql).
+-- $1 team, $2 approvals since, $3 the GitOps repos (sql/gitops.sql), $4 the
+-- people (sql/people.sql).
 WITH non_human_identities AS (
 /*{{non_human_identities}}*/
 ),
@@ -27,17 +30,26 @@ approved AS (
     AND pr_id IS NOT NULL AND repo_full_name IS NOT NULL
     AND NOT (repo_full_name = ANY($3::text[]))
 ),
--- Each one's first approval ever: before it, a push resets nothing.
+-- Each one's first approval ever: before it, a push resets nothing. And
+-- whether its ingest flag (as prs.sql reads it, on pr:opened or pr:merged)
+-- is a bot's branch's: flagged and opened by a person ($4). A reviewer
+-- there is a bot by its account alone.
 firsts AS MATERIALIZED (
   SELECT a.repo_full_name, a.pr_id,
          (SELECT min(x.occurred_at) FROM bitbucket_events x
            WHERE x.repo_full_name = a.repo_full_name AND x.pr_id = a.pr_id
-             AND x.event_type = 'pr:reviewer:approved') AS first_approved_at
+             AND x.event_type = 'pr:reviewer:approved') AS first_approved_at,
+         (SELECT coalesce(bool_or(x.is_automated)
+                            AND lower(coalesce(max(x.author) FILTER (WHERE x.event_type = 'pr:opened'), max(x.author)))
+                                = ANY($4::text[]), false)
+            FROM bitbucket_events x
+           WHERE x.repo_full_name = a.repo_full_name AND x.pr_id = a.pr_id
+             AND x.event_type IN ('pr:opened', 'pr:merged')) AS person_on_bot_branch
   FROM approved a
 ),
 ev AS MATERIALIZED (
   SELECT e.id, e.repo_full_name, e.pr_id, e.event_type, e.occurred_at, e.author, e.author_display_name,
-         e.is_automated, x.pr->'author'->'user' AS pr_author,
+         e.is_automated, x.pr->'author'->'user' AS pr_author, x.service, a.person_on_bot_branch,
          CASE WHEN jsonb_typeof(x.pr->'reviewers') = 'array' OR jsonb_typeof(x.pr->'participants') = 'array' THEN
            (SELECT coalesce(jsonb_agg(jsonb_build_object(
                      'author', coalesce(r->'user'->>'name', ''),
@@ -57,11 +69,17 @@ ev AS MATERIALIZED (
   -- who approves: a reviewer's, and a push to the source branch after the
   -- first approval (Bitbucket may reset approvals then). A comment's
   -- payload is never fetched, nor an earlier push's. OFFSET 0 keeps the
-  -- planner from folding it into each use.
-  CROSS JOIN LATERAL (SELECT CASE WHEN e.event_type IN ('pr:reviewer:approved', 'pr:reviewer:unapproved',
-                                                        'pr:reviewer:needs_work', 'pr:reviewer:updated')
-                                    OR (e.event_type = 'pr:from_ref_updated' AND e.occurred_at > a.first_approved_at)
-                                  THEN e.payload->'pullRequest' END AS pr OFFSET 0) x
+  -- planner from folding it into each use. A flagged one's actor too on a
+  -- person's PR from a bot's branch: a SERVICE account, which the branch's
+  -- flag hid at ingest.
+  CROSS JOIN LATERAL (SELECT e.event_type IN ('pr:reviewer:approved', 'pr:reviewer:unapproved',
+                                              'pr:reviewer:needs_work', 'pr:reviewer:updated')
+                               OR (e.event_type = 'pr:from_ref_updated' AND e.occurred_at > a.first_approved_at)
+                               AS wanted OFFSET 0) w
+  CROSS JOIN LATERAL (SELECT CASE WHEN w.wanted THEN e.payload->'pullRequest' END AS pr,
+                             CASE WHEN w.wanted AND e.is_automated AND a.person_on_bot_branch
+                                  THEN upper(coalesce(e.payload->'actor'->>'type', '')) = 'SERVICE' END AS service
+                      OFFSET 0) x
   WHERE e.event_type LIKE 'pr:%'
 ),
 prs AS (
@@ -69,7 +87,8 @@ prs AS (
          coalesce(max(e.pr_author->>'name'), max(e.author) FILTER (WHERE e.event_type = 'pr:opened'), '') AS opener,
          coalesce(max(e.pr_author->>'displayName'),
                   max(e.author_display_name) FILTER (WHERE e.event_type = 'pr:opened'), '') AS opener_display_name,
-         coalesce(bool_or(e.is_automated) FILTER (WHERE e.event_type IN ('pr:opened', 'pr:merged')), false) AS automated,
+         coalesce(bool_or(e.is_automated) FILTER (WHERE e.event_type IN ('pr:opened', 'pr:merged')), false)
+           AND NOT bool_or(e.person_on_bot_branch) AS automated,
          min(e.occurred_at) FILTER (WHERE e.event_type = 'pr:merged') AS merged_at,
          max(e.occurred_at) FILTER (WHERE e.event_type = 'pr:declined') AS declined_at,
          max(e.occurred_at) FILTER (WHERE e.event_type = 'pr:deleted') AS deleted_at,
@@ -77,8 +96,9 @@ prs AS (
          coalesce(jsonb_agg(jsonb_build_object(
                     'at', e.occurred_at, 'event', e.event_type, 'author', coalesce(e.author, ''),
                     'display_name', coalesce(e.author_display_name, ''),
-                    'bot', e.is_automated OR EXISTS (SELECT 1 FROM non_human_identities n
-                                                       WHERE n.handle IN (lower(e.author), lower(e.author_display_name))),
+                    'bot', (e.is_automated AND NOT (e.person_on_bot_branch AND NOT coalesce(e.service, false)))
+                           OR EXISTS (SELECT 1 FROM non_human_identities n
+                                       WHERE n.handle IN (lower(e.author), lower(e.author_display_name))),
                     'approvers', e.approvers)
                   ORDER BY e.occurred_at, e.id) FILTER (WHERE e.approvers IS NOT NULL OR e.event_type IN
                     ('pr:reviewer:approved', 'pr:reviewer:unapproved', 'pr:reviewer:needs_work')), '[]'::jsonb)

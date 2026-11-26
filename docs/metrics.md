@@ -105,7 +105,7 @@ the data captured in v1.
 | **PR throughput** *(Flow Framework "flow velocity")* | Human PRs merged per week: the merged PRs of the cycle-time row (GitOps repos and bots out) over the period's weeks, or over the weeks since Bitbucket's first event when that lies inside the period (as deploy frequency does for Argo CD), and per week by branch prefix. A PR opened before ingestion started counts: only its merge is needed. A PR is a PR wherever the work happened (owner, 2026-11): one merged into a feature or umbrella branch, not the repo's trunk (`pullRequest.toRef.displayId`; the trunk is master, main, or the branch most of the repo's PRs target, every branch tied for most), and one Bitbucket marked merged without a merge commit of its own in the second another PR of the repo merged (an **implicit merge**: an umbrella branch brought its commits in) are merged work, marked in the facts as merged via an umbrella branch. Two kinds of merged PR are no merged work and are left out of this and every other PR number, each counted under its first reason so the page can say how many: the **umbrella** itself, the vehicle of other people's merged PRs, whose work counts on them: a PR whose source branch is the target of other merged PRs of the repo, over its whole history, or whose merge implicitly merged another person's PR (a bot's PR never makes a person's uncounted, either way); **housekeeping**, a tool's change: a person's PR whose title as opened (trimmed, case and inner spaces aside) was opened by people in at least 3 of the team's repos within an hour, without a person's approval (a bot's, a service's or a declared non-human account's approval is none) and without a ticket key in its title or source branch (owner's decision, 2026-11; how long it stood open says nothing, some of one batch are merged at once, others days later). The openings are the team's of all history, not the window's PRs: a batch opened across a period's edge is housekeeping in both periods. A PR marked merged when an umbrella went in (an implicit merge) whose source branch another merged PR of the repo, counted, came from is the same work and counted once (**twice**: one PR into the umbrella branch, a second of the same branch into master). The umbrella's openers and the siblings' are told bot or person as every PR's opener is, riptide's automation detection at read included. A PR of a **library** repo is merged work, but out of the base of the PRs traced to production (`coverage.to_prod`): a repo that is never rolled out, on positive evidence (owner, 2026-11: a library PR must never read as not traced, nor as a missed release). Over all history: no deployed GitOps release commit names its slug in a compare link, no run of it built an image (deployed or not yet: a repo building one is deployable, in doubt), and no image Argo CD deployed for the team has a path segment equal to its slug (a deployable repo's image is named after it, even when its CI does not report; the tag and digest of the last segment aside, a registry's port is no tag), while the team's tracing works at all (a compare link names some repo, some run's image Argo CD deployed, by its full reference). It needs no build: a starter or client library whose CI does not report is one. A repo one of whose PRs in the window reached any stage by the window's end is none, whatever the evidence (a deploy after a closed period's end does not reclass it). The rule's residual: a deployable repo whose CI does not report, whose images are named otherwise (one service, several images of other names) and whose release commits name no compare link reads as a library. A view whose counted PRs are all libraries' says so (`libraries_only`): nothing to trace, no release missed, no limit. The weekly rate is null when the weeks since Bitbucket's first event are under one: three PRs in six hours are no 84 a week. Per team, never per person. More is better, read next to the batch size: more PRs of the same size is more work done, more because they got smaller is the same work in better portions. |
 | **Batch size** *(DORA capability "working in small batches")* | Changed lines per merged human PR, added plus removed, median and 90th percentile, and the median per week. The size is the PR's final rollup in `noergler_pr_rollups` (`outcome = 'merged'`), joined on `pr_key` = `lower(repo_full_name) || '#' || pr_id`: Bitbucket DC webhooks carry no diff size. noergler counts the whole PR diff at close, over the files it reviews only, so lock files and vendored bundles are out. No size: a PR noergler never reviewed (no rollup), and a rollup counting 0 lines (noergler could not fetch the diff at close and had no run to fall back on). The median, not the mean, which one large PR decides. Smaller is better. |
 | **Open PR age** | The PRs open at an instant T (the period's end), per repo, with their age and what they wait on. Open at T: no `pr:merged` / `pr:deleted` before T, the PR's latest event before T is no `pr:declined`, and the latest event carrying a `pullRequest.state` has it `OPEN` (none does: open unless declined). Every PR event carries the PR, so a declined PR reopened is open again on its next event. Only events before T count, so the previous period's end reads what was open then; a PR open all along that riptide first heard of after it counts there too, else it would read as a new long-open one. Age: T − its last turn ready, the first event after the last one whose `pullRequest.draft` was true, whether or not the parser recognised the flip; never seen a draft (opened ready, or made ready before ingestion) T − `pullRequest.createdDate`, which every PR event carries, so a PR opened before ingestion has one too. Time as a draft is its author's, not the team's: a long draft just made ready is no long-open PR (user, 2026-11-20). A draft has no age and is in no median. Waits on, the first that applies: draft; changes (a human `NEEDS_WORK` in the latest event's `reviewers` or `participants`, Bitbucket's own status, approvals reset by a push included); merge (a human `APPROVED` there); review (a reviewer touch as in the pickup-time query); first review. Long open: 7 days or more; a repo with 4 long-open PRs or more is jammed (both chosen, not measured; the jam was 3 until 2026-11-18). A draft is never long open and never inactive: it waits on its author and may lie as long as it wants (user, 2026-11-18); it stays open, waiting on "draft". Draft is the latest event's `pullRequest.draft`, so a ready PR turned back into a draft is stored as a synthetic `pr:back_to_draft` (else it read as ready until its next event). Per repo the median age of its ready PRs, never the oldest PR's, which one PR alone decides. Exclude GitOps repos and bots as for cycle time. Inactive: no event of any kind on the PR for 30 days before T (for a PR riptide first heard of after T, since its creation); counted apart, in no other number. Webhook-only data cannot tell a PR whose close event Bitbucket never delivered from one nobody touches, and such losses recur: a lost one counts as open until it goes inactive, and alone never makes a jam. Where the loss is evident it is said: a PR whose latest event came before a Bitbucket silence with unseen runs (see [Sources and silences](#sources-and-silences)) and that has had none since is of **unknown** state, counted apart, in no open, long, jam, wait or WIP number, and listed in the PR table as unknown. Its state is never guessed from the review bot's rollup: noergler never decides a PR's lifecycle. A PR without any event since ingestion is missing. |
-| **Time to first review** *(DX Core 4 "code review pickup time")* | Two-part computation per PR — see the SQL block below the table. Clock-start = `COALESCE(pr:ready_for_review, pr:opened)`: PRs opened ready start at `pr:opened`; PRs opened as drafts start at the synthetic `pr:ready_for_review` (emitted by the parser when a `pr:modified` payload carries `previousDraft=true, draft=false`). Engagement = first reviewer touch (`pr:comment:added`, `pr:reviewer:approved`, `pr:reviewer:unapproved`, `pr:reviewer:needs_work`, `pr:reviewer:updated`) where `lower(author) != lower(pr_opener) AND NOT is_automated AND occurred_at >= clock-start`. The five-event reviewer union covers every touch Bitbucket DC emits (silent approvals, retracted approvals, "needs work" flips, bare reviewer-status changes); the `occurred_at >= clock-start` guard drops early-feedback comments solicited during the draft phase, which would otherwise produce negative pickup times. `NOT is_automated` strips bot comments (noergler / Renovate / etc.) — every review-time bot must be recognisable, otherwise its instant comment drives the metric toward zero. Detection matches the `automation` config block against **both** the login handle (`author`) and the display name (`author_display_name`), because a bot is often provisioned as an ordinary user account whose login says nothing. `is_automated` is decided at ingest, so rows written before a bot was recognised stay marked human: the `non_human_identities` CTE in the query below filters those at read time, on both names too, from the accounts senders declare (`reviewer_handle` + `reviewer_account_kind` on noergler rollups, `actor_handle` + `actor_account_kind` on pipeline events) — riptide stores the declaration, it carries no account names of its own. A declared handle is matched against both the login and the display name, so it must never equal a person's display name: that person's reviews and PRs would drop out as a bot's. |
+| **Time to first review** *(DX Core 4 "code review pickup time")* | Two-part computation per PR — see the SQL block below the table. Clock-start = `COALESCE(pr:ready_for_review, pr:opened)`: PRs opened ready start at `pr:opened`; PRs opened as drafts start at the synthetic `pr:ready_for_review` (emitted by the parser when a `pr:modified` payload carries `previousDraft=true, draft=false`). Engagement = first reviewer touch (`pr:comment:added`, `pr:reviewer:approved`, `pr:reviewer:unapproved`, `pr:reviewer:needs_work`, `pr:reviewer:updated`) where `lower(author) != lower(pr_opener) AND NOT is_automated AND occurred_at >= clock-start`. The five-event reviewer union covers every touch Bitbucket DC emits (silent approvals, retracted approvals, "needs work" flips, bare reviewer-status changes); the `occurred_at >= clock-start` guard drops early-feedback comments solicited during the draft phase, which would otherwise produce negative pickup times. `NOT is_automated` strips bot comments (noergler / Renovate / etc.) — every review-time bot must be recognisable, otherwise its instant comment drives the metric toward zero. On a person's PR from a bot's branch every event carries the prefix's flag, so there a reviewer is a bot by its account alone ("Human vs automated split"). Detection matches the `automation` config block against **both** the login handle (`author`) and the display name (`author_display_name`), because a bot is often provisioned as an ordinary user account whose login says nothing. `is_automated` is decided at ingest, so rows written before a bot was recognised stay marked human: the `non_human_identities` CTE in the query below filters those at read time, on both names too, from the accounts senders declare (`reviewer_handle` + `reviewer_account_kind` on noergler rollups, `actor_handle` + `actor_account_kind` on pipeline events) — riptide stores the declaration, it carries no account names of its own. A declared handle is matched against both the login and the display name, so it must never equal a person's display name: that person's reviews and PRs would drop out as a bot's. |
 | **Build success rate** | `pipeline_events` with `phase = 'COMPLETED'` grouped by `status`. Slice by `source` to compare Jenkins vs Tekton, by `pipeline_name` / `team` for ownership. |
 | **Build duration** | `pipeline_events.duration_seconds` (a Postgres `GENERATED ALWAYS AS (finished_at − started_at)` column). Every duration median, spread and comparison is over green runs only: a red run stops wherever it failed, so mixed in it makes a repo that fails early read fast (user, 2026-11-18: "stupide"). Red runs count in the failure rate and their time in the CI time in red runs, never in a duration; an outlier is any run past the cut, red or green. |
 | **Deploy success rate** | `argocd_events` with `operation_phase IN ('Succeeded', 'Failed', 'Error')` aggregated, filtered to `environment = 'prod'` for the prod-only view: Failed and Error both count as failed (the notification template sends either for a sync that deployed nothing). Infrastructure Apps left out, as for deploy frequency. Only what Argo CD reported: a sync whose notification was lost is in no count, so the rate is no proof of completeness. |
@@ -231,13 +231,28 @@ gitops_repos AS (
     ON b.event_type = 'pr:merged'
    AND lower(b.payload->'pullRequest'->'properties'->'mergeCommit'->>'id') = a.revision
 ),
+people AS (
+  -- accounts that open PRs from ordinary branches too: their PR from a
+  -- bot's branch, flagged at ingest by the prefix, is theirs ("Human vs
+  -- automated split")
+  SELECT lower(author) AS handle
+  FROM bitbucket_events
+  WHERE event_type = 'pr:opened' AND author IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM non_human_identities n
+                     WHERE n.handle IN (lower(author), lower(author_display_name)))
+  GROUP BY lower(author)
+  HAVING BOOL_OR(NOT is_automated)
+     AND NOT BOOL_OR(COALESCE(automation_source IN ('service-account', 'other-bot'), false))
+),
 prs AS (
   SELECT repo_full_name, pr_id,
          -- branch_name is stored lowercased; the payload keeps the original
          MAX(lower(payload->'pullRequest'->'fromRef'->>'displayId'))
              FILTER (WHERE event_type = 'pr:opened') AS source_branch,
          MAX(author) FILTER (WHERE event_type = 'pr:opened') AS pr_opener,
-         BOOL_OR(is_automated) FILTER (WHERE event_type = 'pr:opened') AS bot_pr,
+         BOOL_OR(is_automated) FILTER (WHERE event_type = 'pr:opened') AS flagged,
+         COALESCE(lower(MAX(author) FILTER (WHERE event_type = 'pr:opened'))
+                    IN (SELECT handle FROM people), false) AS by_person,
          COALESCE(MIN(occurred_at) FILTER (WHERE event_type = 'pr:ready_for_review'),
                   MIN(occurred_at) FILTER (WHERE event_type = 'pr:opened')) AS ready_at,
          MIN(occurred_at) FILTER (WHERE event_type = 'pr:reviewer:approved') AS approved_at,
@@ -266,7 +281,9 @@ chain AS (
                                   'pr:reviewer:unapproved', 'pr:reviewer:needs_work',
                                   'pr:reviewer:updated')
              AND lower(e.author) IS DISTINCT FROM lower(p.pr_opener)
-             AND NOT e.is_automated
+             AND (NOT e.is_automated
+                  OR (p.flagged AND p.by_person
+                      AND upper(COALESCE(e.payload->'actor'->>'type', '')) <> 'SERVICE'))
              AND NOT EXISTS (SELECT 1 FROM non_human_identities n
                               WHERE n.handle IN (lower(e.author), lower(e.author_display_name)))
              AND e.occurred_at >= p.ready_at) AS first_review_at,
@@ -276,7 +293,8 @@ chain AS (
          (SELECT first_deployed_at FROM lead_time_changes l
            WHERE l.commit_sha = p.merge_commit AND l.environment = 'prod') AS prod_at
   FROM prs p
-  WHERE NOT COALESCE(p.bot_pr, false) AND p.merged_at IS NOT NULL AND p.ready_at IS NOT NULL
+  WHERE NOT (COALESCE(p.flagged, false) AND NOT p.by_person)
+    AND p.merged_at IS NOT NULL AND p.ready_at IS NOT NULL
 ),
 stages AS (
   SELECT 1 AS step, 'coding: first commit -> PR ready' AS stage, ready_at - first_commit_at AS wait
@@ -344,6 +362,19 @@ gitops_repos AS (
     ON b.event_type = 'pr:merged'
    AND lower(b.payload->'pullRequest'->'properties'->'mergeCommit'->>'id') = a.revision
 ),
+people AS (
+  -- Accounts that open PRs from ordinary branches too. The ingest flags
+  -- every event on a bot's branch by its prefix, whoever authored it; on
+  -- such a PR a person opened, a reviewer is a bot by its account alone.
+  SELECT lower(author) AS handle
+  FROM bitbucket_events
+  WHERE event_type = 'pr:opened' AND author IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM non_human_identities n
+                     WHERE n.handle IN (lower(author), lower(author_display_name)))
+  GROUP BY lower(author)
+  HAVING BOOL_OR(NOT is_automated)
+     AND NOT BOOL_OR(COALESCE(automation_source IN ('service-account', 'other-bot'), false))
+),
 pickup_start AS (
   SELECT
     repo_full_name,
@@ -355,7 +386,10 @@ pickup_start AS (
           AND COALESCE(payload->'pullRequest'->>'draft', 'false') = 'false'
       )
     ) AS clock_start,
-    MAX(author) FILTER (WHERE event_type = 'pr:opened') AS pr_opener
+    MAX(author) FILTER (WHERE event_type = 'pr:opened') AS pr_opener,
+    COALESCE(BOOL_OR(is_automated) FILTER (WHERE event_type = 'pr:opened')
+               AND lower(MAX(author) FILTER (WHERE event_type = 'pr:opened'))
+                   IN (SELECT handle FROM people), false) AS person_on_bot_branch
   FROM bitbucket_events
   WHERE repo_full_name NOT IN (SELECT repo_full_name FROM gitops_repos)
   GROUP BY repo_full_name, pr_id
@@ -375,7 +409,9 @@ WHERE ps.clock_start IS NOT NULL
         'pr:reviewer:updated'
       )
   AND lower(e.author) IS DISTINCT FROM lower(ps.pr_opener)
-  AND NOT e.is_automated
+  AND (NOT e.is_automated
+       OR (ps.person_on_bot_branch
+           AND upper(COALESCE(e.payload->'actor'->>'type', '')) <> 'SERVICE'))
   AND NOT EXISTS (
         SELECT 1 FROM non_human_identities n
          WHERE n.handle IN (lower(e.author), lower(e.author_display_name))
@@ -408,7 +444,7 @@ because there's no clock-start to subtract from in the first place.
 | **Tickets per deploy** | `COUNT(DISTINCT unnest(jira_keys))` per deploy — small-batch indicator. Jira keys are extracted at write time from PR title, description, branch name, and commit messages via regex `[A-Z][A-Z0-9]+-\d+`, deduplicated, GIN-indexed. |
 | **Untracked-work rate** | `COUNT(*) WHERE jira_keys = '{}'` over merged PRs outside GitOps repos — process-compliance signal. |
 | **Per-ticket flow** | `WHERE 'ABC-1234' = ANY(jira_keys)` returns every event for a ticket across Bitbucket / pipeline / Argo (joined via commit_sha). |
-| **Human vs automated split** | `WHERE NOT is_automated` (Renovate / Dependabot / Snyk / Mend / generic-bot detection runs at write time and tags `automation_source`, and again at read time on the PR opener and the commit author; besides the configured authors, the branch prefix and the name shape `*-bot`, `*[bot]`, `bot-*`, an account whose login or display name holds a configured automation source's name as whole words (`renovate_team`, "Renovate Team") is that bot, so a dependency bot provisioned as an ordinary user is caught on its direct trunk pushes too, which then count as bot commits in the lead time. That name rule applies at read time only, never written into `automation_source`: a config that guessed wrong is corrected by fixing it. A source whose name is an ordinary word would catch people with that word in their name: name sources by their tool (a name under 4 letters is warned of at load, `automation_source_name_short`); an account the git host itself marks as a service account — Bitbucket DC's built-in system user, which files the default PR tasks — is tagged `service-account` with no config entry), plus the `non_human_identities` filter for accounts a sender declared. Keep `bot` and `service` apart when reading: a **bot** authors work of its own and its velocity is worth its own view, while a **service** account (a CI user pushing merges) authors nothing and should simply not appear in human activity. Default dashboards exclude both. |
+| **Human vs automated split** | `WHERE NOT is_automated` (Renovate / Dependabot / Snyk / Mend / generic-bot detection runs at write time and tags `automation_source`, and again at read time on the PR opener and the commit author; besides the configured authors, the branch prefix and the name shape `*-bot`, `*[bot]`, `bot-*`, an account whose login or display name holds a configured automation source's name as whole words (`renovate_team`, "Renovate Team") is that bot, so a dependency bot provisioned as an ordinary user is caught on its direct trunk pushes too, which then count as bot commits in the lead time. That name rule applies at read time only, never written into `automation_source`: a config that guessed wrong is corrected by fixing it. A source whose name is an ordinary word would catch people with that word in their name: name sources by their tool (a name under 4 letters is warned of at load, `automation_source_name_short`); an account the git host itself marks as a service account — Bitbucket DC's built-in system user, which files the default PR tasks — is tagged `service-account` with no config entry), plus the `non_human_identities` filter for accounts a sender declared. **The branch prefix flags every event on the branch, whoever authored it; on read, who opened the PR decides** (owner, 2026-11): a PR a **person** opened from a bot's branch is the person's work in every PR number (counts, lead time, size, open PRs, approvals, umbrella and housekeeping), its reviewers are bots only by their accounts (configured authors, name shape or source name, a declaration, a SERVICE account in the event's payload, which the prefix hid at ingest), and its builds are the team's: its `PR-<n>` builds and its branch's builds from the close of the branch's earlier PR (the bot reuses the branch name) to its own close, those before its opening included. A person is an account the team's history shows opening a PR the ingest did not flag, never declared, never tagged `service-account` or `other-bot`, and no bot by the read-time detection (`backend/internal/dataset/sql/people.sql`, `sql/people_prs.sql`). The history is the test because the prefix is the fallback for a bot account nobody declared: one that opens PRs from its own branches only stays a bot. A PR the bot opened stays the bot's though a person pushed to it; a person's push to a bot's branch without a PR of theirs stays a bot's push. Keep `bot` and `service` apart when reading: a **bot** authors work of its own and its velocity is worth its own view, while a **service** account (a CI user pushing merges) authors nothing and should simply not appear in human activity. Default dashboards exclude both. |
 | **AI reviewer precision** *(noergler)* | `1 - count(noergler_events WHERE event_type='feedback' AND verdict='disagreed') / sum(noergler_pr_rollups.findings_count)` per repo × week — findings on both sides, since one PR can collect several disagreements. Higher = the AI review is more useful. Filter on `outcome='merged'` to score precision only on PRs that shipped. |
 
 ### FinOps signals
@@ -883,7 +919,8 @@ enter no judged number (owner's decision, 2026-11; a failed dependency-bot
 build is no quality problem of the team, only its CI time is). A bot's
 build is flagged as the dataset is read: its branch starts with one of the
 config's automation `branch_prefixes`, or it is the PR-<n> build of a bot's
-PR. It is in no build number of the page either (success, failures,
+PR; a person's PR from a bot's branch owns its builds over its life
+("Human vs automated split"). It is in no build number of the page either (success, failures,
 durations, hotspots, flaky, CI time), counted apart (`build.bot_runs`, runs
 and CI seconds). `metrics.Assess` raises the signals:
 
