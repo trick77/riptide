@@ -306,6 +306,20 @@ type PRFact struct {
 	MergedAt *time.Time `json:"merged_at"`
 	ProdAt   *time.Time `json:"prod_at"`
 	ToProdS  *float64   `json:"to_prod_s"`
+	// ProdState is where a merged PR stands on production now, the facts'
+	// end (prodPlacement): on_prod, not_yet or not_placeable; null for
+	// every other PR, a library's and a promotion's included. ProdReason
+	// is why tracing cannot place it (no_merge_commit, release_unresolved,
+	// repo_untraced, in_silence), null otherwise.
+	ProdState  *string `json:"prod_state"`
+	ProdReason *string `json:"prod_reason"`
+	// ProdRoute is how its first production deploy was found: compare (a
+	// compare link in the release commit) or image (the run that built a
+	// deployed image); null when not on production. ProdLowerBound: that
+	// deploy's stretch started at a lower bound, the PR may have gone out
+	// earlier with a deploy tracing could not resolve.
+	ProdRoute      *string `json:"prod_route"`
+	ProdLowerBound bool    `json:"prod_lower_bound"`
 	// AgeS and Waiting are a PR open at the dataset's end (now on the page),
 	// as the open-PR section counts it: its age then and
 	// what it waits on, inactive when idle OpenInactiveDays; IdleS the time
@@ -705,7 +719,20 @@ func ComputeFacts(ds *dataset.Dataset, p Params, q string) Facts {
 			parts := titleParts(pr.Title, p.JiraURL)
 			keys, more := jiraPrefix(pr.JiraKeys, parts, p.JiraURL)
 			uncounted, via, library := prMarks(pr)
+			var state, reason, route *string
+			lowerBound := false
+			if pr.State == "merged" && !pr.GitOps && !pr.Bot && !library {
+				pl := prodPlacement(ds, pr, ds.Meta.To)
+				state, lowerBound = ptr(pl.state), pl.lowerBound
+				if pl.reason != "" {
+					reason = ptr(pl.reason)
+				}
+				if pl.route != "" {
+					route = ptr(pl.route)
+				}
+			}
 			return PRFact{
+				ProdState: state, ProdReason: reason, ProdRoute: route, ProdLowerBound: lowerBound,
 				Repo: pr.Repo, PRID: pr.PRID, URL: prLink(pr.URL, p.BitbucketURL), Title: pr.Title, TitleParts: parts,
 				JiraPrefix: keys, JiraMore: more,
 				GitOps: pr.GitOps, ChangeType: pr.ChangeType,

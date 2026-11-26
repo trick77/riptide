@@ -1,110 +1,124 @@
-# Change lead time (DORA), per commit
+# Change lead time (DORA), per PR
 
-**How long from a developer committing to that change running in production.**
-One row per change, not per release: one of DORA's three throughput metrics.
-
-Riptide ships three views for it. Query `lead_time_changes`; the two below it
-exist so the fragile part stays swappable.
-
-| View | One row per | Purpose |
-|---|---|---|
-| `commit_sightings` | commit seen on a master push | expands `payload->'commits'`, with timestamps and classification |
-| `deploy_commit_ranges` | (deploy, app repo) | which commit range a deploy shipped |
-| `lead_time_changes` | (environment, commit) | the change and the **first** deploy that carried it |
+**How long from a developer's first commit of a change to that change running
+in production.** The unit is the pull request, not the commit: a team reasons
+about PRs, and a commit count says little about the work (owner's decision).
+One of DORA's three throughput metrics.
 
 ## The metric
 
-```sql
--- Lead time to production, human-authored changes, last 90 days
-SELECT
-    percentile_cont(0.5) WITHIN GROUP (ORDER BY lead_time) AS p50,
-    percentile_cont(0.9) WITHIN GROUP (ORDER BY lead_time) AS p90,
-    count(*) AS changes
-FROM lead_time_changes
-WHERE environment = 'prod'
-  AND NOT is_merge
-  AND NOT author_is_service_account
-  -- Match the login AND the display name, the same rule the rest of riptide
-  -- uses: a bot is often provisioned with a nondescript login. NOT EXISTS
-  -- rather than NOT IN, so a commit with an unresolved author is kept rather
-  -- than silently dropped by NULL propagation.
-  AND NOT EXISTS (
-        SELECT 1 FROM unnest(:automation_handles) AS h(handle)
-        WHERE lower(h.handle) IN (lower(author), lower(author_display_name))
-      )
-  AND first_deployed_at > now() - interval '90 days';
-```
+Per PR: the people's PRs merged in the period that reached production by the
+period's end, each from its first commit (the oldest commit pushed to its
+branch, else its opening) to the first production deploy that shipped it. The
+page shows the typical value, the slowest 10 % and the basis ("aus n PRs"),
+next to how many of the period's merged PRs it could place ("n von m
+gemergten PRs bis PROD verfolgt") and how many were provably not on production
+yet at the period's end ("n gemergte PRs noch nicht auf PROD").
 
-Group by `team`, `repo_full_name`, or `date_trunc('week', first_deployed_at)`
-for the breakdowns. Swap `environment` for the stage you treat as production.
+- **Bots' PRs are in no number**, neither are their pushes: dependency updates
+  ship, but the number describes the team's work.
+- **Library repos' PRs are outside the base**: libraries are work, but never
+  rolled out, so never "not traced" either.
+- **A closed period is frozen at its end.** Only deploys before the end count:
+  a PR merged in the period and shipped after it is "not on production yet" in
+  that period, for good. The comparison with the previous period is fair: each
+  had the same time.
 
-## What counts as a change
+## Placing a PR on production
 
-The views classify; the query decides. The defaults that make the number mean
-what people think it means:
+`dataset.trace` (backend/internal/dataset/trace.go, reading
+`sql/trace_*.sql`) does it once per page request, over all history, the team's
+data only. Two steps.
 
-- **Exclude merge commits** (`NOT is_merge`). A squash-and-merge lands the change
-  once; counting the merge commit too double-counts it.
-- **Exclude release tooling** (`NOT author_is_service_account`, plus your CI
-  account if it is not flagged `SERVICE` by the git host). `[maven-release-plugin]
-  prepare for next development iteration`, `[gradle-release] …` and
-  component-version commits are created *by* the release, so their lead time is
-  near zero and they drag the median down.
-- **Report bots separately, never blended.** Dependency updates are real changes
-  that ship, but in one measured dataset Renovate authored 87 % of all commits
-  reaching production. Blending makes the median describe the bot's cadence
-  (p50 209.3 h) rather than the team's (p50 193.6 h). Two lines, always.
+**Where a PR reached the trunk.** The trunk is master, main, or the branch most
+of the repo's merged PRs went into (`repo_trunks`). A PR into the trunk arrives
+with its merge commit's first push (Bitbucket's merge pushes it in the same
+second; the merge time when that push was not seen). Merges are true merge
+commits and always the push's tip, so Bitbucket's cap of five commits per push
+never hides one. A PR into another branch arrives with the first PR merged
+from that branch into the trunk at or after it (its umbrella), one level deep;
+a PR Bitbucket marked merged when an umbrella's merge brought it in, with the
+umbrella. A PR with none of these is not placeable (`no_merge_commit`).
+
+**Which stretch of the trunk a deploy shipped.** For every successful deploy,
+per repo, the first of these routes that resolves:
+
+1. **Compare links** in the GitOps release commit, from the previous to the new
+   App-repo commit
+   ([Correlating deploys back to commits](correlating-deploys-to-commits.md)).
+   The new end must have reached the trunk, by its push, before the deploy. The
+   old end likewise (exact), or as the tip before the repo's first push riptide
+   holds (that push's `fromHash`, exact). An old end no payload names predates
+   the data: the stretch then starts at the repo's first trunk push, a **lower
+   bound**. Several links of one repo in one release (Apps on different
+   versions) are merged into one stretch.
+2. **The deployed images.** Each deployed reference is matched exactly to the
+   CI run that published it (the latest run started before the deploy). The
+   run's commit, placed where it reached the trunk, is the head, but never
+   after the run started: a UI job pushes its own release commit minutes into
+   the run, and what landed in between is not in the image. The start is the
+   newest head of the same image repository's tags in this App before (tags are
+   compared as sets: an App may run two tags of one image side by side), exact;
+   else the deploy that ran them (a lower bound: nothing pushed after it was in
+   them); for an App's first deploy of the image repository, after what another
+   App's deploy of it shipped, else the repo's first trunk push (a lower bound:
+   everything on the trunk before the head, minus what an earlier deploy
+   shipped).
+
+A known run head also caps a compare link's new end: a release tool's commit
+the link names may be pushed after the build started.
+
+A PR is on an environment from the first deploy there whose stretch holds its
+arrival on the trunk. Never counted twice: the first deploy wins.
+
+## Not on production, or not placeable
+
+At a cutoff (the period's end; for the facts, now), a merged PR not shipped by
+then is **not yet on production** only with proof: every release (a deploy that
+brought new images, or an App's first) of the Apps known to deploy its repo
+since the PR reached the trunk was resolved for the repo and held none of it.
+Otherwise it is **not placeable**, with the first reason that applies:
+
+| Reason | Meaning |
+|---|---|
+| `no_merge_commit` | nothing marks where it reached the trunk |
+| `repo_untraced` | no deploy ever showed an App deploys its repo (a compare link naming it, an image of its runs, an image named after it) |
+| `in_silence` | a release that may have shipped it lay in or within a week after a lost Bitbucket silence, or Argo CD did not report yet when it reached the trunk |
+| `release_unresolved` | a release since then could not be resolved: it may have shipped it |
+
+A release resolved by a lower bound that starts after the PR's arrival may have
+shipped it, or an earlier one did: unresolved for that PR.
 
 ## Reading it
 
-Lower is better, and the split between environments is where the signal is. In
-the dataset this was built on, human changes reached **intg in 4.0 h (p50)** but
-**production in 193.6 h (p50), p90 505.6 h** — the delivery pipeline is fast and
-the wait is entirely in front of production, in release scheduling. A single
-blended number would have hidden that.
+Lower is better, and the split between environments is where the signal is:
+the breakdown in the flow section shows where the time goes (coding, review,
+merge, to the stage before production, to production), on the same placement.
 
-Beware the tempting shortcut this replaces: taking the *newest* commit in each
-release and calling that lead time. It answers "how stale was the freshest
-change" and reads 26.7 h on the same data — 7× too flattering.
+Beware the tempting shortcut: taking the *newest* commit in each release and
+calling that lead time. It answers "how stale was the freshest change" and
+reads far too fast. Per PR from its first commit, or not at all.
 
 ## Limits, so nobody over-reads the number
 
-- **`authored_at` is the commit's own timestamp**, which a rebase rewrites.
-  That is DORA's "code committed"; `committed_at` sits next to it for comparison.
-- **Coverage is bounded by range resolution.** A deploy whose commit range cannot
-  be resolved contributes nothing — it is absent, never counted as fast. Count
-  deploys, not bumps: one deploy fans out to a row per bumped component.
-
-  ```sql
-  SELECT count(DISTINCT a.id) AS deploys,
-         count(DISTINCT a.id) FILTER (WHERE r.deployed_at IS NULL) AS unresolved
-  FROM argocd_events a
-  LEFT JOIN deploy_commit_ranges r
-         ON r.app_name = a.app_name AND r.deployed_at = a.occurred_at
-  WHERE a.operation_phase = 'Succeeded';
-  ```
-
-- **A missing boundary commit costs a whole release, not one change.** The range
-  needs both endpoint SHAs, so if either is absent — the `commits[]` cap below,
-  or an ingest gap — every change in that window disappears. It does not recover
-  later either: the next release's range starts at *this* release's head, so the
-  window is skipped, not deferred.
-- **Bitbucket caps `commits[]` at 5 per push.** Measured, that bites 0.6 % of
-  master pushes. For changes it keeps it is harmless, but via the point above a
-  dropped commit that happens to be a release boundary costs its whole window.
-- **Boundary commits are assumed to be push tips.** Range membership is decided
-  by push time, so every commit of a push lands on one side of the boundary.
-  That is exact when the boundary SHA is the tip of its push, which is what a
-  release cut normally is. Where it is not, commits sharing that push are
-  attributed to the neighbouring release. Likewise the GitOps release commit
-  must be a push tip to be found at all — a release split across two pushes
-  where Argo reports only the second revision leaves the first unresolvable.
-  Both go away with image-reference-based ranges.
-- **Ranges come from release notes today.** `deploy_commit_ranges` reads the
-  compare links a release-note generator writes into the GitOps commit, so a
-  release landed as a direct version bump is invisible to it. That is the view to
-  replace once CI senders report `pipeline_events.image_refs`: the range then
-  becomes "between the previous and the current successful deploy of this app",
-  which needs no release notes at all. See
-  [Correlating deploys back to commits](correlating-deploys-to-commits.md).
+- **The trunk is assumed linear and never rewritten.** "Reached the trunk no
+  later than the head" stands for "is an ancestor of the head". A force push on
+  the trunk counts dropped commits as shipped.
+- **A lower bound reads long.** A PR placed by one (`lower_bound`) may have gone
+  out earlier with a deploy riptide could not resolve; the page counts them.
+- **Releases riptide cannot resolve place nothing**, and the PRs that may have
+  gone out with them are not placeable, never "not yet". The deploy frequency
+  counts them (`releases_unresolved`).
+- **A monorepo App shares its repo's stretch**: a PR touching only App B also
+  reads as shipped by App A's release. Riptide sees no file paths.
+- **Hotfix and release branches**: a head that never reached the trunk resolves
+  no stretch.
 - **Ingestion is forward-only.** The metric covers what riptide has seen.
+
+## The SQL views
+
+`commit_sightings` (one row per commit of a push to the repo's trunk),
+`deploy_commit_ranges` (compare links with both ends sighted) and
+`lead_time_changes` (per commit, its first deploy) stay for ad-hoc per-commit
+queries and for binaries mid-rollout. They know the first route's exact case
+only; the page reads neither.

@@ -311,28 +311,34 @@ func TestDeployWeeksAndDataStart(t *testing.T) {
 }
 
 func TestLeadTime(t *testing.T) {
-	ds := data(func(ds *dataset.Dataset) {
-		ds.LeadTimes = []dataset.LeadTime{
-			leadTimeRow(func(l *dataset.LeadTime) { l.LeadTimeS = 100 }),
-			leadTimeRow(func(l *dataset.LeadTime) { l.LeadTimeS = 300 }),
-			leadTimeRow(func(l *dataset.LeadTime) { l.LeadTimeS, l.IsMerge = 50, true }),
-			leadTimeRow(func(l *dataset.LeadTime) { l.LeadTimeS, l.ServiceAccount = 60, true }),
-			leadTimeRow(func(l *dataset.LeadTime) { l.LeadTimeS, l.Bot = 70, true }),
-			leadTimeRow(func(l *dataset.LeadTime) { l.LeadTimeS, l.Environment = 900, "intg" }),
-			leadTimeRow(func(l *dataset.LeadTime) { l.LeadTimeS, l.Project = 5, "portal" }),
-		}
-	})
-	l := leadTime(ds, filter{}, "prod")
-	if l.Human.N != 3 || l.Bot.N != 1 || !l.LowSample {
+	cutoff := p4().To
+	humans := []dataset.PR{
+		shipped(100),
+		shipped(300, func(p *dataset.PR) { p.Environments[0].LowerBound = true }),
+		// No first commit seen: from its opening.
+		shipped(0, func(p *dataset.PR) {
+			p.FirstCommitAt, p.OpenedAt = nil, ptr(p.Environments[0].FirstDeployedAt.Add(-200*time.Second))
+		}),
+		// Neither: no start, no lead time.
+		shipped(50, func(p *dataset.PR) { p.FirstCommitAt, p.OpenedAt = nil, nil }),
+		// On production after the period's end: not by its end.
+		shipped(70, func(p *dataset.PR) { p.Environments[0].FirstDeployedAt = cutoff.Add(time.Hour) }),
+		// To intg only.
+		shipped(900, func(p *dataset.PR) { p.Environments[0].Environment = "intg" }),
+		// A library's PR is never rolled out.
+		shipped(5, func(p *dataset.PR) { p.Library = true }),
+	}
+	l := leadTime(humans, "prod", cutoff)
+	if l.Human.N != 3 || l.LowerBound != 1 || !l.LowSample {
 		t.Errorf("lead time = %+v", l)
 	}
-	expectNear(t, "p50", l.Human.P50, 100)
-	expectNear(t, "p90", l.Human.P90, 260)
-	if got := leadTime(ds, filter{product: "kasse"}, "prod").Human.N; got != 2 {
-		t.Errorf("kasse n = %d", got)
+	expectNear(t, "p50", l.Human.P50, 200)
+	expectNear(t, "p90", l.Human.P90, 280)
+	if got := leadTime(humans, "intg", cutoff).Human.N; got != 1 {
+		t.Errorf("intg n = %d", got)
 	}
-	if leadTime(data(), filter{}, "prod").LowSample {
-		t.Error("no commits flagged as a low sample")
+	if leadTime(nil, "prod", cutoff).LowSample {
+		t.Error("no PRs flagged as a low sample")
 	}
 }
 
@@ -711,11 +717,11 @@ func TestChainHotfixPastTheStageBefore(t *testing.T) {
 func TestDeliveryPicksTheStageBeforeProduction(t *testing.T) {
 	// No PR reached a stage before production: the most deployed one.
 	ds := deployData()
-	d := delivery(ds, p4(), filter{}, chainOf(ds, p4(), filter{}))
+	d := delivery(ds, mergedPRs(ds, p4(), filter{}), p4(), filter{}, chainOf(ds, p4(), filter{}))
 	if d.PreEnvironment == nil || *d.PreEnvironment != "intg" || d.LeadTimePre == nil || d.LeadTimePre.Environment != "intg" {
 		t.Errorf("delivery = %+v", d)
 	}
-	d = delivery(data(), p4(), filter{}, chainOf(data(), p4(), filter{}))
+	d = delivery(data(), nil, p4(), filter{}, chainOf(data(), p4(), filter{}))
 	if d.PreEnvironment != nil || d.LeadTimePre != nil {
 		t.Errorf("empty delivery = %+v", d)
 	}

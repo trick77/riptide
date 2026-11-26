@@ -74,7 +74,7 @@ var labels = map[string]string{
 	"build_work_p50":  "median build time per succeeded build, after it got an agent",
 	"deploy_per_week": "production releases per week; more is better",
 	"deploy_success":  "share of production deploys that succeeded; higher is better",
-	"lead_time_p50":   "median time from commit to production; shorter is better",
+	"lead_time_p50":   "median time from a PR's first commit to production; shorter is better",
 	"review_p50":      "median time from PR ready to approval; shorter is better",
 	"within_day":      "share of PRs merged within a day of opening; higher is better",
 	"jammed_repos":    "repos with four or more PRs open a week or longer; fewer is better",

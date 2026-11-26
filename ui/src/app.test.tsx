@@ -4068,6 +4068,7 @@ describe("limits", () => {
           to_prod: { count: 4, n: 6, rate: 4 / 6 },
         },
       },
+      coverage: { ...m.coverage, merged: 6, on_prod: 4, not_yet: 2 },
     };
     render(
       <>
@@ -4088,11 +4089,13 @@ describe("limits", () => {
       screen.getByText(`${num(1500)} Builds von Bot-Branches nicht gezählt`),
     ).toBeInTheDocument();
     // A library's PRs are out of the base of those traced to production,
-    // said as such: never rolled out, never "not traced".
-    expect(
-      screen.getByText(/Bis PROD verfolgt: 4 von 6 PRs, die gemerged wurden\./)
-        .textContent,
-    ).toMatch(/3 PRs in Bibliotheken \(werden nicht ausgerollt\)/);
+    // said as such: never rolled out, never "not traced". The PRs not on
+    // production yet stand next to it.
+    const traced = screen.getByText(
+      /4 von 6 gemergten PRs bis PROD verfolgt\./,
+    ).textContent;
+    expect(traced).toMatch(/2 gemergte PRs noch nicht auf PROD\./);
+    expect(traced).toMatch(/3 PRs in Bibliotheken \(werden nicht ausgerollt\)/);
   });
 
   // No merged PR to trace: no "0 of 0" under the line that says so.
@@ -4117,7 +4120,7 @@ describe("limits", () => {
         }}
       />,
     );
-    expect(screen.queryByText(/Bis PROD verfolgt/)).toBeNull();
+    expect(screen.queryByText(/bis PROD verfolgt/)).toBeNull();
   });
 
   it("marks in the facts what counts nowhere and why", async () => {

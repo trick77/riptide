@@ -140,7 +140,7 @@ func (m *memStore) Dataset(_ context.Context, p dataset.Params) (*dataset.Datase
 	return &dataset.Dataset{
 		Meta:     dataset.Meta{Team: p.Team, From: p.From, To: p.To, GeneratedAt: p.Now, ProductionStage: p.ProductionStage},
 		Products: []dataset.Product{}, PRs: []dataset.PR{}, Deploys: []dataset.Deploy{},
-		LeadTimes: []dataset.LeadTime{}, Runs: []dataset.Run{}, Reviews: []dataset.Review{},
+		Runs: []dataset.Run{}, Reviews: []dataset.Review{},
 	}, nil
 }
 

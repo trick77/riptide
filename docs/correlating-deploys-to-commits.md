@@ -50,20 +50,39 @@ select distinct deploy_id, app_name, environment, deployed_at, commit_sha, pipel
 from produced;
 ```
 
-Lead time then measures from the first sighting of `p.commit_sha` in
-`bitbucket_events` to `a.occurred_at`.
+The run's commit is the deploy's **head**, not the change it shipped: a deploy
+ships everything that reached the trunk since the previous version of the same
+image, up to the head. Measuring lead time from the head's own commit would be
+the newest-commit-per-release shortcut, which reads far too fast. Riptide
+places each merged PR on the first deploy whose stretch holds it
+([Change lead time](dora-lead-time.md)):
+
+- the head is placed where it reached the repo's trunk, never after the run
+  started (a UI job pushes its own release commit minutes into the run);
+- the stretch starts at the newest head of the same image repository's tags the
+  App ran before, compared as tag sets per image repository (an App may run
+  two tags of one image side by side); without one, at the deploy that ran
+  them, or for an App's first deploy at the repo's first trunk push: a lower
+  bound;
+- the references are compared as identical strings: no normalisation of
+  registry, tag or digest. A deploy whose reference no run published is not
+  resolved by this route (CI not reporting, or the image built before CI
+  reported).
 
 Senders that publish no image simply omit both fields; those runs stay
 uncorrelated (`image_refs = '{}'`), which is honest.
 
-## Fallback for rows collected before image references
+## Compare links in the release commit
 
 Where the GitOps repo is itself onboarded to the Bitbucket webhook, its commits
 are in `bitbucket_events` and `argocd_events.revision` matches
 `bitbucket_events.commit_sha` for those rows. If the release commit's message
 lists the component bumps it carries — many release-note generators emit compare
 links containing both the old and the new App-repo SHA — those SHAs can be
-extracted at read time:
+extracted at read time. Riptide tries this route first (the old version's
+commit to the new one, both where they reached the trunk), before the images;
+an old end no payload names predates the data, and the stretch then starts at
+the repo's first trunk push, a lower bound:
 
 ```sql
 with release as (
@@ -79,7 +98,7 @@ bumped as (
   select revision, app_name, environment, deployed_at,
          regexp_matches(
            body,
-           'repos/([a-z0-9-]+)/compare/diff\?targetBranch=([0-9a-f]{40})&sourceBranch=([0-9a-f]{40})',
+           'repos/([a-z0-9._-]+)/compare/diff\?targetBranch=([0-9a-f]{40})&sourceBranch=([0-9a-f]{40})',
            'g') as m
   from release
 )
@@ -90,8 +109,10 @@ from bumped;
 
 This depends on a site-specific message format and only sees releases that go
 through the release-PR path — a direct version-bump commit carries no links.
-Treat it as a way to make history queryable, never as the contract: prefer
-`image_refs` for everything collected from now on.
+It is the route that reaches back before CI reported images; the image
+reference is the contract for everything collected from now on, and where both
+resolve, a known image head caps the link's new end (the release tool's commit
+the link names may be pushed after the build started).
 
 ## What not to do
 

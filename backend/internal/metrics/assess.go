@@ -711,8 +711,8 @@ func teamMetric(name string) (metric, bool) {
 }
 
 // bitbucketCounted are the team numbers read off Bitbucket's events: lost
-// events (lost) leave them uncompared. Lead time is Argo CD's: a commit
-// whose push was lost is missing from it, the others' times are right.
+// events (lost) leave them uncompared. Lead time is Argo CD's: a PR whose
+// merge was lost is missing from it, the others' times are right.
 var bitbucketCounted = map[string]bool{
 	"review_time": true, "within_day": true, "open_jammed": true, "merged_per_week": true, "batch_size": true,
 	"wip_weeks": true, "feature_share": true, "untracked": true, "open_prs": true, "first_touch": true,

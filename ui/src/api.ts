@@ -70,6 +70,9 @@ export type DeployFrequency = {
   releases: number;
   // Of releases, an App's first deploy past the onboarding's grace.
   first_releases: number;
+  // Of releases, those no PR could be traced to: what they shipped no one
+  // can name.
+  releases_unresolved: number;
   syncs: number;
   // First deploys within the onboarding's grace: release or re-sync unknown.
   first_seen: number;
@@ -115,11 +118,35 @@ export type DeployDay = {
   no_data: boolean;
 };
 
+// Per PR: the people's PRs merged in the period on the environment by its
+// end, from the first commit; human.n is how many.
 export type LeadTimes = {
   environment: string;
   human: Spread;
-  bot: Spread;
+  // Of human, placed through a lower bound: they may have gone out earlier.
+  lower_bound: number;
   low_sample: boolean;
+};
+
+// Why tracing cannot place a merged PR, the first reason that applies.
+export type TraceReason =
+  "no_merge_commit" | "release_unresolved" | "repo_untraced" | "in_silence";
+
+// How merged PRs stood on production at the period's end:
+// merged = on_prod + not_yet + not_placeable; library PRs are outside merged.
+export type TraceCounts = {
+  merged: number;
+  on_prod: number;
+  lower_bound: number;
+  not_yet: number;
+  oldest_not_yet: string | null;
+  not_placeable: number;
+  reasons: Record<TraceReason, number>;
+  library: number;
+};
+
+export type Coverage = TraceCounts & {
+  repos: (TraceCounts & { repo: string; project: string })[];
 };
 
 export type Delivery = {
@@ -519,6 +546,8 @@ export type Metrics = {
   product: string | null;
   delivery: Delivery;
   lead_chain: LeadChain;
+  // How the period's merged PRs reached production by its end, per repo too.
+  coverage: Coverage;
   review: Review;
   throughput: Throughput;
   open_prs: OpenPRs;
@@ -571,6 +600,13 @@ export type PRFact = {
   merged_at: string | null;
   prod_at: string | null;
   to_prod_s: number | null;
+  // Where a merged PR stands on production now; null for every other PR, a
+  // library's included. The reason when not placeable; the route of its
+  // first production deploy, and whether that was a lower bound.
+  prod_state: "on_prod" | "not_yet" | "not_placeable" | null;
+  prod_reason: TraceReason | null;
+  prod_route: "compare" | "image" | null;
+  prod_lower_bound: boolean;
   // A PR open now: its age, what it waits on.
   age_s: number | null;
   waiting: PRFactWaiting | null;

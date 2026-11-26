@@ -405,29 +405,30 @@ export const de = {
     lead: {
       label: "Lead Time bis {{prod}}",
       dora: "DORA · Change lead time · Throughput",
-      question: "Wie lange braucht eine Änderung vom Commit bis {{prod}}?",
-      noHuman: "keine menschlichen Commits zugeordnet",
-      slowest_one:
-        "die langsamsten 10 %: über {{p90}} · {{count}} Commit von Menschen",
-      slowest_other:
-        "die langsamsten 10 %: über {{p90}} · {{count}} Commits von Menschen",
+      question: "Wie lange braucht ein PR vom ersten Commit bis {{prod}}?",
+      noHuman: "kein gemergter PR bis {{prod}} verfolgt",
+      slowest_one: "die langsamsten 10 %: über {{p90}} · aus {{count}} PR",
+      slowest_other: "die langsamsten 10 %: über {{p90}} · aus {{count}} PRs",
       directionWhy: "schnelleres Feedback von echten Nutzern",
-      lowSample: "Weniger als 10 Commits: wenig belastbar",
+      lowSample: "Weniger als 10 PRs: wenig belastbar",
       means:
         "Die Zeit, in der eine fertige Änderung noch keinem Nutzer hilft. Lang heisst: Feedback kommt spät, Fehler lassen sich schwer einer Änderung zuordnen, Releases werden gross.",
       watch:
         "die langsamsten 10 % weit über dem typischen Wert liegen: dann bleiben einzelne Änderungen hängen, oft hinter einem Release-Termin.",
       lever:
         "Wo die Zeit liegt, zeigt der Fluss darunter; dort liegt der Hebel, nicht in den kurzen Abschnitten.",
-      def: "Pro Commit vom Autorenzeitpunkt bis zum ersten Deploy auf {{prod}}, der ihn enthält. Merge-Commits und Release-Tooling ausgenommen, Bots separat.",
+      def: "Pro PR vom ersten Commit bis zum ersten Deploy auf {{prod}}, der ihn enthält. Die PRs, die im Zeitraum gemerged wurden und bis zu seinem Ende auf {{prod}} waren. PRs von Bots und von Bibliotheken zählen nicht.",
       basis_one:
-        "{{count}} menschlicher Commit, zuerst deployt im Zeitraum{{bots}}.",
+        "Aus {{count}} PR, gemerged im Zeitraum und bis zu seinem Ende auf {{prod}}.",
       basis_other:
-        "{{count}} menschliche Commits, zuerst deployt im Zeitraum{{bots}}.",
-      basisBots: ", dazu {{n}} von Bots",
-      filterBots: "Bots separat",
-      coverage:
-        "Nur Commits, die Riptide einem Deployment zuordnen kann (Image-Referenz des Builds oder Release-Notes); ein Deployment ohne Zuordnung fehlt hier.",
+        "Aus {{count}} PRs, gemerged im Zeitraum und bis zu seinem Ende auf {{prod}}.",
+      filterBots: "ohne Bots",
+      coverage_one:
+        "{{traced, num}} von {{count, num}} gemergten PR bis {{prod}} verfolgt: über den Compare-Link im Release-Commit oder die Version, die ein Build gebaut hat. Ein Release ohne beides fehlt hier.",
+      coverage_other:
+        "{{traced, num}} von {{count, num}} gemergten PRs bis {{prod}} verfolgt: über den Compare-Link im Release-Commit oder die Version, die ein Build gebaut hat. Ein Release ohne beides fehlt hier.",
+      notYet_one: "{{count, num}} gemergter PR noch nicht auf {{prod}}.",
+      notYet_other: "{{count, num}} gemergte PRs noch nicht auf {{prod}}.",
     },
     dsucc: {
       label: "Deploy-Erfolg",
@@ -491,9 +492,11 @@ export const de = {
     noProd:
       "In diesem Zeitraum wurde keine Änderung bis {{prod}} verfolgt: Anteile gibt es nur über die ganze Strecke.",
     chainNote_one:
-      "Die letzten zwei Abschnitte erreichen nur PRs, deren Merge-Commit einem Deployment zugeordnet ist. Bis {{prod}} verfolgt: {{traced, num}} von {{count, num}} PR, der gemerged wurde.",
+      "Die letzten zwei Abschnitte erreichen nur PRs, die einem Deploy zugeordnet sind: {{traced, num}} von {{count, num}} gemergten PR bis {{prod}} verfolgt.",
     chainNote_other:
-      "Die letzten zwei Abschnitte erreichen nur PRs, deren Merge-Commit einem Deployment zugeordnet ist. Bis {{prod}} verfolgt: {{traced, num}} von {{count, num}} PRs, die gemerged wurden.",
+      "Die letzten zwei Abschnitte erreichen nur PRs, die einem Deploy zugeordnet sind: {{traced, num}} von {{count, num}} gemergten PRs bis {{prod}} verfolgt.",
+    notYet_one: "{{count, num}} gemergter PR noch nicht auf {{prod}}.",
+    notYet_other: "{{count, num}} gemergte PRs noch nicht auf {{prod}}.",
     library_one:
       "{{count, num}} PR in Bibliotheken (werden nicht ausgerollt): in keinem Abschnitt bis {{prod}}, nicht in dieser Zählung.",
     library_other:

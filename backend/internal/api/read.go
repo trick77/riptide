@@ -191,7 +191,7 @@ func (d Deps) periods(ctx context.Context, v view, ps []metrics.Period, running 
 		}
 	}
 	sh, err := d.Reader.Shared(ctx, dataset.SharedParams{Team: v.team, From: from, ClassEnds: ends, Now: v.now, Libraries: true,
-		Changes: true})
+		Trace: true})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -291,9 +291,9 @@ func (d Deps) facts(w http.ResponseWriter, r *http.Request) {
 	}
 	// The period's closed weeks and on to now: the running week's rows are
 	// listed, marked, counted nowhere.
-	// The shared reads first, the changes beside the rest, then the window.
+	// The shared reads first, the tracing beside the rest, then the window.
 	sh, err := d.Reader.Shared(r.Context(), dataset.SharedParams{Team: v.team, From: v.params.Period.From,
-		ClassEnds: []time.Time{v.now}, Now: v.now, Libraries: true, Changes: true})
+		ClassEnds: []time.Time{v.now}, Now: v.now, Libraries: true, Trace: true})
 	var ds *dataset.Dataset
 	if err == nil {
 		ds, err = d.load(r.Context(), v, v.params.Period.From, v.now, readFacts, sh, v.now)

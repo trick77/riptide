@@ -112,18 +112,18 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
       watch: t("overview.lead.watch"),
       lever: t("overview.lead.lever"),
       def: t("overview.lead.def", { prod }),
-      basis: t("overview.lead.basis", {
-        count: lt.human.n,
-        bots: lt.bot.n ? t("overview.lead.basisBots", { n: lt.bot.n }) : "",
-      }),
-      filters: [
-        "NOT is_merge",
-        "NOT service account",
-        t("overview.lead.filterBots"),
-        `environment = ${prod}`,
-      ],
-      coverage: t("overview.lead.coverage"),
-      query: "lead_time_changes · docs/dora-lead-time.md",
+      basis: t("overview.lead.basis", { count: lt.human.n, prod }),
+      filters: [t("overview.lead.filterBots"), `environment = ${prod}`],
+      coverage:
+        t("overview.lead.coverage", {
+          prod,
+          traced: m.coverage.on_prod,
+          count: m.coverage.merged,
+        }) +
+        (m.coverage.not_yet > 0
+          ? " " + t("overview.lead.notYet", { count: m.coverage.not_yet, prod })
+          : ""),
+      query: "docs/dora-lead-time.md",
     },
     dsucc: {
       title: t("overview.dsucc.label"),
@@ -198,7 +198,7 @@ export function Overview({ m, query, why, onWhy, onFacts }: Props) {
           }
           note={
             lt.human.n === 0
-              ? t("overview.lead.noHuman")
+              ? t("overview.lead.noHuman", { prod })
               : t("overview.lead.slowest", {
                   p90: dur(lt.human.p90),
                   count: lt.human.n,

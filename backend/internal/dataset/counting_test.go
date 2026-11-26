@@ -312,30 +312,6 @@ func TestDatasetBotNamedAfterItsTool(t *testing.T) {
 	}
 }
 
-// The same account's direct pushes to the trunk are bot commits in the lead
-// time; the person's in the same release are not.
-func TestDatasetBotPushNamedAfterItsTool(t *testing.T) {
-	st, pool := migrated(t)
-	s := &seeder{t: t, pool: pool}
-	base, botCommit, head, ops := strings.Repeat("e1", 20), strings.Repeat("e4", 20), strings.Repeat("e2", 20), strings.Repeat("e3", 20)
-	s.push(portalWeb, "master", days(5), commit{sha: base, authored: days(5)})
-	s.push(portalWeb, "master", days(6),
-		commit{sha: botCommit, author: "renovate_portal", authored: days(6).Add(-time.Hour), message: "update lib"},
-		commit{sha: head, author: "inga.renovatebaum", authored: days(6), message: "fix layout"})
-	s.push(portalOps, "master", days(6).Add(time.Hour), commit{sha: ops, authored: days(6).Add(time.Hour),
-		message: "portal PROD 2.1\n\n[portal-web 2.0 -> 2.1](https://git.example.com/projects/portal/repos/portal-web/compare/diff?targetBranch=" +
-			base + "&sourceBranch=" + head + ")"})
-	s.deploy(team, "portal-prod", "prod", ops, "Succeeded", days(6).Add(2*time.Hour), "reg/portal-web:2.1")
-	d := load(t, st, t0, days(28))
-	bot := map[string]bool{}
-	for _, l := range d.LeadTimes {
-		bot[l.Author] = l.Bot
-	}
-	if len(bot) != 2 || !bot["renovate_portal"] || bot["inga.renovatebaum"] {
-		t.Errorf("lead time bots = %v", bot)
-	}
-}
-
 // at is the instant T0 plus d days.
 func at(d float64) time.Time { return days(d) }
 

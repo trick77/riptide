@@ -409,29 +409,30 @@ export const en = {
     lead: {
       label: "Lead time to {{prod}}",
       dora: "DORA · Change lead time · Throughput",
-      question: "How long does a change take from commit to {{prod}}?",
-      noHuman: "no human commits mapped",
-      slowest_one:
-        "the slowest 10 %: over {{p90}} · {{count}} commit by people",
-      slowest_other:
-        "the slowest 10 %: over {{p90}} · {{count}} commits by people",
+      question: "How long does a PR take from its first commit to {{prod}}?",
+      noHuman: "no merged PR traced to {{prod}}",
+      slowest_one: "the slowest 10 %: over {{p90}} · from {{count}} PR",
+      slowest_other: "the slowest 10 %: over {{p90}} · from {{count}} PRs",
       directionWhy: "faster feedback from real users",
-      lowSample: "Fewer than 10 commits: not very reliable",
+      lowSample: "Fewer than 10 PRs: not very reliable",
       means:
         "The time in which a finished change helps no user yet. Long means: feedback comes late, failures are hard to pin to a change, releases grow big.",
       watch:
         "the slowest 10 % sit far above the typical value: then single changes get stuck, often behind a release date.",
       lever:
         "Where the time goes is shown by the flow below; that is where the lever is, not in the short stages.",
-      def: "Per commit, from the author time to the first deploy to {{prod}} that contains it. Merge commits and release tooling excluded, bots separate.",
+      def: "Per PR, from its first commit to the first deploy to {{prod}} that contains it. The PRs merged in the period that were on {{prod}} by its end. Bots' PRs and libraries' PRs do not count.",
       basis_one:
-        "{{count}} human commit, first deployed in the period{{bots}}.",
+        "From {{count}} PR, merged in the period and on {{prod}} by its end.",
       basis_other:
-        "{{count}} human commits, first deployed in the period{{bots}}.",
-      basisBots: ", plus {{n}} by bots",
-      filterBots: "bots separate",
-      coverage:
-        "Only commits Riptide can map to a deployment (the build's image reference or release notes); a deployment without a mapping is missing here.",
+        "From {{count}} PRs, merged in the period and on {{prod}} by its end.",
+      filterBots: "no bots",
+      coverage_one:
+        "{{traced, num}} of {{count, num}} merged PR traced to {{prod}}: through the compare link in the release commit or the version a build built. A release with neither is missing here.",
+      coverage_other:
+        "{{traced, num}} of {{count, num}} merged PRs traced to {{prod}}: through the compare link in the release commit or the version a build built. A release with neither is missing here.",
+      notYet_one: "{{count, num}} merged PR not on {{prod}} yet.",
+      notYet_other: "{{count, num}} merged PRs not on {{prod}} yet.",
     },
     dsucc: {
       label: "Deploy success",
@@ -495,9 +496,11 @@ export const en = {
     noProd:
       "No change traced to {{prod}} in this period: shares exist only over the whole way.",
     chainNote_one:
-      "Only PRs whose merge commit maps to a deployment reach the last two stages. Traced to {{prod}}: {{traced, num}} of {{count, num}} merged PR.",
+      "Only PRs mapped to a deploy reach the last two stages: {{traced, num}} of {{count, num}} merged PR traced to {{prod}}.",
     chainNote_other:
-      "Only PRs whose merge commit maps to a deployment reach the last two stages. Traced to {{prod}}: {{traced, num}} of {{count, num}} merged PRs.",
+      "Only PRs mapped to a deploy reach the last two stages: {{traced, num}} of {{count, num}} merged PRs traced to {{prod}}.",
+    notYet_one: "{{count, num}} merged PR not on {{prod}} yet.",
+    notYet_other: "{{count, num}} merged PRs not on {{prod}} yet.",
     library_one:
       "{{count, num}} PR in libraries (never rolled out): in no stage to {{prod}}, not in this count.",
     library_other:
