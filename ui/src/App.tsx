@@ -13,7 +13,7 @@ import { Costs } from "./Costs";
 import { Deploys, Mix } from "./Deploys";
 import { Facts } from "./Facts";
 import { Flow } from "./Flow";
-import { dateTime, fullDate, fullDay, stage } from "./format";
+import { dateTime, fullDate, fullDay, stage, weekSpan } from "./format";
 import { FrameworkMap } from "./FrameworkMap";
 import { PAGE_SECTIONS, SectionNav, sectionOf, useActiveSection } from "./nav";
 import { Overview } from "./Overview";
@@ -237,9 +237,7 @@ export default function App() {
             >
               {t("nav.view", {
                 product: m.product ?? t("page.allProducts"),
-                from: weeks[0].kw,
-                to: weeks[weeks.length - 1].kw,
-                weeks: weeks.length,
+                span: weekSpan(t, weeks[0], weeks[weeks.length - 1]),
               })}
             </a>
           )}
@@ -302,8 +300,7 @@ export default function App() {
                 product: m.product
                   ? t("page.oneProduct", { product: m.product })
                   : t("page.allProductsLower"),
-                from: weeks[0].kw,
-                to: weeks[weeks.length - 1].kw,
+                span: weekSpan(t, weeks[0], weeks[weeks.length - 1]),
                 start: fullDate(new Date(m.period.from)),
                 end: fullDay(m.period.last_day),
                 weeks: weeks.length,

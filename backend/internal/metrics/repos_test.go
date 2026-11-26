@@ -181,10 +181,11 @@ func TestRepoViewGroupsAndRanking(t *testing.T) {
 	}
 
 	rel := spreadOf(t, v, SpreadReleases, nil)
-	// post-api released nothing in the period: set apart, last.
+	// post-api and kasse-api released nothing in the period: set apart,
+	// last, no verdict of a repo's own.
 	last := rel.Dots[len(rel.Dots)-1]
-	if !rel.Shown || rel.Apart != 1 || !last.Apart || last.Repo != "post/post-api" || last.X != nil ||
-		last.Verdict != DotBreach {
+	if !rel.Shown || rel.Apart != 2 || !last.Apart || last.Repo != "post/post-api" || last.X != nil ||
+		last.Verdict != DotNeutral {
 		t.Errorf("releases strip = %+v", rel)
 	}
 	prod := spreadOf(t, v, SpreadToProd, nil)
@@ -240,9 +241,10 @@ func TestRepoViewFirstDeployInGrace(t *testing.T) {
 	if r.Releases != 0 || r.DaysSince == nil || *r.DaysSince != 5 || r.Group != RepoGroupRegular || !r.SinceLowerBound {
 		t.Errorf("row = %+v", r)
 	}
-	// Rolling out regularly: placed at none in the period, never set apart
-	// as one that released nothing.
-	if s := spreadOf(t, v, SpreadReleases, nil); len(s.Dots) != 1 || s.Dots[0].Apart || s.Dots[0].Verdict != DotWithin {
+	// No counted release in the period: set apart like any repo without
+	// one (owner, 2026-11-26), no verdict of its own; its project's standing
+	// is the ranking's.
+	if s := spreadOf(t, v, SpreadReleases, nil); len(s.Dots) != 1 || !s.Dots[0].Apart || s.Dots[0].Verdict != DotNeutral {
 		t.Errorf("releases strip = %+v", s)
 	}
 }
@@ -436,20 +438,43 @@ func TestRepoViewGates(t *testing.T) {
 }
 
 // A project none of whose Apps ever released to production is no project
-// rolled out: the release rule does not judge it, its waiting work is
-// StateNotOnProd's.
+// rolled out: the release rule does not judge it. Its repos form their own
+// group right after the breach, neutral, never "cannot be judged"; its
+// waiting work is StateNotOnProd's, red as ever.
 func TestRepoViewNeverReleased(t *testing.T) {
 	ds := stateData(func(d *dataset.Dataset) {
-		d.Apps = append(d.Apps, dataset.App{Name: "lager-prod", Project: s("lager")})
+		d.Apps = append(d.Apps, dataset.App{Name: "lager-prod", Project: s("lager")},
+			dataset.App{Name: "post-prod", Project: s("post")})
 		d.Releases = []dataset.AppRelease{{App: "kasse-prod", Environment: "intg", At: endAgo(30)},
-			release("lager-prod", 3, false)}
-		d.PRs = []dataset.PR{merged(1, 25)}
+			release("lager-prod", 3, false), release("post-prod", 40, false)}
+		d.Traces["post/post-api"] = dataset.RepoTrace{DeployedSince: endAgoP(150),
+			Releases: []dataset.TraceRelease{traceRelease("post-prod", 40)}}
+		d.PRs = []dataset.PR{merged(1, 25), merged(2, 5, onRepo("post/post-api"))}
 	})
 	v := repoViewOf(ds, &dataset.Dataset{Meta: ds.Meta, Apps: ds.Apps})
 	r := rowOf(t, v, "kasse/kasse-api")
-	if r.Group != RepoGroupUnjudged || *r.Reason != RepoReasonNeverReleased || r.DaysSince != nil ||
-		len(r.Flags) != 1 || r.Flags[0].Key != StateNotOnProd || *r.ReleasesForm != ReleasesFormNone {
+	if r.Group != RepoGroupNever || r.Reason != nil || r.DaysSince != nil ||
+		len(r.Flags) != 1 || r.Flags[0] != (RepoFlag{Key: StateNotOnProd, Tone: DotBreach, Value: 25}) ||
+		*r.ReleasesForm != ReleasesFormNone {
 		t.Errorf("row = %+v", r)
+	}
+	var order []string
+	for _, g := range v.Groups {
+		order = append(order, g.Key)
+	}
+	if !slices.Equal(order, []string{RepoGroupNone, RepoGroupNever}) || v.Rows[1].Repo != "kasse/kasse-api" {
+		t.Errorf("groups = %v, rows %+v", order, v.Rows)
+	}
+	// Its releases are a repo's like any: none in the period, set apart,
+	// no verdict of its own.
+	rel := spreadOf(t, v, SpreadReleases, nil)
+	for _, d := range rel.Dots {
+		if !d.Apart || d.Verdict != DotNeutral {
+			t.Errorf("releases dot %+v", d)
+		}
+	}
+	if rel.Apart != 2 {
+		t.Errorf("releases strip = %+v", rel)
 	}
 	expectFlagsMatch(t, v, assessStates(t, ds, nil, History{}))
 }
@@ -467,6 +492,155 @@ func TestRepoViewNoneWithoutMerges(t *testing.T) {
 	}
 	if s := spreadOf(t, v, SpreadToProd, nil); len(s.Dots) != 0 || s.Apart != 0 {
 		t.Errorf("to_prod strip = %+v", s)
+	}
+}
+
+// The rows read the PRs the cards read, in every view: a 26-week view's
+// previous period lies past the states' look-back and flags nothing; work
+// inside it flags the row and the card alike.
+func TestRepoView26WeeksReadsTheLookback(t *testing.T) {
+	cur, prevP := ClosedPeriod(26, now, zurich), ClosedPrevious(26, now, zurich)
+	p := Params{Period: cur, Previous: prevP}
+	team := func(mod func(*dataset.Dataset)) *dataset.Dataset {
+		return stateData(func(d *dataset.Dataset) {
+			d.Meta.From = cur.From
+			d.Meta.DataStart = dataset.SourceTimes{Bitbucket: endAgoP(500), Pipeline: endAgoP(500), ArgoCD: endAgoP(500),
+				Noergler: endAgoP(500)}
+			d.Traces = map[string]dataset.RepoTrace{"kasse/kasse-api": {DeployedSince: endAgoP(450),
+				Releases: []dataset.TraceRelease{traceRelease("kasse-prod", 250)}}}
+			d.Releases = []dataset.AppRelease{release("kasse-prod", 250, false)}
+			mod(d)
+		})
+	}
+	for _, c := range []struct {
+		name      string
+		ds        *dataset.Dataset
+		prev      []dataset.PR
+		group     string
+		flags     []string
+		cardNamed bool
+	}{
+		{"waiting in the previous period", team(func(d *dataset.Dataset) {
+			d.Releases = []dataset.AppRelease{release("kasse-prod", 3, false)}
+			d.PRs = []dataset.PR{merged(2, 2)}
+		}), []dataset.PR{merged(1, 200)}, RepoGroupRegular, []string{}, false},
+		{"shipped in the previous period", team(func(*dataset.Dataset) {}),
+			[]dataset.PR{merged(1, 200, onProd(200, 1))}, RepoGroupIdle, []string{}, false},
+		{"waiting inside the look-back", team(func(d *dataset.Dataset) { d.PRs = []dataset.PR{merged(2, 100)} }),
+			nil, RepoGroupNone, []string{StateNoRelease, StateNotOnProd}, true},
+	} {
+		prev := &dataset.Dataset{Meta: c.ds.Meta, Apps: c.ds.Apps, PRs: c.prev}
+		v := Compute(c.ds, prev, nil, p).Repos
+		r := rowOf(t, v, "kasse/kasse-api")
+		var keys []string
+		for _, f := range r.Flags {
+			keys = append(keys, f.Key)
+		}
+		if r.Group != c.group || !slices.Equal(append([]string{}, keys...), c.flags) {
+			t.Errorf("%s: row group %s flags %+v, want %s %v", c.name, r.Group, r.Flags, c.group, c.flags)
+		}
+		a := Assess(c.ds, prev, p, History{})
+		if named := len(cardNames(a, StateNotOnProd)) > 0; named != c.cardNamed {
+			t.Errorf("%s: not_on_prod card names %v", c.name, cardNames(a, StateNotOnProd))
+		}
+		expectFlagsMatch(t, v, a)
+	}
+}
+
+// The 4- and 12-week views read the states' look-back before their
+// previous period (Params.Earlier) as the cards do: an old PR still waiting
+// flags its repo, a repo only the look-back holds gets a row where a flag
+// names it, and none otherwise.
+func TestRepoViewReadsTheEarlierLookback(t *testing.T) {
+	for _, weeks := range []int{4, 12} {
+		cur, prevP := ClosedPeriod(weeks, now, zurich), ClosedPrevious(weeks, now, zurich)
+		look := StatePeriod(cur, prevP)
+		age := stEnd.Sub(look.From.Add(look.To.Sub(look.From)/2)).Hours() / 24
+		ds := stateData(func(d *dataset.Dataset) {
+			d.Meta.From = cur.From
+			d.Releases = []dataset.AppRelease{release("kasse-prod", 3, false)}
+			d.Traces["kasse/kasse-ui"] = dataset.RepoTrace{DeployedSince: endAgoP(150)}
+			d.Traces["kasse/kasse-web"] = dataset.RepoTrace{DeployedSince: endAgoP(150)}
+			d.PRs = []dataset.PR{merged(2, 2)}
+		})
+		prev := &dataset.Dataset{Meta: ds.Meta, Apps: ds.Apps}
+		earlier := &dataset.Dataset{Meta: ds.Meta, Apps: ds.Apps, Traces: ds.Traces, PRs: []dataset.PR{merged(1, age),
+			merged(3, age, onRepo("kasse/kasse-web")), merged(4, age, onRepo("kasse/kasse-ui"), onProd(age, 1))}}
+		p := Params{Period: cur, Previous: prevP, Earlier: earlier}
+		v := Compute(ds, prev, nil, p).Repos
+		a := Assess(ds, prev, p, History{})
+		if got := rowsFlagged(v, StateNotOnProd, false); !slices.Equal(got, []string{"kasse/kasse-api", "kasse/kasse-web"}) {
+			t.Errorf("%d weeks: rows flag %v", weeks, got)
+		}
+		if web := rowOf(t, v, "kasse/kasse-web"); web.Merged != 0 || web.Group != RepoGroupIdle {
+			t.Errorf("%d weeks: look-back row %+v", weeks, web)
+		}
+		if slices.ContainsFunc(v.Rows, func(r RepoRow) bool { return r.Repo == "kasse/kasse-ui" }) {
+			t.Errorf("%d weeks: a look-back repo without a flag has a row", weeks)
+		}
+		expectFlagsMatch(t, v, a)
+		// Without the look-back read the row cannot know: the card, read with
+		// it, still names the repo.
+		if got := rowsFlagged(Compute(ds, prev, nil, Params{Period: cur, Previous: prevP}).Repos, StateNotOnProd,
+			false); len(got) != 0 {
+			t.Errorf("%d weeks without the look-back: rows flag %v", weeks, got)
+		}
+	}
+}
+
+// A repo's own releases on the strip carry no verdict: the release rule is
+// its project's, said in the ranking. Every repo with none in the period is
+// set apart, whatever its project's standing.
+func TestRepoViewReleasesStripNeutral(t *testing.T) {
+	ds := repoData()
+	v := repoViewOf(ds, repoPrev(ds))
+	s := spreadOf(t, v, SpreadReleases, nil)
+	var apart []string
+	for _, d := range s.Dots {
+		if d.Verdict != DotNeutral {
+			t.Errorf("dot %s verdict %s", d.Repo, d.Verdict)
+		}
+		if d.Apart {
+			apart = append(apart, d.Repo)
+		}
+	}
+	slices.Sort(apart)
+	if !slices.Equal(apart, []string{"kasse/kasse-api", "post/post-api"}) || s.Apart != 2 {
+		t.Errorf("set apart %v, strip %+v", apart, s)
+	}
+}
+
+// An infrastructure App shipping a repo is none of its releases, as the
+// team's frequency counts none; a repo only such Apps deploy writes none.
+func TestRepoViewInfraReleases(t *testing.T) {
+	ds := stateData(func(d *dataset.Dataset) {
+		d.Releases = []dataset.AppRelease{release("kasse-prod", 40, false), release("monitoring-prod", 3, false),
+			release("monitoring-prod", 10, false), release("monitoring-prod", 17, false)}
+		d.Traces = map[string]dataset.RepoTrace{
+			"kasse/kasse-api": {DeployedSince: endAgoP(150), Releases: []dataset.TraceRelease{
+				traceRelease("kasse-prod", 40), traceRelease("monitoring-prod", 3), traceRelease("monitoring-prod", 10),
+				traceRelease("monitoring-prod", 17)}},
+			"ops/log-agent": {DeployedSince: endAgoP(150), Releases: []dataset.TraceRelease{
+				traceRelease("monitoring-prod", 3), traceRelease("monitoring-prod", 10)}},
+		}
+		d.PRs = []dataset.PR{merged(1, 5, onProd(5, 1)), merged(2, 5, onRepo("ops/log-agent"))}
+	})
+	m := Compute(ds, &dataset.Dataset{Meta: ds.Meta, Apps: ds.Apps}, nil, Params{Period: stCur, Previous: stPrev})
+	r := rowOf(t, m.Repos, "kasse/kasse-api")
+	weekly := 0
+	for _, w := range r.ReleaseWeeks {
+		weekly += *w
+	}
+	// kasse-prod's release 40 days back only, in the previous period.
+	if r.Group != RepoGroupNone || r.Releases != 0 || *r.ReleasesForm != ReleasesFormNone || weekly != 1 {
+		t.Errorf("row = %+v, weeks %v", r, r.ReleaseWeeks)
+	}
+	if ops := rowOf(t, m.Repos, "ops/log-agent"); ops.Group != RepoGroupUnjudged || *ops.Reason != RepoReasonInfra ||
+		ops.ReleasesForm != nil {
+		t.Errorf("infrastructure row = %+v", ops)
+	}
+	if s := spreadOf(t, m.Repos, SpreadReleases, nil); s.Apart != 1 || len(s.Dots) != 1 || s.Dots[0].Repo != "kasse/kasse-api" {
+		t.Errorf("releases strip = %+v", s)
 	}
 }
 
@@ -682,4 +856,32 @@ func TestTrends(t *testing.T) {
 	if r := m.Repos.Rows[0]; r.MergedPrev != nil || r.BatchPrev != nil || r.MergedPerWeek == nil || r.ReleasesPrev == nil {
 		t.Errorf("row = %+v", r)
 	}
+}
+
+// TestRepoViewTakesTheNewestCopy reads one PR in two windows: opened in the
+// look-back, merged implicitly in the previous period. Only the copy of the
+// window it merged in knows it was counted already; the rows take that copy,
+// as the states do, so no row is flagged where no card names its project.
+func TestRepoViewTakesTheNewestCopy(t *testing.T) {
+	cur, prevP := stCur, stPrev
+	ds := stateData(func(d *dataset.Dataset) {
+		d.Meta.From = cur.From
+		d.Releases = []dataset.AppRelease{release("kasse-prod", 50, false)}
+		d.PRs = nil
+	})
+	copyOf := func(whole bool) dataset.PR {
+		return merged(2, 40, func(p *dataset.PR) {
+			p.OpenedAt = endAgoP(70)
+			p.ImplicitMerge, p.Twice = whole, whole
+			if !whole {
+				p.TrunkAt = nil
+			}
+		})
+	}
+	sibling := merged(1, 60, func(p *dataset.PR) { p.TrunkAt, p.OffTrunk = endAgoP(40), true })
+	prev := &dataset.Dataset{Meta: ds.Meta, Apps: ds.Apps, Traces: ds.Traces, PRs: []dataset.PR{copyOf(true)}}
+	earlier := &dataset.Dataset{Meta: ds.Meta, Apps: ds.Apps, Traces: ds.Traces,
+		PRs: []dataset.PR{sibling, copyOf(false)}}
+	p := Params{Period: cur, Previous: prevP, Earlier: earlier}
+	expectFlagsMatch(t, Compute(ds, prev, nil, p).Repos, Assess(ds, prev, p, History{}))
 }

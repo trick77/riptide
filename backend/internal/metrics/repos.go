@@ -29,6 +29,11 @@ const (
 	// RepoGroupNone: its project's last release more than ReleaseBreachDays
 	// back while people worked on it (StateNoRelease fires for the project).
 	RepoGroupNone = "none"
+	// RepoGroupNever: worked on, but no App of its project released to
+	// production as far as the data goes (owner, 2026-11-26): the release
+	// rule judges a project rolled out only, so no breach and no card; its
+	// merged work waiting is StateNotOnProd's.
+	RepoGroupNever = "never"
 	// RepoGroupRare: its project's last release more than ReleaseHintDays
 	// back (StateReleaseDue).
 	RepoGroupRare = "rare"
@@ -46,8 +51,8 @@ const (
 )
 
 // repoGroups are the groups in the ranking's order.
-var repoGroups = []string{RepoGroupNone, RepoGroupRare, RepoGroupUnjudged, RepoGroupRegular, RepoGroupLibrary,
-	RepoGroupIdle}
+var repoGroups = []string{RepoGroupNone, RepoGroupNever, RepoGroupRare, RepoGroupUnjudged, RepoGroupRegular,
+	RepoGroupLibrary, RepoGroupIdle}
 
 // Why a repo's releases cannot be judged (RepoRow.Reason).
 const (
@@ -69,10 +74,6 @@ const (
 	// RepoReasonNoProdStage: Argo CD reports deploys, none to the production
 	// stage (StateNoProdStage).
 	RepoReasonNoProdStage = "no_prod_stage"
-	// RepoReasonNeverReleased: no App of its project released to production
-	// as far as the data goes: the release rule judges a project rolled out
-	// only. Its merged work waiting is StateNotOnProd's.
-	RepoReasonNeverReleased = "never_released"
 )
 
 // How a row writes its releases (RepoRow.ReleasesForm).
@@ -161,9 +162,11 @@ const (
 // RepoView is the period's numbers per repo of the view.
 type RepoView struct {
 	// Rows are every repo with a merged PR in the period or the previous
-	// one, ranked: by group (repoGroups' order); within none and rare the
-	// longest without a release first, within regular those past a
-	// threshold first, then the slowest to production; else by name.
+	// one, and every repo a flag names whose merged PRs lie in the states'
+	// look-back only (StateLookbackFrom), so a repo a card names has a row;
+	// ranked: by group (repoGroups' order); within none and rare the longest
+	// without a release first, within regular those past a threshold first,
+	// then the slowest to production; else by name.
 	Rows []RepoRow `json:"rows"`
 	// Open is how many of Rows the ranking shows before "show all": all of
 	// them when fewer than RepoRankMinHidden would stay hidden.
@@ -198,7 +201,11 @@ type RepoGroup struct {
 // (StateNotOnProd: the oldest merged PR not on production, in days;
 // StateSlowToProd), the first review (StateFirstReviewWait). Tone is the
 // dot's verdict, DotBreach or DotHint. A source the assessment gates
-// (silentEnd) flags nothing.
+// (silentEnd) flags nothing. The release and production flags read the
+// PRs the states read (statePR: the look-back from StateLookbackFrom, in
+// every view), so a row is flagged where the card names it; a card's
+// hysteresis (a unit named last week kept just under the threshold) the
+// page does not know.
 type RepoFlag struct {
 	Key   string  `json:"key"`
 	Tone  string  `json:"tone"`
@@ -224,7 +231,8 @@ type RepoRow struct {
 	LastRelease     *time.Time `json:"last_release"`
 	DaysSince       *float64   `json:"days_since"`
 	SinceLowerBound bool       `json:"since_lower_bound"`
-	// Releases are the period's releases of the Apps that deploy it that
+	// Releases are the period's releases of the Apps that deploy it, no
+	// infrastructure App's (the team's frequency counts none), that
 	// tracing does not show leaving it unchanged
 	// (dataset.TraceRelease.Unchanged), read as tracing knew them by the
 	// period's end, each GitOps revision once at its first instant, an App's
@@ -233,7 +241,8 @@ type RepoRow struct {
 	// period's weeks Argo CD reported (ReleasesBase, rounded, at least 1),
 	// null under a week; ReleasesPrev the previous period's per week.
 	// ReleasesForm is how the row writes them (ReleasesForm*), null where it
-	// writes none: a library, or a repo whose releases cannot be read.
+	// writes none: a library, a repo only infrastructure Apps deploy, or a
+	// repo whose releases cannot be read.
 	Releases        int      `json:"releases"`
 	ReleasesPerWeek *float64 `json:"releases_per_week"`
 	ReleasesPrev    *float64 `json:"releases_prev"`
@@ -372,14 +381,17 @@ type SpreadNote struct {
 type repoAcc struct {
 	row     RepoRow
 	library bool
-	// work are its counted merges outside libraries, both periods: whether
-	// anyone works on it.
+	// lookback: none of its merged PRs lies in the period or the previous
+	// one, only in the states' look-back.
+	lookback bool
+	// work are its counted merges outside libraries among the states' PRs
+	// (statePR): whether anyone works on it, as the release rule reads it.
 	work             []time.Time
 	waits, prevWaits []float64
 	sizes, prevSizes []float64
 	pickups          []float64
 	prevMerged       int
-	// wait are its merged PRs of both periods as placed at the period's end.
+	// wait are the states' PRs of it as placed at the period's end.
 	wait       prodWait
 	mergedWeek []int
 }
@@ -414,20 +426,30 @@ func perWeek(n int, p Period, start *time.Time) *float64 {
 }
 
 // repoView is the per-repo view of ds over p.Period, prev over p.Previous,
-// m and pm their sections as computeBoth made them.
-func repoView(ds, prev *dataset.Dataset, m, pm Metrics, p Params, f filter) RepoView {
+// m and pm their sections as computeBoth made them; earlier is the states'
+// look-back before prev (Params.Earlier, classed as ds), nil when none was
+// read.
+func repoView(ds, prev, earlier *dataset.Dataset, m, pm Metrics, p Params, f filter) RepoView {
 	th := p.thresholds()
 	prod := ds.Meta.ProductionStage
 	loc := p.Period.location()
 	end := p.Period.To
 	weeks := slices.Concat(pm.Period.Weeks, m.Period.Weeks)
+	windows := []*dataset.Dataset{prev, ds}
+	if earlier != nil {
+		windows = []*dataset.Dataset{earlier, prev, ds}
+	}
 	traces := map[string]dataset.RepoTrace{}
-	for _, d := range []*dataset.Dataset{prev, ds} {
+	for _, d := range windows {
 		for repo, t := range d.Traces {
 			traces[repo] = t
 		}
 	}
 	infra := infraRepos(ds, traces)
+	infraApp := map[string]bool{}
+	for _, app := range ds.Apps {
+		infraApp[app.Name] = app.Infra
+	}
 	// A release's revision, so one rolled out to several Apps counts once.
 	revision := map[string]string{}
 	for _, d := range []*dataset.Dataset{prev, ds} {
@@ -461,8 +483,8 @@ func repoView(ds, prev *dataset.Dataset, m, pm Metrics, p Params, f filter) Repo
 	noProd := len(ds.Releases) > 0 &&
 		!slices.ContainsFunc(ds.Releases, func(r dataset.AppRelease) bool { return r.Environment == prod })
 	projects := lastReleases(ds, f, end)
-	// Where a PR stands on production at the period's end, by both periods'
-	// traces, as the states place it.
+	// Where a PR stands on production at the period's end, by every
+	// window's traces, as the states place it.
 	view := *ds
 	view.Traces = traces
 	by := map[string]*repoAcc{}
@@ -482,8 +504,6 @@ func repoView(ds, prev *dataset.Dataset, m, pm Metrics, p Params, f filter) Repo
 			r := get(pr)
 			if pr.Library {
 				r.library = true
-			} else {
-				r.work = append(r.work, *pr.MergedAt)
 			}
 			if w := trendWeekIndex(weeks, *pr.MergedAt); w >= 0 {
 				r.mergedWeek[w]++
@@ -510,13 +530,42 @@ func repoView(ds, prev *dataset.Dataset, m, pm Metrics, p Params, f filter) Repo
 			if !toProdCandidate(pr, traces, infra) {
 				continue
 			}
-			r.wait.add(pr, prodPlacement(&view, pr, end))
 			if e := firstDeployBefore(pr, prod, cutoff); e != nil {
 				if cur {
 					r.waits = append(r.waits, toProdDays(pr, e.FirstDeployedAt))
 				} else {
 					r.prevWaits = append(r.prevWaits, toProdDays(pr, e.FirstDeployedAt))
 				}
+			}
+		}
+	}
+	// Whether anyone works on it and what waits for production: the PRs
+	// the states read (statePR, newStateInput), each once, whatever the
+	// view's length, so the release and production flags are their cards'.
+	// A 26-week view's previous period lies past the look-back; a 4-week
+	// view's look-back reaches past its previous period (earlier). A PR read
+	// in two windows counts by its newest copy, as the states take it: the
+	// marks of an implicit merge are whole only in the window it merged in.
+	from := StateLookbackFrom(p.Period)
+	seen := map[string]bool{}
+	for _, d := range slices.Backward(windows) {
+		for _, pr := range d.PRs {
+			key := prKey(pr)
+			if seen[key] || !statePR(pr, f, from) || !pr.MergedAt.Before(end) {
+				continue
+			}
+			seen[key] = true
+			if by[pr.Repo] == nil {
+				get(pr).lookback = true
+			}
+			r := by[pr.Repo]
+			if pr.Library {
+				r.library = true
+			} else if notCounted(pr) == "" {
+				r.work = append(r.work, *pr.MergedAt)
+			}
+			if toProdCandidate(pr, traces, infra) {
+				r.wait.add(pr, prodPlacement(&view, pr, end))
 			}
 		}
 	}
@@ -550,10 +599,12 @@ func repoView(ds, prev *dataset.Dataset, m, pm Metrics, p Params, f filter) Repo
 		// Releases that may have shipped it, as tracing knew them by the
 		// period's end: each revision at its first instant, so one rolled out
 		// to several Apps counts once, in one week, as the team's frequency.
+		// An infrastructure App's release is none of the team's, as there.
 		rt := traces[row.Repo]
 		firsts := map[string]time.Time{}
 		for _, rel := range rt.Releases {
-			if rel.Environment != prod || rel.Unchanged || !rel.At.Before(end) || !rel.Known.Before(end) {
+			if rel.Environment != prod || rel.Unchanged || !rel.At.Before(end) || !rel.Known.Before(end) ||
+				infraApp[rel.App] {
 				continue
 			}
 			key := releaseKey(rel.App, rel.Environment, rel.At)
@@ -632,7 +683,7 @@ func repoView(ds, prev *dataset.Dataset, m, pm Metrics, p Params, f filter) Repo
 		}
 		// Anyone working on it: work since its project's last release (any,
 		// without one), or within the breach span, as the release rule counts
-		// a project active.
+		// a project active, over the PRs it reads.
 		pl, released := projects[row.Project]
 		active := slices.ContainsFunc(r.work, func(t time.Time) bool {
 			return t.Before(end) && (!released || t.After(pl.release.At) || !t.Before(recent))
@@ -656,7 +707,9 @@ func repoView(ds, prev *dataset.Dataset, m, pm Metrics, p Params, f filter) Repo
 			// No App known to deploy it: no release of its to count either.
 			unjudged(RepoReasonUntraced)
 		case !released:
-			unjudged(RepoReasonNeverReleased)
+			// Never rolled out as far as the data goes: its own group, no
+			// breach, no card; what waits is flagged above.
+			row.Group = RepoGroupNever
 		case gated[dataset.SourceBitbucket]:
 			// Whether anyone worked on it is Bitbucket's to tell.
 			unjudged(RepoReasonBitbucketSilent)
@@ -681,10 +734,15 @@ func repoView(ds, prev *dataset.Dataset, m, pm Metrics, p Params, f filter) Repo
 			row.DaysSince, row.SinceLowerBound = ptr(calendarDays(pl.release.At, end)), pl.lower
 		}
 		// Its releases read as counted: Argo CD reporting the production stage,
-		// an App known to deploy it.
+		// an App known to deploy it that is no infrastructure App's only.
 		if !r.library && argo != nil && argo.Before(end) && !gated[dataset.SourceArgoCD] && !noProd &&
-			rt.DeployedSince != nil && rt.DeployedSince.Before(end) {
+			!infra[row.Repo] && rt.DeployedSince != nil && rt.DeployedSince.Before(end) {
 			row.ReleasesForm = releasesForm(*row)
+		}
+		// A repo only the look-back holds is a row where a flag names it: the
+		// card's repo or project, never a row of dashes otherwise.
+		if r.lookback && len(row.Flags) == 0 {
+			continue
 		}
 		out.Rows = append(out.Rows, *row)
 	}
@@ -787,20 +845,15 @@ func repoSpreads(rows []RepoRow, m Metrics, th config.Thresholds, gated map[stri
 		dot := func(v *float64, n int, verdict string) spreadDot {
 			return spreadDot{repo: r.Repo, project: r.Project, value: v, n: n, verdict: verdict}
 		}
+		// A repo's own releases against no threshold of its own: the release
+		// rule is its project's, judged in the ranking's group and flag,
+		// never in a repo's dot. A repo with none in the period is set apart,
+		// whatever its project's standing.
 		switch r.Group {
-		case RepoGroupNone, RepoGroupRare, RepoGroupRegular:
-			verdict := DotWithin
-			switch r.Group {
-			case RepoGroupNone:
-				verdict = DotBreach
-			case RepoGroupRare:
-				verdict = DotHint
-			}
+		case RepoGroupNone, RepoGroupNever, RepoGroupRare, RepoGroupRegular:
 			if r.ReleasesPerWeek != nil {
-				d := dot(r.ReleasesPerWeek, r.Releases, verdict)
-				// Set apart only when nothing was rolled out: a repo whose one
-				// deploy in the period was an App's first is no such repo.
-				d.apart = r.Group == RepoGroupNone && r.Releases == 0
+				d := dot(r.ReleasesPerWeek, r.Releases, DotNeutral)
+				d.apart = r.Releases == 0
 				rel = append(rel, d)
 			}
 		}

@@ -33,11 +33,11 @@ export const en = {
     ausliefern: "Rollout",
     review: "Review",
     more: "More",
-    view: "{{product}} · CW {{from}}–{{to}}",
+    view: "{{product}} · {{span}}",
   },
   trends: {
     title: "Merged PRs and PR size per week",
-    sub: "People's PRs only, no bots. CW {{from}}–{{to}}: the previous period, the period and the week running now.",
+    sub: "People's PRs only, no bots. {{span}}: the previous period, the period and the week running now.",
     merged: "Merged PRs per week",
     mergedUnit: "per week in the period",
     batch: "PR size per week, typical",
@@ -47,7 +47,7 @@ export const en = {
     previous: "Previous period",
     period: "Period",
     running: "running week, so far",
-    legendPrevious: "Previous period, CW {{from}}–{{to}}",
+    legendPrevious: "Previous period, {{span}}",
     legendWeek: "per week",
     legendRunning: "running week, not over yet",
     gap: {
@@ -62,7 +62,7 @@ export const en = {
     headText:
       "Each repo is judged on its own, never averaged with others. A click on a row shows the repo's PRs in the data below.",
     title: "Repos, what stands out first",
-    sub: "The bars show releases per week, CW {{from}}–{{to}}; the previous period is shaded.",
+    sub: "The bars show releases per week, {{span}}; the previous period is shaded.",
     col: {
       repo: "Repo",
       stand: "Stands out",
@@ -72,19 +72,19 @@ export const en = {
       batch: "PR size, typical",
     },
     group: {
-      none: "No release for more than {{breach}} days",
-      rare: "Last release {{from}}–{{breach}} days ago",
+      none: "Project without a release for more than {{breach}} days",
+      never: "No {{prod}} release yet",
+      rare: "The project's last release {{from}}–{{breach}} days ago",
       unjudged: "Cannot be judged",
-      regular: "Release within the last {{hint}} days",
+      regular: "Project with a release within the last {{hint}} days",
       library: "Libraries",
       idle: "No activity",
     },
     groupSub: {
-      none: "in the repo's project, though it was worked on",
-      rare: "in the repo's project",
+      none: "though it was worked on",
+      never: "As far as the data goes, the project never reached {{prod}}",
       unjudged:
         "the data does not show whether and when the repo is rolled out",
-      regular: "in the repo's project",
       library: "never rolled out themselves, so no release is missing here",
       idle: "no merged PR since the project's last release and none in {{breach}} days",
     },
@@ -106,7 +106,6 @@ export const en = {
       no_prod_stage: "Argo CD sends no data for the stage {{prod}}",
       infra: "infrastructure Apps only",
       untraced: "no App known to roll it out",
-      never_released: "no release of the project to {{prod}} known",
     },
     pill: {
       library: "Library",
@@ -115,8 +114,11 @@ export const en = {
     rel: {
       none: "none in the period",
       perWeek: "{{n}} per week",
-      inWeeks_one: "{{count}} release in {{weeks}} weeks",
-      inWeeks_other: "{{count}} releases in {{weeks}} weeks",
+      inWeeks_one: "{{count}} release in {{weeks}}",
+      inWeeks_other: "{{count}} releases in {{weeks}}",
+      weeks_one: "{{count}} week",
+      weeks_other: "{{count}} weeks",
+      never: "no {{prod}} release of the project yet",
       last_one: "project: last one {{count}} day ago",
       last_other: "project: last one {{count}} days ago",
       lastLower_one: "project: last one at least {{count}} day ago",
@@ -138,7 +140,7 @@ export const en = {
     countAll_other: "{{count}} repos.",
     countOpen: "{{n}} of {{total}} repos shown.",
     order:
-      "Order: first the repos whose project has had no release for more than {{breach}} days, then those with a release {{from}}–{{breach}} days ago, those that cannot be judged and the rest (those breaking the agreement on the time to {{prod}} first); last the libraries and repos without activity.",
+      "Order: first the repos whose project has had no release for more than {{breach}} days, then those whose project never reached {{prod}}, those whose project released {{from}}–{{breach}} days ago, those that cannot be judged and the rest (those breaking the agreement on the time to {{prod}} first); last the libraries and repos without activity.",
     unit: {
       perWeek: "{{n}} per week",
       workingDays: "{{n}} working days",
@@ -215,6 +217,8 @@ export const en = {
   },
   common: {
     cw: "CW {{kw}}",
+    cwSpan: "CW {{from}}–{{to}}",
+    cwSpanYears: "CW {{from}}/{{fromYear}}–CW {{to}}/{{toYear}}",
     hours: "{{n}} h",
     nOf: "{{n}} of {{total}}",
     nPRs_one: "{{count}} PR",
@@ -250,9 +254,8 @@ export const en = {
     print: "Print / PDF",
     title: "Engineering metrics",
     scope:
-      "Team {{team}}, {{product}} · CW {{from}}–{{to}} · {{start}} to {{end}} · compared with the {{weeks}} weeks before, {{prevStart}} to {{prevEnd}}",
-    scopeAlone:
-      "Team {{team}}, {{product}} · CW {{from}}–{{to}} · {{start}} to {{end}}",
+      "Team {{team}}, {{product}} · {{span}} · {{start}} to {{end}} · compared with the {{weeks}} weeks before, {{prevStart}} to {{prevEnd}}",
+    scopeAlone: "Team {{team}}, {{product}} · {{span}} · {{start}} to {{end}}",
     running:
       "This week, CW {{kw}}, so far: {{releases}}, {{merged}}, {{runs}}. It counts in no number on this page; only the open PRs show the state of now.",
     runningReleases_one: "{{count}} release",
@@ -319,6 +322,7 @@ export const en = {
       first_deploys: "first deploys outnumber",
       incomplete: "data has gaps",
       no_value: "no value",
+      not_reporting: "{{source}} sends no data",
     },
     buildSuccess: "Successful builds, {{kind}}",
   },
@@ -339,7 +343,6 @@ export const en = {
     title: "Assessment",
     intro: "What the last {{weeks}} whole weeks show, and where most moves.",
     assess: {
-      weeks: "CW {{from}}–{{to}}",
       ask: "↻ Assess again",
       askFirst: "Assess now",
       running: "running …",
@@ -629,7 +632,7 @@ export const en = {
           rule: "A person's feature or bugfix branch. Bots' branches not counted.",
         },
         flaky_builds: {
-          title: "Unreliable builds",
+          title: "Flaky builds",
           unit: "{{kind}}: {{n}} of {{of}} failed builds passed on the next try without a change",
           threshold:
             "Reported from {{minN}} when such make up at least {{n}} of all failed builds.",
@@ -819,9 +822,9 @@ export const en = {
         data_gap:
           "The source stopped sending data before the end of the period. So its numbers say nothing about the team's work.",
         pr_jam:
-          "Four or more PRs open a week or longer, drafts not counted. Why they wait the data does not show: a merge stop, a dependency, holidays or nobody feeling responsible.",
+          "{{min}} or more PRs open {{days}} days or longer, drafts not counted. Why they wait the data does not show: a merge stop, a dependency, holidays or nobody feeling responsible.",
         slower_build:
-          "The typical successful build takes at least one and a half times as long as in the previous period. The repo is compared with itself, not with others. What inside the build got slower the data does not show.",
+          "The typical successful build takes at least {{factor}} times as long as in the previous period. The repo is compared with itself, not with others. What inside the build got slower the data does not show.",
         failing_more:
           "Builds fail far more often than in the previous period. Whether tests, infrastructure or real breakage, the data does not show.",
         changeGood:
@@ -876,7 +879,7 @@ export const en = {
       },
       label: {
         silent_days: "days without data",
-        open_long: "PRs open ≥ 7 days",
+        open_long: "long-open PRs",
         open: "open PRs",
         age_p50: "typical age",
         failure_rate: "builds failed",
@@ -1000,7 +1003,7 @@ export const en = {
       slowest_one: "the slowest 10 %: over {{p90}} · from {{count}} PR",
       slowest_other: "the slowest 10 %: over {{p90}} · from {{count}} PRs",
       directionWhy: "faster feedback from real users",
-      lowSample: "Fewer than 10 PRs: not very reliable",
+      lowSample: "Fewer than {{n}} PRs: not very reliable",
       means:
         "The time in which a finished change helps no user yet. Long means: feedback comes late, failures are hard to pin to a change, releases grow big.",
       watch:
@@ -1183,7 +1186,7 @@ export const en = {
       means:
         "How many PRs are merged within 24 hours of opening. After that the author has mostly moved on; questions then cost double.",
       watch:
-        "many PRs stay open for more than three days: mostly big PRs or ones waiting on someone.",
+        "many PRs stay open for more than {{days}} days: mostly big PRs or ones waiting on someone.",
       lever: "smaller PRs, reviews asked for early.",
       def: "Per PR, the time from opening to merge. Typically it takes {{p50}}, the slowest 10 % over {{p90}}.",
       basis: "{{count}} of {{n}} people's PRs, merged in the period.",
@@ -1431,6 +1434,10 @@ export const en = {
     noCompareNoValue:
       "no comparable builds of this kind in the previous period",
     noCompareIncomplete: "build data of the previous period incomplete",
+    noCompareStarted: "{{source}} has sent data only since {{date}}",
+    noCompareNotReporting: "{{source}} sends no data",
+    noCompareLost: "Bitbucket sent no data from {{from}} to {{to}}",
+    noCompareLostOngoing: "Bitbucket has sent no data since {{from}}",
     noCompareLowSample:
       "under {{min}} builds in the period or the previous period",
     fineText: "{{p50}}, {{rate}} failed",

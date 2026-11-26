@@ -1027,11 +1027,12 @@ components:
     TrendWeek:
       type: object
       additionalProperties: false
-      required: [start, end, kw, running]
+      required: [start, end, kw, year, running]
       properties:
         start: { $ref: "#/components/schemas/Instant" }
         end: { $ref: "#/components/schemas/Instant" }
         kw: { type: integer, minimum: 1, maximum: 53, description: ISO 8601 week number. }
+        year: { type: integer, minimum: 1, description: The ISO 8601 year `kw` counts in. }
         running:
           type: boolean
           description: The week running now, counted up to now; no whole week.
@@ -1065,17 +1066,19 @@ components:
       description: |
         The period's numbers per repo of the view, so a team number never
         stands alone where repos differ: a ranking row per repo with a merged
-        PR in the period or the previous one, and a strip per number.
+        PR in the period or the previous one, and per repo a flag names
+        whose merged PRs lie in the states' look-back only (26 weeks before
+        the period's end), and a strip per number.
       additionalProperties: false
       required: [rows, open, groups, hint_days, breach_days, rare_from, spreads]
       properties:
         rows:
           type: array
           description: |
-            Ranked: by group (none, rare, unjudged, regular, library, idle);
-            within none and rare the longest without a release first, within
-            regular those past a red threshold first, then the slowest to
-            production; else by name.
+            Ranked: by group (none, never, rare, unjudged, regular, library,
+            idle); within none and rare the longest without a release first,
+            within regular those past a red threshold first, then the slowest
+            to production; else by name.
           items: { $ref: "#/components/schemas/RepoRow" }
         open:
           type: integer
@@ -1114,13 +1117,15 @@ components:
         Where the repo's project stands against the release rule, as the
         no_release and release_due states judge it per project. `none`:
         worked on, the project's last release more than
-        release_breach_days back. `rare`: more than release_hint_days back.
-        `unjudged`: worked on, but whether it is rolled out cannot be told
-        (`reason`). `regular`: the project released within
-        release_hint_days. `library`: never rolled out. `idle`: no counted
-        work since its project's last release nor within
+        release_breach_days back. `never`: worked on, no App of its project
+        released to production as far as the data goes; no breach, no card
+        (the rule judges a project rolled out only). `rare`: more than
+        release_hint_days back. `unjudged`: worked on, but whether it is
+        rolled out cannot be told (`reason`). `regular`: the project
+        released within release_hint_days. `library`: never rolled out.
+        `idle`: no counted work since its project's last release nor within
         release_breach_days.
-      enum: [none, rare, unjudged, regular, library, idle]
+      enum: [none, never, rare, unjudged, regular, library, idle]
 
     RepoRow:
       type: object
@@ -1140,15 +1145,13 @@ components:
         group: { $ref: "#/components/schemas/RepoGroupKey" }
         reason:
           type: [string, "null"]
-          enum: [not_reporting, argocd_silent, bitbucket_silent, no_prod_stage, infra, untraced, never_released, null]
+          enum: [not_reporting, argocd_silent, bitbucket_silent, no_prod_stage, infra, untraced, null]
           description: |
             Why its releases cannot be judged, in the unjudged group only:
             Argo CD not reporting; Argo CD or Bitbucket silent 7 days or more
             at the period's end (the assessment's gate); Argo CD reporting no
             deploy to the production stage; only infrastructure Apps deploy
-            it; no deploy ever showed an App deploying it; no App of its
-            project ever released to production (the rule judges a project
-            rolled out only).
+            it; no deploy ever showed an App deploying it.
         last_release:
           $ref: "#/components/schemas/NullableInstant"
           description: |
@@ -1167,8 +1170,9 @@ components:
           type: integer
           minimum: 0
           description: |
-            The period's releases of the Apps deploying it that tracing does
-            not show leaving it unchanged, as tracing knew them by the
+            The period's releases of the Apps deploying it, no infrastructure
+            App's, that tracing does not show leaving it unchanged, as
+            tracing knew them by the
             period's end, each GitOps revision once at its first deploy; an
             App's first deploy within the grace after Argo CD's first event
             is none, as `delivery.frequency` counts it.
@@ -1186,9 +1190,10 @@ components:
           description: |
             How the row writes its releases: `none` nothing in the period,
             `per_week` the rate from one a week on, `in_weeks` the count over
-            `releases_base` weeks. Null where it writes none: a library, or
-            Argo CD not reporting, silent, without the production stage, or
-            no App known to deploy it.
+            `releases_base` weeks. Null where it writes none: a library, a
+            repo only infrastructure Apps deploy, or Argo CD not reporting,
+            silent, without the production stage, or no App known to deploy
+            it.
         release_weeks:
           type: array
           description: |
@@ -1231,8 +1236,11 @@ components:
           description: |
             The thresholds its numbers are past, by the state they belong to,
             as the state's card names it: no_release and release_due its
-            project's, not_on_prod its oldest merged PR not on production. A
-            source the assessment gates flags nothing.
+            project's, not_on_prod its oldest merged PR not on production,
+            over the PRs the states read (merged from 26 weeks before the
+            period's end on, in every view). A source the assessment gates
+            flags nothing. A card's hysteresis (a unit named a week before
+            kept just under its threshold) no flag shows.
           items:
             type: object
             additionalProperties: false
@@ -1304,13 +1312,19 @@ components:
                 description: |
                   Against the team's threshold: past one whose finding is the
                   rule broken (breach) or a hint, within it; neutral where the
-                  number has none.
+                  number has none. A repo's releases are always neutral: the
+                  release rule is its project's, judged in the ranking.
               x:
                 type: [number, "null"]
                 minimum: 0
                 maximum: 1
               clamped: { type: boolean, description: "Outside the scale, at its end." }
-              apart: { type: boolean, description: "Set apart at the strip's end: nothing released." }
+              apart:
+                type: boolean
+                description: |
+                  Set apart at the strip's end: on the releases strip every repo
+                  without a release in the period; on to_prod a repo of the
+                  none group whose merged PRs none reached production.
         mark:
           type: [object, "null"]
           description: The team's threshold, its config key and value in the strip's unit.
@@ -1615,11 +1629,18 @@ components:
     Week:
       type: object
       additionalProperties: false
-      required: [start, end, kw]
+      required: [start, end, kw, year]
       properties:
         start: { $ref: "#/components/schemas/Instant" }
         end: { $ref: "#/components/schemas/Instant" }
         kw: { type: integer, minimum: 1, maximum: 53, description: ISO 8601 week number. }
+        year:
+          type: integer
+          minimum: 0
+          description: |
+            The ISO 8601 year `kw` counts in (KW 1 may start in December): a
+            span of weeks across a new year names its years. 0 in an
+            assessment stored before the field.
 
     Delivery:
       type: object
@@ -1779,7 +1800,7 @@ components:
         opening) to its first deploy there. Bots' PRs and library repos'
         PRs are in none.
       additionalProperties: false
-      required: [environment, human, lower_bound, unmeasured, low_sample]
+      required: [environment, human, lower_bound, unmeasured, low_sample, low_sample_n]
       properties:
         environment: { type: string }
         human:
@@ -1796,7 +1817,11 @@ components:
             PRs that reached the environment by the end too but have no start
             (no pushed commit, no opening): in no time. `human.n` plus these
             are the PRs traced there (for production `coverage.on_prod`).
-        low_sample: { type: boolean, description: "Fewer than 10 PRs, but some." }
+        low_sample: { type: boolean, description: "Fewer than `low_sample_n` PRs, but some." }
+        low_sample_n:
+          type: integer
+          minimum: 1
+          description: The PRs a lead time needs to be no low sample; the page writes the count from here.
 
     TraceReasons:
       type: object

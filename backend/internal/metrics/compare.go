@@ -278,8 +278,8 @@ func (id metricID) def() metric {
 	}[id]
 }
 
-func (id metricID) judge(cur, prev side, incomplete bool) Change {
-	return id.def().judge(cur, prev, incomplete)
+func (id metricID) judge(cur, prev side) Change {
+	return id.def().judge(cur, prev, false)
 }
 
 func (id metricID) none(reason string) Change { return id.def().none(reason) }
@@ -288,7 +288,7 @@ func (id metricID) none(reason string) Change { return id.def().none(reason) }
 // its Reason and where it lies; nil: they compare).
 func (id metricID) judgeWhy(cur, prev side, why *Change) Change {
 	if why == nil {
-		return id.judge(cur, prev, false)
+		return id.judge(cur, prev)
 	}
 	c := *why
 	c.Verdict, c.Directed = ChangeNone, id.def().d != undirected
@@ -492,13 +492,7 @@ func compare(cur, prev Metrics, period Period, lost, product bool) Comparison {
 	from := period.From
 	argo := started(dataset.SourceArgoCD, meta.DataStart.ArgoCD, from)
 	bitbucket := started(dataset.SourceBitbucket, meta.DataStart.Bitbucket, from)
-	var builds *Change
-	switch t := meta.BuildTypeFrom; {
-	case before(meta.BuildDataFrom, from):
-		builds = started(dataset.SourcePipeline, meta.BuildDataFrom, from)
-	case t != nil && t.After(from):
-		builds = &Change{Reason: ptr(ReasonIncomplete)}
-	}
+	builds := buildsWhy(meta, from)
 	noergler := started(dataset.SourceNoergler, meta.DataStart.Noergler, from)
 
 	cf, pf := cur.Delivery.Frequency, prev.Delivery.Frequency
@@ -616,13 +610,20 @@ func compare(cur, prev Metrics, period Period, lost, product bool) Comparison {
 	return out
 }
 
-// buildsIncomplete: the run data does not cover the previous period from
-// from on. A build type first reported inside it also splits its master
-// runs into unknown and known kinds; one never reported keeps both periods
-// unknown alike.
-func buildsIncomplete(meta dataset.Meta, from time.Time) bool {
-	t := meta.BuildTypeFrom
-	return before(meta.BuildDataFrom, from) || (t != nil && t.After(from))
+// buildsWhy is why the builds do not compare over a previous period from
+// from on: the run data not covering it (started: the CI not reporting, or
+// starting after from), or a build type first reported inside it, which
+// splits its master runs into unknown and known kinds (ReasonIncomplete;
+// one never reported keeps both periods unknown alike). Nil where they
+// compare. The kinds' numbers and each repo's alike.
+func buildsWhy(meta dataset.Meta, from time.Time) *Change {
+	switch t := meta.BuildTypeFrom; {
+	case before(meta.BuildDataFrom, from):
+		return started(dataset.SourcePipeline, meta.BuildDataFrom, from)
+	case t != nil && t.After(from):
+		return &Change{Reason: ptr(ReasonIncomplete)}
+	}
+	return nil
 }
 
 // LeadLowerBoundShare is the share of a period's lead times placed through a

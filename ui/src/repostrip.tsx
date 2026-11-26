@@ -176,10 +176,13 @@ export function RepoStrip({
   );
   // The dot's value, its cases and its verdict in words: a colour alone
   // tells a screen reader or a colour-blind reader nothing.
+  // A dot set apart keeps the backend's verdict: red only where it judges a
+  // breach (the wait to production), neutral on the releases strip, whose
+  // rule is the project's.
+  const apartBreach = apart.some((d) => d.verdict === "breach");
   const tipText = (d: RepoDot) => {
-    const verdict = d.apart
-      ? t("repos.verdict.breach")
-      : t(`repos.verdict.${d.verdict}`);
+    // Neutral says nothing: an empty word, never the key.
+    const verdict = t(`repos.verdict.${d.verdict}`, { defaultValue: "" });
     const value =
       d.apart || d.value == null
         ? apartLabel
@@ -305,7 +308,9 @@ export function RepoStrip({
               y={axisY + 11}
               textAnchor="start"
               fontSize="9.5"
-              fill="var(--color-danger-ink)"
+              fill={
+                apartBreach ? "var(--color-danger-ink)" : "var(--color-muted)"
+              }
             >
               {apartLabel}
             </text>
@@ -328,7 +333,9 @@ export function RepoStrip({
               fill={d.apart ? "none" : FILL[d.verdict]}
               stroke={
                 d.apart
-                  ? "var(--color-danger-ink)"
+                  ? d.verdict === "breach"
+                    ? "var(--color-danger-ink)"
+                    : "var(--color-ink-dim)"
                   : d.verdict === "hint"
                     ? "var(--color-ink-dim)"
                     : "var(--color-panel)"

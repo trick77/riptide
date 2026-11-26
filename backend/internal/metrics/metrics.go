@@ -36,7 +36,8 @@ type Params struct {
 	Thresholds *config.Thresholds
 	// Earlier is the dataset over StatePeriod, before Previous, that the
 	// assessment's states look back into (a project's last work, a PR
-	// still before production, a typical week); nil: none read.
+	// still before production, a typical week), and the per-repo view's
+	// flags with them; nil: none read.
 	Earlier *dataset.Dataset
 }
 
@@ -141,7 +142,13 @@ func Compute(ds, prev, running *dataset.Dataset, p Params) Metrics {
 	m, pm := computeBoth(ds, prev, running, p)
 	f := newFilter(ds, p)
 	m.Trends = trends(m, pm, ds.Meta.DataEnd, running, p, f)
-	m.Repos = repoView(ds, prev, m, pm, p, f)
+	// The states' look-back, classed as Assess classes it: the rows' flags
+	// read the PRs the cards read.
+	var earlier *dataset.Dataset
+	if p.Earlier != nil {
+		earlier = p.Earlier.Classified(ds.Apps)
+	}
+	m.Repos = repoView(ds, prev, earlier, m, pm, p, f)
 	return m
 }
 
@@ -169,8 +176,11 @@ func computeBoth(ds, prev, running *dataset.Dataset, p Params) (m, pm Metrics) {
 	// commits: with its events lost, a repo's builds compare with nothing, as
 	// the kinds' numbers do (compare).
 	lost := lostEvents(ds, prev)
-	base := &baseline{repos: names, kinds: pm.Build.repos,
-		incomplete: buildsIncomplete(ds.Meta, p.Previous.From) || (lost && f.product != "")}
+	why := buildsWhy(ds.Meta, p.Previous.From)
+	if lost && f.product != "" {
+		why = ptr(lostChange(true, prev.Meta, ds.Meta))
+	}
+	base := &baseline{repos: names, kinds: pm.Build.repos, why: why}
 	m = compute(ds, p.Period, f, base)
 	m.Delivery.Frequency.fillCalendar(p.Period, ds.Meta.DataStart.ArgoCD)
 	// The open PRs are the one number of now, not of the period's end: what
@@ -562,8 +572,10 @@ type LeadTimes struct {
 	// a lost silence): in no time. Human.N + Unmeasured are the PRs traced
 	// there (for production Coverage.OnProd).
 	Unmeasured int `json:"unmeasured"`
-	// LowSample: fewer than 10 PRs, but some.
-	LowSample bool `json:"low_sample"`
+	// LowSample: fewer than LowSampleN PRs (lowSample), but some; the page
+	// writes the count from here, never its own.
+	LowSample  bool `json:"low_sample"`
+	LowSampleN int  `json:"low_sample_n"`
 }
 
 // leadTime is per PR of humans (mergedPRs), first commit to the first
@@ -592,7 +604,7 @@ func leadTime(humans []dataset.PR, env string, cutoff time.Time) LeadTimes {
 	}
 	h := spread(waits)
 	return LeadTimes{Environment: env, Human: h, LowerBound: lower, Unmeasured: unmeasured,
-		LowSample: h.N > 0 && h.N < lowSample}
+		LowSample: h.N > 0 && h.N < lowSample, LowSampleN: lowSample}
 }
 
 // Delivery is the DORA section.

@@ -191,8 +191,14 @@ export function Strip({ m }: { m: Metrics }) {
                     <span
                       className={`absolute top-1/2 left-1/2 -translate-1/2 px-1.5 text-[11px] whitespace-nowrap text-faint ${stripe}`}
                     >
+                      {/* The source that does not report, the backend's:
+                          noergler, Bitbucket or the CI as well as Argo CD. */}
                       {c.reason === "not_reporting"
-                        ? t("overview.freq.notReporting")
+                        ? t("strip.reason.not_reporting", {
+                            source: t(
+                              `overview.assess.source.${c.source ?? "argocd"}`,
+                            ),
+                          })
                         : c.reason && c.reason !== "undirected"
                           ? t(`strip.reason.${c.reason}`)
                           : t("compare.none")}

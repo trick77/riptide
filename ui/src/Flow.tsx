@@ -380,7 +380,10 @@ export function Flow({ m, why, onWhy, onFacts }: Props) {
     cycle: {
       title: t("flow.cycle.label"),
       means: t("flow.cycle.means"),
-      watch: t("flow.cycle.watch"),
+      // The histogram's last bound, the backend's: past it a PR stays long.
+      watch: t("flow.cycle.watch", {
+        days: num(r.cycle_histogram.upper_bounds_s.at(-1)! / 86400),
+      }),
       lever: t("flow.cycle.lever"),
       def: t("flow.cycle.def", {
         p50: dur(r.cycle.p50),

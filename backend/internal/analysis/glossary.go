@@ -148,7 +148,7 @@ var vocabulary = []Term{
 func vocabularyFor(stage string) []Term {
 	out := make([]Term, len(vocabulary))
 	for i, v := range vocabulary {
-		v.Words = v.Words.staged(stage)
+		v.Words = v.staged(stage)
 		out[i] = v
 	}
 	return out
@@ -200,7 +200,7 @@ var states = map[string]StateGloss{
 	metrics.StateBranchFailing: {"A person's feature branch whose builds failed many times in a row.",
 		"Builds eines Branches scheitern immer wieder", "A branch's builds fail again and again"},
 	metrics.StateFlakyBuilds: {"A repo's builds of a kind mostly failed for no code change: a retry on the same commit succeeded.",
-		"Unzuverlässige Builds", "Unreliable builds"},
+		"Unzuverlässige Builds", "Flaky builds"},
 	metrics.StateLongBuilds: {"A repo's successful builds of a kind typically take longer than the team's threshold.",
 		"Builds dauern lang", "Builds take long"},
 	metrics.StateReleaseFailing: {"A repo's release builds fail in a notable share.",

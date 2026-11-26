@@ -7,13 +7,16 @@
 import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Metrics, RepoGroupKey, RepoRow, TrendSeries } from "./api";
-import { num, stage } from "./format";
+import { num, stage, weekSpan } from "./format";
 import { TABLE_HEAD } from "./shared";
 import { TrendChart } from "./trends";
 import { Pill, type Tone } from "./ui";
 
+// The release rule's verdict is the breach group's red only; a project
+// never rolled out is no breach (owner, 2026-11-26), its dot neutral.
 const GROUP_TONE: Record<RepoGroupKey, string> = {
   none: "bg-danger",
+  never: "border-[1.5px] border-ink-3",
   rare: "border-[1.5px] border-muted",
   unjudged: "texture-unknown",
   regular: "bg-online",
@@ -53,8 +56,9 @@ function GroupHead({
         {t(`repos.group.${g}`, cuts(m))}
       </span>
       <span className="font-mono text-[12.5px] text-muted">{count}</span>
+      {/* A group its heading says all of has no sub-line. */}
       <span className="text-xs text-faint">
-        {t(`repos.groupSub.${g}`, cuts(m))}
+        {t(`repos.groupSub.${g}`, { ...cuts(m), defaultValue: "" })}
       </span>
     </div>
   );
@@ -209,8 +213,9 @@ export function Ranking({
   const before = (x: number | null, f: (n: number) => string) =>
     x == null ? undefined : t("compare.before", { v: f(x) });
   const days = (x: number) => t("units.days", { n: num(x, 1) });
-  // As the strips write it: once a month is 0.25, not 0.3.
-  const perWeek = (x: number) => num(x, x < 1 ? 2 : x < 10 ? 1 : 0);
+  // As the strips write it: once a month is 0.25, not 0.3; none is 0.
+  const perWeek = (x: number) =>
+    x === 0 ? "0" : num(x, x < 1 ? 2 : x < 10 ? 1 : 0);
   const body: ReactNode[] = [];
   let group: RepoGroupKey | null = null;
   shown.forEach((r) => {
@@ -248,14 +253,18 @@ export function Ranking({
             ? t("repos.rel.perWeek", { n: perWeek(r.releases_per_week) })
             : t("repos.rel.inWeeks", {
                 count: r.releases,
-                weeks: r.releases_base,
+                weeks: t("repos.rel.weeks", { count: r.releases_base }),
               });
+    // The project's last release, the release rule's reading; a project
+    // never rolled out says so.
     const relSub =
       r.days_since != null
         ? t(r.since_lower_bound ? "repos.rel.lastLower" : "repos.rel.last", {
             count: Math.round(r.days_since),
           })
-        : undefined;
+        : r.group === "never"
+          ? t("repos.rel.never", { prod })
+          : undefined;
     let prodCell: { v: string; sub?: string; tone?: string };
     if (r.to_prod != null)
       prodCell = {
@@ -269,6 +278,10 @@ export function Ranking({
       prodCell = { v: t("repos.thinCell", { count: r.to_prod_n }) };
     else if (r.group === "none" && r.merged > 0)
       prodCell = { v: t("repos.lying", { prod }), tone: "text-danger-ink" };
+    // A project never rolled out: true, but no breach (its waiting work is
+    // the not_on_prod flag's red).
+    else if (r.group === "never" && r.merged > 0)
+      prodCell = { v: t("repos.lying", { prod }) };
     else prodCell = { v: "–" };
     if (r.not_yet > 0)
       prodCell.sub = [
@@ -393,7 +406,7 @@ export function Ranking({
           {t("repos.title")}
         </span>
         <span className="text-[12.5px] text-muted">
-          {t("repos.sub", { from: weeks[0]?.kw, to: weeks.at(-1)?.kw })}
+          {t("repos.sub", { span: weekSpan(t, weeks[0], weeks.at(-1)) })}
         </span>
       </div>
       <div className="overflow-x-auto">

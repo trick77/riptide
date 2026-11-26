@@ -26,15 +26,15 @@ func runs(repo string, count int, d int64, failures int, status string) []datase
 
 // baselineOf is what Compute hands build: prev's runs, named as both
 // periods' are.
-func baselineOf(ds, prev *dataset.Dataset, incomplete bool) *baseline {
+func baselineOf(ds, prev *dataset.Dataset, why *Change) *baseline {
 	names := newRepoNamer(slices.Concat(ds.Runs, prev.Runs))
 	pb := build(prev, p4(), filter{}, &baseline{repos: names})
-	return &baseline{repos: names, kinds: pb.repos, incomplete: incomplete}
+	return &baseline{repos: names, kinds: pb.repos, why: why}
 }
 
 // against is the build section of ds with prev as the previous period.
 func against(ds, prev *dataset.Dataset) Build {
-	return build(ds, p4(), filter{}, baselineOf(ds, prev, false))
+	return build(ds, p4(), filter{}, baselineOf(ds, prev, nil))
 }
 
 // flagged counts a kind's repos flagged slow and failing more.
@@ -207,9 +207,56 @@ func TestHotspotsAgainstOwnPeriod(t *testing.T) {
 		*r.DurationChange.Reason != ReasonNoValue || r.Factor != nil || nb.compared[KindMain] != 0 {
 		t.Errorf("new repo = %+v", r)
 	}
-	ik := kindOf(build(period(120), p4(), filter{}, baselineOf(period(120), period(60), true)).Hotspots, KindMain)
+	ik := kindOf(build(period(120), p4(), filter{}, baselineOf(period(120), period(60),
+		&Change{Reason: ptr(ReasonIncomplete)})).Hotspots, KindMain)
 	if r := repoOf(ik, "kasse/api"); r.Slow || r.DurationChange.Reason == nil || *r.DurationChange.Reason != ReasonIncomplete {
 		t.Errorf("incomplete = %+v", r)
+	}
+}
+
+// A repo's builds that compare with nothing name the kinds' own cause: the
+// CI's start inside the previous period, Bitbucket's lost span in a
+// product view, never a bare "incomplete" the kind's tile does not say.
+func TestRepoBuildsNameTheCause(t *testing.T) {
+	// Twenty main builds of kasse-api days back (shift), the CI reporting
+	// since start.
+	mk := func(shift float64, start *time.Time, silences []dataset.Silence) *dataset.Dataset {
+		return data(func(ds *dataset.Dataset) {
+			for _, r := range runs("kasse/kasse-api", 20, 100, 0, "") {
+				r.StartedAt, r.FinishedAt, r.OccurredAt = agoP(1+shift), agoP(0.99+shift), ago(0.99+shift)
+				ds.Runs = append(ds.Runs, r)
+			}
+			ds.Meta.BuildDataFrom, ds.Meta.BuildTypeFrom, ds.Meta.DataStart.Pipeline = start, start, start
+			ds.Meta.Silences = silences
+		})
+	}
+	lost := []dataset.Silence{{Source: dataset.SourceBitbucket, Lost: true, From: ago(40), To: ago(39)}}
+	cases := []struct {
+		name, reason, source, product string
+		start                         *time.Time
+		silences                      []dataset.Silence
+	}{
+		{"ci started inside the previous period", ReasonStarted, dataset.SourcePipeline, "", agoP(40), nil},
+		{"bitbucket lost in a project view", ReasonLost, "", "kasse", agoP(100), lost},
+	}
+	for _, c := range cases {
+		cur, prev := mk(0, c.start, nil), mk(28, c.start, c.silences)
+		m := Compute(cur, prev, nil, Params{Period: p4(), Previous: PreviousPeriod(4, now, zurich), Product: c.product})
+		r := repoOf(kindOf(m.Build.Hotspots, KindMain), "kasse/kasse-api")
+		var kind KindChange
+		for _, kc := range m.Comparison.Build {
+			if kc.Kind == KindMain {
+				kind = kc
+			}
+		}
+		for _, ch := range []Change{r.DurationChange, r.FailureChange} {
+			if ch.Reason == nil || *ch.Reason != c.reason || (c.source != "" && (ch.Source == nil || *ch.Source != c.source)) {
+				t.Errorf("%s: repo change = %+v", c.name, ch)
+			}
+		}
+		if kind.Success.Reason == nil || *kind.Success.Reason != c.reason {
+			t.Errorf("%s: the kind's own reason %+v", c.name, kind.Success)
+		}
 	}
 }
 

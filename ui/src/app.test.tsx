@@ -3907,9 +3907,60 @@ describe("strip", () => {
       />,
     );
     const freq = screen.getAllByTestId("strip-row")[0];
+    expect(within(freq).getByText("Argo CD liefert keine Daten")).toBeVisible();
+  });
+
+  // Any source can be the one not reporting: the strip names it as the
+  // tile's foot does, never Argo CD for noergler's PR size.
+  it("names the source that does not report", () => {
+    const m = metrics();
+    render(
+      <Strip
+        m={{
+          ...m,
+          comparison: {
+            ...m.comparison,
+            batch_size: {
+              ...change("none", null, "not_reporting"),
+              source: "noergler",
+            },
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("noergler liefert keine Daten")).toBeVisible();
+    expect(screen.queryByText(/Argo CD liefert/)).toBeNull();
+  });
+});
+
+describe("build comparisons per repo", () => {
+  // A repo whose builds compare with nothing names the cause the kind's
+  // tile names: the CI's start, not a bare "incomplete".
+  it("names the CI's start, as the kind's tile does", () => {
+    const m = metrics();
+    const k = m.build.hotspots.kinds[0];
+    const started = {
+      ...change("none", null, "source_started"),
+      source: "pipeline" as const,
+      since: "2026-10-20T09:00:00Z",
+    };
+    m.build.hotspots.kinds[0] = {
+      ...k,
+      repos: k.repos.map((r) => ({
+        ...r,
+        compared: false,
+        duration_change: started,
+        failure_change: started,
+      })),
+    };
+    render(<Build m={m} onFacts={() => {}} />);
     expect(
-      within(freq).getByText("Argo CD liefert für das Team noch keine Daten"),
-    ).toBeVisible();
+      screen.getAllByText(/Die CI liefert erst seit dem 20\.10\.2026 Daten;/)
+        .length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.queryByText(/Build-Daten der Vorperiode unvollständig/),
+    ).toBeNull();
   });
 });
 

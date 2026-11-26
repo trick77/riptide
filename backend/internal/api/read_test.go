@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -132,20 +134,29 @@ func TestReadParams(t *testing.T) {
 			}
 		}
 		// The metrics: the period, the weeks right before, the running week
-		// (no lead times or reviews), side by side in any order.
+		// (no lead times or reviews), side by side in any order; and the
+		// states' look-back before them, lean, where it reaches further
+		// than the previous period (not in a 26-week view).
 		h.mem.params = nil
 		expectStatus(t, h.serveUI(newRequest(http.MethodGet, "/api/metrics?"+c.query, nil)), http.StatusOK)
 		reads := map[time.Time]dataset.Params{}
 		for _, x := range h.mem.params {
 			reads[x.To] = x
 		}
-		if len(h.mem.params) != 3 || len(reads) != 3 {
+		want := 4
+		if 2*c.weeks >= metrics.StateLookbackWeeks {
+			want = 3
+		}
+		if len(h.mem.params) != want || len(reads) != want {
 			t.Fatalf("/api/metrics?%s: reads = %+v", c.query, h.mem.params)
 		}
 		check("/api/metrics?", reads[c.monday], c.from, c.monday, false)
 		prev := reads[c.from]
-		if !prev.To.Equal(c.from) || prev.From.Before(c.from.AddDate(0, 0, -7*c.weeks-1)) || prev.FactsOnly {
+		if !prev.To.Equal(c.from) || prev.From.Before(c.from.AddDate(0, 0, -7*c.weeks-1)) || prev.FactsOnly || prev.Lean {
 			t.Errorf("/api/metrics?%s: previous = %+v", c.query, prev)
+		}
+		if look, ok := reads[prev.From]; want == 4 && (!ok || !look.Lean || !look.FactsOnly || !look.From.Before(prev.From)) {
+			t.Errorf("/api/metrics?%s: look-back = %+v", c.query, look)
 		}
 		check("/api/metrics?", reads[now], c.monday, now, true)
 		// The facts: the period's weeks on to now, the running week marked.
@@ -390,6 +401,63 @@ func TestRepoViewUsesTheTeamsThresholds(t *testing.T) {
 	}
 	if v := m.Repos; v.BreachDays != 60 || v.HintDays != 50 || len(v.Rows) != 1 || v.Rows[0].Group != metrics.RepoGroupRegular {
 		t.Errorf("repos = %+v", v)
+	}
+}
+
+// leanReader answers the states' look-back (a lean read) with lean, every
+// other window with full.
+type leanReader struct {
+	*memStore
+	full, lean *dataset.Dataset
+}
+
+func (l leanReader) Dataset(ctx context.Context, p dataset.Params) (*dataset.Dataset, error) {
+	if _, err := l.memStore.Dataset(ctx, p); err != nil {
+		return nil, err
+	}
+	if p.Lean {
+		return l.lean, nil
+	}
+	return l.full, nil
+}
+
+// The page's per-repo view reads the states' look-back as the assessment
+// does: a PR merged before the previous period and still not on production
+// flags its repo, as the card names it.
+func TestMetricsReadTheStatesLookback(t *testing.T) {
+	h := newHarness(t, nil)
+	day := func(d float64) time.Time { return fixedNow.Add(-time.Duration(d * float64(24*time.Hour))) }
+	start, kasse := day(400), "kasse"
+	meta := dataset.Meta{Team: "checkout", From: day(30), To: fixedNow, GeneratedAt: fixedNow, ProductionStage: "prod",
+		DataStart: dataset.SourceTimes{Bitbucket: &start, Pipeline: &start, ArgoCD: &start, Noergler: &start},
+		DataEnd:   dataset.SourceTimes{Bitbucket: &fixedNow, Pipeline: &fixedNow, ArgoCD: &fixedNow, Noergler: &fixedNow},
+		Lost:      []dataset.Silence{}, Silences: []dataset.Silence{}, RepoStarts: []dataset.RepoStart{}}
+	apps := []dataset.App{{Name: "kasse-prod", Project: &kasse}}
+	traces := map[string]dataset.RepoTrace{"kasse/kasse-api": {DeployedSince: ptrTo(day(300))}}
+	pr := func(id int64, d float64) dataset.PR {
+		return dataset.PR{Repo: "kasse/kasse-api", Project: kasse, PRID: id, State: "merged", MergedAt: ptrTo(day(d)),
+			TrunkAt: ptrTo(day(d)), OpenedAt: ptrTo(day(d + 1)), Environments: []dataset.EnvironmentDeploy{}}
+	}
+	full := &dataset.Dataset{Meta: meta, Apps: apps, Traces: traces,
+		Releases: []dataset.AppRelease{{App: "kasse-prod", Environment: "prod", At: day(5)}},
+		PRs:      []dataset.PR{pr(1, 4)}}
+	lean := &dataset.Dataset{Meta: meta, Apps: apps, Traces: traces, PRs: []dataset.PR{pr(2, 100)}}
+	d := Deps{Reader: leanReader{memStore: h.mem, full: full, lean: lean}, Runtime: h.runtime,
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: func() time.Time { return fixedNow }}
+	w := httptest.NewRecorder()
+	d.metrics(w, newRequest(http.MethodGet, "/api/metrics?team=checkout&tz=Europe/Zurich", nil))
+	expectStatus(t, w, http.StatusOK)
+	leanReads := slices.DeleteFunc(slices.Clone(h.mem.params), func(p dataset.Params) bool { return !p.Lean })
+	if len(h.mem.params) != 4 || len(leanReads) != 1 || !leanReads[0].FactsOnly {
+		t.Fatalf("reads %+v, want the look-back once, lean", h.mem.params)
+	}
+	var m metrics.Metrics
+	if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Repos.Rows) != 1 || len(m.Repos.Rows[0].Flags) != 1 || m.Repos.Rows[0].Flags[0].Key != metrics.StateNotOnProd ||
+		m.Repos.Rows[0].Flags[0].Value < 90 {
+		t.Errorf("rows = %+v", m.Repos.Rows)
 	}
 }
 

@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"fmt"
 	"reflect"
 	"slices"
 	"testing"
@@ -73,6 +74,16 @@ func TestPeriod(t *testing.T) {
 	}
 	if NewPeriod(4, time.Date(2027, 1, 1, 12, 0, 0, 0, zurich), zurich).Weeks[3].KW != 53 {
 		t.Error("KW 53 lost")
+	}
+	// Each week names the ISO year its number counts in: KW 1 of 2026
+	// starts on Monday 2025-12-29, so a span across the new year can name
+	// both years.
+	var years []string
+	for _, w := range NewPeriod(4, time.Date(2026, 1, 8, 12, 0, 0, 0, zurich), zurich).Weeks {
+		years = append(years, fmt.Sprintf("%d/%d", w.KW, w.Year))
+	}
+	if !slices.Equal(years, []string{"51/2025", "52/2025", "1/2026", "2/2026"}) {
+		t.Errorf("weeks = %v", years)
 	}
 	if !ValidWindow(12) || ValidWindow(5) {
 		t.Error("windows")
@@ -329,7 +340,8 @@ func TestLeadTime(t *testing.T) {
 		shipped(5, func(p *dataset.PR) { p.Library = true }),
 	}
 	l := leadTime(humans, "prod", cutoff)
-	if l.Human.N != 3 || l.LowerBound != 1 || !l.LowSample {
+	// The page writes the low sample's count from the answer, never its own.
+	if l.Human.N != 3 || l.LowerBound != 1 || !l.LowSample || l.LowSampleN != lowSample {
 		t.Errorf("lead time = %+v", l)
 	}
 	expectNear(t, "p50", l.Human.P50, 200)
@@ -446,13 +458,13 @@ func TestThroughput(t *testing.T) {
 
 	// Smaller batches are the better direction, more merged PRs too.
 	ok := func(v float64) side { return side{ptr(v), true} }
-	if c := batchSizeMetric.judge(ok(80), ok(200), false); c.Verdict != ChangeBetter {
+	if c := batchSizeMetric.judge(ok(80), ok(200)); c.Verdict != ChangeBetter {
 		t.Errorf("smaller batch = %+v", c)
 	}
-	if c := batchSizeMetric.judge(ok(200), ok(80), false); c.Verdict != ChangeWorse {
+	if c := batchSizeMetric.judge(ok(200), ok(80)); c.Verdict != ChangeWorse {
 		t.Errorf("larger batch = %+v", c)
 	}
-	if c := mergedPerWeekMetric.judge(ok(12), ok(8), false); c.Verdict != ChangeBetter {
+	if c := mergedPerWeekMetric.judge(ok(12), ok(8)); c.Verdict != ChangeBetter {
 		t.Errorf("more merged = %+v", c)
 	}
 }

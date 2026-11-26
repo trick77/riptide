@@ -2,9 +2,27 @@
 // 24.11.) in both UI languages (user, 2026-11-15): only the unit words
 // follow the language.
 
+import type { TFunction } from "i18next";
+import type { Week } from "./api";
 import i18n from "./i18n";
 
 const LOCALE = "de-CH";
+
+// A span of calendar weeks as every label of the page writes it: "KW 22–47"
+// within one ISO year, both years named once it runs across a new year
+// ("KW 48/2025–KW 47/2026"), each the backend's (Week.year). An assessment
+// stored before the year keeps the short form.
+export function weekSpan(t: TFunction, first?: Week, last?: Week): string {
+  if (!first || !last) return "";
+  return first.year && last.year && first.year !== last.year
+    ? t("common.cwSpanYears", {
+        from: first.kw,
+        fromYear: first.year,
+        to: last.kw,
+        toYear: last.year,
+      })
+    : t("common.cwSpan", { from: first.kw, to: last.kw });
+}
 
 export function num(x: number, digits = 0): string {
   return x.toLocaleString(LOCALE, {

@@ -9,7 +9,7 @@ import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import type { Metrics, TrendGap, TrendSeries, TrendWeek } from "./api";
 import { labelEvery } from "./charts";
-import { num } from "./format";
+import { num, weekSpan } from "./format";
 import { Card, CardHead, Legend } from "./ui";
 
 // The top of a scale: a round value at or above v.
@@ -346,8 +346,7 @@ export function TrendCard({ m }: { m: Metrics }) {
       <CardHead
         title={t("trends.title")}
         sub={t("trends.sub", {
-          from: tr.weeks[0].kw,
-          to: tr.weeks[tr.weeks.length - 1].kw,
+          span: weekSpan(t, tr.weeks[0], tr.weeks[tr.weeks.length - 1]),
         })}
       />
       <div className="mt-3.5 grid grid-cols-2 gap-x-8 gap-y-6 max-md:grid-cols-1">
@@ -391,8 +390,7 @@ export function TrendCard({ m }: { m: Metrics }) {
                 className="size-2.5 rounded-[3px] bg-active"
               />
               {t("trends.legendPrevious", {
-                from: prev[0].kw,
-                to: prev[prev.length - 1].kw,
+                span: weekSpan(t, prev[0], prev[prev.length - 1]),
               })}
             </span>
           )}

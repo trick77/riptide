@@ -386,18 +386,38 @@ function gains(t: TFunction, h: RepoHotspot) {
   return out;
 }
 
-// Why a repo has no comparison, in the repo's terms.
+// Why a repo has no comparison, in the repo's terms: the cause the kind's
+// tile names too (the CI's start, Bitbucket's lost span), the backend's.
 function noCompare(
   t: TFunction,
   h: RepoHotspot,
   minRuns: number,
 ): string | null {
   if (h.compared) return null;
-  switch (h.duration_change.reason ?? h.failure_change.reason) {
+  const c = h.duration_change.reason ? h.duration_change : h.failure_change;
+  const source = t(`overview.assess.source.${c.source ?? "pipeline"}`);
+  switch (c.reason) {
     case "no_value":
       return t("build.noCompareNoValue");
     case "incomplete":
       return t("build.noCompareIncomplete");
+    case "source_started":
+      return c.since
+        ? t("build.noCompareStarted", {
+            source,
+            date: fullDate(new Date(c.since)),
+          })
+        : t("build.noCompareIncomplete");
+    case "not_reporting":
+      return t("build.noCompareNotReporting", { source });
+    case "lost":
+      if (!c.from) return t("build.noCompareIncomplete");
+      return c.to
+        ? t("build.noCompareLost", {
+            from: dateTime(c.from),
+            to: dateTime(c.to),
+          })
+        : t("build.noCompareLostOngoing", { from: dateTime(c.from) });
     default:
       return t("build.noCompareLowSample", { min: minRuns });
   }

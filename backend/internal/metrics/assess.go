@@ -676,7 +676,7 @@ func (a *assessor) jamSignals() {
 		// Against the previous end only where Bitbucket covers that period:
 		// a repo riptide did not hear of yet reads as 0 then.
 		if incomplete := before(a.m.Meta.DataStart.Bitbucket, a.p.Previous.From) || a.lost; !incomplete {
-			c := openJammedMetric.judge(side{f64(r.Long), true}, side{prevLong, true}, false)
+			c := openJammedMetric.judge(side{f64(r.Long), true}, side{prevLong, true})
 			long.Verdict, long.Magnitude = c.Verdict, c.Magnitude
 		} else {
 			long.Prev = nil
