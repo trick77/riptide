@@ -822,7 +822,11 @@ size, branch life), each judged again from the data. A week its number
 stood only within the hysteresis counts for nothing, nor does a unit held
 within it now: first past the threshold, a unit is a hint whatever it stood
 at before. The unit that held it two sprints is marked (`two_sprints`); one
-such unit turns the whole card red, its fresh units beside it.
+such unit turns the whole card red, its fresh units beside it. A card
+none of whose units is past the threshold at the period's end, every one
+only held within the hysteresis (below), breaks no agreement now: a hint
+whatever the state's tone, never red, no worsening folded onto it; one
+unit past it keeps the card's tone, the held ones beside it.
 Ranking (`weight`): the team's rule broken (9), held up now (7), lasting
 (5), data honesty (4); within a tier by breadth (count over judged), then
 the distance past the threshold. Layout slots: 4 red, 3 hints, 1 limit, 2
@@ -836,7 +840,10 @@ changed threshold resolves nothing): a unit that fired then keeps firing
 while its number stays at or above `hysteresis_share` (0.8) of the
 threshold (`held`). A state that fired then and fires on none of its units
 now is resolved, once ("gelöst"), only where every unit it named is clear on
-evidence; where one of them can no longer be judged it reads
+evidence and its card was red then, by the same rules as one now (a
+lasting state's two sprints read from the four weeks before that
+instant): a hint then resolves silently, no card, nothing in the tally.
+Where one of them can no longer be judged it reads
 `unmeasurable` ("nicht mehr messbar", tone limit, its units named, no
 lever), never resolved; a unit fallen idle, gone or escalated (a release
 hint past the breach) is neither. A held unit's chain reads the four weeks
@@ -890,9 +897,13 @@ The states, their conditions and starting values (`thresholds` keys):
   ready to merge), nor one on a PR untouched for `OpenInactiveDays` (30) by
   then (given up long ago), nor one whose merge may lie in a lost silence
   since it; a lost silence takes its working time out of the week and its
-  expectation. Read as of the week's end: a closed week reads the same
-  whenever it is read. The card names the approved PRs open at the week's
-  end. Held up now when it is the period's last week.
+  expectation: the unit's `typical` is the typical week scaled to the
+  working time left, `lost` says so (the page names the days Bitbucket
+  delivered no data), and a week left expecting fewer than
+  `merge_pause_min_typical` merges is not judged, since merges riptide
+  never heard of could make the pause. Read as of the week's end: a closed
+  week reads the same whenever it is read. The card names the approved PRs
+  open at the week's end. Held up now when it is the period's last week.
 - `approved_waiting`: a repo's PRs with a person's approval (not the
   author's) standing at the period's end, waiting longer than
   `approved_wait_days` (1) working days for their merge, at least

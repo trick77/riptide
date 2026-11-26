@@ -3014,15 +3014,17 @@ components:
       type: object
       description: One unit a state names, its number in the threshold's unit and what it rests on.
       additionalProperties: false
-      required: [name, project, value, count, of, typical, since, lower_bound, week, names, held, two_sprints, reason,
-                 ci_seconds, query, measure]
+      required: [name, project, value, count, of, typical, since, lower_bound, week, lost, names, held, two_sprints,
+                 reason, ci_seconds, query, measure]
       properties:
         name: { type: string, description: "A project key, a repo, an App, a bot branch as `<repo>:<branch>`; empty for the team." }
         project: { type: [string, "null"] }
         value: { type: number }
         count: { type: [integer, "null"], description: "The cases it rests on: PRs, builds, waiting PRs, merges of a paused week." }
         of: { type: [integer, "null"], description: "The base of a share (a repo's merged PRs)." }
-        typical: { $ref: "#/components/schemas/NullableNumber" }
+        typical:
+          $ref: "#/components/schemas/NullableNumber"
+          description: "What it was measured against where that is no constant: a project's typical week, scaled to the working time a lost Bitbucket silence left of the week (`lost`)."
         since:
           $ref: "#/components/schemas/NullableInstant"
           description: |
@@ -3036,6 +3038,7 @@ components:
           oneOf:
             - $ref: "#/components/schemas/Week"
             - type: "null"
+        lost: { type: boolean, description: "A merge pause's week lost Bitbucket's events for part of its working time: `typical` is scaled to what is left. False for every other state." }
         names: { type: array, items: { type: string }, description: "What it holds: a project's Apps, the repos of a paused week's waiting PRs." }
         held: { type: boolean, description: "Below the threshold now, kept while above its hysteresis share because it fired a week before the period's end (judged again from the data)." }
         two_sprints: { type: boolean, description: "A lasting state's unit that has held it two sprints: what turns its card red (the card's other units may be fresh)." }

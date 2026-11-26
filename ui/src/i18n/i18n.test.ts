@@ -106,7 +106,7 @@ describe("state cards", () => {
     value: 3,
     count: 2,
     of: 9,
-    typical: 7.5,
+    typical: 6.5,
     since: "2026-10-02T09:00:00Z",
     lower_bound: false,
     week: {
@@ -114,6 +114,7 @@ describe("state cards", () => {
       start: "2026-11-02T00:00:00Z",
       end: "2026-11-09T00:00:00Z",
     },
+    lost: false,
     names: ["feature"],
     held: false,
     two_sprints: false,
@@ -183,6 +184,7 @@ describe("state cards", () => {
           unit(),
           unit({ held: true }),
           unit({ two_sprints: true }),
+          unit({ lost: true }),
           unit({ measure: "oldest" }),
           unit({ measure: "typical" }),
         ].map((u) => stateUnitText(t, c, u, "PROD")),
@@ -217,6 +219,7 @@ describe("state wording", () => {
     since: null,
     lower_bound: false,
     week: null,
+    lost: false,
     names: [],
     held: false,
     two_sprints: false,
@@ -360,6 +363,29 @@ describe("state wording", () => {
       ),
     ).toBe(
       "2 freigegebene PRs warten auf den Merge, der älteste seit 12 Arbeitstagen (seit zwei Sprints oder länger)",
+    );
+  });
+  // A week Bitbucket lost part of: the typical value (the backend's,
+  // scaled) says it leaves those days out.
+  it("names the days a merge pause's week lost", () => {
+    const c = card("merge_pause", { value: 0.2, min: 3, unit: "share" });
+    const week = {
+      kw: 45,
+      start: "2026-11-02T00:00:00Z",
+      end: "2026-11-09T00:00:00Z",
+    };
+    const u = unit({
+      value: 4,
+      count: 0,
+      typical: 4.8,
+      week,
+      names: ["kasse/kasse-api"],
+    });
+    expect(stateUnitText(t, c, { ...u, lost: true }, "PROD")).toBe(
+      "KW 45: 0 PRs gemerged statt typisch 4.8 (ohne die Tage, an denen Bitbucket keine Daten lieferte), während am Ende der Woche 4 freigegebene PRs offen waren (kasse/kasse-api)",
+    );
+    expect(stateUnitText(t, c, u, "PROD")).toBe(
+      "KW 45: 0 PRs gemerged statt typisch 4.8, während am Ende der Woche 4 freigegebene PRs offen waren (kasse/kasse-api)",
     );
   });
   it("counts one in the singular", () => {

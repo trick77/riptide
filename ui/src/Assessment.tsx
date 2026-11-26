@@ -541,12 +541,16 @@ export function stateUnitText(
   u: StateUnitData,
   prod: string,
 ): string {
+  // A week Bitbucket lost part of (a merge pause) names the gap its typical
+  // value leaves out.
   const key =
     c.key === "first_review_wait"
       ? u.measure === "typical"
         ? "unitTypical"
         : "unitOldest"
-      : "unit";
+      : u.lost
+        ? "unitLost"
+        : "unit";
   const text = t(`overview.assess.state.${c.key}.${key}`, {
     defaultValue: "{{n}}",
     n: unitValue(c, u.value),

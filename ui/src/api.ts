@@ -822,6 +822,9 @@ export type StateUnit = {
   since: string | null;
   lower_bound: boolean;
   week: Week | null;
+  // A merge pause's week lost Bitbucket's events for part of it: typical is
+  // scaled to the working time left.
+  lost: boolean;
   names: string[];
   held: boolean;
   // A lasting state's unit that held it two sprints: what made its card

@@ -329,6 +329,10 @@ export const en = {
             "week {{week}}: {{count}} PR merged instead of typically {{typical}}, while {{n}} approved PRs were open at the week's end ({{names}})",
           unit_other:
             "week {{week}}: {{count}} PRs merged instead of typically {{typical}}, while {{n}} approved PRs were open at the week's end ({{names}})",
+          unitLost_one:
+            "week {{week}}: {{count}} PR merged instead of typically {{typical}} (leaving out the days Bitbucket delivered no data), while {{n}} approved PRs were open at the week's end ({{names}})",
+          unitLost_other:
+            "week {{week}}: {{count}} PRs merged instead of typically {{typical}} (leaving out the days Bitbucket delivered no data), while {{n}} approved PRs were open at the week's end ({{names}})",
           threshold:
             "Reported when a week has at most {{n}} of the typical merges while {{minN}} or more were open at the week's end.",
           min_one: "{{n}} approved PR",
@@ -561,7 +565,7 @@ export const en = {
         unmeasurable: {
           title: "{{was}}: no longer measurable",
           unit: "",
-          rule: "A week ago riptide found it here; now the data does not suffice to judge it. That does not mean it is solved.",
+          rule: "A week ago this still held here; now the data does not suffice to judge it. That does not mean it is solved.",
         },
       },
       tallyLabel: "Tally",
@@ -635,7 +639,7 @@ export const en = {
         resolved:
           "The latest assessment raised it; now the value is back where it was before, or better.",
         resolvedState:
-          "A week ago riptide found it here; now it holds for none of the units named then: clearly below the limit again, or over, like a merge pause or failed builds a card may still show with their date.",
+          "A week ago this still held here. Not any more: clearly below the limit again, or over, like a merge pause or failed builds a card may still show with their date.",
       },
       factsOf: "View the facts of {{repo}} →",
       driver: "Driver: {{repo}} carries {{share}} of the rise",
