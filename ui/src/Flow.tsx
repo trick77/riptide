@@ -4,11 +4,12 @@
 
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import type { LeadChain, Metrics, StageKey } from "./api";
+import type { LeadChain, Metrics, StageKey, TraceReason } from "./api";
 import { GroupedBars } from "./charts";
-import { dateTime, dur, durParts, pct, stage } from "./format";
+import { dateTime, dur, durParts, fullDate, num, pct, stage } from "./format";
 import { OpenPRs } from "./OpenPRs";
 import { StageRidge } from "./ridgeline";
+import { TABLE_HEAD } from "./shared";
 import type { Tab } from "./state";
 import { ThroughputCard } from "./Throughput";
 import {
@@ -86,7 +87,7 @@ function Chain({ m }: { m: Metrics }) {
     <Card>
       <CardHead
         title={t("flow.chainTitle", { prod })}
-        sub={t("flow.chainSub")}
+        sub={t("flow.chainSub", { prod })}
       />
       {pre && (
         <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3">
@@ -199,25 +200,135 @@ function Chain({ m }: { m: Metrics }) {
         </p>
       )}
       {/* How many of the merged PRs the last stages read, when there are
-          any to read; a library's PRs are none: never rolled out. */}
-      {(m.throughput.coverage.to_prod.n > 0 || m.throughput.library > 0) && (
+          any to read, and what they leave out; a library's PRs are none:
+          never rolled out. */}
+      {(m.coverage.merged > 0 || m.coverage.library > 0) && (
         <p className="mt-2.5 mb-0 text-xs text-muted">
-          {m.throughput.coverage.to_prod.n > 0 &&
-            t("flow.chainNote", {
-              prod,
-              traced: m.throughput.coverage.to_prod.count,
-              count: m.throughput.coverage.to_prod.n,
-            })}
-          {m.coverage.not_yet > 0 &&
-            " " + t("flow.notYet", { count: m.coverage.not_yet, prod })}
-          {m.throughput.coverage.to_prod.n > 0 &&
-            m.throughput.library > 0 &&
-            " "}
-          {m.throughput.library > 0 &&
-            t("flow.library", { count: m.throughput.library, prod })}
+          {[
+            m.coverage.merged > 0 &&
+              t("flow.chainNote", {
+                prod,
+                traced: m.coverage.on_prod,
+                count: m.coverage.merged,
+              }),
+            ...traceLines(t, m, prod),
+          ]
+            .filter(Boolean)
+            .join(" ")}
         </p>
       )}
+      <RepoCoverage m={m} prod={prod} />
     </Card>
+  );
+}
+
+// What the PRs traced to production leave out, a sentence each: those not
+// on it yet (with the oldest's merge), those tracing cannot place and why,
+// those placed through a lower bound, the libraries' apart. Every count is
+// the backend's (Metrics.coverage), at the period's end.
+export function traceLines(t: TFunction, m: Metrics, prod: string): string[] {
+  const c = m.coverage;
+  const out: string[] = [];
+  if (c.not_yet > 0)
+    out.push(
+      t("flow.notYet", {
+        count: c.not_yet,
+        prod,
+        date: c.oldest_not_yet ? fullDate(new Date(c.oldest_not_yet)) : "–",
+      }),
+    );
+  if (c.not_placeable > 0)
+    out.push(
+      t("flow.notPlaceable", {
+        count: c.not_placeable,
+        reasons: (Object.keys(c.reasons) as TraceReason[])
+          .filter((r) => c.reasons[r] > 0)
+          .map((r) =>
+            t("flow.reasonPart", {
+              reason: t(`facts.prodReason.${r}`),
+              count: c.reasons[r],
+            }),
+          )
+          .join(", "),
+      }),
+    );
+  if (c.lower_bound > 0)
+    out.push(t("flow.lowerBound", { count: c.lower_bound, prod }));
+  if (c.library > 0) out.push(t("flow.library", { count: c.library, prod }));
+  return out;
+}
+
+// The same per repo, as the backend ranks them (most not yet on
+// production first), folded away: a list to look up, not a picture.
+function RepoCoverage({ m, prod }: { m: Metrics; prod: string }) {
+  const { t } = useTranslation();
+  const repos = m.coverage.repos;
+  if (repos.length === 0) return null;
+  const cell = (n: number) => (n > 0 ? num(n) : "–");
+  return (
+    <details className="mt-2 text-[12.5px] text-ink-dim">
+      <summary className="cursor-pointer text-muted hover:text-ink">
+        {t("flow.perRepo", { count: repos.length })}
+      </summary>
+      <div className="mt-2 overflow-x-auto">
+        <table className="w-full border-separate border-spacing-0">
+          <thead>
+            <tr>
+              {[
+                t("flow.colRepo"),
+                t("flow.colMerged"),
+                t("flow.colOnProd", { prod }),
+                t("flow.colNotYet", { prod }),
+                t("flow.colNotPlaceable"),
+                t("flow.colLibrary"),
+              ].map((h, i) => (
+                <th
+                  key={h}
+                  className={`${TABLE_HEAD} ${i === 0 ? "text-left" : "text-right"} pr-3`}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {repos.map((r) => (
+              <tr key={r.repo} className="hover:bg-active">
+                <td className="border-b border-border-soft py-1 pr-3 font-mono text-[12px] break-all">
+                  {r.repo}
+                </td>
+                {[r.merged, r.on_prod].map((n, i) => (
+                  <td
+                    key={i}
+                    className="border-b border-border-soft py-1 pr-3 text-right tabular-nums"
+                  >
+                    {cell(n)}
+                  </td>
+                ))}
+                <td className="border-b border-border-soft py-1 pr-3 text-right tabular-nums">
+                  {cell(r.not_yet)}
+                  {r.oldest_not_yet && (
+                    <span className="ml-1.5 text-[11.5px] text-muted">
+                      {t("flow.oldestSince", {
+                        date: fullDate(new Date(r.oldest_not_yet)),
+                      })}
+                    </span>
+                  )}
+                </td>
+                {[r.not_placeable, r.library].map((n, i) => (
+                  <td
+                    key={i}
+                    className="border-b border-border-soft py-1 pr-3 text-right tabular-nums"
+                  >
+                    {cell(n)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </details>
   );
 }
 

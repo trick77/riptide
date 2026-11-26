@@ -147,7 +147,23 @@ type StateUnit struct {
 	Reason *string `json:"reason"`
 	// CISeconds is a bot loop's CI time.
 	CISeconds *float64 `json:"ci_seconds"`
+	// Query is the facts search listing the unit's rows in the card's facts
+	// table (StateCard.Facts): a repo's or an App's name, a project's App
+	// of its last release, a project's repos, a branch's pipeline. Null
+	// where no search finds them: a team-wide unit, branches without a PR.
+	Query *string `json:"query"`
+	// Measure is what Value measured where a state judges a unit two ways
+	// (StateFirstReviewWait): MeasureOldest the oldest case waiting at the
+	// period's end, MeasureTypical the period's typical case. Null for
+	// every other state.
+	Measure *string `json:"measure"`
 }
+
+// What a unit's Value measured (StateUnit.Measure).
+const (
+	MeasureOldest  = "oldest"
+	MeasureTypical = "typical"
+)
 
 // StateCard is what a state's signal says beyond its facts: which state,
 // over which units, k of n, the worst three and the rest, since when, the
@@ -300,6 +316,11 @@ func (a *assessor) judge(e stateEval) {
 	for _, u := range e.units {
 		if u.status == unitClear && e.lower > 0 && last[u.Name] && u.Value >= e.lower {
 			u.status, u.Held = unitFires, true
+		}
+		// A repo's or an App's rows are found by its name; a state names
+		// another search where the unit's name finds nothing.
+		if u.Query == nil && e.facts != "" && u.Name != "" && (e.unit == UnitRepo || e.unit == UnitApp) {
+			u.Query = ptr(u.Name)
 		}
 		switch u.status {
 		case unitFires:

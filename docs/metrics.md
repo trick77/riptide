@@ -770,6 +770,15 @@ lower bound where the data starts there), and the threshold measured
 against (`threshold`, a key of `riptide.json`'s `thresholds` block, which
 the card prints). A unit with nothing to judge (no work in the span) is
 `idle`; one without the data to judge is `unjudged`, never "ohne Befund".
+Each unit names the facts search that lists its rows in the card's facts
+table (`query`, the `/api/facts` `q`): a repo's or an App's name, the App of
+a project's last release (the deploy table holds no project), `<project>/`
+for a project's PRs, a branch's pipeline name (the runs table knows no
+`<repo>:<branch>`); none for a team-wide unit or branches without a PR,
+whose card has no facts table. The facts search lists a merged PR by where
+it stands on production in the column's words ("auf PROD", "noch nicht auf
+PROD", "nicht zuordenbar" with its reason, "höchstens" on a time through a
+lower bound, both languages); exactly those words list exactly those PRs.
 
 Eligibility, shared by every state: bots' PRs, branches and builds,
 infrastructure Apps and GitOps repos are never judged; library repos are
@@ -834,7 +843,10 @@ The states, their conditions and starting values (`thresholds` keys):
 - `first_review_wait`: a repo's ready PRs waiting longer than
   `first_review_days` (2) working days for anyone's first touch, at least
   `first_review_waiting` (3); or its typical pickup over it on
-  `first_review_min_prs` (5) merged PRs. Lasting.
+  `first_review_min_prs` (5) merged PRs. The unit's `measure` says which
+  (`oldest`, `typical`); for the waiting PRs it is since the oldest was
+  ready, as an approved PR waits since its approval, so ready PRs untouched
+  for two sprints make it red. Lasting.
 - `deploy_failing`: an App's last production deploy in the period failed
   (Failed or Error) and none succeeded for `deploy_failing_days` (1)
   working day, red, held up now; `deploy_failures`:
@@ -876,8 +888,11 @@ The states, their conditions and starting values (`thresholds` keys):
   bot's scheme, bots' pushes, and branches whose every push's head commit
   is a tool's (a git identity of the `.invalid` e-mail domain, the one
   behind housekeeping commits; or one the config's automation `authors`
-  names) are out. Hints. A branch merged without a PR (its commits pushed
-  onto a target) is not recognised: it reads as one without a PR.
+  names) are out, and so is a branch merged without a PR: its last head
+  reached the trunk (a trunk push whose tip it is, that lists it, or whose
+  commit names it a parent; the merge commit is a push's tip, never hidden
+  by the five-commit cap). Merged onto another branch that is no trunk, it
+  still reads as one without a PR. Hints.
 - `bot_loop`: a bot branch failing `bot_loop_failures` (10) builds in a
   row, an aborted build neither breaking nor extending it: CI time wasted,
   a hint, never a quality finding. The build section's line is

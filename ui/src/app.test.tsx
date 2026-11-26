@@ -19,7 +19,7 @@ import type {
 import { Build } from "./Build";
 import { DayCalendar } from "./calendar";
 import { Costs } from "./Costs";
-import { fullDate, num } from "./format";
+import { ciHours, dur, fullDate, num } from "./format";
 import { Flow } from "./Flow";
 import { stepLook } from "./heatmap";
 import { initialLanguage } from "./i18n";
@@ -347,7 +347,9 @@ describe("App", () => {
       "1erledigt",
       "1zum Besprechen",
       "8 von 11aktiven Repos ohne Befund",
-      "1Repo nicht beurteilbar",
+      // Apart from the cards of what cannot be judged ("nicht
+      // beurteilbar"): repos too thin to judge.
+      "1Repo mit zu wenig Daten",
     ]);
     expect(panel.textContent).not.toMatch(
       /unauffällig|fällt nichts auf|Nichts hakt/,
@@ -905,10 +907,42 @@ describe("App", () => {
 
   it("spells a PR's type and its way to prod", async () => {
     const rows = [
-      prFact({ pr_id: 11, title: "a", prod_at: null, to_prod_s: null }),
+      prFact({
+        pr_id: 11,
+        title: "a",
+        prod_at: null,
+        to_prod_s: null,
+        prod_state: "not_yet",
+        prod_route: null,
+      }),
       prFact({ pr_id: 12, title: "b", change_type: "other" }),
       prFact({ pr_id: 13, title: "c", change_type: null }),
       prFact({ pr_id: 14, title: "d", change_type: "spike" }),
+      // Placed through a lower bound: its time is at most that.
+      prFact({
+        pr_id: 15,
+        title: "e",
+        prod_lower_bound: true,
+        prod_route: "image",
+      }),
+      prFact({
+        pr_id: 16,
+        title: "f",
+        prod_at: null,
+        to_prod_s: null,
+        prod_state: "not_placeable",
+        prod_reason: "in_silence",
+        prod_route: null,
+      }),
+      prFact({
+        pr_id: 17,
+        title: "g",
+        prod_at: null,
+        to_prod_s: null,
+        prod_state: null,
+        prod_route: null,
+        library: true,
+      }),
     ];
     mockFetch((url) =>
       url.pathname === "/api/facts"
@@ -919,11 +953,30 @@ describe("App", () => {
     const row = async (title: string) =>
       within((await screen.findByText(title)).closest("tr")!);
     expect((await row("a")).getByText("Feature")).toBeInTheDocument();
-    expect((await row("a")).getByText("Nein")).toBeInTheDocument();
+    expect(
+      (await row("a")).getByText("noch nicht auf PROD"),
+    ).toBeInTheDocument();
     expect((await row("b")).getByText("Anderes")).toBeInTheDocument();
     expect((await row("c")).getAllByText("–").length).toBeGreaterThan(0);
     // a prefix the UI does not know yet shows as the backend sent it
     expect((await row("d")).getByText("spike")).toBeInTheDocument();
+    // On PROD: the time, the route and the day in its tooltip; through a
+    // lower bound "höchstens", as it may have gone out earlier.
+    const onProd = (await row("b")).getByTitle(/^Auf PROD seit /);
+    expect(onProd.title).toMatch(/Compare-Link/);
+    expect(onProd.textContent).toBe(dur(0.8 * 86400));
+    const atMost = (await row("e")).getByTitle(/^Auf PROD seit /);
+    expect(atMost.textContent).toBe(`höchstens ${dur(0.8 * 86400)}`);
+    expect(atMost.title).toMatch(/gebaut hat\. Höchstens: /);
+    // Not placeable, with the reason in plain words.
+    expect((await row("f")).getByText("nicht zuordenbar")).toBeInTheDocument();
+    expect(
+      (await row("f")).getByText("eine Lücke in den Daten"),
+    ).toBeInTheDocument();
+    // A library's PR is never rolled out: no "not yet".
+    expect(
+      (await row("g")).getByText("Bibliothek, wird nicht ausgerollt"),
+    ).toBeInTheDocument();
   });
 
   it("says what all wait on", async () => {
@@ -1040,32 +1093,52 @@ describe("App", () => {
       held: false,
       reason: null,
       ci_seconds: null,
+      query: null,
+      measure: null,
       ...o,
     });
     const card = (
       key: string,
       unitKind: string,
-      units: ReturnType<typeof unit>[],
-      more: number,
+      worst: ReturnType<typeof unit>[],
+      rest: ReturnType<typeof unit>[],
       threshold: { key: string; value: number; unit: string },
+      facts = "deploys",
     ) => ({
       key,
       unit: unitKind,
-      count: units.length + more,
+      count: worst.length + rest.length,
       judged: 9,
       unjudged: 1,
       idle: 2,
-      worst: units,
-      more,
-      units,
+      worst,
+      more: rest.length,
+      units: [...worst, ...rest],
       since: "2026-10-02T09:00:00Z",
       since_lower_bound: true,
       threshold: { ...threshold, min_key: null, min: null },
-      at: "2026-11-09T00:00:00Z",
+      // The period's end, Monday 00:00 in Zurich: "as of" the Sunday.
+      at: "2026-11-08T23:00:00Z",
       was: null,
-      facts: "deploys",
+      facts,
     });
-    const state = (id: string, tone: string, st: unknown, kind = "state") =>
+    const fact = (id: string, o = {}) => ({
+      id,
+      label: "state_units",
+      unit: "count",
+      value: 1,
+      prev: null,
+      verdict: "none",
+      magnitude: null,
+      ...o,
+    });
+    const state = (
+      id: string,
+      tone: string,
+      st: unknown,
+      kind = "state",
+      more: unknown[] = [],
+    ) =>
       ({
         id,
         kind,
@@ -1076,17 +1149,7 @@ describe("App", () => {
         metric: null,
         weight: 9,
         seen: 0,
-        facts: [
-          {
-            id: `${id}.count`,
-            label: "state_units",
-            unit: "count",
-            value: 1,
-            prev: null,
-            verdict: "none",
-            magnitude: null,
-          },
-        ],
+        facts: [fact(`${id}.count`), ...more],
         waiting: null,
         drivers: [],
         state: st,
@@ -1102,10 +1165,27 @@ describe("App", () => {
             card(
               "no_release",
               "project",
-              [unit("kasse", 41), unit("lager", 31), unit("portal", 29)],
-              1,
+              [
+                unit("kasse", 41, { query: "kasse-prod" }),
+                unit("lager", 31, { names: ["lager-prod"] }),
+                unit("portal", 29, { count: 1, names: ["portal-prod"] }),
+              ],
+              [unit("tools", 29.5, { names: ["tools-prod"] })],
               { key: "release_breach_days", value: 28, unit: "days" },
             ),
+            "state",
+            // The team's release rate got notably worse: the backend folds
+            // it onto the card that speaks for it.
+            [
+              fact("change:deploy_frequency.value", {
+                label: "deploy_per_week",
+                unit: "per_week",
+                value: 0.5,
+                prev: 2,
+                verdict: "worse",
+                magnitude: "notable",
+              }),
+            ],
           ),
           state(
             "state:bot_loop",
@@ -1116,10 +1196,13 @@ describe("App", () => {
               [
                 unit("kasse/kasse-api:renovate/lib-2.x", 23, {
                   ci_seconds: 7200,
+                  names: [],
+                  query: "kasse-api/renovate%2Flib-2.x",
                 }),
               ],
-              0,
+              [],
               { key: "bot_loop_failures", value: 10, unit: "count" },
+              "runs",
             ),
           ),
           state(
@@ -1128,9 +1211,17 @@ describe("App", () => {
             card(
               "untraced",
               "repo",
-              [unit("kasse/kasse-web", 2, { of: 9, reason: "in_silence" })],
-              0,
+              [
+                unit("kasse/kasse-web", 2, {
+                  of: 9,
+                  reason: "in_silence",
+                  names: [],
+                  query: "kasse/kasse-web",
+                }),
+              ],
+              [],
               { key: "", value: 1, unit: "count" },
+              "prs",
             ),
           ),
           state("future:thing", "hint", null, "future_kind"),
@@ -1172,32 +1263,92 @@ describe("App", () => {
     expect(
       p.getByRole("heading", { name: "Nicht beurteilbar" }),
     ).toBeInTheDocument();
-    expect(p.getByText("Kein Release nach PROD")).toBeInTheDocument();
-    expect(p.getByText("4 von 9 Projekten")).toBeInTheDocument();
+    // Hints and what cannot be judged say they are no finding.
     expect(
-      p.getByText(
-        "kasse: seit 41 Tagen kein Release nach PROD (kasse-prod); seither 4 PRs gemerged",
-      ),
-    ).toBeInTheDocument();
-    expect(p.getByText("+1 weiteres")).toBeInTheDocument();
+      p.getByRole("heading", { name: "Hinweise" }).nextSibling?.textContent,
+    ).toBe("kein Befund, nur zur Kenntnis");
+    const red = within(
+      p.getByText("Lange kein Release nach PROD").closest("article")!,
+    );
+    expect(red.getByText("4 von 9 Projekten")).toBeInTheDocument();
+    // Each unit: its name, then its number in the state's words.
     expect(
-      p.getAllByText(
-        /seit mindestens dem 02\.10\.2026.*Schwelle des Teams: 28 Tage/,
-      ).length,
-    ).toBe(1);
-    expect(
-      p.getByText(
-        /^kasse\/kasse-api:renovate\/lib-2\.x: 23 fehlgeschlagene Builds in Folge, 2.0 \S+ CI-Zeit$/,
+      red.getByText(
+        "letztes Release vor 41 Tagen (kasse-prod), seither 4 PRs gemerged",
       ),
     ).toBeInTheDocument();
     expect(
-      p.getByText(
-        "kasse/kasse-web: 2 von 9 gemergten PRs lassen sich PROD nicht zuordnen (in einer Lücke von Bitbucket)",
+      red.getByText(
+        "letztes Release vor 29 Tagen (portal-prod), seither 1 PR gemerged",
+      ),
+    ).toBeInTheDocument();
+    // The rest behind "+1 weiteres", the backend's list as sent.
+    expect(red.queryByText("tools")).toBeNull();
+    fireEvent.click(red.getByRole("button", { name: "+1 weiteres" }));
+    expect(red.getByText("tools")).toBeInTheDocument();
+    expect(
+      red.getByText(/^letztes Release vor 29\.5 Tagen/),
+    ).toBeInTheDocument();
+    fireEvent.click(red.getByRole("button", { name: "weniger zeigen" }));
+    expect(red.queryByText("tools")).toBeNull();
+    // The team's worsening the state speaks for, as a line of its own.
+    expect(
+      red.getByText(
+        "Releases pro Woche: 0.5, deutlich schlechter als in der Vorperiode",
+      ),
+    ).toBeInTheDocument();
+    expect(red.getByText("vorher 2.0")).toBeInTheDocument();
+    // Since when, as of when, the agreement with the team's own number.
+    expect(
+      red.getByText(
+        /^seit mindestens dem 02\.10\.2026 · Stand 08\.11\.2026 · 1 mit zu wenig Daten$/,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      red.getByText(
+        "Abmachung: mindestens ein Release nach PROD pro Sprint. Gezählt ab mehr als 28 Tagen ohne Release.",
+      ),
+    ).toBeInTheDocument();
+    // A bot's branch, worded as CI time; its unit word is the bot's.
+    const hint = within(
+      p.getByText("Bot-Branch scheitert immer wieder").closest("article")!,
+    );
+    expect(hint.getByText("1 von 9 Bot-Branches")).toBeInTheDocument();
+    expect(
+      hint.getByText(/^23 fehlgeschlagene Builds in Folge, 2.0 \S+ CI-Zeit$/),
+    ).toBeInTheDocument();
+    expect(
+      hint.getByText("Gezählt ab 10 fehlgeschlagenen Builds in Folge."),
+    ).toBeInTheDocument();
+    const limit = within(
+      p
+        .getByText("Nicht messbar, ob gemergte PRs auf PROD sind")
+        .closest("article")!,
+    );
+    expect(
+      limit.getByText(
+        "2 von 9 gemergten PRs nicht zuordenbar: eine Lücke in den Daten",
       ),
     ).toBeInTheDocument();
     const tally = within(p.getByRole("list", { name: "Bilanz" }));
     expect(tally.getByText("Hinweise")).toBeInTheDocument();
     expect(tally.getByText("nicht beurteilbar")).toBeInTheDocument();
+    // A unit's name opens its rows: the backend's search, the card's table.
+    expect(red.queryByRole("button", { name: "lager" })).toBeNull();
+    fireEvent.click(hint.getByRole("button", { name: /renovate/ }));
+    expect(window.location.search).toBe(
+      "?q=kasse-api%2Frenovate%252Flib-2.x&tab=runs",
+    );
+    fireEvent.click(red.getByRole("button", { name: "kasse" }));
+    expect(window.location.search).toBe("?q=kasse-prod&tab=deploys");
+    // A state whose rows carry a mark links to all of them by it.
+    fireEvent.click(
+      limit.getByRole("button", {
+        name: "«nicht zuordenbar» in den Daten ansehen →",
+      }),
+    );
+    // (The PR table is the default: no tab in the URL.)
+    expect(window.location.search).toBe("?q=nicht+zuordenbar");
   });
 
   // A gain the cards left out still counts: the tally and the foot follow
@@ -1245,7 +1396,7 @@ describe("App", () => {
     render(<App />);
     const p = within(await screen.findByTestId("assessment"));
     const stuck = p.getByRole("heading", { name: "Hakt" });
-    expect(stuck.nextElementSibling?.textContent).toBe(
+    expect(stuck.parentElement?.nextElementSibling?.textContent).toBe(
       "Ohne eigene Karte: Die Befunde stehen weiter unten.",
     );
     expect(p.queryByText("Nichts hakt in diesen Wochen.")).toBeNull();
@@ -2653,7 +2804,10 @@ describe("open PRs", () => {
         .getAllByTestId("mekko-col")
         .map((c) => c.getAttribute("aria-label")?.split(":")[0]),
     ).toEqual(["kasse/kasse-api", "portal/portal-web"]);
-    const rows = screen.getAllByText(/^(kasse\/kasse-api|portal\/portal-web)$/);
+    // (The flow's per-repo list of PRs to production, folded, apart.)
+    const rows = screen
+      .getAllByText(/^(kasse\/kasse-api|portal\/portal-web)$/)
+      .filter((r) => !r.closest("details"));
     expect(rows.map((r) => r.textContent)).toEqual([
       "kasse/kasse-api",
       "portal/portal-web",
@@ -4253,7 +4407,22 @@ describe("limits", () => {
           to_prod: { count: 4, n: 6, rate: 4 / 6 },
         },
       },
-      coverage: { ...m.coverage, merged: 6, on_prod: 4, not_yet: 2 },
+      coverage: {
+        ...m.coverage,
+        merged: 6,
+        on_prod: 4,
+        lower_bound: 1,
+        not_yet: 1,
+        oldest_not_yet: "2026-10-20T09:00:00Z",
+        not_placeable: 1,
+        reasons: {
+          no_merge_commit: 0,
+          release_unresolved: 0,
+          repo_untraced: 0,
+          in_silence: 1,
+        },
+        library: 3,
+      },
     };
     render(
       <>
@@ -4270,17 +4439,29 @@ describe("limits", () => {
         "5 Builds ohne Repo: Weder ihr Commit noch ihr Pipeline-Name nennt eines. In der Teamansicht gezählt, in keiner Produktansicht.",
       ),
     ).toBeInTheDocument();
+    // Bots' builds as what they cost, CI time, never a finding.
     expect(
-      screen.getByText(`${num(1500)} Builds von Bot-Branches nicht gezählt`),
+      screen.getByText(
+        `Bot-Builds: ${num(1500)} Builds, ${ciHours(90000)} CI-Zeit, davon 300 fehlgeschlagen (${ciHours(18000)}). Kosten, kein Befund: in keiner anderen Zahl dieses Abschnitts.`,
+      ),
     ).toBeInTheDocument();
     // A library's PRs are out of the base of those traced to production,
     // said as such: never rolled out, never "not traced". The PRs not on
-    // production yet stand next to it.
+    // production yet stand next to it, the oldest's merge with them; the
+    // ones tracing cannot place with why.
     const traced = screen.getByText(
       /4 von 6 gemergten PRs bis PROD verfolgt\./,
     ).textContent;
-    expect(traced).toMatch(/2 gemergte PRs noch nicht auf PROD\./);
-    expect(traced).toMatch(/3 PRs in Bibliotheken \(werden nicht ausgerollt\)/);
+    expect(traced).toMatch(
+      /1 gemergter PR noch nicht auf PROD, gemerged am 20\.10\.2026\./,
+    );
+    expect(traced).toMatch(
+      /1 gemergter PR nicht zuordenbar: eine Lücke in den Daten \(1\)\./,
+    );
+    expect(traced).toMatch(
+      /Bei 1 der verfolgten PRs ist die Zeit bis PROD höchstens so lang/,
+    );
+    expect(traced).toMatch(/3 PRs in Bibliotheken, werden nicht ausgerollt/);
   });
 
   // No merged PR to trace: no "0 of 0" under the line that says so.
@@ -4302,6 +4483,7 @@ describe("limits", () => {
               opened: { count: 0, n: 0, rate: null },
             },
           },
+          coverage: { ...m.coverage, merged: 0, on_prod: 0, not_yet: 0 },
         }}
       />,
     );

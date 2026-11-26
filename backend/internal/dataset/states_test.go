@@ -79,6 +79,12 @@ func TestDatasetBranches(t *testing.T) {
 	s.push(kasseAPI, "feature/describe-repo", days(2), commit{sha: sha("e"), authored: days(2), author: "Describer",
 		email: "describer@tool.invalid"})
 	s.push(kasseAPI, "feature/helper", days(2), commit{sha: sha("f"), authored: days(2), author: "ci-helper"})
+	// Merged onto the trunk without a PR: by a merge commit naming the
+	// branch's head a parent, and by a fast-forward to it.
+	s.push(kasseAPI, "feature/kas-3", days(2), commit{sha: sha("1"), authored: days(2)})
+	s.push(kasseAPI, "master", days(3), commit{sha: sha("2"), authored: days(3), parents: []string{sha("0"), sha("1")}})
+	s.push(kasseAPI, "feature/kas-4", days(2), commit{sha: sha("3"), authored: days(2)})
+	s.push(kasseAPI, "master", days(3), commit{sha: sha("3"), authored: days(2)})
 	sh, err := st.Shared(context.Background(), dataset.SharedParams{Team: team, From: t0, ClassEnds: []time.Time{days(10)},
 		Now: days(28), States: true, Automated: automated(t)})
 	if err != nil {
@@ -93,8 +99,14 @@ func TestDatasetBranches(t *testing.T) {
 	for _, b := range d.Branches {
 		by[b.Branch] = b
 	}
-	if b := by["feature/kas-1"]; !b.FirstAt.Equal(days(1)) || !b.LastAt.Equal(days(4)) || b.Pushes != 2 || b.HasPR || b.Target || b.Bot {
-		t.Errorf("kas-1 = %+v, want pushed days 1 and 4, no PR", b)
+	if b := by["feature/kas-1"]; !b.FirstAt.Equal(days(1)) || !b.LastAt.Equal(days(4)) || b.Pushes != 2 || b.HasPR || b.Target || b.Bot ||
+		b.Merged {
+		t.Errorf("kas-1 = %+v, want pushed days 1 and 4, no PR, not merged", b)
+	}
+	for _, name := range []string{"feature/kas-3", "feature/kas-4"} {
+		if b := by[name]; !b.Merged || b.HasPR {
+			t.Errorf("%s = %+v, want merged without a PR", name, b)
+		}
 	}
 	if b := by["feature/kas-2"]; !b.HasPR {
 		t.Errorf("kas-2 = %+v, want its PR", b)

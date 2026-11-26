@@ -28,6 +28,12 @@ rows the existing `(team, occurred_at)` and `(repo_full_name, branch_name,
 occurred_at)` indexes serve them. Watch `GET /api/analysis` durations after
 the deploy.
 
+**A branch merged onto its trunk without a PR** is no branch "without a PR"
+any more: the branches' read also reads the trunk pushes since the same
+start (tip, listed commits and their parents) once per request. On the
+reference data `GET /api/analysis` took about 40 ms longer for it; watch it
+on a database with many release-tooling pushes to the trunk.
+
 **A branch named after its ticket without a prefix** (`KAS-12-login`) is a
 feature branch now: its builds count as feature builds, its PRs (stored as
 change type "other") as features, on read, past periods too. `release-12`,

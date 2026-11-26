@@ -156,6 +156,12 @@ func TestFactsSearch(t *testing.T) {
 		{"fail", 0, 1, 1},  // the failed sync's phase, the broken run
 		{"BUILD", 0, 0, 4}, // build_type and the Art column's "Default branch builds", case-insensitive
 		{"nothing like it", 0, 0, 0},
+		// Where a merged PR stands on production, the column's words: no App
+		// is known to deploy kasse-api, portal's PR is on production.
+		{"auf PROD", 1, 0, 0},
+		{"nicht zuordenbar", 1, 0, 0},
+		{"kein Deploy des Repos", 1, 0, 0},
+		{"no deploy of the repo", 1, 0, 0},
 	} {
 		f := ComputeFacts(ds, all(), c.q)
 		if f.PRs.Count != c.prs || f.Deploys.Count != c.deploys || f.Runs.Count != c.nruns {
@@ -170,6 +176,50 @@ func TestFactsSearch(t *testing.T) {
 	}
 	if f := ComputeFacts(ds, product("nope"), ""); f.PRs.Count+f.Deploys.Count+f.Runs.Count != 0 {
 		t.Errorf("unknown product matched: %+v", f)
+	}
+}
+
+// A placement's whole words list exactly the PRs standing there: "auf PROD"
+// is part of "noch nicht auf PROD", a substring would find both. Within a
+// longer search they are words like any other. The stage is written as the
+// UI writes it, upper case.
+func TestFactsPlacementSearch(t *testing.T) {
+	ds := factsData()
+	ds.Traces = map[string]dataset.RepoTrace{"kasse/kasse-api": {DeployedSince: agoP(50)}}
+	ds.PRs[3].Environments[0].LowerBound = true
+	for _, c := range []struct {
+		q    string
+		want string
+	}{
+		{"noch nicht auf PROD", "[1]"},
+		{"Not on prod yet", "[1]"},
+		{"auf PROD", "[4]"},
+		{"on PROD", "[4]"},
+		{"PROD", "[4 1]"},
+		{"höchstens", "[4]"},
+		{"at most", "[4]"},
+		{"nicht zuordenbar", "[]"},
+	} {
+		if got := prIDs(ComputeFacts(ds, all(), c.q).PRs.Rows); fmt.Sprint(got) != c.want {
+			t.Errorf("%q: %v, want %s", c.q, got, c.want)
+		}
+	}
+	rows := ComputeFacts(ds, all(), "").PRs.Rows
+	for _, r := range rows {
+		switch r.PRID {
+		case 1:
+			if r.ProdState == nil || *r.ProdState != ProdNotYet || r.ProdLowerBound {
+				t.Errorf("pr 1 = %+v", r)
+			}
+		case 4:
+			if r.ProdState == nil || *r.ProdState != ProdOnProd || !r.ProdLowerBound {
+				t.Errorf("pr 4 = %+v", r)
+			}
+		case 2, 5:
+			if r.ProdState != nil {
+				t.Errorf("pr %d placed: %+v", r.PRID, r)
+			}
+		}
 	}
 }
 
@@ -238,6 +288,9 @@ type uiTerms struct {
 	ViaUmbrella string            `json:"viaUmbrella"`
 	Library     string            `json:"library"`
 	Infra       string            `json:"infra"`
+	ProdState   map[string]string `json:"prodState"`
+	ProdReason  map[string]string `json:"prodReason"`
+	AtMost      string            `json:"atMost"`
 }
 
 // The backend searches the words the UI shows, in both languages: a label
@@ -260,8 +313,8 @@ func TestSearchTermsMatchTheUI(t *testing.T) {
 	}
 	for code, g := range groups {
 		got := slices.Sorted(maps.Keys(g))
-		if want := []string{"changeType", "deployClass", "flaky", "infra", "library", "notCounted", "prState", "prWaiting", "promotion",
-			"runKind", "runOutcome", "running", "viaUmbrella"}; !slices.Equal(got, want) {
+		if want := []string{"atMost", "changeType", "deployClass", "flaky", "infra", "library", "notCounted", "prState", "prWaiting",
+			"prodReason", "prodState", "promotion", "runKind", "runOutcome", "running", "viaUmbrella"}; !slices.Equal(got, want) {
 			t.Errorf("terms.json %s groups %v, compared %v", code, got, want)
 		}
 	}
@@ -288,6 +341,8 @@ func TestSearchTermsMatchTheUI(t *testing.T) {
 			"runOutcome":  {u.RunOutcome, lang(runOutcomeTerm, de)},
 			"runKind":     {u.RunKind, lang(runKindTerm, de)},
 			"notCounted":  {u.NotCounted, lang(notCountedTerm, de)},
+			"prodState":   {u.ProdState, lang(prodStateTerm, de)},
+			"prodReason":  {u.ProdReason, lang(prodReasonTerm, de)},
 		} {
 			if !maps.Equal(c[0], c[1]) {
 				t.Errorf("%s %s: ui %v, backend %v", code, name, c[0], c[1])
@@ -305,7 +360,8 @@ func TestSearchTermsMatchTheUI(t *testing.T) {
 		for name, c := range map[string]struct {
 			ui   string
 			term uiTerm
-		}{"viaUmbrella": {u.ViaUmbrella, viaUmbrellaTerm}, "library": {u.Library, libraryTerm}, "infra": {u.Infra, infraTerm}} {
+		}{"viaUmbrella": {u.ViaUmbrella, viaUmbrellaTerm}, "library": {u.Library, libraryTerm}, "infra": {u.Infra, infraTerm},
+			"atMost": {u.AtMost, atMostTerm}} {
 			if want := map[bool]string{true: c.term.De, false: c.term.En}[de]; c.ui != want {
 				t.Errorf("%s %s: ui %q, backend %q", code, name, c.ui, want)
 			}

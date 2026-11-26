@@ -50,7 +50,19 @@
     },
     "viaUmbrella": "merged via an umbrella branch",
     "library": "Library, never rolled out",
-    "infra": "Infrastructure, not counted"
+    "infra": "Infrastructure, not counted",
+    "prodState": {
+      "on_prod": "on {{prod}}",
+      "not_yet": "not on {{prod}} yet",
+      "not_placeable": "not placeable"
+    },
+    "prodReason": {
+      "no_merge_commit": "Bitbucket named no merge commit",
+      "release_unresolved": "a later release cannot be tied to PRs",
+      "repo_untraced": "no deploy of the repo known",
+      "in_silence": "a gap in the data"
+    },
+    "atMost": "at most"
   },
   "de": {
     "prState": {
@@ -103,6 +115,18 @@
     },
     "viaUmbrella": "über Sammel-Branch gemerged",
     "library": "Bibliothek, wird nicht ausgerollt",
-    "infra": "Infrastruktur, nicht gezählt"
+    "infra": "Infrastruktur, nicht gezählt",
+    "prodState": {
+      "on_prod": "auf {{prod}}",
+      "not_yet": "noch nicht auf {{prod}}",
+      "not_placeable": "nicht zuordenbar"
+    },
+    "prodReason": {
+      "no_merge_commit": "Bitbucket nannte keinen Merge-Commit",
+      "release_unresolved": "ein späteres Release lässt sich keinen PRs zuordnen",
+      "repo_untraced": "kein Deploy des Repos bekannt",
+      "in_silence": "eine Lücke in den Daten"
+    },
+    "atMost": "höchstens"
   }
 }

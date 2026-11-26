@@ -180,7 +180,7 @@ function labelText(t: TFunction, label: string): string {
 
 // The rule title of a signal, its words filled from the signal itself;
 // prod is the production stage as the page shows it.
-function signalTitle(t: TFunction, s: Signal, prod = "PROD"): string {
+export function signalTitle(t: TFunction, s: Signal, prod = "PROD"): string {
   if (s.kind === "state" && s.state)
     return t(`overview.assess.state.${s.state.key}.title`, {
       defaultValue: "",
@@ -464,44 +464,57 @@ const SPARK_STROKE: Record<Column, string> = {
 };
 
 type StateData = NonNullable<Signal["state"]>;
+type StateUnitData = StateData["units"][number];
 
-// A state's number in its threshold's unit, as the page writes it.
-function stateValue(
-  t: TFunction,
-  unit: StateData["threshold"]["unit"],
-  v: number,
-): string {
-  switch (unit) {
-    case "days":
-      return t("overview.assess.state.days", { count: v, n: num(v) });
-    case "working_days":
-      return t("overview.assess.state.workingDays", {
-        count: v,
-        n: num(v, 1),
-      });
-    case "share":
-      return pct(v);
-    case "minutes":
-      return t("overview.assess.state.minutes", { n: num(v) });
-    default:
-      return num(v);
-  }
+// A state's value is a share where the state measures one; else a count
+// or days, one decimal where it has one (working days).
+const SHARE_VALUE: ReadonlySet<string> = new Set([
+  "release_failing",
+  "big_prs",
+  "unapproved",
+]);
+
+// The build states name a unit's build kind: in the build section's words.
+const KIND_NAMES: ReadonlySet<string> = new Set([
+  "flaky_builds",
+  "long_builds",
+  "release_failing",
+]);
+
+function bare(v: number): string {
+  return num(v, Number.isInteger(v) ? 0 : 1);
 }
 
-// One unit of a state in the state's own words: every number, the ranking
-// and the worst three are the backend's.
-function stateUnitLine(
+// The states whose rows a mark of the facts table lists across their
+// units, in the viewer's words (terms.json: the backend searches the same
+// words in both languages). The others link per unit only.
+const STATE_TERM: Partial<
+  Record<StateData["key"], (t: TFunction, prod: string) => string>
+> = {
+  not_on_prod: (t, prod) => t("facts.prodState.not_yet", { prod }),
+  untraced: (t) => t("facts.prodState.not_placeable"),
+  approved_waiting: (t) => t("facts.prWaiting.merge"),
+  first_review_wait: (t) => t("facts.prWaiting.first_review"),
+  flaky_builds: (t) => t("facts.flaky"),
+};
+
+// One unit of a state in the state's own words, after its name: every
+// number, the ranking and the worst three are the backend's.
+export function stateUnitText(
   t: TFunction,
   c: StateData,
-  u: StateData["units"][number],
+  u: StateUnitData,
   prod: string,
 ): string {
-  const line = t(`overview.assess.state.${c.key}.unit`, {
-    defaultValue: "{{name}}: {{value}}",
-    name: u.name,
-    value: stateValue(t, c.threshold.unit, u.value),
-    // The bare number, one decimal where it has one (working days).
-    n: num(u.value, Number.isInteger(u.value) ? 0 : 1),
+  const key =
+    c.key === "first_review_wait"
+      ? u.measure === "typical"
+        ? "unitTypical"
+        : "unitOldest"
+      : "unit";
+  const text = t(`overview.assess.state.${c.key}.${key}`, {
+    defaultValue: "{{n}}",
+    n: SHARE_VALUE.has(c.key) ? pct(u.value) : bare(u.value),
     count: u.count ?? 0,
     of: u.of != null ? num(u.of) : "",
     typical: u.typical != null ? num(u.typical, 1) : "",
@@ -509,48 +522,157 @@ function stateUnitLine(
     names: u.names
       .map((x) => (c.key === "no_prod_stage" ? stage(x) : x))
       .join(", "),
+    kind: KIND_NAMES.has(c.key)
+      ? u.names.map((k) => t(`build.kind.${k}`, { defaultValue: k })).join(", ")
+      : "",
     ci: u.ci_seconds != null ? dur(u.ci_seconds) : "",
     reason: u.reason
-      ? t(`overview.assess.state.reason.${u.reason}`, { defaultValue: "" })
+      ? t(`facts.prodReason.${u.reason}`, { defaultValue: "" })
       : "",
+    lines: c.threshold.min != null ? num(c.threshold.min) : "",
     prod,
   });
-  return u.held ? `${line} ${t("overview.assess.state.held")}` : line;
+  return u.held ? `${text} ${t("overview.assess.state.held")}` : text;
 }
 
-// A state's card body: k of n units, the worst three with their number,
-// how many more, since when, the team's threshold.
-function StateBody({ s, prod }: { s: Signal; prod: string }) {
+// The threshold a state measured against, in the team's words: the
+// agreement it breaks, or from where it counts. The values are the
+// backend's (config thresholds), never written into a text.
+export function thresholdText(
+  t: TFunction,
+  c: StateData,
+  prod: string,
+): string {
+  const th = c.threshold;
+  if (!th.key) return "";
+  return t(`overview.assess.state.${c.key}.threshold`, {
+    defaultValue: "",
+    count: th.value,
+    n: th.unit === "share" ? pct(th.value) : bare(th.value),
+    min: th.min != null ? num(th.min) : "",
+    prod,
+  });
+}
+
+// "k of n <units>", the backend's counts; the unit's word is the state's
+// where its units are of one kind only (a bot's branches). None for a
+// team-wide state or one that judged nothing.
+function stateOf(t: TFunction, c: StateData): string | null {
+  if (c.unit === "team" || c.judged === 0) return null;
+  const unit = c.key === "bot_loop" ? "botBranch" : c.unit;
+  return t(`overview.assess.state.of.${unit}`, {
+    count: c.judged,
+    k: num(c.count),
+    n: num(c.judged),
+  });
+}
+
+// The card's day: its instant is the period's end, Monday 00:00, so the
+// day shown is the one before it.
+function asOfDay(at: string): string {
+  return fullDate(new Date(new Date(at).getTime() - 1));
+}
+
+// A state's units: the worst three, the rest behind "+N weitere" (the
+// backend's list, in its order). A unit whose rows a facts search lists
+// links there by its name.
+function StateUnits({
+  c,
+  prod,
+  onFacts,
+}: {
+  c: StateData;
+  prod: string;
+  onFacts: OnFacts;
+}) {
+  const { t } = useTranslation();
+  const [all, setAll] = useState(false);
+  const shown = all ? c.units : c.worst;
+  if (shown.length === 0) return null;
+  const tab = c.facts === "" ? null : c.facts;
+  return (
+    <ul className="m-0 mb-1.5 grid list-none gap-1 p-0">
+      {shown.map((u) => {
+        const q = tab && u.query ? u.query : null;
+        return (
+          <li
+            key={`${u.name}|${u.week?.kw ?? ""}`}
+            className="leading-snug break-words"
+          >
+            {u.name &&
+              (tab && q ? (
+                <button
+                  type="button"
+                  onClick={() => onFacts(tab, q)}
+                  title={t("overview.assess.state.unitFacts", { name: u.name })}
+                  className="mr-1.5 border-0 bg-transparent p-0 text-left font-mono text-[12.5px] font-semibold break-all text-ink underline decoration-border decoration-dotted underline-offset-[3px] hover:text-accent-strong hover:decoration-accent-strong"
+                >
+                  {u.name}
+                </button>
+              ) : (
+                <span className="mr-1.5 font-mono text-[12.5px] font-semibold break-all text-ink">
+                  {u.name}
+                </span>
+              ))}
+            <span>{stateUnitText(t, c, u, prod)}</span>
+          </li>
+        );
+      })}
+      {c.more > 0 && (
+        <li>
+          <button
+            type="button"
+            aria-expanded={all}
+            onClick={() => setAll((v) => !v)}
+            className="no-print border-0 bg-transparent p-0 text-[13px] text-accent-strong hover:underline"
+          >
+            {all
+              ? t("overview.assess.state.less")
+              : t("overview.assess.state.more", { count: c.more })}
+          </button>
+        </li>
+      )}
+    </ul>
+  );
+}
+
+// A state's card body: k of n units, the units, a team number's worsening
+// the state speaks for (the backend folds it onto the card: the only facts
+// here with a previous value), since when and as of when, the team's
+// threshold.
+function StateBody({
+  s,
+  prod,
+  onFacts,
+}: {
+  s: Signal;
+  prod: string;
+  onFacts: OnFacts;
+}) {
   const { t } = useTranslation();
   const c = s.state;
   if (!c) return null;
-  const th = c.threshold;
+  const threshold = thresholdText(t, c, prod);
+  const folded = s.facts.filter((f) => f.prev != null && f.verdict !== "none");
+  const of = stateOf(t, c);
   return (
     <div className="mb-2 text-[13.5px] text-ink-dim">
-      {c.unit !== "team" && c.judged > 0 && (
-        <p className="m-0 mb-1.5 font-serif text-[22px] leading-tight text-ink tabular-nums">
-          {t(`overview.assess.state.of.${c.unit}`, {
-            count: c.judged,
-            k: num(c.count),
-            n: num(c.judged),
-          })}
+      {of && (
+        <p className="m-0 mb-2 font-serif text-[22px] leading-tight text-ink tabular-nums">
+          {of}
         </p>
       )}
-      {c.worst.length > 0 && (
-        <ul className="m-0 mb-1.5 grid list-none gap-0.5 p-0">
-          {c.worst.map((u) => (
-            <li key={`${u.name}|${u.week?.kw ?? ""}`} className="break-words">
-              {stateUnitLine(t, c, u, prod)}
-            </li>
-          ))}
-          {c.more > 0 && (
-            <li className="text-muted">
-              {t("overview.assess.state.more", { count: c.more })}
-            </li>
-          )}
-        </ul>
-      )}
-      <p className="m-0 font-mono text-[11.5px] text-muted">
+      <StateUnits c={c} prod={prod} onFacts={onFacts} />
+      {folded.map((f) => (
+        <p key={f.id} className="m-0 mb-1.5 text-[13px] text-ink-dim">
+          {t("overview.assess.state.folded", {
+            label: labelText(t, f.label),
+            value: fmtFact(t, f.unit, f.value),
+          })}{" "}
+          <Prev f={f} />
+        </p>
+      ))}
+      <p className="m-0 mt-1.5 font-mono text-[11.5px] text-muted">
         {[
           c.since &&
             t(
@@ -559,16 +681,7 @@ function StateBody({ s, prod }: { s: Signal; prod: string }) {
                 : "overview.assess.state.since",
               { date: fullDate(new Date(c.since)) },
             ),
-          th.key &&
-            t(
-              th.min != null
-                ? "overview.assess.state.thresholdMin"
-                : "overview.assess.state.threshold",
-              {
-                value: stateValue(t, th.unit, th.value),
-                min: th.min != null ? num(th.min) : "",
-              },
-            ),
+          t("overview.assess.state.asOf", { date: asOfDay(c.at) }),
           c.unjudged > 0 &&
             t("overview.assess.state.unjudged", {
               count: c.unjudged,
@@ -578,7 +691,37 @@ function StateBody({ s, prod }: { s: Signal; prod: string }) {
           .filter(Boolean)
           .join(META_SEP)}
       </p>
+      {threshold && (
+        <p className="m-0 mt-1 text-[12.5px] text-muted">{threshold}</p>
+      )}
     </div>
+  );
+}
+
+// The link to the rows of a state across its units, by the mark the facts
+// table shows them with; none for a state without one.
+function StateFactsLink({
+  c,
+  prod,
+  onFacts,
+}: {
+  c: StateData;
+  prod: string;
+  onFacts: OnFacts;
+}) {
+  const { t } = useTranslation();
+  const term = STATE_TERM[c.key];
+  const tab = c.facts;
+  if (!term || tab === "") return null;
+  const q = term(t, prod);
+  return (
+    <button
+      type="button"
+      onClick={() => onFacts(tab, q)}
+      className="no-print mt-1.5 border-0 bg-transparent p-0 text-left text-[13px] text-accent-strong hover:underline"
+    >
+      {t("overview.assess.state.facts", { term: q })}
+    </button>
   );
 }
 
@@ -621,7 +764,7 @@ function WeekSpark({
   );
 }
 
-function SignalCard({ c }: { c: CardView }) {
+function SignalCard({ c, onFacts }: { c: CardView; onFacts: OnFacts }) {
   const { t } = useTranslation();
   // A state's card says it with its units, not with a hero number.
   const f = c.s.state ? undefined : c.s.facts[0];
@@ -665,16 +808,19 @@ function SignalCard({ c }: { c: CardView }) {
           )}
         </div>
       )}
-      {c.s.state && <StateBody s={c.s} prod={c.prod} />}
+      {c.s.state && <StateBody s={c.s} prod={c.prod} onFacts={onFacts} />}
       {c.s.waiting && <WaitingBar w={c.s.waiting} />}
       {d && (
         <div className="mt-1.5 font-mono text-xs leading-relaxed text-ochre">
           {t("overview.assess.driver", { repo: d.repo, share: pct(d.share) })}
         </div>
       )}
-      <p className="my-2 text-sm text-ink-dim">{c.take}</p>
+      {c.take && <p className="my-2 text-sm text-ink-dim">{c.take}</p>}
       <Retro q={c.retro} />
       <Lever k={c.lever} />
+      {c.s.state && (
+        <StateFactsLink c={c.s.state} prod={c.prod} onFacts={onFacts} />
+      )}
     </article>
   );
 }
@@ -801,20 +947,28 @@ function Group({
   const { t } = useTranslation();
   const style = COLUMN_STYLE[col];
   const share = Math.min(n, 4);
+  // Hints and what cannot be judged say what they are not: no finding.
+  const sub =
+    col === "hint" || col === "limit"
+      ? t(`overview.assess.colSub.${col}`)
+      : null;
   return (
     <section
       className="min-w-0"
       style={{ flex: `${share} 1 ${share * 260}px` }}
     >
-      <h4
-        className={`m-0 mb-2.5 flex items-center gap-2 text-[11px] font-medium tracking-[.12em] uppercase ${style.ink}`}
-      >
-        <span
-          aria-hidden="true"
-          className={`size-2 rounded-full ${style.dot}`}
-        />
-        {t(`overview.assess.col.${col}`)}
-      </h4>
+      <div className="mb-2.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+        <h4
+          className={`m-0 flex items-center gap-2 text-[11px] font-medium tracking-[.12em] uppercase ${style.ink}`}
+        >
+          <span
+            aria-hidden="true"
+            className={`size-2 rounded-full ${style.dot}`}
+          />
+          {t(`overview.assess.col.${col}`)}
+        </h4>
+        {sub && <span className="text-[12px] text-faint">{sub}</span>}
+      </div>
       <div className="grid grid-cols-[repeat(auto-fit,minmax(min(250px,100%),1fr))] gap-2.5">
         {children}
       </div>
@@ -1134,7 +1288,8 @@ function Panel({
           className="m-0 flex list-none flex-wrap gap-x-[34px] gap-y-3.5 p-0"
         >
           {/* A zero is no alarm: grey, like the repos; and none at all
-              where the limits leave it saying nothing. */}
+              where the limits leave it saying nothing (a hole in the data,
+              no comparison, something not judgeable). */}
           {(tally.bad > 0 || !limited) && (
             <TallyCount
               look={tally.bad > 0 ? COLUMN_STYLE.bad : undefined}
@@ -1207,7 +1362,7 @@ function Panel({
           {tally.bad > 0 && (
             <Group col="bad" n={Math.max(stuck.length, 1)}>
               {stuck.map((c) => (
-                <SignalCard key={c.s.id} c={c} />
+                <SignalCard key={c.s.id} c={c} onFacts={onFacts} />
               ))}
               {stuck.length === 0 && (
                 <Quiet>{t("overview.assess.stuckBelow")}</Quiet>
@@ -1217,7 +1372,7 @@ function Panel({
           {left.length > 0 && (
             <Group col="good" n={left.length}>
               {left.map((c) => (
-                <SignalCard key={c.s.id} c={c} />
+                <SignalCard key={c.s.id} c={c} onFacts={onFacts} />
               ))}
             </Group>
           )}
@@ -1228,14 +1383,14 @@ function Panel({
           {neutral.length > 0 && (
             <Group col="hint" n={neutral.length}>
               {neutral.map((c) => (
-                <SignalCard key={c.s.id} c={c} />
+                <SignalCard key={c.s.id} c={c} onFacts={onFacts} />
               ))}
             </Group>
           )}
           {unjudgedCards.length > 0 && (
             <Group col="limit" n={unjudgedCards.length}>
               {unjudgedCards.map((c) => (
-                <SignalCard key={c.s.id} c={c} />
+                <SignalCard key={c.s.id} c={c} onFacts={onFacts} />
               ))}
             </Group>
           )}
@@ -1309,6 +1464,13 @@ function Panel({
               className={`rounded-full border px-2.5 py-0.5 text-[12.5px] ${columnStyle(column).line} ${columnStyle(column).ink}`}
             >
               {signalTitle(t, s, prod)}
+              {/* A state without a card of its own still says how wide. */}
+              {s.state && stateOf(t, s.state) && (
+                <span className="text-muted">
+                  {META_SEP}
+                  {stateOf(t, s.state)}
+                </span>
+              )}
             </span>
           ))}
         </div>

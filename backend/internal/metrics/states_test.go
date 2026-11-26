@@ -138,6 +138,10 @@ func TestNoReleaseBreachAndHint(t *testing.T) {
 	if !slices.Equal(c.Units[0].Names, []string{"kasse-prod"}) || c.Units[0].LowerBound {
 		t.Errorf("kasse's Apps %v lower %v, want kasse-prod, a known release", c.Units[0].Names, c.Units[0].LowerBound)
 	}
+	// The deploy table knows no project: its last release's App finds it.
+	if q := c.Units[0].Query; q == nil || *q != "kasse-prod" || c.Facts != "deploys" {
+		t.Errorf("kasse's facts %q query %v, want the deploys of kasse-prod", c.Facts, q)
+	}
 	d := stateSignal(a, StateReleaseDue)
 	if d == nil || d.Tone != ToneHint || d.State.Count != 1 || d.State.Units[0].Name != "lager" || d.State.Units[0].Value != 19 {
 		t.Errorf("hint = %+v, want lager after 19 days", d)
@@ -298,6 +302,10 @@ func TestMergePause(t *testing.T) {
 		x.Weight != tierNow {
 		t.Errorf("pause = %+v week %+v weight %d, want kasse KW 45, 0 merges of typically 8, 3 waiting, now", u, u.Week,
 			x.Weight)
+	}
+	// A project's PRs are its repos': "kasse/" finds them.
+	if u.Query == nil || *u.Query != "kasse/" {
+		t.Errorf("pause query = %v", u.Query)
 	}
 	// Two approved PRs in a quiet week: a holiday, no pause.
 	if x := stateSignal(assessStates(t, pauseData(2), nil, History{}), StateMergePause); x != nil {

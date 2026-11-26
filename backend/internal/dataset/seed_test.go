@@ -211,6 +211,9 @@ type commit struct {
 	merge                      bool
 	// email is the git identity's e-mail address; none when empty.
 	email string
+	// parents are its parents' SHAs; a placeholder's (one, two for a merge)
+	// when empty.
+	parents []string
 }
 
 // push inserts a repo:refs_changed whose tip is the last commit.
@@ -221,6 +224,12 @@ func (s *seeder) push(repo, branch string, at time.Time, commits ...commit) {
 		parents := []any{map[string]any{"id": sha("0")}}
 		if c.merge {
 			parents = append(parents, map[string]any{"id": sha("0")})
+		}
+		if len(c.parents) > 0 {
+			parents = parents[:0]
+			for _, p := range c.parents {
+				parents = append(parents, map[string]any{"id": p})
+			}
 		}
 		author, kind := c.author, c.kind
 		if author == "" {
