@@ -567,6 +567,155 @@ export type Metrics = {
   costs: Costs;
   comparison: Comparison;
   running_week: RunningWeek;
+  // Merged PRs, their size and the releases week by week: the previous
+  // period, the period and the running week.
+  trends: Trends;
+  // The period's numbers per repo: the ranking and a strip per number.
+  repos: RepoView;
+};
+
+// Why a trend's week has no value: the source had not reported by its
+// start, a lost Bitbucket silence overlaps it, no case to take a typical
+// value of; "" where it has one.
+export type TrendGap = "" | "no_data" | "lost" | "none";
+
+export type TrendWeek = Week & { running: boolean };
+
+// One value per entry of Trends.weeks.
+export type TrendSeries = {
+  values: (number | null)[];
+  n: number[];
+  gaps: TrendGap[];
+};
+
+export type Trends = {
+  weeks: TrendWeek[];
+  // Index of the period's first week in weeks.
+  split: number;
+  merged: TrendSeries;
+  batch: TrendSeries;
+  releases: TrendSeries;
+};
+
+export type RepoGroupKey =
+  "none" | "rare" | "unjudged" | "regular" | "library" | "idle";
+
+export type RepoFlag = {
+  key: "no_release" | "release_due" | "slow_to_prod" | "first_review_wait";
+  tone: "breach" | "hint";
+  value: number;
+};
+
+// One repo's numbers over the period; null where too few cases.
+export type RepoRow = {
+  repo: string;
+  project: string;
+  group: RepoGroupKey;
+  reason: "not_reporting" | "infra" | "untraced" | null;
+  last_release: string | null;
+  days_since: number | null;
+  since_lower_bound: boolean;
+  releases: number;
+  releases_per_week: number | null;
+  releases_prev: number | null;
+  // Per trend week but the running one; null where Argo CD had not reported.
+  release_weeks: (number | null)[];
+  to_prod: number | null;
+  to_prod_n: number;
+  to_prod_prev: number | null;
+  not_yet: number;
+  merged: number;
+  merged_per_week: number | null;
+  merged_prev: number | null;
+  merged_weeks: (number | null)[];
+  batch: number | null;
+  sized: number;
+  batch_prev: number | null;
+  pickup: number | null;
+  pickup_n: number;
+  flags: RepoFlag[];
+};
+
+export type SpreadKey =
+  | "releases"
+  | "to_prod"
+  | "merged"
+  | "batch"
+  | "pickup"
+  | "build_duration"
+  | "build_success";
+
+export type SpreadUnit =
+  "per_week" | "days" | "lines" | "working_days" | "seconds" | "share";
+
+export type DotVerdict = "breach" | "hint" | "within" | "neutral";
+
+// One repo on a strip; x 0..1 with the better end at 0, null when set
+// apart (nothing released).
+export type RepoDot = {
+  repo: string;
+  project: string;
+  value: number | null;
+  n: number;
+  verdict: DotVerdict;
+  x: number | null;
+  clamped: boolean;
+  apart: boolean;
+};
+
+export type SpreadNote = {
+  kind: "dominant" | "far" | "pooled";
+  repo: string | null;
+  share: number | null;
+  of: number;
+  near: number;
+  above: number;
+  below: number;
+  additive: boolean;
+};
+
+export type RepoSpread = {
+  key: SpreadKey;
+  kind: RunKind | null;
+  unit: SpreadUnit;
+  higher_better: boolean;
+  // Placed repos at two values or more: the page draws the strip only
+  // then. same: the one value every placed repo shares, for a line instead.
+  shown: boolean;
+  same: number | null;
+  scale: {
+    lo: number;
+    hi: number;
+    log: boolean;
+    ticks: { value: number; x: number }[];
+  };
+  dots: RepoDot[];
+  mark: { key: string; value: number; x: number } | null;
+  note: SpreadNote | null;
+  typical: number | null;
+  typical_x: number | null;
+  team: number | null;
+  judged: number;
+  thin: number;
+  apart: number;
+};
+
+export type RepoView = {
+  rows: RepoRow[];
+  // Rows shown before "show all".
+  open: number;
+  // hidden_count: its repos past open; hidden: the first five of them;
+  // more: how many follow those.
+  groups: {
+    key: RepoGroupKey;
+    count: number;
+    hidden_count: number;
+    hidden: string[];
+    more: number;
+  }[];
+  hint_days: number;
+  breach_days: number;
+  spreads: RepoSpread[];
 };
 
 // The week running now so far, counted in no other number of the page.

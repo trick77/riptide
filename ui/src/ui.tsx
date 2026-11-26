@@ -292,6 +292,10 @@ export type TileProps = {
   // When set, the tile has a "Was heisst das?" toggle.
   open?: boolean;
   onWhy?: () => void;
+  // A small trend line beside the number, and what follows the note: the
+  // number per repo.
+  spark?: ReactNode;
+  extra?: ReactNode;
 };
 
 export function Tile({
@@ -306,6 +310,8 @@ export function Tile({
   compare,
   open,
   onWhy,
+  spark,
+  extra,
 }: TileProps) {
   const { t } = useTranslation();
   return (
@@ -334,6 +340,7 @@ export function Tile({
           {value}
         </span>
         {unit && <span className="text-[13px] text-muted">{unit}</span>}
+        {spark && <span className="ml-auto self-center">{spark}</span>}
       </div>
       {compare?.change.prev != null && (
         <div>
@@ -341,6 +348,7 @@ export function Tile({
         </div>
       )}
       {note && <div className="text-xs text-muted">{note}</div>}
+      {extra}
       {direction && <div className="text-xs text-muted">{direction}</div>}
       {warn && <WarnLine>{warn}</WarnLine>}
       {compare && <Compare change={compare.change} />}

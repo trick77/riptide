@@ -130,9 +130,13 @@ func (d Deps) readView(w http.ResponseWriter, r *http.Request) (view, bool) {
 	}
 	now := d.now().UTC().Truncate(time.Second)
 	// Closed weeks only, as the assessment reads them: a week still running
-	// is counted apart (Running), never in a number or a comparison.
+	// is counted apart (Running), never in a number or a comparison. The
+	// team's thresholds as this request found them: the per-repo view judges
+	// against them as the assessment does.
+	th := cfg.Thresholds
 	return view{team: team, now: now, cfg: cfg, params: metrics.Params{
-		Period: metrics.ClosedPeriod(weeks, now, loc), Previous: metrics.ClosedPrevious(weeks, now, loc),
+		Thresholds: &th,
+		Period:     metrics.ClosedPeriod(weeks, now, loc), Previous: metrics.ClosedPrevious(weeks, now, loc),
 		Running: metrics.RunningPeriod(now, loc),
 		Product: strings.TrimSpace(q.Get("product")), JiraURL: cfg.JiraBaseURL, BitbucketURL: d.Onboarding.BitbucketURL,
 	}}, true

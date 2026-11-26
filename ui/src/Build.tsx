@@ -32,6 +32,7 @@ import {
 import { shareLow, Spark } from "./charts";
 import { FailureHeatmap } from "./heatmap";
 import { Quiver } from "./quiver";
+import { spreadOf, StripBlock } from "./repostrip";
 import { Sankey, type SankeyLink, type SankeyNode } from "./sankey";
 import { SEP, TABLE_CELL as CELL, TABLE_HEAD as HEAD } from "./shared";
 import type { Tab } from "./state";
@@ -191,6 +192,19 @@ function KindCard({
       </div>
       <Flaky b={b} c={c} onFacts={onFacts} />
       {c && <RepoChanges c={c} />}
+      {/* Per repo: a kind's team numbers mix fast and slow repos. */}
+      <div className={lead ? "grid gap-x-6 md:grid-cols-2" : ""}>
+        <StripBlock
+          s={spreadOf(m, "build_success", b.kind)}
+          title={t("repos.strip.buildSuccess")}
+          onRepo={(repo) => onFacts("runs", repo)}
+        />
+        <StripBlock
+          s={spreadOf(m, "build_duration", b.kind)}
+          title={t("repos.strip.buildDuration")}
+          onRepo={(repo) => onFacts("runs", repo)}
+        />
+      </div>
     </div>
   );
 }

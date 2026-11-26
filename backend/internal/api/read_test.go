@@ -291,6 +291,68 @@ func TestReadMatchesOpenAPISpec(t *testing.T) {
 	}
 }
 
+// The per-repo view and the trends of a closed period, every row and note
+// kind reached, match the contract.
+func TestRepoViewMatchesOpenAPISpec(t *testing.T) {
+	h := newHarness(t, nil)
+	day := func(d float64) time.Time { return fixedNow.Add(-time.Duration(d * float64(24*time.Hour))) }
+	at := func(d float64) *time.Time { return ptrTo(day(d)) }
+	s, n := func(v string) *string { return &v }, func(v int64) *int64 { return &v }
+	start := day(70)
+	ds := &dataset.Dataset{
+		Meta: dataset.Meta{Team: "checkout", From: day(30), To: fixedNow, GeneratedAt: fixedNow, ProductionStage: "prod",
+			DataStart: dataset.SourceTimes{Bitbucket: &start, Pipeline: &start, ArgoCD: &start, Noergler: &start},
+			DataEnd:   dataset.SourceTimes{Bitbucket: &fixedNow, Pipeline: &fixedNow, ArgoCD: &fixedNow, Noergler: &fixedNow},
+			// A lost silence over working days of the period: a gap in the
+			// trends.
+			Lost:     []dataset.Silence{{Source: dataset.SourceBitbucket, From: day(16), To: day(14), UnseenRuns: 1, Lost: true}},
+			Silences: []dataset.Silence{}, RepoStarts: []dataset.RepoStart{}},
+		Products: []dataset.Product{{Key: "kasse", Repos: []string{"kasse/kasse-api"}, Apps: []string{"kasse-prod"}}},
+		Apps:     []dataset.App{{Name: "kasse-prod", Project: s("kasse")}, {Name: "lager-prod", Project: s("lager")}},
+		Traces: map[string]dataset.RepoTrace{
+			"kasse/kasse-api": {DeployedSince: at(60), Releases: []dataset.TraceRelease{
+				{App: "kasse-prod", Environment: "prod", At: day(45), Known: day(60)}}},
+			"lager/lager-api": {DeployedSince: at(60), Releases: []dataset.TraceRelease{
+				{App: "lager-prod", Environment: "prod", At: day(5), Known: day(60)},
+				{App: "lager-prod", Environment: "prod", At: day(12), Known: day(60)}}},
+		},
+	}
+	merged := func(repo string, id int64, d float64, mod func(*dataset.PR)) dataset.PR {
+		pr := dataset.PR{Repo: repo, Project: strings.Split(repo, "/")[0], PRID: id, State: "merged",
+			OpenedAt: at(d + 2), ReadyAt: at(d + 2), FirstReviewAt: at(d + 1), ApprovedAt: at(d + 1), MergedAt: at(d),
+			FirstCommitAt: at(d + 3), MergeCommit: s("abc"), TrunkAt: at(d), LinesAdded: n(40 * id), LinesRemoved: n(id)}
+		if mod != nil {
+			mod(&pr)
+		}
+		return pr
+	}
+	for i := range 6 {
+		d := 8 + float64(i)
+		ds.PRs = append(ds.PRs, merged("lager/lager-api", int64(i+1), d, func(p *dataset.PR) {
+			p.Environments = []dataset.EnvironmentDeploy{{Environment: "prod", FirstDeployedAt: day(d - 3), Route: dataset.RouteCompare}}
+		}))
+	}
+	ds.PRs = append(ds.PRs, merged("kasse/kasse-api", 20, 9, nil), merged("kasse/kasse-lib", 21, 9,
+		func(p *dataset.PR) { p.Library = true }), merged("portal/portal-web", 22, 9, nil))
+	for i := range 6 {
+		ds.Runs = append(ds.Runs, dataset.Run{Source: "jenkins", PipelineName: "lager-api/feature%2Fx", Branch: "feature/x",
+			BranchKind: "feature", RunID: string(rune('a' + i)), CommitSHA: s("abc"), Status: s("SUCCESS"), StartedAt: at(9),
+			FinishedAt: at(9), OccurredAt: day(9), DurationS: n(1200), Repo: s("lager/lager-api"), Project: s("lager"),
+			ImageRefs: []string{}})
+	}
+	h.mem.dataset = ds
+	w := h.serveUI(newRequest(http.MethodGet, "/api/metrics?team=checkout&tz=Europe/Zurich", nil))
+	expectStatus(t, w, http.StatusOK)
+	validateResponse(t, specRouter(t), http.MethodGet, "/api/metrics", w)
+	for _, want := range []string{`"group":"none"`, `"group":"regular"`, `"group":"library"`, `"group":"unjudged"`,
+		`"reason":"untraced"`, `"apart":true`, `"key":"no_release"`, `"verdict":"hint"`, `"gaps":[`, `"lost"`,
+		`"running":true`, `"key":"build_duration","kind":"feature"`} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Errorf("metrics have no %s", want)
+		}
+	}
+}
+
 // analystMem is the in-memory store with a fixed analysis status: the
 // contract's rarer shapes, which the e2e data never reaches.
 type analystMem struct {
@@ -721,9 +783,34 @@ func TestE2ERead(t *testing.T) {
 		RunningWeek struct {
 			Runs int `json:"runs"`
 		} `json:"running_week"`
+		Trends struct {
+			Weeks []struct {
+				Running bool `json:"running"`
+			} `json:"weeks"`
+			Split    int `json:"split"`
+			Releases struct {
+				Values []*float64 `json:"values"`
+			} `json:"releases"`
+		} `json:"trends"`
+		Repos struct {
+			Rows    []json.RawMessage `json:"rows"`
+			Spreads []struct {
+				Key  string  `json:"key"`
+				Kind *string `json:"kind"`
+			} `json:"spreads"`
+		} `json:"repos"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil {
 		t.Fatal(err)
+	}
+	// Eight closed weeks and the running one; the deploy a first deploy, no
+	// release; no merged PR, so no repo row, but a strip per number and the
+	// release builds' two.
+	tr := m.Trends
+	if len(tr.Weeks) != 9 || tr.Split != 4 || !tr.Weeks[8].Running || len(tr.Releases.Values) != 9 ||
+		len(m.Repos.Rows) != 0 || len(m.Repos.Spreads) != 7 || m.Repos.Spreads[5].Kind == nil ||
+		*m.Repos.Spreads[5].Kind != "release" {
+		t.Errorf("trends = %+v, repos = %+v", m.Trends, m.Repos)
 	}
 	if m.Delivery.Frequency.Syncs != 1 || m.Delivery.Frequency.FirstSeen != 1 || len(m.Build.Kinds) != 1 ||
 		m.Build.Kinds[0].Kind != "release" || m.Build.Kinds[0].Runs != 1 || m.Costs.Total != 1.5 {

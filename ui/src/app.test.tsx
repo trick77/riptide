@@ -26,7 +26,8 @@ import { initialLanguage } from "./i18n";
 import { keepLabels } from "./marimekko";
 import { parseState, stateQuery } from "./state";
 import { Strip } from "./strip";
-import { BatchTile, MergedTile, ThroughputCard } from "./Throughput";
+import { BatchTile, MergedTile } from "./Throughput";
+import { TrendCard } from "./trends";
 import {
   ago,
   analysedStatus,
@@ -151,12 +152,13 @@ describe("App", () => {
     ]) {
       expect(screen.getByRole("heading", { name: h })).toBeInTheDocument();
     }
-    // The sections in a change's order, builds before rollout, and the nav
-    // in the same order as the page.
+    // The view's filter, then the sections in a change's order, builds
+    // before rollout.
     const sections = [...document.querySelectorAll("section[id]")].map(
       (s) => s.id,
     );
     expect(sections).toEqual([
+      "ansicht",
       "ueberblick",
       "fluss",
       "build",
@@ -166,12 +168,42 @@ describe("App", () => {
       "daten",
       "frameworks",
     ]);
+    // The header jumps to the page's main questions in page order, the rest
+    // behind "Weitere"; every link lands on an element of the page.
     const nav = screen.getByRole("navigation", { name: "Bereiche" });
+    const links = within(nav)
+      .getAllByRole("link", { hidden: true })
+      .map((a) => a.getAttribute("href")!);
+    expect(links).toEqual([
+      "#einschaetzung",
+      "#ausliefern",
+      "#fluss",
+      "#review",
+      "#build",
+      "#daten",
+      "#deploys",
+      "#arbeitsmix",
+      "#kosten",
+      "#frameworks",
+    ]);
+    const main = links
+      .slice(0, 6)
+      .map((h) => document.getElementById(h.slice(1))!);
+    for (let i = 1; i < main.length; i++)
+      expect(
+        main[i - 1].compareDocumentPosition(main[i]) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    for (const h of links)
+      expect(document.getElementById(h.slice(1))).not.toBeNull();
+    // The first section is marked as the one being read.
     expect(
-      within(nav)
-        .getAllByRole("link")
-        .map((a) => a.getAttribute("href")),
-    ).toEqual(sections.map((id) => `#${id}`));
+      within(nav).getByRole("link", { name: "Einschätzung" }),
+    ).toHaveAttribute("aria-current", "location");
+    // The view stays in sight in the header.
+    expect(screen.getByTestId("head-view")).toHaveTextContent(
+      "Alle Produkte · KW 43–46",
+    );
     // The viewer's zone goes along: the backend cuts the weeks there.
     expect(metricsCalls(calls)[0]).toBe(
       "/api/metrics?team=team-a&weeks=4&tz=Europe%2FZurich",
@@ -1796,7 +1828,8 @@ describe("App", () => {
     render(<App />);
     await screen.findByRole("heading", { name: "Einschätzung" });
     fireEvent.click(screen.getByRole("button", { name: "12 W" }));
-    await screen.findByText(/KW 35–46/);
+    // In the page's scope and the header's view alike.
+    expect(await screen.findAllByText(/KW 35–46/)).toHaveLength(2);
     expect(metricsCalls(calls).at(-1)).toMatch(/weeks=12/);
     fireEvent.change(screen.getByLabelText("Team"), {
       target: { value: "team-b" },
@@ -3570,7 +3603,7 @@ describe("throughput", () => {
       <>
         <MergedTile m={m} />
         <BatchTile m={m} />
-        <ThroughputCard m={m} />
+        <TrendCard m={m} />
       </>,
     );
     const merged = screen
@@ -3617,10 +3650,10 @@ describe("throughput", () => {
     ).toBeInTheDocument();
     expect(within(batch).getByText("vorher 80")).toBeInTheDocument();
     expect(within(batch).getByText("Schlechter")).toBeInTheDocument();
-    // Two charts, a column per week each.
-    expect(screen.getAllByTestId("week-col")).toHaveLength(
-      2 * m.period.weeks.length,
-    );
+    // Two trend lines over both periods and the running week, and a small
+    // one on each tile.
+    expect(screen.getAllByTestId("trend-chart")).toHaveLength(2);
+    expect(screen.getAllByTestId("trend-spark")).toHaveLength(2);
   });
 
   it("says so when no PR has a size", () => {
